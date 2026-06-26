@@ -160,3 +160,71 @@ def test_feed_to_chat_locates_source_turn(console_with_feed):
             result["turn_rendered"] = page.query_selector('[data-task-id="TRACE"]') is not None
         browser.close()
     assert result.get("located"), f"去聊天没定位到来源那一轮(料→去聊天静默失效):{result}"
+
+
+@pytest.fixture
+def console_with_proposal(tmp_path):
+    """真 console + 一条待决提案 + 你结晶过的相关标准 → 验决策卡把"你的标准 + 回执"渲染出来。"""
+    import uvicorn
+
+    from karvyloop.cognition.belief_store import BeliefStore
+    from karvyloop.cognition.conversation import ConversationManager, ConversationStore
+    from karvyloop.cognition.memory import MemoryManager
+    from karvyloop.console import build_console_app
+    from karvyloop.crystallize.decision_pref import make_decision_pref_belief
+    from karvyloop.karvy.observer import WorkbenchObserver
+    from karvyloop.karvy.proposal_registry import PendingProposalRegistry, proposal_for_route
+
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    mgr = ConversationManager(ConversationStore(tmp_path / "conv"))
+    mgr.start()
+    app.state.conversation_manager = mgr
+    app.state.no_llm = True
+
+    mem = MemoryManager(store=BeliefStore(tmp_path / "beliefs.json"))
+    mem.write(make_decision_pref_belief(
+        "动生产数据库前必须先有完整备份,未备份一律不批", "constraint",
+        strength=0.8, status="confirmed", explicit=True,
+        evidence=[{"ts": 1.0, "decision": "REJECT", "gist": "没备份不许动生产"}]))
+    app.state.memory = mem
+
+    pr = PendingProposalRegistry()
+    pr.register(proposal_for_route(domain_id="d", role="运维", agent_id="运维",
+                                   domain_name="运维组", requirement="在生产库上直接跑数据迁移", ts=1.0))
+    app.state.proposal_registry = pr
+
+    port = _free_port()
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="off")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if getattr(server, "started", False):
+            break
+        time.sleep(0.1)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_decision_card_shows_your_standard_with_receipt(console_with_proposal):
+    """楔子的脸:待决卡上摆出"🧭 你的标准 + 📍 来自你的拍板"回执 —— 渲染崩了楔子就对用户隐形。"""
+    from playwright.sync_api import sync_playwright
+
+    found = {}
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(console_with_proposal, wait_until="commit", timeout=10000)
+        try:
+            page.wait_for_selector(".dcard-pref-receipt", timeout=8000)   # 回执行渲染出来
+            found["receipt_text"] = page.query_selector(".dcard-pref-receipt").inner_text()
+            found["h2a_text"] = page.query_selector("#h2a-list").inner_text()
+        except Exception:
+            found["receipt_text"] = ""
+            found["h2a_text"] = page.query_selector("#h2a-list").inner_text() if page.query_selector("#h2a-list") else "(no #h2a-list)"
+        browser.close()
+    assert "没备份" in found.get("receipt_text", ""), f"回执没渲染:{found}"
+    assert "备份" in found.get("h2a_text", ""), f"标准没摆上卡:{found}"
