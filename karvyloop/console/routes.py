@@ -1057,10 +1057,13 @@ def _resolve_roundtable_from_intent(app, intent: str):
                                 "name": name, "domain_name": getattr(domain, "name", domain.id)})
     except Exception:
         return None
-    # 圆桌判定:有圆桌词 + ≥1 角色,或点到 ≥2 角色。否则交给单点委派路径。
-    if not ((has_kw and matched) or len(matched) >= 2):
-        return None
     if not matched:
+        return None
+    # 圆桌判定:有圆桌词 + ≥1 角色,或点到 ≥2 个**不同**角色。
+    # (同一角色名跨多个域 ≠ 多人:"让分析师出周报" 命中两个域的"分析师"也只是单点委派,
+    #  别误升圆桌 —— 真模型压测台逮到的 bug。)
+    distinct_names = {m["name"] for m in matched}
+    if not ((has_kw and matched) or len(distinct_names) >= 2):
         return None
     # 群定位:显式点到大群,或角色跨域 → l0 大群;否则同域群。
     wants_world = any(k in low for k in ("karvy world", "karvyworld")) or ("大群" in intent)

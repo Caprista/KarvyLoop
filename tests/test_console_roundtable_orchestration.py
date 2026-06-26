@@ -95,6 +95,14 @@ def test_resolve_single_role_no_signal_is_none():
                                            "让分析师出一份周报") is None
 
 
+# ---- RT4b: 同名角色跨多域 + 单点意图(无圆桌词)→ 仍不升圆桌(压测台逮到的 bug)----
+def test_resolve_same_name_across_domains_single_intent_is_none():
+    reg = _reg_two_analysts()  # "分析师" 在两个域都有
+    # "出周报" 是单产出意图、无圆桌词 → 命中两域的"分析师"也只算单点委派,不该升圆桌
+    assert _resolve_roundtable_from_intent(_app(domain_registry=reg),
+                                           "让分析师出一份周报") is None
+
+
 # ---- RT5: 圆桌意图 → KIND_ROUNDTABLE ----
 def test_maybe_route_emits_roundtable():
     reg = _reg_two_analysts()
