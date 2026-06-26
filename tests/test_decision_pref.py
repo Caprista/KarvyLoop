@@ -348,3 +348,22 @@ def test_parse_violations_empty_and_garbage():
     assert parse_violations("这条提案好像有点问题吧") == []     # prose 不抽
     assert parse_violations('[{"standard": 坏json') == []       # 像 JSON 解析失败 → []
     assert parse_violations('[{"why":"无 standard 字段"}]') == []  # 缺 standard → 丢
+
+
+# ---- 并发截断救援:违背即拦不能因响应被截成缺尾 ] 而静默漏拦(安全 fail-open)----
+
+def test_parse_violations_salvages_truncated_array():
+    from karvyloop.crystallize.decision_pref import parse_violations
+    out = parse_violations('[{"standard":"动生产先备份","why":"直接 drop 没备份"}')  # 缺尾 ]
+    assert out == [{"standard": "动生产先备份", "why": "直接 drop 没备份"}]
+
+
+def test_parse_decision_prefs_salvages_truncated_array():
+    out = parse_decision_prefs('[{"content":"碰生产先写测试","kind":"constraint","explicit":true}')  # 缺尾 ]
+    assert len(out) == 1 and out[0]["content"] == "碰生产先写测试"
+
+
+def test_parse_unsalvageable_still_refuses():
+    from karvyloop.crystallize.decision_pref import parse_violations
+    assert parse_violations('[{"standard":"x","wh') == []   # 截在对象中间,无完整对象 → 救不回,[]
+    assert parse_violations("这条提案有点问题吧") == []        # prose 仍不抽(宁空勿毒不变)

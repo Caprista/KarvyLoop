@@ -29,6 +29,27 @@ from karvyloop.schemas.cognition import Belief
 DECISION_PREF_SOURCE = "decision_pref"
 _KINDS = ("constraint", "taste", "standing")
 
+
+def _loads_tolerant(cleaned: str):
+    """json.loads,但**容忍并发截断**:多渠道并发撞同一把 key 会把响应截成 `[{...}` 缺尾 `]` ——
+    严格 json.loads 直接失败 → 整条丢(违背即拦就**静默漏拦**=安全 fail-open)。这里:解析失败且以
+    `[` 开头 → 截到最后一个完整对象 `}` + 补 `]` 再**严格**解析。仍守宁空勿毒:只补数组闭合、只取
+    完整对象,**绝不抽 prose、不猜内容**。救不回 → None。"""
+    import json as _json
+    try:
+        return _json.loads(cleaned)
+    except (_json.JSONDecodeError, ValueError):
+        if cleaned.startswith("["):
+            last = cleaned.rfind("}")
+            if last != -1:
+                try:
+                    d = _json.loads(cleaned[:last + 1].rstrip().rstrip(",") + "]")
+                    if isinstance(d, list):
+                        return d
+                except (_json.JSONDecodeError, ValueError):
+                    pass
+        return None
+
 # 强化/翻转步长 + 撤销下限(决策偏好比执行技能更易撤,守"不固化你",产品之书未尽之问#2)
 REINFORCE_STEP = 0.1     # 同方向决策再现 → strength + 此值(封顶 1.0)
 WEAKEN_STEP = 0.3        # 相反决策 → strength - 此值
@@ -87,9 +108,8 @@ def parse_violations(text: str) -> list[dict]:
     cleaned = "\n".join(lines).strip()
     if not cleaned:
         return []
-    try:
-        data: Any = json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
+    data = _loads_tolerant(cleaned)   # 容忍并发截断(违背即拦不能静默漏拦)
+    if data is None:
         return []
     if isinstance(data, dict):
         data = data.get("violations") if isinstance(data.get("violations"), list) else (
@@ -180,10 +200,9 @@ def parse_decision_prefs(text: str) -> list[dict]:
     cleaned = "\n".join(lines).strip()
     if not cleaned:
         return []
-    try:
-        data: Any = json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
-        return []   # 决策画像:解析失败一律拒,绝不 prose 兜底
+    data = _loads_tolerant(cleaned)   # 决策画像:解析失败一律拒,绝不 prose 兜底;但容忍并发截断
+    if data is None:
+        return []
     if isinstance(data, dict):
         for key in ("prefs", "preferences", "items", "data"):
             if isinstance(data.get(key), list):
@@ -388,9 +407,8 @@ def parse_reconcile(text: str) -> tuple[list[dict], list[int]]:
     cleaned = "\n".join(lines).strip()
     if not cleaned:
         return [], []
-    try:
-        data: Any = json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
+    data = _loads_tolerant(cleaned)   # 容忍并发截断
+    if data is None:
         return [], []
     if isinstance(data, list):
         return parse_decision_prefs(json.dumps(data)), []
