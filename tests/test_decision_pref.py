@@ -32,6 +32,7 @@ from karvyloop.crystallize.decision_pref import (  # noqa: E402
     prealign_block,
     qualifies,
     recall_decision_prefs,
+    receipt_gists,
     reinforce,
     should_revoke,
     weaken,
@@ -281,3 +282,33 @@ def test_find_decision_pref_by_content_and_status():
     assert find_decision_pref(bs, "用表格", status="confirmed") is None
     assert find_decision_pref(bs, "先写测试", status="confirmed") is not None
     assert find_decision_pref(bs, "不存在") is None
+
+
+# ---- Cut 1:回执(这条标准从你哪几次拍板来 —— 答用户视角 Q2)----
+
+def _pref_with_evidence(evidence):
+    return make_decision_pref_belief(
+        "动生产数据前必须先备份", "constraint", scope="personal",
+        evidence=evidence, strength=0.7, status="provisional", explicit=True)
+
+
+def test_receipt_gists_from_rich_evidence():
+    b = _pref_with_evidence([
+        {"ts": 1.0, "decision": "REJECT", "gist": "没备份不许动生产"},
+        {"ts": 2.0, "decision": "REJECT", "gist": "动生产前必须先备份"},
+    ])
+    gists = receipt_gists(b)
+    assert gists == ["没备份不许动生产", "动生产前必须先备份"]
+
+
+def test_receipt_backward_compat_old_timestamp_evidence():
+    # 旧数据:evidence 只存时间戳(float)→ 没 gist → 返回空,绝不崩
+    b = _pref_with_evidence([1.0, 2.0, 3.0])
+    assert receipt_gists(b) == []
+
+
+def test_prealign_block_renders_receipt():
+    b = _pref_with_evidence([{"ts": 1.0, "decision": "REJECT", "gist": "没备份不许动生产"}])
+    block = prealign_block([b])
+    assert "动生产数据前必须先备份" in block        # 标准
+    assert "来自你的拍板:没备份不许动生产" in block   # 回执(可核)

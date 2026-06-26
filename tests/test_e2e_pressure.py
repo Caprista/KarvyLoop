@@ -123,6 +123,8 @@ def test_j3_decision_crystallization_real_model(app):
 
     block = prealign_block(recall_decision_prefs(prefs), domain="", role="")
     assert block and "备份" in block, "下次决策前没把这条标准预对齐摆上来"
+    # Cut 1 回执:预对齐块要带"来自你的拍板"凭据(答用户视角 Q2:凭什么信你)
+    assert "来自你的拍板" in block, "标准摆了但没回执 —— Q2(凭什么信你)没堵"
 
 
 # ---- J4:圆桌 ACCEPT 真开桌(真模型)----

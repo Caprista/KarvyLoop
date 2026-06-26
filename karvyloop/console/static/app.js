@@ -587,6 +587,11 @@
             row.appendChild(el("span", { class: "dcard-pref-kind", text: "[" + (p.kind_label || "") + "]" }));
             row.appendChild(el("span", { class: "dcard-pref-text", text: p.content || "" }));
             box.appendChild(row);
+            // 回执:这条标准从你哪几次拍板来 —— 不是凭空的,可核(答"凭什么信你")
+            if (p.receipt && p.receipt.length) {
+              box.appendChild(el("div", { class: "dcard-pref-receipt",
+                text: t("dcard.pref_receipt") + p.receipt.join("；") }));
+            }
           });
           box.appendChild(el("div", { class: "dcard-aligned-hint", text: t("dcard.aligned_hint") }));
         }

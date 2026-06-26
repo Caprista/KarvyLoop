@@ -1492,3 +1492,9 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
   70%  { background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent-line); }
   100% { background: transparent; box-shadow: 0 0 0 0 transparent; }
 }
+
+/* 决策卡·标准回执:这条标准从你哪几次拍板来 —— 弱化展示,可核(答"凭什么信你") */
+.dcard-pref-receipt {
+  font-size: 12px; color: var(--text-soft, #8a7a66);
+  margin: 1px 0 6px 18px; line-height: 1.4;
+}

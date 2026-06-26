@@ -416,6 +416,20 @@ def _applies_here(b: Belief, *, domain: str, role: str) -> bool:
     return True
 
 
+def receipt_gists(b: Belief, *, limit: int = 3) -> list[str]:
+    """这条决策偏好的人话回执:来自你哪几次拍板(决策+理由摘要)。
+
+    兼容旧数据:早期 evidence 只存时间戳(float)→ 没 gist 的跳过(返回空,不崩)。
+    """
+    out: list[str] = []
+    for e in (b.provenance.get("evidence") or []):
+        if isinstance(e, dict) and e.get("gist"):
+            out.append(str(e["gist"]))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def recall_decision_prefs(beliefs: list[Belief], *, domain: str = "", role: str = "",
                           limit: int = 6) -> list[Belief]:
     """从一批 Belief 里筛出适用当前场景的决策偏好,按 strength·freshness 排序、封顶。"""
@@ -439,6 +453,9 @@ def prealign_block(beliefs: list[Belief], *, domain: str = "", role: str = "",
         k = label.get(b.provenance.get("kind", ""), "偏好")
         prov = "" if b.provenance.get("status") == "confirmed" else "(暂记)"
         lines.append(f"- [{k}]{prov} {b.content}")
+        gists = receipt_gists(b)   # 回执:这条从你哪几次拍板来 —— 不是凭空的标准,可核
+        if gists:
+            lines.append(f"  └ 来自你的拍板:{'；'.join(gists)}")
     return "\n".join(lines)
 
 
@@ -448,7 +465,7 @@ __all__ = [
     "make_decision_pref_belief", "is_decision_pref",
     "parse_decision_prefs", "format_samples", "compile_decisions",
     "initial_strength", "qualifies", "maybe_promote", "is_high_value",
-    "recall_decision_prefs", "prealign_block",
+    "recall_decision_prefs", "prealign_block", "receipt_gists",
     "REINFORCE_STEP", "WEAKEN_STEP", "STRENGTH_FLOOR",
     "DECISION_RECONCILE_SYSTEM", "reinforce", "weaken", "should_revoke",
     "parse_reconcile", "reconcile_decisions",

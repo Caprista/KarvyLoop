@@ -33,7 +33,8 @@ def _recall_aligned_prefs(app: Any, payload: dict) -> list[dict]:
     if mem is None:
         return []
     try:
-        from karvyloop.crystallize.decision_pref import is_high_value, recall_decision_prefs
+        from karvyloop.crystallize.decision_pref import (
+            is_high_value, recall_decision_prefs, receipt_gists)
         beliefs: list = []
         idx = getattr(mem, "index", None)
         if idx is None:
@@ -56,6 +57,7 @@ def _recall_aligned_prefs(app: Any, payload: dict) -> list[dict]:
                 "strength": round(float(b.provenance.get("strength", 0.0)), 2),
                 "status": b.provenance.get("status", ""),   # provisional | confirmed
                 "high_value": is_high_value(b),
+                "receipt": receipt_gists(b),   # 回执:这条标准来自你哪几次拍板(可核,答 Q2)
             })
         return out
     except Exception:

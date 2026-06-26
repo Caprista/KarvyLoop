@@ -89,7 +89,11 @@ async def maybe_crystallize_decisions(app: Any) -> int:
         batch, existing=[b.content for b in existing], gateway=gw,
         model_ref=rk.get("model_ref", ""), context={"domain": ctx_domain, "role": ctx_role})
     by_norm = {_norm(b.content): b for b in existing}
-    evidence = [getattr(s, "ts", 0.0) for s in batch]
+    # 回执:存"这条标准来自你哪几次拍板"的人话凭据(决策+理由摘要),不只时间戳 ——
+    # 让预对齐/决策卡能摆出"来自你的拍板:…",答用户视角 Q2(凭什么信你)。
+    evidence = [{"ts": getattr(s, "ts", 0.0), "decision": s.decision,
+                 "gist": (getattr(s, "reason", "") or getattr(s, "context", "") or "").strip()[:60]}
+                for s in batch]
     weakened = revoked = 0
 
     # P1 不固化你:相反决策 → 削弱;provisional 跌破下限 → 撤销(confirmed 只降不删)
