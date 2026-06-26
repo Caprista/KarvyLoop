@@ -95,3 +95,68 @@ def test_console_loads_in_real_browser(console_url):
     missing = [s for s, ok in selectors_present.items() if not ok]
     assert not missing, f"这些关键控件没渲染出来(SPA 可能崩了):{missing}"
     assert ready_state != "loading", "settle 后页面仍 loading —— 主线程可能被同步初始化卡死"
+
+
+@pytest.fixture
+def console_with_feed(tmp_path):
+    """真 console + 一条"料"(done 任务)挂到一条有 TRACE 标记轮次的对话 → 验"去聊天"定位。"""
+    import uvicorn
+
+    from karvyloop.cognition.conversation import ConversationManager, ConversationStore
+    from karvyloop.console import build_console_app
+    from karvyloop.console.tasks import TaskRegistry
+    from karvyloop.karvy.observer import WorkbenchObserver
+
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    mgr = ConversationManager(ConversationStore(tmp_path / "conv"))
+    mgr.start()
+    mgr.record_turn("第一句无关的", "第一应", brain="slow")              # 噪音轮(定位别选错)
+    mgr.record_turn("分析世界杯", "分析结果在此", brain="slow", task_id="TRACE")  # 目标轮
+    conv_id = mgr.current().id
+    app.state.conversation_manager = mgr
+
+    treg = TaskRegistry()
+    tid = treg.start(who="小卡", domain_id="l0", role="", intent="分析世界杯")
+    treg.set_conversation(tid, conv_id, trace_id="TRACE")              # 料→该对话 + 定位键=TRACE
+    treg.finish(tid, result="分析结果在此")
+    app.state.task_registry = treg
+    app.state.no_llm = True   # 只读模式:别弹"强制配模型"的锁死引导,好驱动 feed
+
+    port = _free_port()
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="off")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if getattr(server, "started", False):
+            break
+        time.sleep(0.1)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_feed_to_chat_locates_source_turn(console_with_feed):
+    """料→去聊天:点料卡→点'去聊天'→聊天窗里**那一轮被高亮**(你撞过的静默失效就发生在这)。"""
+    from playwright.sync_api import sync_playwright
+
+    result = {}
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(console_with_feed, wait_until="commit", timeout=10000)
+        page.wait_for_selector(".task-card", timeout=8000)        # 料里那条任务出现
+        page.click(".task-card", force=True)                      # → 任务详情模态(force:绕模态遮罩/2s轮询重渲染)
+        page.wait_for_selector("#mgmt-body .mgmt-submit", timeout=5000)
+        page.click("#mgmt-body .mgmt-submit", force=True)         # → 去聊天
+        try:
+            # 命门:目标轮(data-task-id=TRACE)被打上 flash 高亮(定位真生效)
+            page.wait_for_selector('[data-task-id="TRACE"].turn-locate-flash', timeout=4000)
+            result["located"] = True
+        except Exception:
+            result["located"] = False
+            result["turn_rendered"] = page.query_selector('[data-task-id="TRACE"]') is not None
+        browser.close()
+    assert result.get("located"), f"去聊天没定位到来源那一轮(料→去聊天静默失效):{result}"
