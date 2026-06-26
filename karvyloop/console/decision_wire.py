@@ -257,8 +257,11 @@ def schedule_decision_crystallize(app: Any) -> None:
     task.add_done_callback(_on_done)
 
 
-def prealign_governance(app: Any, mem: Any, *, domain: str = "", role: str = "") -> str:
-    """提案/drive 前:召回适用决策偏好 → 预对齐块(注入 governance)。空 → ""。"""
+def prealign_governance(app: Any, mem: Any, *, query: str = "", domain: str = "", role: str = "") -> str:
+    """提案/drive 前:召回**与本次相关**的决策偏好 → 预对齐块(注入 governance)。空 → ""。
+
+    query=本次意图/提案文本 → 按相关性召回(规模大也先摆相关的、不静默漏);空=回退强度排序。
+    """
     if mem is None:
         return ""
     try:
@@ -267,7 +270,7 @@ def prealign_governance(app: Any, mem: Any, *, domain: str = "", role: str = "")
         for scope in ("personal", "domain"):
             for b in idx.all(scope):
                 beliefs.append(b)
-        return prealign_block(beliefs, domain=domain, role=role)
+        return prealign_block(beliefs, query=query, domain=domain, role=role)
     except Exception:
         return ""
 

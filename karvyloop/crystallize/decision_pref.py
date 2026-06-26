@@ -430,23 +430,39 @@ def receipt_gists(b: Belief, *, limit: int = 3) -> list[str]:
     return out
 
 
-def recall_decision_prefs(beliefs: list[Belief], *, domain: str = "", role: str = "",
-                          limit: int = 6) -> list[Belief]:
-    """从一批 Belief 里筛出适用当前场景的决策偏好,按 strength·freshness 排序、封顶。"""
+def applicable_decision_prefs(beliefs: list[Belief], *, query: str = "",
+                              domain: str = "", role: str = "") -> list[Belief]:
+    """适用本场景的全部决策偏好,**按相关性·强度·新鲜度**排序(不封顶)。
+
+    相关性用知识召回同款词面打分(`context.relevance.overlap_score`,无向量)——
+    决策 X 时把跟 X **相关**的标准排前面,而不是只看全局最强(规模一大相关但较弱的被挤掉)。
+    query 空 → 相关性全 0 → 回退到强度·新鲜度(0 回归)。
+    """
+    from karvyloop.context.relevance import overlap_score
     matched = [b for b in beliefs if is_decision_pref(b) and _applies_here(b, domain=domain, role=role)]
-    matched.sort(key=lambda b: (float(b.provenance.get("strength", 0.0)), b.freshness_ts), reverse=True)
-    return matched[:max(0, limit)]
+    matched.sort(key=lambda b: (overlap_score(query, b.content),
+                                float(b.provenance.get("strength", 0.0)), b.freshness_ts),
+                 reverse=True)
+    return matched
 
 
-def prealign_block(beliefs: list[Belief], *, domain: str = "", role: str = "",
+def recall_decision_prefs(beliefs: list[Belief], *, query: str = "", domain: str = "",
+                          role: str = "", limit: int = 6) -> list[Belief]:
+    """筛出适用当前场景的决策偏好,按相关性·强度·新鲜度排序、封顶 limit。"""
+    return applicable_decision_prefs(beliefs, query=query, domain=domain, role=role)[:max(0, limit)]
+
+
+def prealign_block(beliefs: list[Belief], *, query: str = "", domain: str = "", role: str = "",
                    limit: int = 6) -> str:
     """召回适用偏好 → 拼成注入 governance 的预对齐块(空 → "")。
 
     提案前注入,让小卡/角色一上来就贴合你怎么拍板。**只偏置提案、不自动执行**(H2A)。
+    封顶但**绝不静默漏**:适用标准超过 limit → 末尾明示"还有 N 条(已按相关性挑最相关的)"。
     """
-    prefs = recall_decision_prefs(beliefs, domain=domain, role=role, limit=limit)
-    if not prefs:
+    applicable = applicable_decision_prefs(beliefs, query=query, domain=domain, role=role)
+    if not applicable:
         return ""
+    prefs = applicable[:max(0, limit)]
     lines = ["【你的决策偏好(提案请预先对齐;这些是偏置不是硬规则,最终仍你拍板)】"]
     label = {"constraint": "约束", "taste": "品味", "standing": "站位"}
     for b in prefs:
@@ -456,6 +472,9 @@ def prealign_block(beliefs: list[Belief], *, domain: str = "", role: str = "",
         gists = receipt_gists(b)   # 回执:这条从你哪几次拍板来 —— 不是凭空的标准,可核
         if gists:
             lines.append(f"  └ 来自你的拍板:{'；'.join(gists)}")
+    dropped = len(applicable) - len(prefs)
+    if dropped > 0:   # 不静默漏:明示还有几条没展开(已按相关性挑了最相关的)
+        lines.append(f"(还有 {dropped} 条适用标准未展开,已按与本次相关性挑了最相关的)")
     return "\n".join(lines)
 
 
@@ -465,7 +484,7 @@ __all__ = [
     "make_decision_pref_belief", "is_decision_pref",
     "parse_decision_prefs", "format_samples", "compile_decisions",
     "initial_strength", "qualifies", "maybe_promote", "is_high_value",
-    "recall_decision_prefs", "prealign_block", "receipt_gists",
+    "recall_decision_prefs", "applicable_decision_prefs", "prealign_block", "receipt_gists",
     "REINFORCE_STEP", "WEAKEN_STEP", "STRENGTH_FLOOR",
     "DECISION_RECONCILE_SYSTEM", "reinforce", "weaken", "should_revoke",
     "parse_reconcile", "reconcile_decisions",

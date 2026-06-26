@@ -872,7 +872,8 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     try:
         from karvyloop.console.decision_wire import prealign_governance
         _peer = mgr.current_peer() if mgr is not None else None
-        _pa = prealign_governance(request.app, mem, domain=(getattr(_peer, "domain_id", "") or ""),
+        _pa = prealign_governance(request.app, mem, query=req.intent,
+                                  domain=(getattr(_peer, "domain_id", "") or ""),
                                   role=(getattr(_peer, "role", "") or ""))
         if _pa:
             governance = (_pa + "\n\n" + governance).strip()

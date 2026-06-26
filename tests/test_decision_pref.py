@@ -312,3 +312,23 @@ def test_prealign_block_renders_receipt():
     block = prealign_block([b])
     assert "动生产数据前必须先备份" in block        # 标准
     assert "来自你的拍板:没备份不许动生产" in block   # 回执(可核)
+
+
+# ---- Step 0(b):决策召回相关性排序 + 不静默漏 ----
+
+def test_recall_relevance_beats_strength():
+    # 强但无关 vs 弱但相关:有 query 时,相关的该排前(规模大不被强度挤掉)
+    strong_off = make_decision_pref_belief("输出默认用 markdown 表格", "taste", strength=0.95, now=2.0)
+    weak_rel = make_decision_pref_belief("动生产数据前必须先备份", "constraint", strength=0.5, now=1.0)
+    got = recall_decision_prefs([strong_off, weak_rel], query="要不要直接改生产数据库", limit=2)
+    assert got[0].content == "动生产数据前必须先备份"   # 相关优先,即便强度低
+    # 无 query → 回退强度排序(0 回归)
+    got2 = recall_decision_prefs([strong_off, weak_rel], limit=2)
+    assert got2[0].content == "输出默认用 markdown 表格"
+
+
+def test_prealign_no_silent_drop_discloses_omitted():
+    prefs = [make_decision_pref_belief(f"标准{i}", "taste", strength=0.5, now=float(i)) for i in range(8)]
+    block = prealign_block(prefs, limit=3)
+    assert block.count("- [") == 3            # 只展示 3 条
+    assert "还有 5 条" in block                # 但明示漏了 5 条,不静默

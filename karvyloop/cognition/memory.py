@@ -197,13 +197,12 @@ class MemoryManager:
             beliefs.append(b)
         if not beliefs:
             return ""
-        q = (query or "").lower()
-        q_tokens = {t for t in q.replace("，", " ").replace(",", " ").split() if t}
+        # 相关性用**共享**打分(context.relevance.overlap_score)——含 CJK bigram,
+        # 跟决策标准召回同一套,别两份漂移(Hardy:别只一两个功能用上 context engineering)。
+        from karvyloop.context.relevance import overlap_score
 
         def score(b: Belief) -> tuple:
-            c = b.content.lower()
-            overlap = sum(1 for t in q_tokens if t in c)
-            return (overlap, b.freshness_ts)
+            return (overlap_score(query, b.content), b.freshness_ts)
 
         ranked = sorted(beliefs, key=score, reverse=True)[:max(0, limit)]
         return fence(ranked)

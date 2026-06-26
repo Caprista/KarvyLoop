@@ -23,22 +23,24 @@ def _verify_store(app: Any):
 _PREF_LABEL = {"constraint": "约束", "taste": "品味", "standing": "站位"}
 
 
-def _recall_aligned_prefs(app: Any, payload: dict) -> list[dict]:
-    """召回适用本提案场景的、你已结晶的决策偏好 —— 摆到卡上(用你自己的标准帮你拍)。
+def _recall_aligned_prefs(app: Any, payload: dict) -> tuple[list[dict], int]:
+    """召回**与本提案相关**的、你已结晶的决策偏好 —— 摆到卡上(用你自己的标准帮你拍)。
 
     楔子(decision-pref crystallization)在拍板那一刻**可见**:不是凭空让你拍,而是
     "你以前的标准是 X,我已按它预对齐"。只读呈现(改偏好走 🧭 决策偏好管理面,不在卡上改)。
+    按相关性召回(规模大也先摆相关的)+ 返回**漏掉条数**(不静默丢,卡上明示"+N 条")。
+    返回 (prefs, omitted)。
     """
     mem = getattr(app.state, "memory", None)
     if mem is None:
-        return []
+        return [], 0
     try:
         from karvyloop.crystallize.decision_pref import (
-            is_high_value, recall_decision_prefs, receipt_gists)
+            applicable_decision_prefs, is_high_value, receipt_gists)
         beliefs: list = []
         idx = getattr(mem, "index", None)
         if idx is None:
-            return []
+            return [], 0
         for scope in ("personal", "domain"):
             try:
                 beliefs.extend(idx.all(scope))
@@ -46,9 +48,12 @@ def _recall_aligned_prefs(app: Any, payload: dict) -> list[dict]:
                 pass
         domain = payload.get("domain_id", "") or ""
         role = payload.get("role", "") or ""
-        matched = recall_decision_prefs(beliefs, domain=domain, role=role, limit=5)
+        # query = 本提案文本(需求/主题/摘要)→ 按相关性排;无则回退强度
+        query = " ".join(str(payload.get(k, "")) for k in ("requirement", "topic", "intent", "summary")).strip()
+        applicable = applicable_decision_prefs(beliefs, query=query, domain=domain, role=role)
+        LIMIT = 5
         out: list[dict] = []
-        for b in matched:
+        for b in applicable[:LIMIT]:
             kind = b.provenance.get("kind", "taste")
             out.append({
                 "content": b.content,
@@ -59,9 +64,9 @@ def _recall_aligned_prefs(app: Any, payload: dict) -> list[dict]:
                 "high_value": is_high_value(b),
                 "receipt": receipt_gists(b),   # 回执:这条标准来自你哪几次拍板(可核,答 Q2)
             })
-        return out
+        return out, max(0, len(applicable) - len(out))
     except Exception:
-        return []   # 召回失败不挡决策卡(降级为无预对齐)
+        return [], 0   # 召回失败不挡决策卡(降级为无预对齐)
 
 
 def build_card_for_proposal(app: Any, proposal_id: str) -> Optional[dict]:
@@ -92,8 +97,9 @@ def build_card_for_proposal(app: Any, proposal_id: str) -> Optional[dict]:
     d["proposal_id"] = proposal_id
     # 预对齐:把你已结晶、适用本场景的决策偏好摆上卡。命中高价值偏好 → 标 high_value
     # (价值闸输入:这类该你拍的别静默放过)。
-    aligned = _recall_aligned_prefs(app, payload)
+    aligned, aligned_omitted = _recall_aligned_prefs(app, payload)
     d["aligned_prefs"] = aligned
+    d["aligned_omitted"] = aligned_omitted   # 不静默漏:还有几条适用标准没摆上(卡上明示)
     d["high_value"] = any(p.get("high_value") for p in aligned)
     if aligned:
         # 高价值命中的那条标准文本(给前端"拍前确认"弹窗点名用)

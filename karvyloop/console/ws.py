@@ -128,7 +128,8 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     try:
         from karvyloop.console.decision_wire import prealign_governance
         _peer = mgr.current_peer() if mgr is not None else None
-        _pa = prealign_governance(app, mem, domain=(getattr(_peer, "domain_id", "") or ""),
+        _pa = prealign_governance(app, mem, query=intent,
+                                  domain=(getattr(_peer, "domain_id", "") or ""),
                                   role=(getattr(_peer, "role", "") or ""))
         if _pa:
             governance = (_pa + "\n\n" + governance).strip()

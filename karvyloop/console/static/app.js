@@ -593,6 +593,11 @@
                 text: t("dcard.pref_receipt") + p.receipt.join("；") }));
             }
           });
+          // 不静默漏:适用标准超出展示数 → 明示还有几条(已按相关性挑了最相关的)
+          if (c.aligned_omitted > 0) {
+            box.appendChild(el("div", { class: "dcard-aligned-omitted",
+              text: t("dcard.aligned_omitted").replace("{n}", String(c.aligned_omitted)) }));
+          }
           box.appendChild(el("div", { class: "dcard-aligned-hint", text: t("dcard.aligned_hint") }));
         }
         // unverifiable 卡没有接地依据可 认/改/删 → 给"你的判断依据"输入:你也能真判断,
