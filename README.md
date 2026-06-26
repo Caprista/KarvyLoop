@@ -19,7 +19,7 @@ KarvyLoop runs on your own machine. It runs your repetitive work, verifies its o
 | OS | Status |
 |----|--------|
 | **Linux** | ✅ First-class — full security sandbox (bubblewrap). |
-| **macOS** | 🧪 Experimental — everything runs *except* the security sandbox, so an agent's `run_command` / file execution is disabled until the native Seatbelt adapter lands (on the roadmap). |
+| **macOS** | ✅ Supported — native Seatbelt (`sandbox-exec`) sandbox; the same fail-closed contract as Linux (writes confined to the workspace, no network unless granted), verified on Apple Silicon / macOS 26. Newer than the Linux path, so rougher. |
 | **Windows** | ⛔ Not yet. |
 
 KarvyLoop is a cross-platform user-space runtime (pure Python; it doesn't ride on the Linux
@@ -87,7 +87,7 @@ The code (the **image**) is open and copyable — it's this repo. The **instance
 
 ## Quickstart
 
-**Requirements**: Python 3.11+. Sandboxed skill execution needs Linux + `bubblewrap`; everything else is cross-platform.
+**Requirements**: Python 3.11+. Sandboxed skill execution needs Linux + `bubblewrap` or macOS (built-in `sandbox-exec`); everything else is cross-platform.
 
 ```bash
 # 1) Install (editable)

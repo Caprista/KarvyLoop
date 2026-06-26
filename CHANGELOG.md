@@ -11,6 +11,13 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward 1.0 — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **macOS sandbox (Seatbelt).** Native `sandbox-exec` adapter via the PAL, mirroring the Linux
+  bubblewrap fail-closed contract (deny-default; writes confined to the token's workspace;
+  no network unless granted). Adversarially verified on real hardware (Apple Silicon, macOS 26):
+  writes outside the workspace / to `$HOME` and ungranted network are blocked; granted network
+  reaches. macOS is now a supported platform with working agent execution, not just chat.
+
 ## 2026.6.26
 
 First dated public release — a snapshot of the current runtime.

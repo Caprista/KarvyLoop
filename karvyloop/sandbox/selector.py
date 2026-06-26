@@ -19,15 +19,20 @@ def default_sandbox(override: Optional[Sandbox] = None) -> Sandbox:
     顺序：
       1) override（测试 / 上层定制）
       2) Linux → 探 bwrap；可用则用，不可用降级到 StubSandbox（**不**静默改用无隔离）
-      3) 其他平台 → StubSandbox
+      3) macOS → 探 sandbox-exec（Seatbelt）；可用则用，不可用降级到 StubSandbox
+      4) 其他平台 → StubSandbox
     """
     if override is not None:
         return override
+    from karvyloop.platform._stub import StubSandbox
     if sys.platform.startswith("linux"):
         from karvyloop.platform.linux.bubblewrap import BubblewrapSandbox
-        from karvyloop.platform._stub import StubSandbox
         if BubblewrapSandbox.available():
             return BubblewrapSandbox()
         return StubSandbox()
-    from karvyloop.platform._stub import StubSandbox
+    if sys.platform == "darwin":
+        from karvyloop.platform.darwin.seatbelt import SeatbeltSandbox
+        if SeatbeltSandbox.available():
+            return SeatbeltSandbox()
+        return StubSandbox()
     return StubSandbox()
