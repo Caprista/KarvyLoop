@@ -114,6 +114,7 @@ _EN = {
     "cli.run.config_missing": "config not found: {path}. run `karvyloop init` first.",
     "cli.interrupted": "interrupted.",
     "cli.chat.readonly_warning": "[karvyloop] config.yaml not found ({path}); TUI read-only view — intent submission will fail; run `karvyloop init` first",
+    "chat.empty_retry_fallback": "(I didn't quite catch that — could you say it once more?)",
     # init wizard
     "wizard.choose_provider": "Choose your LLM provider:",
     "wizard.choose_prompt": "Pick [1..{n}] (default 1=local): ",
@@ -233,6 +234,7 @@ _ZH = {
     "cli.run.config_missing": "配置不存在:{path}。先跑 karvyloop init。",
     "cli.interrupted": "中断。",
     "cli.chat.readonly_warning": "[karvyloop] config.yaml 不存在({path});TUI 只读视图 — intent 提交将失败,先跑 `karvyloop init`",
+    "chat.empty_retry_fallback": "(这次没接住,能再说一遍吗?)",
     "wizard.choose_provider": "选择你的 LLM provider:",
     "wizard.choose_prompt": "选 [1..{n}] (默认 1=本地): ",
     "wizard.unknown_provider": "未知 provider: {raw}",

@@ -111,7 +111,21 @@ async def drive_in_tui(
                 error=str(e),
             )
 
-    return await asyncio.to_thread(_run_drive)
+    outcome = await asyncio.to_thread(_run_drive)
+    # EVE④/多渠道:**绝不静默空白**。成功但正文为空(多渠道并发撞同一把 key 把响应截成空、
+    # 偶发 LLM 空回)→ 重试一次;仍空 → 友好兜底文案(尤其语音不能没声音)。
+    # 放在 drive_in_tui 这个**渠道共同边界**:网页 console 和 GlobalKarvy.ask 都过这里,一处全覆盖。
+    if not outcome.error and not (outcome.text or "").strip():
+        logger.warning("[drive] 成功但正文空 → 重试一次(防多渠道并发静默空白)")
+        retry = await asyncio.to_thread(_run_drive)
+        if not retry.error and (retry.text or "").strip():
+            return retry
+        try:
+            from karvyloop.i18n import t
+            outcome.text = t("chat.empty_retry_fallback")
+        except Exception:
+            outcome.text = "(这次没接住,能再说一遍吗?)"
+    return outcome
 
 
 __all__ = ["DriveOutcome", "drive_in_tui"]
