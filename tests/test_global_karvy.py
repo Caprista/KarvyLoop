@@ -43,3 +43,28 @@ def test_ready_and_dashboard():
     k = GlobalKarvy(main_loop=object(), runtime_kwargs={}, dashboard_fn=lambda: {"tasks": [1, 2]})
     assert k.dashboard() == {"tasks": [1, 2]}
     assert GlobalKarvy(main_loop=object(), runtime_kwargs={}).dashboard() == {}   # 没接 → 空
+
+
+def test_ask_threads_governance_fn(monkeypatch):
+    # Step 0(a):接了 governance_fn → ask() 把你的标准喂进 drive(语音/TUI 不再认知失明)
+    import karvyloop.karvy.global_karvy as gk
+    seen = {}
+
+    async def fake_drive(intent, ml, *, ctx=None, persona=None, governance="", on_event=None, **rk):
+        seen["governance"] = governance
+        return types.SimpleNamespace(text="ok", error="",
+                                     brain=types.SimpleNamespace(value="slow"), task_id="t")
+    monkeypatch.setattr(gk, "drive_in_tui", fake_drive)
+    mgr = types.SimpleNamespace(context_view=lambda: (), record_turn=lambda *a, **k: None)
+
+    k = GlobalKarvy(main_loop=object(), conversation_manager=mgr,
+                    runtime_kwargs={"gateway": object(), "workspace_root": "/"},
+                    governance_fn=lambda intent: f"【你的标准】关于「{intent}」")
+    asyncio.run(k.ask("动生产数据库"))
+    assert "你的标准" in seen["governance"] and "动生产数据库" in seen["governance"]
+
+    # 没接 governance_fn → governance 空(0 回归,旧行为)
+    k2 = GlobalKarvy(main_loop=object(), conversation_manager=mgr,
+                     runtime_kwargs={"gateway": object(), "workspace_root": "/"})
+    asyncio.run(k2.ask("x"))
+    assert seen["governance"] == ""

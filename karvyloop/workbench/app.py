@@ -80,6 +80,7 @@ class WorkbenchApp(App):
         main_loop: Optional[MainLoop] = None,
         runtime_kwargs: Optional[dict] = None,
         conversation_manager: Optional[object] = None,
+        memory: Optional[object] = None,
     ) -> None:
         super().__init__()
         self._workbench = workbench
@@ -103,12 +104,25 @@ class WorkbenchApp(App):
         self._last_error: str = ""
         self._last_intent: str = ""
         self._initial_snap: Optional[WidgetSnapshot] = None
+        self._memory = memory
+        # Step 0(a):给 GlobalKarvy 接 governance_fn —— TUI/语音也认你的标准(prealign+知识召回),
+        # 不再认知失明。有 memory 才接(无 → None,退化成只 ctx+人格的旧行为)。
+        _gov_fn = None
+        if memory is not None:
+            import types as _types
+            _shim = _types.SimpleNamespace(state=_types.SimpleNamespace(
+                memory=memory, runtime_kwargs=self._runtime_kwargs))
+
+            def _gov_fn(intent: str) -> str:
+                from karvyloop.console.decision_wire import assemble_governance
+                return assemble_governance(_shim, intent=intent)
         # 渠道无关的「全局小卡」对话接口(Hardy):TUI 是它的一个壳,语音以后用同一个。
         # 关键:走小卡人格(不是裸 forge)—— 这才是"跟全局 Karvy 沟通"。
         from karvyloop.karvy.global_karvy import GlobalKarvy
         self._karvy = GlobalKarvy(main_loop=main_loop, conversation_manager=conversation_manager,
                                   runtime_kwargs=self._runtime_kwargs,
-                                  dashboard_fn=self._build_snapshot)   # 看板也走同一接口(语音可复用)
+                                  dashboard_fn=self._build_snapshot,   # 看板也走同一接口(语音可复用)
+                                  governance_fn=_gov_fn)
 
     # ---- 拍 3b 接入:K5 决策闭环 ----
 

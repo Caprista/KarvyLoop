@@ -82,12 +82,22 @@ def cmd_chat(
     except Exception as e:
         logger.warning(f"对话编排器接线失败(TUI 照常起): {e}")
 
+    # 个人知识/决策标准库(与 console 同款)→ 让 TUI/语音的全局小卡也认你的标准(Step 0a)。
+    memory = None
+    try:
+        from karvyloop.cognition.belief_store import BeliefStore
+        from karvyloop.cognition.memory import MemoryManager
+        memory = MemoryManager(store=BeliefStore(Path.home() / ".karvyloop" / "beliefs.json"))
+    except Exception as e:
+        logger.warning(f"认知库接线失败(TUI 照常起,只是不预对齐你的标准): {e}")
+
     app = WorkbenchApp(
         workbench=workbench,
         user_address=user_address,
         main_loop=main_loop,
         runtime_kwargs=runtime_kwargs,
         conversation_manager=conversation_manager,
+        memory=memory,
     )
 
     if headless:
