@@ -64,6 +64,49 @@ DECISION_RECONCILE_SYSTEM = (
 )
 
 
+# 守线员 system:判一条提案是否**违背**用户已定标准(Cut 2 违背即拦)。宁可漏拦不可错拦。
+VIOLATION_SYSTEM = (
+    "你是 KarvyLoop 的决策守线员。下面是一条待用户拍板的**提案**,和用户**已经定下的决策标准**。"
+    "判断这条提案是否**违背**了其中任何标准——只标**真的踩线**的(不是沾边、不是相关、不是补充)。"
+    "严格输出 JSON 数组,每条违背一项:"
+    '[{"standard":"<被违背标准的原文,照抄>","why":"<一句话:踩在哪>"}];'
+    "没有违背 → []。**拿不准就不标(宁可不拦,不可错拦)**。不要输出 JSON 以外任何文字。"
+)
+
+
+def parse_violations(text: str) -> list[dict]:
+    """解析守线员输出 → [{"standard","why"}]。严格 JSON、宁空勿毒(同 parse_decision_prefs)。"""
+    t = (text or "").strip()
+    if not t:
+        return []
+    lines = t.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+    cleaned = "\n".join(lines).strip()
+    if not cleaned:
+        return []
+    try:
+        data: Any = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    if isinstance(data, dict):
+        data = data.get("violations") if isinstance(data.get("violations"), list) else (
+            [data] if data.get("standard") else [])
+    if not isinstance(data, list):
+        return []
+    out: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        std = (item.get("standard") or "").strip()
+        if not std:
+            continue
+        out.append({"standard": std, "why": (item.get("why") or "").strip()})
+    return out
+
+
 @dataclass
 class DecisionSample:
     """决策 loop 里的一次拍板样本(信号源:H2A 决策 / 显式陈述 / 步骤编辑 / 圆桌改写)。"""
@@ -485,6 +528,7 @@ __all__ = [
     "parse_decision_prefs", "format_samples", "compile_decisions",
     "initial_strength", "qualifies", "maybe_promote", "is_high_value",
     "recall_decision_prefs", "applicable_decision_prefs", "prealign_block", "receipt_gists",
+    "VIOLATION_SYSTEM", "parse_violations",
     "REINFORCE_STEP", "WEAKEN_STEP", "STRENGTH_FLOOR",
     "DECISION_RECONCILE_SYSTEM", "reinforce", "weaken", "should_revoke",
     "parse_reconcile", "reconcile_decisions",

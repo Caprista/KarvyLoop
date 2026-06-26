@@ -1504,3 +1504,11 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
   font-size: 12px; color: var(--text-soft, #8a7a66);
   margin: 4px 0 2px 0; font-style: italic;
 }
+
+/* 决策卡·违背即拦(Cut 2):踩了你定的标准 → 拍板前最显眼标红(它替你把关) */
+.dcard-violation {
+  background: var(--danger-soft, rgba(216,82,124,0.12));
+  border: 1px solid var(--danger-line, rgba(216,82,124,0.40));
+  border-radius: 10px; padding: 8px 10px; margin: 0 0 8px 0;
+}
+.dcard-violation-head { color: var(--danger, #d8527c); font-weight: 600; line-height: 1.45; }

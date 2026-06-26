@@ -546,6 +546,18 @@
         judgeState.hvStandard = c.high_value_standard || "";
         judgeState.needsRecheck = !!c.needs_recheck;
         const box = el("div", { class: "dcard" + (c.high_value ? " dcard-highvalue" : "") });
+        // Cut 2 违背即拦:踩了你定的标准 → 拍板**之前**最显眼处标红(带回执,可核"它替我把关")
+        const violations = c.violations || [];
+        violations.forEach((v) => {
+          const vb = el("div", { class: "dcard-violation" });
+          vb.appendChild(el("div", { class: "dcard-violation-head",
+            text: t("dcard.violation") + "『" + (v.standard || "") + "』" + (v.why ? " — " + v.why : "") }));
+          if (v.receipt && v.receipt.length) {
+            vb.appendChild(el("div", { class: "dcard-pref-receipt",
+              text: t("dcard.pref_receipt") + v.receipt.join("；") }));
+          }
+          box.appendChild(vb);
+        });
         // 反投降:已处在"连着无脑拍"streak → 拍之前先提醒(banner),ACCEPT 会再要一次确认
         if (c.needs_recheck) {
           box.appendChild(el("div", { class: "dcard-surrender", text: t("dcard.surrender_banner") }));

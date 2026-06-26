@@ -332,3 +332,19 @@ def test_prealign_no_silent_drop_discloses_omitted():
     block = prealign_block(prefs, limit=3)
     assert block.count("- [") == 3            # 只展示 3 条
     assert "还有 5 条" in block                # 但明示漏了 5 条,不静默
+
+
+# ---- Cut 2:守线员输出解析(宁空勿毒)----
+
+def test_parse_violations_strict():
+    from karvyloop.crystallize.decision_pref import parse_violations
+    out = parse_violations('[{"standard":"动生产先备份","why":"直接 drop 表没备份"}]')
+    assert out == [{"standard": "动生产先备份", "why": "直接 drop 表没备份"}]
+
+
+def test_parse_violations_empty_and_garbage():
+    from karvyloop.crystallize.decision_pref import parse_violations
+    assert parse_violations("[]") == []
+    assert parse_violations("这条提案好像有点问题吧") == []     # prose 不抽
+    assert parse_violations('[{"standard": 坏json') == []       # 像 JSON 解析失败 → []
+    assert parse_violations('[{"why":"无 standard 字段"}]') == []  # 缺 standard → 丢

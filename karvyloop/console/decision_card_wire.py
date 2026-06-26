@@ -69,6 +69,58 @@ def _recall_aligned_prefs(app: Any, payload: dict) -> tuple[list[dict], int]:
         return [], 0   # 召回失败不挡决策卡(降级为无预对齐)
 
 
+async def check_violations(app: Any, proposal_text: str, standards: list[str]) -> list[dict]:
+    """Cut 2 守线:LLM 判这条提案**违背**了哪些已定标准。无 gateway/无标准/空提案 → []。
+
+    宁可漏拦不可错拦(prompt 已嘱)。返回 [{"standard","why"}]。失败 → [](不挡决策卡)。
+    """
+    rk = getattr(getattr(app, "state", None), "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    if gw is None or not standards or not (proposal_text or "").strip():
+        return []
+    from karvyloop.crystallize.decision_pref import VIOLATION_SYSTEM, parse_violations
+    from karvyloop.gateway import ResolveScope
+    from karvyloop.gateway.system import SystemPrompt
+    numbered = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(standards))
+    material = f"提案:\n{proposal_text.strip()}\n\n用户已定的决策标准:\n{numbered}"
+    out = ""
+    try:
+        ref = gw.resolve_model(ResolveScope(atom_model=rk.get("model_ref") or None))
+        async for ev in gw.complete([{"role": "user", "content": material}], [], ref,
+                                    system=SystemPrompt(static=[VIOLATION_SYSTEM])):
+            if type(ev).__name__ == "TextDelta":
+                out += getattr(ev, "text", "")
+    except Exception:
+        return []
+    return parse_violations(out)
+
+
+def _attach_violations(app: Any, d: dict, aligned: list[dict], problem: str,
+                       approach: str, payload: dict) -> None:
+    """对召回到的标准跑一道守线(只在有标准时,省 token),把违背摆到卡最显眼处 + 逼拍前确认。"""
+    if not aligned:
+        return
+    proposal_text = " ".join([problem or "", approach or ""]
+                             + [str(payload.get(k, "")) for k in ("requirement", "topic", "intent")]).strip()
+    try:
+        import asyncio
+        violations = asyncio.run(check_violations(app, proposal_text, [a["content"] for a in aligned]))
+    except Exception:
+        violations = []
+    if not violations:
+        return
+    # 给每条违背配上回执(来自你哪几次拍板)+ kind,卡上"它替我把关"才可核
+    by_content = {a["content"]: a for a in aligned}
+    for v in violations:
+        src = by_content.get(v["standard"])
+        if src:
+            v["receipt"] = src.get("receipt", [])
+            v["kind_label"] = src.get("kind_label", "")
+    d["violations"] = violations
+    d["high_value"] = True       # 违背 = 高价值,拍前必确认
+    d["needs_recheck"] = True
+
+
 def build_card_for_proposal(app: Any, proposal_id: str) -> Optional[dict]:
     """从一条待决提案建决策卡(接地于 verify store,无则 honest unverifiable)。"""
     reg = getattr(app.state, "proposal_registry", None)
@@ -108,6 +160,9 @@ def build_card_for_proposal(app: Any, proposal_id: str) -> Optional[dict]:
     # 反投降当前态(只读 tracker,不创建)→ 前端据此在**拍之前**拦,不再马后炮
     tracker = getattr(app.state, "decision_card_tracker", None)
     d["needs_recheck"] = bool(tracker.needs_recheck()) if tracker is not None else False
+    d["violations"] = []
+    # Cut 2 违背即拦:对召回到的标准跑守线(放在最后 —— 会把 high_value/needs_recheck 升上去)
+    _attach_violations(app, d, aligned, problem, approach, payload)
     return d
 
 

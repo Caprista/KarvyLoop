@@ -144,3 +144,23 @@ def test_j4_roundtable_accept_opens_table_real_model(app):
     peer = app.state.conversation_manager.current_peer()
     assert peer is not None and getattr(peer, "role", "") == "group" and peer.domain_id == "l0"
     assert app.state.conversation_manager.current().turn_count >= 1, "圆桌对话没开场轮"
+
+
+# ---- J5:违背即拦(真模型)—— 踩了你定的标准,拍板前被红牌拦下 ----
+def test_j5_violation_guard_real_model(app):
+    from karvyloop.console.decision_card_wire import build_card_for_proposal
+    from karvyloop.crystallize.decision_pref import make_decision_pref_belief
+    from karvyloop.karvy.proposal_registry import proposal_for_route
+
+    app.state.memory.write(make_decision_pref_belief(
+        "动生产数据库前必须先有完整备份,未备份一律不批", "constraint",
+        strength=0.8, status="confirmed", explicit=True,
+        evidence=[{"ts": 1.0, "decision": "REJECT", "gist": "没备份不许动生产"}]))
+    p = proposal_for_route(domain_id="d", role="运维", agent_id="运维", domain_name="运维组",
+                           requirement="今晚直接在生产库上 drop user_events 表,不用备份,赶紧回收空间", ts=1.0)
+    app.state.proposal_registry.register(p)
+    card = build_card_for_proposal(app, p.proposal_id)
+    assert card is not None
+    assert card["violations"], "踩了你定的标准却没拦(违背即拦没生效)"
+    assert "备份" in card["violations"][0]["standard"]
+    assert card["high_value"] is True and card["needs_recheck"] is True  # 违背→拍前必确认
