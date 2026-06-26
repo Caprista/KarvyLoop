@@ -1,0 +1,235 @@
+"""app — build_console_app(M3+ 批 8.5-C)。
+
+设计:plans/snoopy-singing-sunbeam.md §批 8.5-C。
+
+构造 FastAPI app,挂载:
+- /api/* 端点(routes.py)
+- /ws 端点(ws.py)
+- / → 静态 index.html; /static/* → 静态资源
+
+显式 `app.state.{workbench, main_loop, runtime_kwargs, workbench_app, ws_clients}`,
+无隐式全局。
+
+K 边界:K3/K4/K5 由 routes / ws 模块各自把关,本模块只 wire。
+"""
+from __future__ import annotations
+
+import logging
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, Optional
+
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from karvyloop.cli.main_loop import MainLoop
+from karvyloop.karvy.observer import WorkbenchObserver
+
+from .routes import router as api_router
+from .ws import router as ws_router
+
+logger = logging.getLogger(__name__)
+
+# 静态资源目录(与本文件同包下)
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+def build_console_app(
+    *,
+    workbench: WorkbenchObserver,
+    main_loop: Optional[MainLoop] = None,
+    runtime_kwargs: Optional[dict] = None,
+    workbench_app: Any = None,
+    proposal_pump: Any = None,
+) -> FastAPI:
+    """构造 FastAPI app。
+
+    Args:
+        workbench: 必填 — WorkbenchObserver 注入(供 /api/snapshot 等读)。
+        main_loop: 可选 — MainLoop 注入(供 /api/intent / /api/stats)。
+        runtime_kwargs: 可选 — 慢脑工厂 kwargs(token/sandbox/gateway/workspace_root/model_ref)。
+        workbench_app: 可选 — WorkbenchApp 注入(供 /api/chat_history 读 ring buffer)。
+        proposal_pump: 可选 — ProposalPump 注入(9.0d:IntentAnalyst → console h2a_proposal 推送桥)。
+            None 时 /api/propose 返优雅"未接 analyst"提示,不报错。
+
+    Returns:
+        FastAPI app。
+    """
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        import asyncio
+
+        # 启动:init ws_clients
+        app.state.ws_clients = set()
+        logger.info(
+            f"[karvyloop console] 启动 workbench={bool(workbench)} "
+            f"main_loop={main_loop is not None} "
+            f"workbench_app={workbench_app is not None} "
+            f"proposal_pump={getattr(app.state, 'proposal_pump', None) is not None}"
+        )
+
+        # 9.0e:小卡每天后台看一次行为(daily poll → 有强建议推 h2a_proposal)。
+        # 仅当 entry 接线了 pump + 设了正间隔才起;默认不开(0.1.0 §少脚手架)。
+        daily_task = None
+        pump = getattr(app.state, "proposal_pump", None)
+        interval = getattr(app.state, "proposal_daily_interval_s", None)
+        if pump is not None and interval and interval > 0:
+            async def _daily_loop() -> None:
+                while True:
+                    try:
+                        await asyncio.sleep(interval)
+                        proposal, sent = await pump.daily()
+                        if proposal is not None:
+                            logger.info(
+                                f"[karvyloop console] 小卡 daily 建议 → 推 {sent} client(s): "
+                                f"{proposal.summary[:40]}"
+                            )
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        # 慢脑异常不打断 loop(下个周期再来)
+                        logger.warning(f"[karvyloop console] daily poll 异常(下轮再试): {e}")
+                        # §0.7 fail-loud:后台 daily 失败不再静默,主动 push 给 UI
+                        try:
+                            from karvyloop.console.task_events import schedule_system_error
+                            schedule_system_error(app, "daily_poll", str(e))
+                        except Exception:
+                            pass
+            daily_task = asyncio.create_task(_daily_loop())
+            app.state.daily_task = daily_task
+            logger.info(f"[karvyloop console] 小卡 daily 调度已起(间隔 {interval}s)")
+
+        # 定时任务调度器:每 30s tick 一次,跑窗口内到点的任务(只有 Karvy 起的;角色没调度工具)。
+        async def _scheduler_loop() -> None:
+            import time as _time
+            from karvyloop.console.routes import _scheduler_store, fire_schedule
+            last = _time.time()
+            while True:
+                try:
+                    await asyncio.sleep(30)
+                    now = _time.time()
+                    for t in _scheduler_store(app).due(since=last, now=now):
+                        try:
+                            await fire_schedule(app, t)
+                        except Exception as fe:
+                            logger.warning(f"[karvyloop console] 定时任务 {t.id} 执行异常: {fe}")
+                    last = now
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"[karvyloop console] 定时调度 tick 异常(下轮再试): {e}")
+        app.state.scheduler_task = asyncio.create_task(_scheduler_loop())
+        logger.info("[karvyloop console] 定时任务调度器已起(30s tick)")
+
+        # A:接 MCP server(若 config.yaml 配了 mcp.servers)→ **在主循环上**连,工具注入 agent 工具集。
+        # agent 跑在 worker 线程的另一个 asyncio.run 循环里,McpAgentTool 会跨循环桥回这个主循环。
+        # 没配 → 不连(0 影响);连失败 → 降级无 MCP 工具,不挡 console 启动。
+        app.state.mcp_group_ctx = None
+        try:
+            from karvyloop.coding.tools.mcp_tool import (
+                connect_mcp_agent_tools, read_mcp_server_configs)
+            mcp_cfgs = read_mcp_server_configs(getattr(app.state, "config_path", "") or "")
+            if mcp_cfgs:
+                group_ctx, mcp_tools = await connect_mcp_agent_tools(mcp_cfgs)
+                app.state.mcp_group_ctx = group_ctx   # 保活,关闭时 __aexit__
+                rk = getattr(app.state, "runtime_kwargs", None)
+                if isinstance(rk, dict):
+                    rk["mcp_tools"] = mcp_tools        # 慢脑工厂取它注入 agent 工具集
+                print(f"[karvyloop console] MCP 接入 {len(mcp_tools)} 个工具: {list(mcp_tools)}", flush=True)
+        except Exception as e:
+            logger.warning(f"[karvyloop console] MCP 接入失败(降级无 MCP 工具,不影响启动): {e}")
+
+        # #39 ①:持久化执行 —— 续跑上次被中断的 workflow(console 崩/重启后,已完成步秒命中、剩余续)。
+        try:
+            from karvyloop.console.routes import resume_workflows
+            n = await resume_workflows(app)
+            if n:
+                print(f"[karvyloop console] 续跑了 {n} 个被中断的 workflow", flush=True)
+        except Exception as e:
+            logger.warning(f"[karvyloop console] workflow 续跑失败(不影响启动): {e}")
+
+        yield
+
+        # A:关 MCP 会话(断子进程)
+        _gctx = getattr(app.state, "mcp_group_ctx", None)
+        if _gctx is not None:
+            try:
+                await _gctx.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+        # 关闭:取消 daily task + 定时调度器 + 清 ws clients + 关 pump 资源(trace/habit sqlite)
+        if daily_task is not None:
+            daily_task.cancel()
+        _sched_task = getattr(app.state, "scheduler_task", None)
+        if _sched_task is not None:
+            _sched_task.cancel()
+        app.state.ws_clients.clear()
+        close_fn = getattr(app.state, "proposal_close", None)
+        if callable(close_fn):
+            try:
+                close_fn()
+            except Exception as e:
+                logger.warning(f"[karvyloop console] proposal_close 异常: {e}")
+        logger.info("[karvyloop console] 关闭")
+
+    app = FastAPI(
+        title="KarvyLoop Console",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+    # 显式 state(无隐式全局)
+    # 注:ws_clients 必须**立即**初始化,TestClient 在 lifespan 触发前就可能连 WS
+    app.state.workbench = workbench
+    app.state.main_loop = main_loop
+    app.state.runtime_kwargs = runtime_kwargs or {}
+    app.state.workbench_app = workbench_app
+    app.state.proposal_pump = proposal_pump  # 9.0d:IntentAnalyst → console 推送桥(可 None)
+    app.state.proposal_close = None           # 9.0e:entry 接线时设(关 trace/habit sqlite)
+    app.state.proposal_daily_interval_s = None  # 9.0e:entry 接线时设(daily 调度间隔;None=不开)
+    app.state.conversation_manager = None     # 9.1d:entry 接线时设(对话编排器;None=无对话上下文)
+    app.state.domain_registry = None          # 9.2b:entry 接线时设(列业务域 peer;None=仅私聊)
+    app.state.domain_store = None             # 9.2c-持久化:entry 接线时设(建域存盘)
+    app.state.token_ledger = None             # 9.3a:entry 接线时设(token 账本/看板)
+    app.state.ws_clients = set()  # 立即 set,lifespan 里也 set 同引用
+
+    # mount routers
+    app.include_router(api_router)
+    app.include_router(ws_router)
+
+    # 静态文件
+    if STATIC_DIR.is_dir():
+        # index.html 由 / 路由直接返(避免 StaticFiles 默认 index.html 兜底)
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+        @app.get("/")
+        def index():
+            # 9.4:把已保存的语言偏好注入页面(data-default-lang)→ 全新浏览器/清缓存后
+            # GUI 也直接以保存的语言启动(i18n.js getLang 读 data-default-lang)。localStorage 仍可覆盖。
+            from fastapi.responses import HTMLResponse
+            from karvyloop.i18n import get_locale
+            try:
+                html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+                loc = get_locale()
+                html = html.replace(
+                    '<html lang="en">',
+                    f'<html lang="{loc}" data-default-lang="{loc}">',
+                )
+                return HTMLResponse(html)
+            except Exception:
+                return FileResponse(str(STATIC_DIR / "index.html"))
+    else:
+        @app.get("/")
+        def index_no_static() -> dict[str, str]:
+            return {"error": f"static dir not found: {STATIC_DIR}"}
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
+    return app
+
+
+__all__ = ["build_console_app", "STATIC_DIR"]

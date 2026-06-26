@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# venv
+.venv/
+venv/
+env/
+
+# local config / secrets (never commit)
+~/.karvyloop/
+config.yaml
+*.key
+.env
+
+# IDE / caches
+.idea/
+.vscode/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.swp
+
+# 本地内部草稿/设计(绝不入公开仓)
+_local/

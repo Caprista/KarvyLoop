@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KarvyLoop Console</title>
+  <link rel="icon" type="image/png" href="/static/assets/karvyloop-logo-64.png" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/vendor/highlight-github.min.css" />
+</head>
+<body>
+  <!-- 9.4c 暖色品牌系重构:左导航(管理面)/ 中对话+IP 主视觉 / 右上下文。
+       所有功能性 id 保持不变(JS 接线不动);看板从 5 列收进右侧上下文栏。 -->
+  <div class="app" id="app">
+
+    <!-- 顶栏:品牌(IP+标题)+ 脉搏 + 统计 + 成本 + 小卡 + 语言(驾驶舱仪表盘条) -->
+    <header class="topbar">
+      <div class="brand">
+        <!-- IP 主视觉:卡皮巴拉 + 头顶发光 ∞ + 叼绿叶(Hardy 定稿 logo) -->
+        <img class="brand-logo" src="/static/assets/karvyloop-logo.png" alt="KarvyLoop" />
+        <span class="brand-name" data-i18n="ui.title">KarvyLoop</span>
+      </div>
+      <!-- 脉搏:小卡此刻在看什么(常驻,克制) -->
+      <span class="pulse-chip" id="pulse-text" data-i18n="cockpit.pulse_idle">小卡在看着你的工作台</span>
+      <div class="topbar-spacer"></div>
+      <!-- 统计 + token 成本表(用得起是护城河,成本必须可见;点 token 开统计弹窗) -->
+      <div class="topbar-stats" id="stats">
+        <span id="stat-drives">drives: —</span>
+        <span class="fast-brain" id="stat-fast-brain">fast-brain: —</span>
+        <span class="crystallizations" id="stat-crystallized">crystallized: —</span>
+      </div>
+      <span class="token-meter" id="token-meter" data-i18n-title="cockpit.token_title">💰 —</span>
+      <!-- 小卡永远在场 -->
+      <div class="topbar-karvy">
+        <img src="/static/assets/karvy-capybara.png" alt="Karvy" />
+        <span class="role" data-i18n="app.karvy_role">你的副驾</span>
+      </div>
+      <div class="top-actions">
+        <span class="lang-switcher" id="lang-switcher"></span>
+      </div>
+    </header>
+
+    <!-- 左导航:管理面入口 + 对话控件 + 统计 -->
+    <nav class="sidebar">
+      <div class="nav-group">
+        <div class="nav-group-title" data-i18n="nav.manage">Manage</div>
+        <button class="nav-item" data-panel="domains">
+          <span class="nav-ico">📂</span><span data-i18n="nav.domains">Business Domains</span>
+        </button>
+        <button class="nav-item" data-panel="roles">
+          <span class="nav-ico">◑</span><span data-i18n="nav.roles">Roles</span>
+        </button>
+        <button class="nav-item" data-panel="atoms">
+          <span class="nav-ico">⬡</span><span data-i18n="nav.atoms">Atom Agents</span>
+        </button>
+        <button class="nav-item" data-panel="agents">
+          <span class="nav-ico">⊞</span><span data-i18n="nav.agents">External Agents</span>
+        </button>
+        <button class="nav-item" data-panel="memory">
+          <span class="nav-ico">🧠</span><span data-i18n="nav.memory">Knowledge</span>
+        </button>
+        <button class="nav-item" data-panel="decision_prefs">
+          <span class="nav-ico">🧭</span><span data-i18n="nav.decision_prefs">Decision Preferences</span>
+        </button>
+        <button class="nav-item" data-panel="skills">
+          <span class="nav-ico">🧩</span><span data-i18n="nav.skills">Skill Library</span>
+        </button>
+        <button class="nav-item" data-panel="models">
+          <span class="nav-ico">🤖</span><span data-i18n="nav.models">Models (global)</span>
+        </button>
+        <button class="nav-item" data-panel="diagnose">
+          <span class="nav-ico">🩺</span><span data-i18n="nav.diagnose">Diagnose</span>
+        </button>
+        <button class="nav-item" data-panel="files">
+          <span class="nav-ico">📁</span><span data-i18n="nav.files">Files</span>
+        </button>
+        <button class="nav-item" data-panel="schedules">
+          <span class="nav-ico">⏰</span><span data-i18n="nav.schedules">Scheduled</span>
+        </button>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-title" data-i18n="nav.conversation">Conversation</div>
+        <button id="domain-new-btn" class="nav-btn" data-i18n="btn.domain_new" data-i18n-title="btn.domain_new.title">🏢 New Domain</button>
+      </div>
+
+      <div class="nav-spacer"></div>
+    </nav>
+
+    <!-- 中央:决策者的指挥台(书 ch4)。工作台 = 态势 + 要我拍的板 + 成本;
+         工作在 KarvyChat 里发生。按决策者要的业务类型组织,每条一键连 Chat。-->
+    <main class="cockpit">
+      <!-- 四象限:拍板 / 流进来的料 ; 预判 / 谁在忙(脉搏/统计/成本已上移到顶栏仪表盘条)-->
+      <div class="cockpit-grid">
+        <section class="cockpit-col col-decide">
+          <h2 class="col-head"><span data-i18n="cockpit.decide">⚖ 要我拍什么板</span>
+            <button id="propose-btn" class="col-act" data-i18n="btn.propose" data-i18n-title="btn.propose.title">🔮</button></h2>
+          <div class="col-scroll">
+            <div id="h2a-list"><div class="h2a-empty" data-i18n="empty.h2a">no proposals</div></div>
+            <div class="recent-head" data-i18n="decisions.recent_head">🗳 最近拍板</div>
+            <div id="recent-decisions"><div class="empty-state" data-i18n="empty.recent_decisions">—</div></div>
+          </div>
+        </section>
+        <section class="cockpit-col col-intel">
+          <h2 class="col-head" data-i18n="cockpit.intel">📥 流进来的料</h2>
+          <div class="col-scroll">
+            <div id="task-board"><div class="empty-state" data-i18n="empty.task_board">no tasks yet</div></div>
+            <div class="material-bar hidden" id="material-bar"></div>
+          </div>
+        </section>
+        <section class="cockpit-col col-predict">
+          <h2 class="col-head" data-i18n="cockpit.predict">🔮 你可能想做</h2>
+          <div class="col-scroll">
+            <div id="predict-list"><div class="empty-state" data-i18n="empty.predict">—</div></div>
+          </div>
+        </section>
+        <section class="cockpit-col col-busy">
+          <h2 class="col-head" data-i18n="cockpit.busy">🔄 谁在忙</h2>
+          <div class="col-scroll">
+            <div id="busy-list"><div class="empty-state" data-i18n="empty.busy">—</div></div>
+          </div>
+        </section>
+      </div>
+
+    </main>
+
+    <!-- 又懂了你(技能/认知)收进抽屉,保留 id 供 renderSnapshot/pollKnowledge 写入 -->
+    <aside class="learn-drawer" id="learn-drawer" hidden>
+      <div id="skill-list"></div>
+      <div id="knowledge-list"></div>
+    </aside>
+
+    <!-- 管道(非驾驶座主视:域/上次/广播)收进可折叠抽屉,仍保留 id 供 renderSnapshot 写入 -->
+    <aside class="context-drawer" id="context-drawer" hidden>
+      <div id="domain-list"></div>
+      <div id="last-drive"></div>
+      <div id="broadcast-list"></div>
+    </aside>
+
+    <!-- 全局聊天:从右下角小卡升起的对话面板。左=对话/场切换,右=正文,统一入口。 -->
+    <div class="modal-overlay chat-overlay hidden" id="chat-modal">
+      <div class="chat-panel">
+        <div class="chat-panel-head">
+          <img class="chat-panel-avatar" src="/static/assets/karvy-capybara.png" alt="Karvy" />
+          <span class="modal-title" id="chat-title" data-i18n="chat.title">💬 你 & 小卡</span>
+          <span class="chat-head-spacer"></span>
+          <button class="modal-close" id="chat-modal-close" aria-label="close">✕</button>
+        </div>
+        <div class="chat-panel-body">
+          <!-- 左:纯聊天列表(可聊对象一行行展开,点谁跟谁聊)。
+               由 refreshPeers() 渲染 → switchPeer();群场(大群/业务域)分隔在下。 -->
+          <aside class="chat-panel-side">
+            <div class="chat-side-label up" data-i18n="chat.peers">Conversations</div>
+            <div id="peer-list" class="peer-list"></div>
+          </aside>
+          <!-- 右:正文(对话流 + 圆桌阶段条 + 输入 + 频道内操作栏) -->
+          <main class="chat-panel-main">
+            <div class="chat-log" id="chat-log"></div>
+            <!-- ch4 圆桌阶段0:对齐目标中 → 你拍板【开始讨论】 -->
+            <div class="roundtable-bar hidden" id="roundtable-bar"></div>
+            <!-- ch4 #1:群里 @ 角色 —— 行内高亮 @花名(可多个、整体删),输 @ 弹角色选择器 -->
+            <div class="chat-input-wrap">
+              <div class="mention-pop hidden" id="mention-pop"></div>
+              <form class="chat-input" id="chat-form">
+                <div
+                  id="chat-input"
+                  class="chat-input-ce is-empty"
+                  contenteditable="true"
+                  role="textbox"
+                  aria-multiline="false"
+                  data-i18n-ph="input.placeholder"
+                ></div>
+                <!-- 多模态附件:图(发图问)/ 文本·Markdown(发文档问)缩略预览,可单删 -->
+                <div class="chat-attachments hidden" id="chat-attachments"></div>
+                <input type="file" id="chat-attach-input" class="hidden" multiple
+                       accept="image/*,.md,.markdown,.txt,.json,.csv,.log,.py,.js,.ts,.html,.css,.yaml,.yml,.xml" />
+                <!-- WeChat 式频道内操作栏:附件 + 新对话/历史(每个频道内的功能) + 圆桌(仅群场:
+                     业务域 / karvy world 才有,_toggleRoundtableBtn 控显隐) + 发送 -->
+                <!-- 频道内操作:图标按钮(hover 出气泡说明),不再堆文字 -->
+                <div class="chat-toolbar">
+                  <button type="button" id="chat-attach-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.attach.title" data-i18n-title="btn.attach.title">📎</button>
+                  <button type="button" id="conv-new-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.conv_new.title" data-i18n-title="btn.conv_new.title">🆕</button>
+                  <select id="conv-history" class="chat-hist chat-tool-sel" data-i18n-title="sel.history.title">
+                    <option value="">🕘</option>
+                  </select>
+                  <button type="button" id="roundtable-btn" class="chat-tool-btn icon-btn rt-btn hidden" data-i18n-tip="rt.open.title" data-i18n-title="rt.open.title">🎡</button>
+                  <span class="chat-toolbar-spacer"></span>
+                  <button type="submit" id="chat-send" class="chat-send-btn" data-i18n="btn.send">Send</button>
+                </div>
+              </form>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9.5 #3:管理面模态(原子库 / 角色库 / 业务域)— 点左导航打开 -->
+    <div class="modal-overlay hidden" id="mgmt-modal">
+      <div class="modal">
+        <div class="modal-head">
+          <span class="modal-title" id="mgmt-title">—</span>
+          <button class="modal-close" id="mgmt-close" aria-label="close">✕</button>
+        </div>
+        <div class="modal-body" id="mgmt-body"></div>
+      </div>
+    </div>
+
+    <!-- 全局悬浮聊天入口(右下角常驻):小卡 = 统一对话入口 ——
+         私聊 / 业务域 / 圆桌都从这进(切场在弹起的聊天里完成)。
+         未来可在此并一个语音入口(voice),两个入口共用同一套对话。 -->
+    <div class="karvy-dock">
+      <!-- 定时冒泡:让人知道这只卡皮巴拉能点(沟通是核心功能)。佛系人设 → 只发省略号动效 … -->
+      <div class="karvy-bubble hidden" id="karvy-bubble"><span class="karvy-bubble-dots">·</span></div>
+      <span class="karvy-dock-label" data-i18n="chat.open">跟小卡说…</span>
+      <button class="karvy-fab" id="chat-open" data-i18n-title="chat.open" aria-label="Talk to Karvy">
+        <img src="/static/assets/karvy-capybara.png" alt="Karvy" />
+      </button>
+    </div>
+  </div>
+
+  <!-- 9.4 渲染层:vendored markdown-it + DOMPurify(本地,不走 CDN)+ render.js,须在主逻辑脚本之前 -->
+  <script src="/static/vendor/markdown-it.min.js"></script>
+  <script src="/static/vendor/purify.min.js"></script>
+  <script src="/static/vendor/highlight.min.js"></script>
+  <script src="/static/render.js"></script>
+  <script src="/static/i18n.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
