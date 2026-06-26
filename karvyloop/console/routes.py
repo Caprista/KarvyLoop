@@ -2802,6 +2802,10 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
         for tn in ctx
     ).strip()
     goal = await _roundtable_goal_summary(gw, model_ref, topic, align)
+    # Step 0(a):你的决策标准在**圆桌**里也生效(成员发言按你的标准对齐;fresh 只跳执行记忆,
+    # 不跳你的标准 —— governance 显式传仍生效)。query=goal → 按相关性召回。
+    from karvyloop.console.decision_wire import assemble_governance
+    governance = assemble_governance(app, intent=goal, domain=(peer.domain_id or ""), base=governance)
 
     async def member_reply(addr, _topic, transcript):
         dom = dom_reg.get(addr.domain_id)
