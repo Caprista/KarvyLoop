@@ -20,11 +20,15 @@ class GlobalKarvy:
 
     def __init__(self, *, main_loop: Any, conversation_manager: Any = None,
                  runtime_kwargs: Optional[dict] = None,
-                 dashboard_fn: Optional[Callable[[], dict]] = None) -> None:
+                 dashboard_fn: Optional[Callable[[], dict]] = None,
+                 governance_fn: Optional[Callable[[str], str]] = None) -> None:
         self._ml = main_loop
         self._mgr = conversation_manager
         self._rk = runtime_kwargs or {}
         self._dashboard_fn = dashboard_fn
+        # Step 0(a):你的决策标准/知识 装配器(intent → governance)。接了 → 语音/TUI 也认你的标准,
+        # 不再认知失明;None → 退化成只有 ctx+人格(旧行为)。
+        self._governance_fn = governance_fn
 
     @property
     def ready(self) -> bool:
@@ -41,8 +45,15 @@ class GlobalKarvy:
         ctx = mgr.context_view() if mgr is not None else None
         ws = self._rk.get("workspace_root", "/")
         persona = build_karvy_persona_prompt(cwd=ws)   # ← 这就是"全局 Karvy",不是裸 forge
+        # Step 0(a):语音/TUI 也要认你的标准 —— 接了 governance_fn 就装配(prealign+知识召回),不再认知失明。
+        governance = ""
+        if self._governance_fn is not None:
+            try:
+                governance = self._governance_fn(intent) or ""
+            except Exception:
+                governance = ""
         outcome = await drive_in_tui(intent, self._ml, ctx=ctx, persona=persona,
-                                     on_event=on_event, **self._rk)
+                                     governance=governance, on_event=on_event, **self._rk)
         if mgr is not None and not getattr(outcome, "error", ""):
             try:
                 mgr.record_turn(intent, outcome.text or "",

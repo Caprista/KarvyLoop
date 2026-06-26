@@ -715,7 +715,10 @@ async def api_workflow_run(req: WorkflowRunRequest, request: Request) -> dict[st
     steps = plan.get("steps") or []
     if not steps:
         return {"ok": False, "reason": "空 workflow"}
-    governance = mgr.governance_text() or ""
+    # Step 0(a):你的决策标准在**工作流执行**时也生效(query=goal),不只 l0 聊天。
+    from karvyloop.console.decision_wire import assemble_governance
+    governance = assemble_governance(app, intent=(plan.get("goal") or req.intent or ""),
+                                     domain=(peer.domain_id or ""), base=(mgr.governance_text() or ""))
     ws = rk.get("workspace_root", "/")
     goal = (plan.get("goal") or req.intent or "").strip()
     # §11 P2:你对小卡所提 DAG 的改动 = 决策信号("你想要怎么做")→ 攒进决策结晶(走双关门;
@@ -2284,7 +2287,11 @@ async def fire_schedule(app: Any, t) -> None:
                              role=(t.target_role or ""), intent=f"⏰ {t.intent[:120]}") if task_reg else None
     try:
         scope = "domain" if t.target_domain and t.target_role else None
-        outcome = await drive_in_tui(t.intent, main_loop, governance="", persona=persona,
+        # Step 0(a):你的决策标准在**定时任务**触发时也生效(到点替你做事,标准照管)。
+        from karvyloop.console.decision_wire import assemble_governance
+        _sched_gov = assemble_governance(app, intent=t.intent, domain=(t.target_domain or ""),
+                                         role=(t.target_role or ""))
+        outcome = await drive_in_tui(t.intent, main_loop, governance=_sched_gov, persona=persona,
                                      scope=scope, **eff_rk)
         err = getattr(outcome, "error", "") or ""
         if task_reg and task_id:

@@ -105,7 +105,10 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
         try:
             from karvyloop.cli.main_loop import forge_slow_brain_factory
             from karvyloop.coding.checker import verify_and_fix_with_rk, verdict_suffix
-            gov = _governance_for(app, payload)
+            from karvyloop.console.decision_wire import assemble_governance
+            # Step 0(a):你的决策标准在**委派执行**时也生效(不只 l0 聊天)。
+            gov = assemble_governance(app, intent=requirement, domain=payload.get("domain_id", ""),
+                                      role=str(role), base=_governance_for(app, payload))
             slow_brain = forge_slow_brain_factory(governance=gov, **rk)
             # loop step3:业务委派执行后过一道独立验收(在该域治理下产出 → 独立 checker 核验)。
             checked = verify_and_fix_with_rk(requirement, ml=ml, slow_brain=slow_brain, rk=rk)
@@ -153,8 +156,12 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
             )
         try:
             from karvyloop.cli.main_loop import forge_slow_brain_factory
+            from karvyloop.console.decision_wire import assemble_governance
             did = payload.get("domain_id", "l0")
-            gov = _governance_for(app, payload) if did != "l0" else ""
+            # Step 0(a):你的决策标准在**重跑任务**时也生效(l0 也注入 —— 重跑就是替你做事)。
+            gov = assemble_governance(app, intent=intent, domain=("" if did == "l0" else did),
+                                      role=payload.get("role", ""),
+                                      base=(_governance_for(app, payload) if did != "l0" else ""))
             # 重跑也用小卡人格(l0)→ 输出是小卡的声音,不是 CodingResult 八股(与人格层一致)
             persona = None
             if did == "l0":

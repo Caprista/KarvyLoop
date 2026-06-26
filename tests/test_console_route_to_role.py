@@ -160,3 +160,43 @@ def test_route_split_does_not_execute():
     routed = asyncio.run(maybe_route_to_role(app, None, "让设计师出海报"))
     assert routed is not None and routed.get("routed")
     # 没有任何 drive 发生(只 PROPOSE);ACCEPT 才执行(handler 路径,AC3 覆盖)
+
+
+# ---- Step 0(a):你的决策标准在委派执行时也注入 governance(不只 l0 聊天)----
+def test_route_handler_injects_your_standards(monkeypatch):
+    import pathlib
+    import tempfile
+    from karvyloop.cognition.belief_store import BeliefStore
+    from karvyloop.cognition.memory import MemoryManager
+    from karvyloop.crystallize.decision_pref import make_decision_pref_belief
+
+    reg = _reg_with_designer()
+    d = list(reg.list_all())[0]
+    mem = MemoryManager(store=BeliefStore(pathlib.Path(tempfile.mkdtemp()) / "b.json"))
+    mem.write(make_decision_pref_belief("海报配色必须先过无障碍对比度", "constraint",
+                                        strength=0.8, status="confirmed", explicit=True))
+    captured = {}
+
+    class _Result:
+        text = "ok"
+        error = ""
+
+    class _ML:
+        def drive(self, requirement, slow_brain=None):
+            captured["gov"] = slow_brain[1]
+            return _Result()
+
+    import karvyloop.cli.main_loop as ml_mod
+    monkeypatch.setattr(ml_mod, "forge_slow_brain_factory",
+                        lambda **kw: ("sb", kw.get("governance", "")))
+    app = _app(main_loop=_ML(),
+               runtime_kwargs={"token": 1, "sandbox": 2, "gateway": 3, "workspace_root": "/tmp"},
+               domain_registry=reg, memory=mem)
+    handlers = build_proposal_handlers(app)
+    p = proposal_for_route(domain_id=d.id, role="设计师", agent_id="设计师",
+                           domain_name="设计工作室", requirement="出一版海报", ts=1.0)
+    ok, _ = handlers[KIND_ROUTE_TO_ROLE](p)
+    assert ok
+    # 你的标准 + 回执 进了委派执行的 governance(委派也认你怎么拍板)
+    assert "海报配色必须先过无障碍对比度" in captured["gov"]
+    assert "诚实第一" in captured["gov"]   # 域 value.md 仍在(base 没丢)

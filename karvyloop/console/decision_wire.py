@@ -257,6 +257,33 @@ def schedule_decision_crystallize(app: Any) -> None:
     task.add_done_callback(_on_done)
 
 
+def assemble_governance(app: Any, *, intent: str = "", domain: str = "", role: str = "",
+                        base: str = "") -> str:
+    """**统一上下文装配**:把"你的决策标准(prealign)"+ 个人知识召回 前置到 base governance。
+
+    每条 drive 路径共用这一个接缝,保证**你的标准到处生效**(不只 l0 聊天),别再各拼各的漂移
+    (Hardy:别只一两个功能用上 context engineering)。顺序(上→下):prealign → 知识召回 → base。
+    intent = 本次意图/任务文本 → 按相关性召回(规模大也先摆相关、不静默漏)。
+    """
+    gov = base or ""
+    mem = getattr(getattr(app, "state", None), "memory", None)
+    if mem is None:
+        return gov
+    try:
+        block = mem.recall_block(intent, scope="personal", limit=8, domain=(domain or ""))
+        if block:
+            gov = (block + "\n\n" + gov).strip()
+    except Exception:
+        pass
+    try:
+        pa = prealign_governance(app, mem, query=intent, domain=domain, role=role)
+        if pa:
+            gov = (pa + "\n\n" + gov).strip()
+    except Exception:
+        pass
+    return gov
+
+
 def prealign_governance(app: Any, mem: Any, *, query: str = "", domain: str = "", role: str = "") -> str:
     """提案/drive 前:召回**与本次相关**的决策偏好 → 预对齐块(注入 governance)。空 → ""。
 
@@ -278,5 +305,6 @@ def prealign_governance(app: Any, mem: Any, *, query: str = "", domain: str = ""
 __all__ = [
     "DECISION_BATCH", "observe_decision", "maybe_crystallize_decisions",
     "crystallize_candidates", "schedule_decision_crystallize", "prealign_governance",
+    "assemble_governance",
     "proposal_for_confirm_decision",
 ]
