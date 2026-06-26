@@ -150,7 +150,7 @@ KarvyLoop ships **by version** ([CHANGELOG](CHANGELOG.md)), and it tells you whe
 
 - **How you find out**: the console shows a dismissible banner when a newer release exists; or run `karvyloop update` anytime. (It's a plain version check against GitHub Releases — no telemetry, no data sent. Turn it off with `KARVYLOOP_NO_UPDATE_CHECK=1`.)
 - **How you upgrade**: from a clone → `git pull && pip install -e .`; from PyPI (once published) → `pip install -U karvyloop`. The notifier prints the right one for your install.
-- **Your data survives.** Everything you grow lives in `~/.karvyloop/` (config, beliefs, skills, decision log) — outside the repo — and stays across upgrades. A breaking data change is a MAJOR version bump and ships with a migration.
+- **Your data survives.** Everything you grow lives in `~/.karvyloop/` (config, beliefs, skills, decision log) — outside the repo — and stays across upgrades. A breaking data change always ships with a migration and is called out loudly in the release notes.
 
 ---
 

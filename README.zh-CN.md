@@ -147,7 +147,7 @@ KarvyLoop **按版本发布**([CHANGELOG](CHANGELOG.md)),有新版会**提示你
 
 - **怎么知道有新版**:控制台在有新版时显示一条**可关掉**的横幅;或随时跑 `karvyloop update`。(只是对 GitHub Releases 做一次纯版本查询——**零遥测、不发任何数据**;用 `KARVYLOOP_NO_UPDATE_CHECK=1` 可关掉。)
 - **怎么升级**:从 clone 装的 → `git pull && pip install -e .`;从 PyPI 装的(将来发布后)→ `pip install -U karvyloop`。提示器会按你的安装方式给出对的命令。
-- **你的数据不丢**:你长出来的一切都在 `~/.karvyloop/`(config、beliefs、skills、决策流水)——在仓库之外——跨版本存活。破坏性的数据变更会升 MAJOR 版本,并随附迁移。
+- **你的数据不丢**:你长出来的一切都在 `~/.karvyloop/`(config、beliefs、skills、决策流水)——在仓库之外——跨版本存活。破坏性的数据变更必随附迁移,并在发布说明里明确标出。
 
 ---
 
