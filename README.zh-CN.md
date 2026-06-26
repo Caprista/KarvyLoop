@@ -174,7 +174,7 @@ KarvyLoop **按版本发布**([CHANGELOG](CHANGELOG.md)),有新版会**提示你
 
 ```
 README.md / README.zh-CN.md   ← 你在这(英 / 中)
-LICENSE                       ← Apache-2.0
+LICENSE                       ← MIT
 pyproject.toml                ← 安装 / 构建
 karvyloop/                    ← 全部源码
   schemas/        数据契约(类型的唯一来源)
@@ -223,7 +223,7 @@ pytest -q                    # 全量,不需要任何 flag
 
 ## 许可证
 
-[Apache-2.0](LICENSE)。代码开源;你的实例(你长出来的数据与技能)归你。
+[MIT](LICENSE)。代码开源;你的实例(你长出来的数据与技能)归你。
 
 ---
 

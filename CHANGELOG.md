@@ -56,4 +56,4 @@ First dated public release — a snapshot of the current runtime.
   new release and tells you the upgrade command — **never auto-upgrades** (zero telemetry;
   off via `KARVYLOOP_NO_UPDATE_CHECK`).
 - Frontend↔backend wiring contract test (orphan endpoints / dead calls fail CI).
-- Bilingual (en/zh) presentation layer; Apache-2.0; self-contained test suite.
+- Bilingual (en/zh) presentation layer; MIT licensed; self-contained test suite.

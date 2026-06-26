@@ -40,7 +40,7 @@ proposal) — with tests green and no dead/half-wired surfaces.
   party skills sandboxed. ✅
 - **Versioning & updates**: by-version releases, changelog, detect-and-notify update
   path (never auto-upgrade). ✅ (0.2.0)
-- Open-source hygiene: Apache-2.0, bilingual README with the real philosophy,
+- Open-source hygiene: MIT, bilingual README with the real philosophy,
   self-contained green test suite. ✅
 
 ### v1.0 punch-list — **all 5 done ✅** (shipped to `main`, verified on VM)

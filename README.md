@@ -176,7 +176,7 @@ For the full picture, read the source — it's documented. The map below tells y
 
 ```
 README.md / README.zh-CN.md   ← you are here (en / zh)
-LICENSE                       ← Apache-2.0
+LICENSE                       ← MIT
 pyproject.toml                ← install / build
 karvyloop/                    ← all source
   schemas/        data contracts (single source of types)
@@ -225,7 +225,7 @@ Pull requests welcome. Before submitting: `pytest -q` must be green; user-facing
 
 ## License
 
-[Apache-2.0](LICENSE). The code is open; your instance (the data and skills you grow) is yours.
+[MIT](LICENSE). The code is open; your instance (the data and skills you grow) is yours.
 
 ---
 
