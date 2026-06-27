@@ -261,6 +261,31 @@ class RoleRegistry:
             pf.write_text(_json.dumps(prof, ensure_ascii=False), encoding="utf-8")
         return self.get(rid)
 
+    def rewrite_atom_refs(self, role_id: str, mapping: dict) -> bool:
+        """把 COMPOSITION 的原子引用按 mapping(old_id→new_id)改写 + 去重(原子语义合并用,§11.2)。
+        保留 skills 段不动。真改了返 True;角色不在 / 没引到任何 old → False(幂等)。"""
+        rid = (role_id or "").strip()
+        comp = self._root / rid / "COMPOSITION.yaml"
+        if not comp.exists():
+            return False
+        txt = comp.read_text(encoding="utf-8")
+        cur_atoms = _ATOM_REF_RE.findall(txt)
+        cur_skills = _SKILL_REF_RE.findall(txt)
+        new_atoms: list[str] = []
+        seen: set[str] = set()
+        changed = False
+        for a in cur_atoms:
+            na = mapping.get(a, a)
+            if na != a:
+                changed = True
+            if na not in seen:
+                seen.add(na)
+                new_atoms.append(na)
+        if not changed:
+            return False
+        comp.write_text(_composition_yaml(rid, new_atoms, list(cur_skills)), encoding="utf-8")
+        return True
+
     def get(self, role_id: str) -> Optional[RoleView]:
         d = self._root / role_id
         comp = d / "COMPOSITION.yaml"

@@ -21,6 +21,8 @@ API_ONLY = {
     "/api/memory/ingest",       # 程序化写入;UI 用 /memory/feed
     "/api/roundtable/discuss",  # 历史端点;UI 走对话式 /align
     "/api/tokens/buckets",      # token 时段时间序列(可配粒度);UI 用 /api/tokens 的 by_hour,此面给外部前端/压测按需取
+    "/api/atoms/consolidate/suggest",  # 原子语义合并·建议(§11.2);外部前端/管理面按需,核心逻辑已测
+    "/api/atoms/consolidate/apply",    # 原子语义合并·兑现(经 H2A);同上
 }
 
 

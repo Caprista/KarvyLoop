@@ -3241,6 +3241,51 @@ def api_atoms(request: Request) -> dict[str, Any]:
     return {"atoms": [_atom_to_dict(a) for a in reg.list_all()]}
 
 
+class AtomMergeRequest(BaseModel):
+    canonical_id: str = Field(..., min_length=1, max_length=64)
+    member_ids: list[str] = Field(default_factory=list, max_length=64)
+    merged_purpose: str = Field(default="", max_length=400)
+    merged_tools: list[str] = Field(default_factory=list, max_length=16)
+
+
+@router.post("/atoms/consolidate/suggest")
+async def api_atoms_consolidate_suggest(request: Request) -> dict[str, Any]:
+    """原子语义合并·**建议**(docs/14 §11.2):LLM 找近重复原子簇,**只给建议不改任何东西**(dry-run)。
+    护城河资产 → 合并须人拍板,这里是"提案"那一步;`apply` 才真改。"""
+    app = request.app
+    reg = getattr(app.state, "atom_registry", None)
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    if reg is None:
+        return {"ok": False, "reason": "未接 atom_registry", "clusters": []}
+    if gw is None:
+        return {"ok": False, "reason": "未接 LLM(--no-llm?)无法语义聚类", "clusters": []}
+    from karvyloop.atoms.consolidate import suggest_consolidation
+    try:
+        with _token_src("atom_consolidate"):
+            clusters = await suggest_consolidation(reg.list_all(), gateway=gw,
+                                                   model_ref=rk.get("model_ref", ""))
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[atom consolidate] 建议失败: {e}")
+        return {"ok": False, "reason": f"聚类失败: {e}", "clusters": []}
+    return {"ok": True, "clusters": clusters, "atom_total": len(reg.list_all())}
+
+
+@router.post("/atoms/consolidate/apply")
+def api_atoms_consolidate_apply(req: AtomMergeRequest, request: Request) -> dict[str, Any]:
+    """原子语义合并·**兑现**(经 H2A,Hardy 拍过的一簇):rewire-before-delete —— 先改所有角色引用到
+    规范原子,再删冗余,绝不留悬空引用。"""
+    app = request.app
+    areg = getattr(app.state, "atom_registry", None)
+    rreg = getattr(app.state, "role_registry", None)
+    if areg is None or rreg is None:
+        return {"ok": False, "reason": "未接 atom_registry / role_registry"}
+    from karvyloop.atoms.consolidate import apply_merge
+    return apply_merge(req.canonical_id.strip(), req.member_ids,
+                       merged_purpose=req.merged_purpose, merged_tools=req.merged_tools,
+                       atom_registry=areg, role_registry=rreg)
+
+
 @router.post("/atom/create")
 def api_atom_create(req: AtomCreateRequest, request: Request) -> dict[str, Any]:
     """建一个原子入公共库(就地买糖也走这个)。"""
