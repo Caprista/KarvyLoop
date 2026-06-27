@@ -81,6 +81,18 @@ Two things compound, turn over turn:
 
 The second kind is the part almost no one else builds. It's why the loop becomes **yours**, not merely good.
 
+### Your assets, not someone else's agents
+
+Software here is disposable — you describe what you want, it gets written, used, and discarded. What *stays* is the reusable shape underneath, crystallized into a library that's yours: skills (*how to do X*), decision preferences (*how you decide*), and the **roles & atoms** your work is built from.
+
+Already invested in agents elsewhere? Bring them. An imported agent isn't flattened into a file — a model **decomposes it into a role** (its persona) **plus reusable atoms** (its capabilities), dropped into a shared pool any of your roles can compose. Near-duplicate atoms across roles get merged into one canonical atom — *you* confirm the merge, since it's your asset — and each atom is labeled honestly: *executable* (its tools are real and wired) or *advisory* (persona reasoning only), so "it ran" never masquerades as "it works".
+
+That library — your roles, atoms, skills, and decision style — is the part that compounds into leverage and **can't be lifted out**.
+
+### Karvy runs the team, you set the terms
+
+Inside lives **Karvy 🦫**, the global assistant. Talk to it in plain language — *"get a few people in the Product domain to analyze the competitor"* — and it figures out the shape: who to pull in, and whether the job is a single hand-off, a **roundtable** (several roles think in parallel, then converge), a **workflow** (a multi-step pipeline with hand-offs), or an **ops** check on the system itself. It never just *does* it: every orchestration comes back as a decision card for you to confirm. The execution fans out and self-verifies; the deciding stays with you.
+
 ### The moat: image vs instance
 
 The code (the **image**) is open and copyable — it's this repo. The **instance** you grow on it — your memory, your skills, your decision style — is yours and can't be copied. Open source and the moat are consistent: we publish the image, never your instance.
@@ -148,11 +160,12 @@ No need to understand agents — here's the whole loop, end to end:
 
 ## Updating
 
-KarvyLoop ships **by version** ([CHANGELOG](CHANGELOG.md)), and it tells you when there's a newer one — but it **never upgrades itself**. Detect → notify → *you* decide (upgrading is your call, the same way every decision inside KarvyLoop is).
+KarvyLoop ships **by version** ([CHANGELOG](CHANGELOG.md)), and it tells you when there's a newer one — but it **never upgrades itself**. Detect → notify → *you* decide. "Never upgrades itself" means the system won't act unprompted — not that you're stuck typing commands: once *you* click, it runs the whole thing for you.
 
 - **How you find out**: the console shows a dismissible banner when a newer release exists; or run `karvyloop update` anytime. (It's a plain version check against GitHub Releases — no telemetry, no data sent. Turn it off with `KARVYLOOP_NO_UPDATE_CHECK=1`.)
-- **How you upgrade**: from a clone → `git pull && pip install -e .`; from PyPI (once published) → `pip install -U karvyloop`. The notifier prints the right one for your install.
-- **Your data survives.** Everything you grow lives in `~/.karvyloop/` (config, beliefs, skills, decision log) — outside the repo — and stays across upgrades. A breaking data change always ships with a migration and is called out loudly in the release notes.
+- **One-click upgrade**: the banner has an **Upgrade** button — click it and the console runs the whole pipeline itself (stop → install → restart) and reconnects the page. No terminal needed. (Localhost-only, CSRF-guarded, single-flight; it's still *you* deciding — just without the command.)
+- **Or by hand**: from a clone → `git pull && pip install -e .`; from PyPI (once published) → `pip install -U karvyloop`. The banner also shows the exact command for your install.
+- **Your data survives.** Everything you grow lives in `~/.karvyloop/` (config, beliefs, skills, roles/atoms, decision log) — outside the repo — and stays across upgrades. A breaking data change always ships with a migration and is called out loudly in the release notes.
 
 ---
 
@@ -205,7 +218,7 @@ pip install -e ".[dev]"      # installs pytest / pytest-asyncio / respx / psutil
 pytest -q                    # full suite — no flags needed
 ```
 
-The suite is **self-contained**: it doesn't depend on any non-shipped docs, and optional infrastructure (e.g. the `mcp` package, redis, Linux+bubblewrap) is **skipped cleanly** rather than failing. Expect roughly **1550+ passed / a dozen skipped**. To run everything, on Linux: `pip install -e .` (puts the `karvyloop` CLI on PATH), `pip install mcp`, install `bubblewrap` and `redis`.
+The suite is **self-contained**: it doesn't depend on any non-shipped docs, and optional infrastructure (e.g. the `mcp` package, redis, Linux+bubblewrap) is **skipped cleanly** rather than failing. Expect roughly **1880+ passed / a dozen skipped**. To run everything, on Linux: `pip install -e .` (puts the `karvyloop` CLI on PATH), `pip install mcp`, install `bubblewrap` and `redis`.
 
 > A meta-guard test (`tests/test_suite_self_contained.py`) forbids any test from reading non-shipped docs, so "code-only checkouts stay green" is enforced, not hoped for.
 

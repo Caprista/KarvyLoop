@@ -5,12 +5,12 @@ the process; it's short on purpose.
 
 ## Versioning
 
-- **Date-based (CalVer)** — `YYYY.M.D`, the date the release is cut (e.g. `2026.6.26`).
+- **Date-based (CalVer)** — `YYYY.M.D`, the date the release is cut (e.g. `2026.6.27`).
   A later date is a newer version; the update check compares them as dotted integers.
 - **Single source of truth**: `karvyloop/__init__.py:__version__`. `pyproject.toml`
   reads it dynamically; the CLI, console, and update check all import it. Change
   the version in **one** place.
-- Tags are the bare date `YYYY.M.D` (e.g. `2026.6.26`). The in-app update check reads the
+- Tags are the bare date `YYYY.M.D` (e.g. `2026.6.27`). The in-app update check reads the
   latest GitHub **Release** `tag_name`, so a release must be a real Release on a date
   tag — not just a pushed commit.
 
