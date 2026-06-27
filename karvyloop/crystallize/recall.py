@@ -139,6 +139,7 @@ def recall(
     store: Optional[UsageStore] = None,
     skill_index: Optional[SkillIndex] = None,
     prefer: Optional[list[str]] = None,
+    satisfaction: Optional[object] = None,
 ) -> Optional[RecallHit]:
     """按意图召回一个最匹配的已结晶技能;没命中 → None(走慢脑)。
 
@@ -190,25 +191,39 @@ def recall(
             })
 
     best: Optional[RecallHit] = None
-    best_score = 0.0
+    # 排序键 = (意图匹配主分, 满意度裁决分)。**字典序**:意图匹配**绝对优先**,满意度
+    # **只在意图打平时**裁决 —— 绝不能盖过真实的匹配差(对抗验收 MEDIUM:+0.3 加权曾能
+    # 翻盘 20-30% 的匹配差 = 召回错技能;改成严格平手裁决兑现"只在打平时")。
+    best_key: tuple[float, float] = (-1.0, -1.0)
     for c in candidates:
         overlap = intent_tokens & c["all_tokens"]
         if not overlap:
             continue
-        s = len(overlap) / max(1, len(intent_tokens))
+        primary = len(overlap) / max(1, len(intent_tokens))
         if c["name"] in prefer_set:
-            s += 0.5  # 绑定优先:角色随身技能在接近时胜出(不绕 scope,只加权)
-        if s > best_score:
+            primary += 0.5  # 绑定优先仍属"意图/归属"主分(不绕 scope,只加权)
+        # docs/40:满意度回到行为 —— 意图打平时,role 评出来"更管用"的技能胜出(新近度加权,抗滞后)。
+        # 无满意度 store / 无样本 → 0(优雅降级);异常吞掉不拖垮召回。
+        secondary = 0.0
+        if satisfaction is not None and c.get("sig"):
+            try:
+                sat = satisfaction.mean_overall_recent(c["sig"])
+                if sat is not None:
+                    secondary = float(sat)
+            except Exception:
+                pass
+        key = (primary, secondary)
+        if key > best_key:
             best = RecallHit(
                 name=c["name"],
                 body=c["body"],
                 path=c["path"],
-                score=s,
+                score=primary,
                 manifest=c["raw"],
                 sig=c.get("sig", ""),
                 result_reuse=c.get("result_reuse", "dynamic"),
             )
-            best_score = s
+            best_key = key
 
     # auto-restore:命中项若在 store 归档集合里 → 翻出来
     if best is not None and store is not None and best.sig:

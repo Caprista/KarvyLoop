@@ -177,6 +177,26 @@ class SatisfactionStore:
             return None
         return sum(x.overall for x in s) / len(s)
 
+    def mean_overall_recent(self, sig: str, *, halflife: float = 5.0) -> Optional[float]:
+        """**新近度加权**的满意度均值(docs/40 §4.1 抗滞后):越近的样本权重越高。
+
+        慢学习器读 Trace 评出来的"什么对你管用"会随你变;拿陈年样本当"现在的你"会失配
+        (actor-learner 的 policy lag,IMPALA V-trace 精神)。按距最新样本的位置指数半衰
+        加权 → 近期表现主导,旧的自然淡出。无样本 → None。
+        """
+        s = self.samples(sig)   # oldest → newest
+        if not s:
+            return None
+        n = len(s)
+        wsum = 0.0
+        acc = 0.0
+        for i, x in enumerate(s):
+            age = n - 1 - i          # 0 = 最新
+            w = 0.5 ** (age / max(0.5, halflife))
+            wsum += w
+            acc += x.overall * w
+        return acc / wsum if wsum > 0 else None
+
     def mean_dims(self, sig: str) -> Optional[dict]:
         """各维均值(质量维仅在有样本时计);无样本 → None。"""
         s = self.samples(sig)

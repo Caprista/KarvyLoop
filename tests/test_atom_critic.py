@@ -173,6 +173,69 @@ def test_evaluate_pending_skips_without_sig_or_ref(tmp_path):
     assert evaluate_pending(trace, sat) == 0            # 无 sig / 无 trace_ref 都跳过(没法做水位,宁不评)
 
 
+# ---- 丁 抗滞后:新近度加权满意度均值 ----
+
+def test_mean_overall_recent_weights_recent():
+    from karvyloop.crystallize import record_facts
+    sat = SatisfactionStore()
+    for i in range(5):   # 先 5 个低分(achievement 0.5)
+        record_facts(sat, "s", success=True, verified=False, steps=1, trace_ref=f"lo{i}")
+    for i in range(5):   # 再 5 个高分(achievement 1.0)
+        record_facts(sat, "s", success=True, verified=True, steps=1, trace_ref=f"hi{i}")
+    flat = sat.mean_overall("s")
+    recent = sat.mean_overall_recent("s")
+    assert recent > flat                 # 近期高分主导 → 加权均值高于平均(抗滞后)
+
+
+# ---- 飞轮回到行为:满意度影响召回排序 ----
+
+def test_recall_prefers_higher_satisfaction_on_tie(tmp_path):
+    from karvyloop.crystallize import recall, record_facts
+    skills = tmp_path / "skills"
+
+    def _mk(name, sig):
+        d = skills / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            f"---\nname: {name}\nwhen_to_use: 导出 csv 报表\ndescription: 导出 csv\n"
+            f"signature: {sig}\n---\n\n## Steps\n1. do\n", encoding="utf-8")
+
+    _mk("skill_a", "sigLow")    # 字母序在前、满意度低
+    _mk("skill_z", "sigHigh")   # 字母序在后、满意度高
+    sat = SatisfactionStore()
+    record_facts(sat, "sigLow", success=True, verified=False, steps=1, trace_ref="l")   # overall 0.5
+    record_facts(sat, "sigHigh", success=True, verified=True, steps=1, trace_ref="h")   # overall 1.0
+
+    # 无满意度:overlap 打平 → 取先遇到的(字母序 skill_a)
+    assert recall("导出 csv 报表", skills_dir=skills, scope="user").name == "skill_a"
+    # 有满意度:role 评得更管用的 skill_z 胜出(翻转了字母序 —— 飞轮真的影响了行为)
+    assert recall("导出 csv 报表", skills_dir=skills, scope="user",
+                  satisfaction=sat).name == "skill_z"
+
+
+def test_satisfaction_never_overrides_a_better_intent_match(tmp_path):
+    # 对抗验收 MEDIUM:满意度是**严格平手裁决**,绝不能盖过更好的意图匹配(防召回错技能)。
+    from karvyloop.crystallize import recall, record_facts
+    skills = tmp_path / "skills"
+
+    def _mk(name, sig, when):
+        d = skills / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            f"---\nname: {name}\nwhen_to_use: {when}\ndescription: {when}\n"
+            f"signature: {sig}\n---\n\n## Steps\n1. do\n", encoding="utf-8")
+
+    # strong 几乎全匹配但零满意度;weak 部分匹配但满意度拉满 —— strong 必须仍胜出
+    _mk("strong", "sigStrong", "导出 csv 报表 到 本地 目录")
+    _mk("weak", "sigWeak", "导出 报表")
+    sat = SatisfactionStore()
+    for i in range(3):
+        record_facts(sat, "sigWeak", success=True, verified=True, steps=1, trace_ref=f"w{i}")  # overall 1.0
+    # sigStrong 无样本 → 无裁决分
+    hit = recall("导出 csv 报表 到 本地 目录", skills_dir=skills, scope="user", satisfaction=sat)
+    assert hit.name == "strong"   # 匹配更好的赢,满意度盖不过(moat 不回归)
+
+
 # ---- context engineering 基建:读 Trace 喂 LLM 的材料走 token 预算 + HR-9 截断,不裸截 ----
 
 def test_clip_to_tokens_budgets_via_hr9_truncate():

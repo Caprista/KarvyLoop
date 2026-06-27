@@ -283,6 +283,7 @@ class MainLoop:
             scope=eff_scope,
             store=self.store,
             skill_index=self.skill_index,
+            satisfaction=self.satisfaction,   # docs/40:飞轮产物回到行为(满意度影响召回排序)
         )
         # #2 §13.6:命中后分两条路 —— stable 才回放缓存结果;dynamic(默认)**不回放**,拿当前输入重跑。
         guided_skill = None   # 非 None = 命中了 dynamic 技能 → 重跑(产出新鲜),且不再 observe/结晶
