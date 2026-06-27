@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -3264,31 +3265,95 @@ class AgentImportRequest(BaseModel):
 
 
 @router.post("/agent/import")
-def api_agent_import(req: AgentImportRequest, request: Request) -> dict[str, Any]:
-    """把外部 agent **按 KarvyLoop 范式改造**(adapter 五段:Source→Map→Plan→Apply→Validate)
-    → 物化成 7 灵魂文件 + COMPOSITION → 落进角色库。
+async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[str, Any]:
+    """把外部 agent 导入成 KarvyLoop 资产。
+
+    **M3 LLM 拆解(docs/14 §10,Hardy 2026-06-26 拍)**:有 LLM 时,先跑一次拆解
+    (agent → 真人设 role + 公共原子库里的可复用 atom + 识别内含 skill),**耗 token**;
+    tools 不再是 COMPOSITION 里的死字符串,而是落成原子(任何角色都能复用)。
+    **降级**:无 LLM(--no-llm)/ 拆解失败(宁空勿毒返 None)→ 回退 v0 确定性 adapter
+    (五段 Source→Map→Plan→Apply→Validate,套模板写 7 文件、0 原子、0 token)。
     """
-    reg = getattr(request.app.state, "role_registry", None)
+    app = request.app
+    reg = getattr(app.state, "role_registry", None)
     if reg is None:
         return {"ok": False, "reason": "未接 role_registry"}
     rid = (req.role_id or "").strip()
     if not rid:
         raise HTTPException(status_code=422, detail="role_id 不能为空")
+    # 字符集前置校验(对齐 RoleRegistry._ROLE_ID_RE):否则 "a.b" 这类绕过下面的存在性检查,
+    # 等拆解+建原子落盘后才在 reg.create 崩 → 原子孤儿留在公共池(独立对抗验收 Defect 2)。
+    if not re.match(r"^[\w\-]+$", rid):
+        raise HTTPException(status_code=422, detail="role_id 只能含字母/数字/下划线/连字符")
     if (reg.root / rid).exists():
         raise HTTPException(status_code=422, detail=f"角色「{rid}」已存在")
+
+    from karvyloop.adapter import discover_manifest
+    from karvyloop.adapter.source import ManifestError
+    payload = {
+        "system_prompt": req.system_prompt,
+        "tools": [{"name": t} for t in req.tools if t],
+        "agent_name": rid,
+    }
     try:
-        from karvyloop.adapter import (
-            discover_manifest, build_plan, apply_plan, validate_with_loader,
-        )
-        payload = {
-            "system_prompt": req.system_prompt,
-            "tools": [{"name": t} for t in req.tools if t],
-            "agent_name": rid,
-        }
         manifest = discover_manifest(req.source_type, payload, source_path="<console-import>")
-        if not manifest.is_minimal():
-            raise HTTPException(status_code=422,
-                                detail="缺 system_prompt 或 tools(外部 agent 至少要有这两样)")
+    except ManifestError as e:                  # J1:缺 system_prompt/tools → 拒收(422 非 500)
+        raise HTTPException(status_code=422,
+                            detail=f"缺 system_prompt 或 tools(外部 agent 至少要有这两样):{e}")
+    if not manifest.is_minimal():
+        raise HTTPException(status_code=422,
+                            detail="缺 system_prompt 或 tools(外部 agent 至少要有这两样)")
+
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    atom_reg = getattr(app.state, "atom_registry", None)
+
+    # ---- M3 路径:有 LLM + 原子库 → 拆解 → 落原子 → 建带原子引用的 role ----
+    if gw is not None and atom_reg is not None:
+        try:
+            from karvyloop.adapter.bootstrap import bootstrap_decompose
+            decomp = await bootstrap_decompose(
+                manifest, existing_atom_ids=[a.id for a in atom_reg.list_all()],
+                gateway=gw, model_ref=rk.get("model_ref", ""))
+        except Exception as e:  # noqa: BLE001 — 拆解任何异常都降级,不让导入崩
+            decomp = None
+            logger.warning(f"[agent/import] LLM 拆解失败,降级 v0: {e}")
+        if decomp is not None and decomp.is_valid():
+            atoms_created: list[str] = []
+            for ap in decomp.atoms:
+                if atom_reg.get(ap.id) is not None:
+                    continue                     # 复用已有(甲:用不拥有)
+                try:
+                    atom_reg.create(ap.id, ap.kind, ap.purpose, tools=list(ap.tools))
+                    atoms_created.append(ap.id)
+                except Exception as e:  # noqa: BLE001 — 单个原子建失败不阻断,跳过
+                    logger.warning(f"[agent/import] 原子 {ap.id} 建失败: {e}")
+            atom_ids = [ap.id for ap in decomp.atoms if atom_reg.get(ap.id) is not None]
+            # 技能:只绑**确认在库**的(识别到但没导入的只报不绑 → 不谎称角色拥有它,也不触 UnknownSkillError)
+            known = reg._known_skills() if hasattr(reg, "_known_skills") else None
+            bind_skills = [s for s in decomp.skills if known is not None and s in known]
+            try:
+                reg.create(rid, identity=decomp.identity, soul=decomp.soul,
+                           atom_ids=atom_ids, skill_ids=bind_skills)
+            except Exception as e:  # noqa: BLE001
+                # 回滚本次新建的原子(不留孤儿在公共池);复用的已有原子不动(Defect 2 防御纵深)
+                for aid in atoms_created:
+                    try:
+                        atom_reg.remove(aid)
+                    except Exception:  # noqa: BLE001
+                        pass
+                raise HTTPException(status_code=422, detail=f"拆解出原子但建角色失败:{e}")
+            return {
+                "ok": True, "role_id": rid, "decomposed": True,
+                "atoms": atom_ids, "atoms_created": atoms_created,
+                "skills_recognized": list(decomp.skills), "skills_bound": bind_skills,
+                "identity": decomp.identity,
+            }
+        # decomp 为 None/无效 → 落到 v0 降级
+
+    # ---- v0 降级:确定性 adapter(无 LLM 或拆解失败)----
+    try:
+        from karvyloop.adapter import apply_plan, build_plan, validate_with_loader
         target = str(reg.root / rid)
         plan = build_plan(manifest, target)
         if not plan.can_apply:
@@ -3301,7 +3366,8 @@ def api_agent_import(req: AgentImportRequest, request: Request) -> dict[str, Any
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"导入失败:{e}")
     return {
-        "ok": True, "role_id": rid,
+        "ok": True, "role_id": rid, "decomposed": False,
+        "note": "未接 LLM 或拆解未成 → 走确定性 adapter(tools 仅列名,未出原子)",
         "written": list(getattr(result, "written", [])),
         "valid": bool(getattr(validation, "is_valid", True)),
     }

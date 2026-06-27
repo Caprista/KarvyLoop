@@ -60,6 +60,10 @@ def app():
                deontic=Deontic(), member_query="user:ch AND agent:分析师")
     reg.create(name="设计工作室", created_by="user:ch", value_md_raw="# 价值观\n- 诚实",
                deontic=Deontic(), member_query="user:ch AND agent:设计师")
+    from karvyloop.atoms.registry import AtomRegistry, AtomStore
+    from karvyloop.roles.registry import RoleRegistry
+    atom_reg = AtomRegistry(store=AtomStore(tmp / "atoms.json"))
+    role_reg = RoleRegistry(tmp / "roles", atom_registry=atom_reg)
     mgr = ConversationManager(ConversationStore(tmp / "conv"))
     mgr.start()
     a = types.SimpleNamespace(state=types.SimpleNamespace(
@@ -67,6 +71,7 @@ def app():
         domain_registry=reg, memory=MemoryManager(store=BeliefStore(tmp / "beliefs.json")),
         conversation_manager=mgr, proposal_registry=PendingProposalRegistry(),
         task_registry=TaskRegistry(), ws_clients=set(), config_path="", workbench_app=None,
+        atom_registry=atom_reg, role_registry=role_reg,
     ))
     a.state.proposal_handlers = build_proposal_handlers(a)
     return a
@@ -170,3 +175,40 @@ def test_j5_violation_guard_real_model(app):
     assert card["violations"], "踩了你定的标准却没拦(违背即拦没生效;若反复空,多半是并发把响应截没了)"
     assert "备份" in card["violations"][0]["standard"]
     assert card["high_value"] is True and card["needs_recheck"] is True  # 违背→拍前必确认
+
+
+# ---- J6:导入 agent = LLM 拆解(真模型)—— 头号缺陷修复,Hardy 验收锚三选三 ----
+def test_j6_agent_import_llm_decompose_real_model(app):
+    """外部 agent 经真模型拆解 → (a) 出 role (b) 出 ≥1 atom (c) 走了 LLM(gateway.complete 计费)。
+
+    Hardy 2026-06-26 拍:导入不该扁平拷成 skill,该 LLM 拆出 role+atom 并耗 token。
+    best-effort:真模型 + 并发可能把 JSON 截断(宁空勿毒返 None → 降级 v0)→ 重试几次验"能拆"。
+    """
+    import types as _t
+
+    from karvyloop.console.routes import api_agent_import
+
+    req = _t.SimpleNamespace(
+        role_id="imported_researcher", source_type="generic-json",
+        system_prompt=("You are a meticulous research analyst. You search the web, fetch and read "
+                       "sources, verify claims against primary sources, then summarize with citations."),
+        tools=["web_search", "fetch_url", "verify_claim", "summarize_with_citations"])
+    request = _t.SimpleNamespace(app=app)
+
+    out = None
+    for _ in range(3):
+        # 每次换个 role_id(失败会留半成品目录,重名会被拒)
+        req.role_id = f"imported_researcher_{_}"
+        out = asyncio.run(api_agent_import(req, request))
+        if out.get("decomposed"):
+            break
+    assert out is not None and out.get("ok"), f"导入直接失败: {out}"
+    assert out.get("decomposed") is True, f"真模型没拆解(反复降级 v0;多半并发截断了 JSON): {out}"
+    # (a) role 物化
+    assert (app.state.role_registry.root / out["role_id"]).exists(), "拆解了但角色没落库"
+    # (b) ≥1 atom 进公共原子库 + COMPOSITION 引的是原子不是死字符串
+    assert len(out["atoms"]) >= 1, "没拆出原子(Hardy 验收锚 b)"
+    for aid in out["atoms"]:
+        assert app.state.atom_registry.get(aid) is not None, f"原子 {aid} 没进公共池"
+    comp = (app.state.role_registry.root / out["role_id"] / "COMPOSITION.yaml").read_text(encoding="utf-8")
+    assert any(f"atom: {aid}" in comp for aid in out["atoms"]), "COMPOSITION 没引原子"
