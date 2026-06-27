@@ -36,6 +36,10 @@ from karvyloop.schemas import AtomRun
 from karvyloop.cognition import TraceEntry, TraceStore
 
 logger = logging.getLogger(__name__)
+
+# docs/27 原文层容量环上限:cognition.trace 保留的**原文事件**(atom_run/eval_fact/turns)条数上限,
+# 超额丢最旧(提炼物 satisfaction/lesson 不计、永久)。给宽松值——近期评价/蒸馏都吃最近,不受影响。
+TRACE_RAW_CAP = 8000
 from karvyloop.crystallize import (
     InMemoryUsageStore,
     SkillIndex,
@@ -248,12 +252,27 @@ class MainLoop:
         """接线漏斗原文层(entry 把 IntentAnalyst 共享的 TraceIndex 接进来,9.3c)。"""
         self._trace_funnel = funnel
 
+    # 漏斗原文事件单字段字节上限:漏斗要的是**模式**不是全文,大输出(编码几十KB)若整段落进
+    # 10MB 环,几百条就滚完、提炼器(daily)还没消费就丢了。截断稳住"环里装的事件数"(回 Hardy 10MB 问)。
+    _FUNNEL_FIELD_BYTES = 2000
+
     def _emit_funnel_event(self, payload: dict) -> None:
-        """把一个事件落漏斗原文层(docs/27 TR-1:trace 是提炼真相源)。失败不阻断。"""
+        """把一个事件落漏斗原文层(docs/27 TR-1:trace 是提炼真相源)。失败不阻断。
+        大字符串字段先过 HR-9 截断(基建),防大输出把容量环冲爆。"""
         if self._trace_funnel is None:
             return
         try:
-            self._trace_funnel.append_raw(payload)
+            from karvyloop.context.truncate import truncate_str_utf8
+            cap = self._FUNNEL_FIELD_BYTES
+
+            def _slim(v, depth=0):
+                if isinstance(v, str) and len(v) > cap:
+                    return truncate_str_utf8(v, cap)[0]
+                if isinstance(v, dict) and depth < 2:     # 递归一两层:防嵌套大字段(如 output.text)漏网
+                    return {k: _slim(x, depth + 1) for k, x in v.items()}
+                return v
+
+            self._trace_funnel.append_raw({k: _slim(v) for k, v in payload.items()})
         except Exception:
             pass
 
@@ -571,6 +590,14 @@ class MainLoop:
                 write_critiques_to_skill_md(self.skills_dir / name / "SKILL.md", crits, now=now)
             except Exception:
                 pass  # 单个技能 improve 失败不拖垮整轮维护
+        # docs/27 原文层容量环:cognition.trace 此前无界,串联越来越多(eval_fact/satisfaction/
+        # lesson…)会一直涨。保提炼物、原文超额丢最旧(宽松上限,不碰近期工作的评价/蒸馏)。
+        try:
+            prune = getattr(self.trace, "prune_raw", None)
+            if callable(prune):
+                prune(TRACE_RAW_CAP)
+        except Exception:
+            logger.warning("[trace] 原文层容量环修剪失败;维护继续", exc_info=True)
         archived = evict_stale(self.store, skills_dir=self.skills_dir, now=now)
         return len(archived)
 

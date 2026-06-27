@@ -184,7 +184,10 @@ def distill_lessons(trace, satisfaction: SatisfactionStore, *, judge,
         material = _build_material(trace, highs[-_LESSON_RUNS_PER_GROUP:],
                                    lows[-_LESSON_RUNS_PER_GROUP:])
         if not material:
-            continue                                # 取不到 run 内容(数据形态不对)→ 不烧 judge
+            # 取不到 run 内容(原文被容量环剪了/数据形态不对)→ 推进水位,避免对同一死批次每轮
+            # 反复重试(对抗验收 M-2)。不烧 judge。
+            satisfaction.set_lesson_watermark(sig, len(samples))
+            continue
         # 戊·编辑预算:每个 sig 最多留 MAX_KEPT 条规律 → 到顶不再蒸(靠监控撤回腾位,不无限堆)。
         statuses = _lesson_status_map(trace, sig)
         if sum(1 for st in statuses.values() if st == LESSON_KEPT) >= LESSON_MAX_KEPT_PER_SIG:
@@ -201,7 +204,7 @@ def distill_lessons(trace, satisfaction: SatisfactionStore, *, judge,
         if statuses.get(lesson) in (LESSON_REVERTED, LESSON_KEPT):
             continue                                # 撤过的(缓冲)/ 已在留着的 → 不重复写
         # 戊:乐观地**留下(kept)**,记当下满意度基线供日后"变差就撤"的监控用。
-        baseline = satisfaction.mean_overall_recent(sig)
+        baseline = satisfaction.confidence_overall(sig)   # 置信分(贝叶斯收缩),抗小样本噪声
         _writeback_lesson(trace, sig, lesson, len(samples), clk,
                           status=LESSON_KEPT, baseline=baseline)
         _fold_into_skill(sig, lesson, skills_dir=skills_dir, skill_index=skill_index, clock=clk)
@@ -228,7 +231,7 @@ def validate_lessons(trace, satisfaction: SatisfactionStore, *, skills_dir: Path
         if not any(e.get("status") == LESSON_KEPT for e in latest.values()):
             continue
         cur_n = len(satisfaction.samples(sig))
-        current = satisfaction.mean_overall_recent(sig)
+        current = satisfaction.confidence_overall(sig)   # 置信分:用量够了才有可信判据,抗混杂
         if current is None:
             continue
         for les, entry in latest.items():

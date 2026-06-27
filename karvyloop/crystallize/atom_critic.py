@@ -195,6 +195,30 @@ class SatisfactionStore:
             return None
         return sum(x.overall for x in s) / len(s)
 
+    def confidence_overall(self, sig: str, *, halflife: float = 5.0,
+                           prior: float = 0.6, pseudo: float = 4.0) -> Optional[float]:
+        """**置信分**(大众点评式;docs/40 §5 + Hardy):新近度加权 + **贝叶斯收缩**——
+        用得**少**就往中性先验(prior)缩、不被几次走运的高均值骗;用得**多**才贴近真值;
+        混杂噪声随用量被洗掉(大数定律)。无样本 → None。
+
+        公式:`(pseudo·prior + n·mean_recent) / (pseudo + n)`。
+        - mean_recent = **新近度加权**均值(抗滞后,丁);
+        - **收缩按原始样本数 n**(不是加权和)—— 否则新近度把有效样本封顶,再多高分也到不了真值。
+        - pseudo = 先验"伪样本量";n 越大先验权重越小(用得多就贴真值,用得少往先验缩)。
+        """
+        s = self.samples(sig)   # oldest → newest
+        if not s:
+            return None
+        n = len(s)
+        wsum = 0.0
+        acc = 0.0
+        for i, x in enumerate(s):
+            w = 0.5 ** ((n - 1 - i) / max(0.5, halflife))
+            wsum += w
+            acc += x.overall * w
+        mean_recent = acc / wsum if wsum > 0 else prior
+        return (pseudo * prior + n * mean_recent) / (pseudo + n)
+
     def mean_overall_recent(self, sig: str, *, halflife: float = 5.0) -> Optional[float]:
         """**新近度加权**的满意度均值(docs/40 §4.1 抗滞后):越近的样本权重越高。
 

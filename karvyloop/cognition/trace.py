@@ -85,5 +85,35 @@ class TraceStore:
         with self._lock:
             return list(self._by_task.keys())
 
+    def prune_raw(self, max_raw: int) -> int:
+        """docs/27 原文层"容量环":只丢**大块原文事件**(atom_run / turns / tool_call,见 DROPPABLE_KINDS)
+        超 `max_raw` 的最旧那些;**eval_fact(几百字节,且可能还没评)+ 全部提炼物一律保留**。返回丢弃条数。
 
-__all__ = ["TraceEntry", "TraceStore"]
+        为什么只丢这几类:① 真涨的是 atom_run 的大输出(几十KB),eval_fact 微小;② **绝不丢没评的
+        eval_fact**(否则它的满意度永久丢 —— 对抗验收 C-1)。append-only = 不改事件,不是永不滚动。
+        留最新:按 (ts, seq) 排,丢最旧(与 sqlite 版 ORDER BY ts DESC, rowid DESC 对齐 —— 对抗验收 C-2)。
+        """
+        with self._lock:
+            drop_able = [(e.ts, e.seq, tid) for tid, ents in self._by_task.items()
+                         for e in ents if e.kind in DROPPABLE_KINDS]
+            if len(drop_able) <= max_raw:
+                return 0
+            drop_able.sort(key=lambda r: (r[0], r[1]))   # (ts, seq) 升序 → 最旧在前
+            drop = {(tid, seq) for _, seq, tid in drop_able[:len(drop_able) - max_raw]}
+            n = 0
+            for tid in list(self._by_task.keys()):
+                ents = self._by_task[tid]
+                kept = [e for e in ents if (tid, e.seq) not in drop]
+                n += len(ents) - len(kept)
+                if kept:
+                    self._by_task[tid] = kept
+                else:
+                    del self._by_task[tid]               # 原文全滚走的空 task 清掉(不重置 _seq)
+            return n
+
+
+# 容量环里**可丢的大块原文**(其余一律保留:eval_fact 微小且可能未评、satisfaction/quality/lesson 是提炼物)。
+DROPPABLE_KINDS = frozenset({"atom_run", "user_turn", "assistant_turn", "tool_call"})
+
+
+__all__ = ["TraceEntry", "TraceStore", "DROPPABLE_KINDS"]

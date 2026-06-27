@@ -74,6 +74,25 @@ class SqliteTraceStore(TraceStore):
         self._clock = clock
         self._closed = False
 
+    def prune_raw(self, max_raw: int) -> int:
+        """docs/27 原文层容量环(sqlite 版):只丢大块原文(DROPPABLE_KINDS)超额最旧;
+        eval_fact(可能未评)+ 提炼物一律保留。留最新:ORDER BY ts DESC, **rowid DESC**(ts 打平时
+        按插入序留最新,修对抗验收 C-2:原 DESC 在打平时反而留了最旧)。返回丢弃条数。"""
+        drop = "('atom_run','user_turn','assistant_turn','tool_call')"
+        with self._lock:
+            if self._closed:
+                return 0
+            total = self._conn.execute(
+                f"SELECT COUNT(*) FROM trace_entries WHERE kind IN {drop}").fetchone()[0]
+            if total <= max_raw:
+                return 0
+            self._conn.execute(
+                f"DELETE FROM trace_entries WHERE kind IN {drop} AND rowid NOT IN "
+                f"(SELECT rowid FROM trace_entries WHERE kind IN {drop} "
+                f"ORDER BY ts DESC, rowid DESC LIMIT ?)", (max_raw,))
+            self._conn.commit()
+            return total - max_raw
+
     def close(self) -> None:
         with self._lock:
             if self._closed:

@@ -187,6 +187,43 @@ def test_mean_overall_recent_weights_recent():
     assert recent > flat                 # 近期高分主导 → 加权均值高于平均(抗滞后)
 
 
+# ---- 置信分(大众点评式:用得少往先验缩,用得多才信)----
+
+def test_confidence_pulls_few_samples_toward_prior():
+    from karvyloop.crystallize import record_facts
+    sat = SatisfactionStore()
+    record_facts(sat, "few", success=True, verified=True, steps=1, trace_ref="a")   # 1 个走运满分
+    c_few = sat.confidence_overall("few")
+    assert 0.5 < c_few < 0.85                       # 被先验拉低,不是裸 1.0(2 个人说好≠高分)
+    for i in range(30):                             # 很多高分 → 用量够,贴近真值
+        record_facts(sat, "many", success=True, verified=True, steps=1, trace_ref=f"m{i}")
+    c_many = sat.confidence_overall("many")
+    assert c_many > c_few and c_many > 0.9
+
+
+def test_recall_prefers_proven_over_lucky_few(tmp_path):
+    # 用得多的(置信高)胜过用一次走运满分的(置信被先验拉低)—— 即便后者裸均值更高
+    from karvyloop.crystallize import recall, record_facts
+    skills = tmp_path / "skills"
+
+    def _mk(name, sig):
+        d = skills / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            f"---\nname: {name}\nwhen_to_use: 导出 csv\ndescription: 导出 csv\n"
+            f"signature: {sig}\n---\n\n## Steps\n1. do\n", encoding="utf-8")
+
+    _mk("lucky", "sigLucky")    # 1 次满分(裸均值 1.0,但没几次)
+    _mk("proven", "sigProven")  # 一堆中上分(用得多)
+    sat = SatisfactionStore()
+    record_facts(sat, "sigLucky", success=True, verified=True, steps=1, trace_ref="L")  # 裸均值 1.0
+    for i in range(25):
+        record_facts(sat, "sigProven", success=True, verified=True, steps=2, trace_ref=f"p{i}")
+    # 置信分:proven(用得多)> lucky(没几次)→ 召回选 proven
+    assert sat.confidence_overall("sigProven") > sat.confidence_overall("sigLucky")
+    assert recall("导出 csv", skills_dir=skills, scope="user", satisfaction=sat).name == "proven"
+
+
 # ---- 飞轮回到行为:满意度影响召回排序 ----
 
 def test_recall_prefers_higher_satisfaction_on_tie(tmp_path):

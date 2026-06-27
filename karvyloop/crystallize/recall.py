@@ -207,7 +207,8 @@ def recall(
         secondary = 0.0
         if satisfaction is not None and c.get("sig"):
             try:
-                sat = satisfaction.mean_overall_recent(c["sig"])
+                # 置信分(贝叶斯收缩):用得少的技能往先验缩,不靠几次走运的高均值抢召回。
+                sat = satisfaction.confidence_overall(c["sig"])
                 if sat is not None:
                     secondary = float(sat)
             except Exception:
