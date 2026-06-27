@@ -3473,9 +3473,22 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
                     except Exception:  # noqa: BLE001
                         pass
                 raise HTTPException(status_code=422, detail=f"拆解出原子但建角色失败:{e}")
+            # 诚实披露(docs/14 §11.1):哪些原子是顾问型(工具没接真实注册表,只靠人设推理)
+            advisory = [aid for aid in atom_ids
+                        if (atom_reg.get(aid) is not None and not atom_reg.get(aid).executable)]
+            executable = [aid for aid in atom_ids if aid not in advisory]
+            # agent-vs-skill 识别(docs/14 §11.3):若**一个可执行原子都没有**,这更像一段顾问人设/技能,
+            # 不是会干活的工具型 agent —— **不静默当 agent 强改写**,如实标 import_kind + 建议走 skill import。
+            import_kind = "tool_agent" if executable else "advisory_persona"
+            note = ("" if executable else
+                    "无可执行工具:这更像顾问人设/技能而非工具型 agent。已按顾问角色导入(原子均为 advisory);"
+                    "若本意是一项技能,建议改走技能导入(skill import)。")
             return {
                 "ok": True, "role_id": rid, "decomposed": True,
+                "import_kind": import_kind, "note": note,
                 "atoms": atom_ids, "atoms_created": atoms_created,
+                "atoms_advisory": advisory,        # 工具是合成名、对不上真工具 → 只能顾问推理
+                "atoms_executable": executable,
                 "skills_recognized": list(decomp.skills), "skills_bound": bind_skills,
                 "identity": decomp.identity,
             }

@@ -141,6 +141,24 @@ def test_api_agent_import_decomposes_to_role_and_atoms(tmp_path):
     assert "研究分析师" in ident
     # skill 识别到了但没强塞(库里没有 → 只报不绑)
     assert out["skills_recognized"] == ["fact-check"] and out["skills_bound"] == []
+    # docs/14 §11.1 诚实披露:两个原子的 tools(http_get / 空)都不是真实工具 → 标 advisory
+    assert "atoms_advisory" in out and set(out["atoms_advisory"]) == {"web_search", "summarize"}
+    assert out["atoms_executable"] == []
+    # docs/14 §11.3 agent-vs-skill:全 advisory → 标 advisory_persona + 建议走 skill import(不静默当 agent)
+    assert out["import_kind"] == "advisory_persona" and "skill import" in out["note"]
+
+
+def test_api_agent_import_tool_agent_kind(tmp_path):
+    """有真实工具(web_search)→ import_kind=tool_agent、note 空(它真能干活)。"""
+    from karvyloop.console.routes import api_agent_import
+    tool_json = ('{"identity":"研究员","soul":"查证","atoms":[{"id":"do_search","kind":"task",'
+                 '"purpose":"搜","tools":["web_search"],"reuse_existing":false}],"skills":[]}')
+    request, atom_reg, role_reg = _app_with(tmp_path, FakeGateway(tool_json))
+    req = types.SimpleNamespace(role_id="researcher", source_type="generic-json",
+                                system_prompt="careful researcher", tools=["web_search"])
+    out = asyncio.run(api_agent_import(req, request))
+    assert out["decomposed"] is True and out["import_kind"] == "tool_agent" and out["note"] == ""
+    assert out["atoms_executable"] == ["do_search"] and out["atoms_advisory"] == []
 
 
 def test_api_agent_import_reuses_existing_atom(tmp_path):

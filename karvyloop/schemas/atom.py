@@ -43,6 +43,12 @@ class AtomSpec(Schema):
     commitment_policy: Optional[dict] = None
     is_read_only: bool = False
     is_concurrency_safe: bool = False
+    # 工具真实性诚实标注(docs/14 §11.1):`executable`=至少一个 tool 接上了真实工具注册表
+    # → 真能干活;否则 `advisory`=只靠人设/prompt 推理(导入纯人设 agent 合成的"工具名"对不上
+    # 真工具时就是这种)。`unresolved_tools`=列出对不上真工具的名字。**只诚实标注,不补全**。
+    # 默认 True 兼容旧 atoms.json(没标过的当已接);AtomRegistry.create 落库时按真实目录算准。
+    executable: bool = True
+    unresolved_tools: list[str] = Field(default_factory=list)
 
 
 class AtomRun(Schema):

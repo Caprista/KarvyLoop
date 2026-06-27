@@ -111,6 +111,10 @@ class AtomRegistry:
             raise ValueError(f"kind 必须是 task/daemon,得到 {kind!r}")
         if aid in self._atoms:
             raise DuplicateAtomError(f"原子「{aid}」已存在(原子是公共库,换个名字)")
+        # 工具真实性诚实标注(docs/14 §11.1):落库时把 tools 核对真实工具目录 →
+        # executable(至少一个真工具能调)/ advisory(合成名对不上,只靠人设推理)+ 列出对不上的。
+        from karvyloop.atoms.tool_catalog import classify_atom_tools
+        cls = classify_atom_tools(tools or [])
         spec = AtomSpec(
             id=aid,
             kind=kind,
@@ -122,6 +126,8 @@ class AtomRegistry:
             model=model,
             is_read_only=is_read_only,
             is_concurrency_safe=is_concurrency_safe,
+            executable=cls["executable"],
+            unresolved_tools=cls["unresolved_tools"],
         )
         self._atoms[aid] = spec
         self._persist()
