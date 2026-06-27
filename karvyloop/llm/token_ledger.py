@@ -148,6 +148,50 @@ class TokenLedger:
     def by_day(self, *, since: Optional[float] = None) -> list[dict]:
         return self._group("day", since)
 
+    def buckets(self, *, interval_sec: int = 3600, since: Optional[float] = None,
+                limit: int = 200) -> list[dict]:
+        """按固定间隔分桶的时间序列 —— **回答"token 是什么时候烧的"**(docs/28:by_day 只到天,
+        整场会话压成一桶,看不出时段;这里到任意粒度,默认按小时,压测可传 60 秒看分钟级)。
+
+        每桶 floor 到 interval 边界,newest-first;label 用本地时。interval_sec 由调用方校验为正整数。
+        """
+        interval = max(1, int(interval_sec))
+        w, p = self._where(since)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT CAST(ts / {interval} AS INTEGER) * {interval} AS bucket, "
+                f"COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"FROM token_usage {w} GROUP BY bucket ORDER BY bucket DESC LIMIT ?",
+                (*p, int(limit)),
+            ).fetchall()
+        out = []
+        for r in rows:
+            bstart = int(r[0])
+            out.append({
+                "bucket_start": bstart,
+                "label": time.strftime("%Y-%m-%d %H:%M", time.localtime(bstart)),
+                "input": int(r[1]), "output": int(r[2]),
+                "cache_read": int(r[3]), "cache_write": int(r[4]),
+                "total": int(r[1]) + int(r[2]), "calls": int(r[5]),
+            })
+        return out
+
+    def recent(self, *, limit: int = 50) -> list[dict]:
+        """最近 N 条原始调用(时间线:何时、哪个 source/model、烧多少)—— 定位某次尖峰是谁。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts, source, model, input, output, cache_read, cache_write "
+                "FROM token_usage ORDER BY ts DESC LIMIT ?", (int(limit),),
+            ).fetchall()
+        return [
+            {"ts": float(r[0]),
+             "label": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r[0])),
+             "source": r[1], "model": r[2], "input": int(r[3]), "output": int(r[4]),
+             "cache_read": int(r[5]), "cache_write": int(r[6]), "total": int(r[3]) + int(r[4])}
+            for r in rows
+        ]
+
     def _where(self, since: Optional[float]) -> tuple[str, tuple]:
         if since is None:
             return "", ()

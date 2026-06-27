@@ -1175,16 +1175,31 @@ def _stub_no_main_loop(intent: str):
 
 @router.get("/tokens")
 def api_tokens(request: Request) -> dict[str, Any]:
-    """token 用量看板:总量 + 按来源(功能)/ 模型 / 天。无账本 → 空。"""
+    """token 用量看板:总量 + 按来源(功能)/ 模型 / 天 / **小时(时段)** + 最近调用时间线。无账本 → 空。"""
     led = getattr(request.app.state, "token_ledger", None)
     if led is None:
-        return {"totals": {}, "by_source": [], "by_model": [], "by_day": []}
+        return {"totals": {}, "by_source": [], "by_model": [], "by_day": [],
+                "by_hour": [], "recent": []}
     return {
         "totals": led.totals(),
         "by_source": led.by_source(),   # ⭐ KarvyLoop 专属:看清 token 花在哪个功能
         "by_model": led.by_model(),
         "by_day": led.by_day(),
+        "by_hour": led.buckets(interval_sec=3600, limit=48),  # ⭐ 时段:近 48 小时,看何时烧的
+        "recent": led.recent(limit=50),                       # ⭐ 时间线:最近 50 次调用
     }
+
+
+@router.get("/tokens/buckets")
+def api_token_buckets(request: Request, interval: int = 3600,
+                      limit: int = 200, since: float | None = None) -> dict[str, Any]:
+    """任意粒度的 token 时间序列(压测看分钟级:`?interval=60`)。回答"token 什么时候烧的"。"""
+    led = getattr(request.app.state, "token_ledger", None)
+    if led is None:
+        return {"interval": interval, "buckets": []}
+    iv = max(1, min(int(interval), 86400))   # 1 秒 ~ 1 天,挡掉荒谬值
+    lim = max(1, min(int(limit), 5000))
+    return {"interval": iv, "buckets": led.buckets(interval_sec=iv, since=since, limit=lim)}
 
 
 # ---- /api/domain/create (9.2c:建业务域 — 让 picker 真有业务域可选) ----
