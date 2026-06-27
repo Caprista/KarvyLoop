@@ -3229,7 +3229,10 @@ class AtomCreateRequest(BaseModel):
 def _atom_to_dict(a) -> dict[str, Any]:
     return {"id": a.id, "kind": a.kind, "prompt": a.prompt,
             "tools": list(a.tools), "model": a.model,
-            "is_read_only": a.is_read_only}
+            "is_read_only": a.is_read_only,
+            # §11.1 诚实标注:原子库列表也暴露工具真实性(顾问 vs 真能执行)
+            "executable": getattr(a, "executable", True),
+            "unresolved_tools": list(getattr(a, "unresolved_tools", []))}
 
 
 @router.get("/atoms")
