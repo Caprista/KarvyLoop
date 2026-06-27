@@ -146,34 +146,158 @@ class SatisfactionStore:
             "n": len(s),
         }
 
+    def critiques(self, sig: str, limit: int = 10) -> list[str]:
+        """该 sig 最近的非空 role 评语(喂 atom 的 SKILL.md 改进;docs/02 §14)。"""
+        with self._lock:
+            rows = self._by_sig.get(sig) or []
+            out = [s.critique for s, _ in rows if s.critique]
+            return out[-limit:]
 
-# ---- 评估 + 记录(信用隔离:入参只有 run + sig,无 role-outcome)----
+
+# ---- 评估 + 记录(信用隔离:入参只有 run + sig + 本跑质量评语,无 role-outcome)----
 
 def evaluate_run(run, sig: str, *, has_proof: bool,
-                 baseline_steps: Optional[float], clock=time.time) -> AtomSatisfaction:
-    """对一条 atom run 算多维满意度。duck-type:只读 run.success / run.tool_calls。"""
-    steps = len(getattr(run, "tool_calls", None) or [])
+                 baseline_steps: Optional[float],
+                 quality: Optional[float] = None, critique: str = "",
+                 clock=time.time) -> AtomSatisfaction:
+    """对一条 atom run 算多维满意度。duck-type:只读 run.success / run.tool_calls。
+
+    quality/critique 是"做好·质量"维(LLM 判,做对站住才采信;见 judge_quality)。
+    """
     return AtomSatisfaction(
         sig=sig,
         achievement=score_achievement(bool(getattr(run, "success", False)), has_proof),
-        efficiency=score_efficiency(steps, baseline_steps),
+        efficiency=score_efficiency(len(getattr(run, "tool_calls", None) or []), baseline_steps),
+        quality=quality,
+        critique=critique or "",
         at=clock(),
     )
 
 
 def record_run(store: SatisfactionStore, run, sig: str, *,
-               has_proof: bool, clock=time.time) -> AtomSatisfaction:
+               has_proof: bool, quality: Optional[float] = None, critique: str = "",
+               clock=time.time) -> AtomSatisfaction:
     """算 + 存一次(基线取记录前的历史均值,所以本次不污染自己的基线)。"""
     steps = len(getattr(run, "tool_calls", None) or [])
     sat = evaluate_run(run, sig, has_proof=has_proof,
-                       baseline_steps=store.baseline_steps(sig), clock=clock)
+                       baseline_steps=store.baseline_steps(sig),
+                       quality=quality, critique=critique, clock=clock)
     store.record(sig, sat, steps)
     return sat
 
 
+# ---- 做好·质量维:LLM 判(docs/02 §14.2 第 3 条)----
+
+QUALITY_SYSTEM = (
+    "你是 role,在用客观标准复盘一个 atom(子任务执行体)刚完成的活做得【多好】。\n"
+    "对错已经另判过——你这里**只评质量**:产出是否利落、有没有更省力更好的做法、有哪个具体可改进点。\n"
+    "严格只输出一个 JSON 对象,不要别的文字:\n"
+    '{"quality": 0.0 到 1.0 的小数, "critique": "一句具体、可操作的改进建议"}\n'
+    '无法判断质量时输出 {"quality": null, "critique": ""}。'
+)
+
+_MAX_CRITIQUE = 280
+
+
+def _first_json_object(s: str) -> Optional[str]:
+    """从 s 里抠出**第一个**配平的 {...}(处理嵌套 + 尾随杂质;不用贪婪正则跨多对象,对抗验收 N1)。"""
+    start = s.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(s)):
+        c = s[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start:i + 1]
+    return None
+
+
+def sanitize_critique(s: object) -> str:
+    """把评语压成**安全单行**再许它进技能库(对抗验收 C1:防 `## Steps`/`---` 结构性投毒)。
+
+    去换行/折叠空白/剥前导 markdown 结构符(#/-/>/*/`/|)/中和 frontmatter `---` → 评语绝不能
+    改变 SKILL.md 的结构,它只是一行注解。
+    """
+    import re
+    if not isinstance(s, str):
+        return ""
+    s = re.sub(r"\s+", " ", s.replace("\r", " ").replace("\n", " ")).strip()
+    s = s.lstrip("#->*`|=~ \t")          # 不让它成 header/列表/引用/表格/fence
+    s = s.replace("---", "—").replace("```", "")  # 中和 frontmatter 分隔符 + 代码 fence
+    return s[:_MAX_CRITIQUE].strip()
+
+
+def parse_quality(text: str) -> tuple[Optional[float], str]:
+    """宁空勿毒:严格解析 LLM 质量评判 → (quality∈[0,1] 或 None, **安全单行** critique)。
+
+    解析失败 / 非法 / 非有限数 → quality=None。绝不把整坨 prose 或结构性 markdown 写进技能库
+    (投毒护城河)。critique 一律过 sanitize_critique。
+    """
+    import json
+    import math
+    if not text or not text.strip():
+        return (None, "")
+    blob = _first_json_object(text.strip())
+    if not blob:
+        return (None, "")
+    try:
+        obj = json.loads(blob)
+    except Exception:
+        return (None, "")
+    if not isinstance(obj, dict):
+        return (None, "")
+    crit = sanitize_critique(obj.get("critique", ""))
+    q = obj.get("quality", None)
+    if q is None or isinstance(q, bool):   # bool 是 int 子类,{"quality": true} 不算分数
+        return (None, crit)
+    try:
+        qf = float(q)
+    except (TypeError, ValueError):
+        return (None, crit)
+    if not math.isfinite(qf):              # NaN / Infinity(json 默认收)→ 拒(M2)
+        return (None, crit)
+    return (max(0.0, min(1.0, qf)), crit)
+
+
+async def judge_quality(intent: str, output_text: str, *, gateway,
+                        model_ref: str = "") -> tuple[Optional[float], str]:
+    """role 用 LLM 评这次产出的质量。gateway.complete 自动入 token 账本(打 atom_quality 标)。
+
+    无 gateway / 调用失败 / 解析失败 → (None, "")(宁空勿毒,绝不拖垮)。
+    **调用方须确保只在 achievement>0(做对站住)时才调**——质量在做对之后才采信。
+    """
+    if gateway is None:
+        return (None, "")
+    from karvyloop.gateway import ResolveScope
+    from karvyloop.gateway.system import SystemPrompt
+    from karvyloop.llm.token_ledger import token_source
+    try:
+        ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
+    except Exception:
+        ref = model_ref
+    material = f"子任务:{intent}\n\n产出:\n{(output_text or '')[:2000]}"
+    out = ""
+    try:
+        with token_source("atom_quality"):
+            async for ev in gateway.complete(
+                [{"role": "user", "content": material}], [], ref,
+                system=SystemPrompt(static=[QUALITY_SYSTEM]),
+            ):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
+    except Exception:
+        return (None, "")
+    return parse_quality(out)
+
+
 __all__ = [
-    "W_BASE", "W_GOOD",
+    "W_BASE", "W_GOOD", "UNVERIFIED_SUCCESS_ACHIEVEMENT",
     "score_achievement", "score_efficiency",
     "AtomSatisfaction", "SatisfactionStore",
     "evaluate_run", "record_run",
+    "QUALITY_SYSTEM", "parse_quality", "sanitize_critique", "judge_quality",
 ]

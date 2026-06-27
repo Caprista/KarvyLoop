@@ -22,7 +22,21 @@ _Work in progress toward 1.0 — see [ROADMAP.md](ROADMAP.md)._
   atom's score). New `crystallize/atom_critic.py` (AtomSatisfaction / SatisfactionStore),
   recorded on the live drive path with the run's own verify verdict (no lag) and fail-loud
   on error. This is the seam that turns "越用越记得你重复过什么" (memory) into "越用越对你管用"
-  (learning); wiring it into promote/improve and adding the LLM quality dimension come next.
+  (learning); wiring it into promote/recall comes next.
+- **Atom improve is now driven by the role's judgment, not the human's** (the second slice).
+  The skill `improve` path used to write the *human's* mid-task corrections into `SKILL.md`
+  (`steered_by_user`) — training the atom with human feedback, which inverts the accountability
+  chain (an atom answers to its role, not to you) and was in any case dead code (nothing ever
+  populated it). It now writes the **role's quality critique** instead. Added the quality
+  dimension itself: an LLM judge (`judge_quality`) scores *how well* a verified sub-goal was
+  done with a strict 宁空勿毒 parser (`parse_quality` — rejects non-finite/bool/garbage numbers,
+  takes only the first balanced JSON object) and a critique that is sanitized to a single safe
+  line before it can touch the skill library (no markdown/frontmatter injection). By design the
+  quality judge runs **off the hot path** — execution and evaluation are separate: a drive only
+  records the cheap deterministic signal, and the LLM judging rides the existing async Trace
+  consumer pipeline (the same daily-poll / distiller cadence and gateway bridge that habit
+  distillation already uses) rather than adding latency to your turn. **That async consumer is
+  the next slice**; the deterministic achievement+efficiency signal above is live today.
 - **One-click upgrade from the console.** The "new version" banner now has an *Upgrade*
   button: you click it (so it's never a silent auto-upgrade — you decide), and the
   console runs the whole pipeline for you — stop the service → install (`git pull

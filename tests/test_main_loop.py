@@ -364,10 +364,11 @@ def test_scope_isolation_domain_skill_not_recalled_in_user_scope(tmp_path: Path)
     assert r.brain == Brain.SLOW and r.fast_brain_hit is False
 
 
-def test_background_review_improves_skill_from_corrections(tmp_path: Path):
-    """审计修(2026-06-21):background_review 把 steered_by_user 纠正写回 SKILL.md + 清纠正(防重复)。
-    此前 improve 从没接进主循环 → 用户纠正被记录却永不写回(技能永不进化)。"""
-    from karvyloop.crystallize.store import InMemoryUsageStore  # noqa: F401
+def test_background_review_writes_role_critique_from_satisfaction(tmp_path: Path):
+    """docs/02 §14(slice-b 拆接反点):atom improve 由 **role 的质量评语**(满意度 critique)驱动,
+    不再由人的纠正(steered_by_user 那条接反问责链 + 本就是死路,已拆)。幂等:后台反复跑不重复写。"""
+    import types
+    from karvyloop.crystallize import record_run
     from karvyloop.schemas.skill import UsageStats
     ml = fresh_loop(tmp_path)
     sd = ml.skills_dir / "daily-report"
@@ -376,16 +377,19 @@ def test_background_review_improves_skill_from_corrections(tmp_path: Path):
     sig = "sig-daily"
     ml.skill_index.register(name="daily-report", sig=sig, scope="user",
                             when_to_use="日报", description="日报", path=str(sd / "SKILL.md"))
-    ml.store.put(sig, UsageStats(steered_by_user=["记得加日期", "用 markdown 表格"]))
+    ml.store.put(sig, UsageStats(usage_count=2))            # 该 sig 在 usage store 里(background 才遍历到)
+    # role 评判积累了两条评语(满意度 critique)
+    run = types.SimpleNamespace(success=True, tool_calls=[{"name": "x"}])
+    record_run(ml.satisfaction, run, sig, has_proof=True, quality=0.7, critique="少读一个文件")
+    record_run(ml.satisfaction, run, sig, has_proof=True, quality=0.8, critique="先查缓存")
 
     ml.background_review()
     md = (sd / "SKILL.md").read_text(encoding="utf-8")
-    assert "记得加日期" in md and "markdown 表格" in md      # 纠正真写回了
-    assert ml.store.get(sig).steered_by_user == []          # 已消费纠正被清
+    assert "Role critique" in md and "少读一个文件" in md and "先查缓存" in md  # role 评语真写回了
 
     ml.background_review()                                   # 再跑一次
     md2 = (sd / "SKILL.md").read_text(encoding="utf-8")
-    assert md2.count("记得加日期") == 1                      # 没重复写(清纠正生效)
+    assert md2.count("少读一个文件") == 1                    # 幂等:按内容去重,没重复写
 
 
 def test_slow_brain_records_bare_intent_not_governance(monkeypatch):

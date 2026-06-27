@@ -190,6 +190,42 @@ def write_corrections_to_skill_md(
     return True
 
 
+# ---- atom 层 improve:由 role 的质量评语驱动(docs/02 §14,取代死的 steered_by_user 路)----
+
+ROLE_CRITIQUE_HEADER = "## Role critique (atom 自评)"
+
+
+def write_critiques_to_skill_md(
+    skill_path: Path,
+    critiques: list[str],
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    """把 role 对 atom 的质量评语(满意度评判的 critique)写回 SKILL.md。
+
+    docs/02 §14:atom 的 improve 由 **role 的客观评判** 驱动,不是人的纠正
+    (人的纠正归 role 层决策偏好 §11)。返回 True 表示有写。
+    """
+    from .atom_critic import sanitize_critique
+    # 防御性消毒:评语进技能库前压成安全单行(防 `## Steps`/`---` 结构性投毒,对抗验收 C1)。
+    cs = [c for c in (sanitize_critique(x) for x in (critiques or [])) if c]
+    if not cs or not skill_path.exists():
+        return False
+    text = skill_path.read_text(encoding="utf-8")
+    # 幂等:已作为评语 bullet 写过的不重复(按 bullet 上下文精确匹配,**不是裸子串** — 对抗验收 M3:
+    # 短评语"先查缓存"恰好是别处正文子串时不该被误判已写)。
+    def _already(c: str) -> bool:
+        return re.search(r"- \([^)]*\) " + re.escape(c) + r"\s*$", text, re.MULTILINE) is not None
+    cs = [c for c in cs if not _already(c)]
+    if not cs:
+        return False
+    ts = _fmt_ts(now)
+    bullets = [f"- ({ts}) {c}" for c in cs]
+    text = _insert_into_section(text, ROLE_CRITIQUE_HEADER, bullets)
+    skill_path.write_text(text, encoding="utf-8")
+    return True
+
+
 # ---- 主入口(每 5 轮触发)----
 
 def maybe_improve(
@@ -203,6 +239,12 @@ def maybe_improve(
     force: bool = False,
 ) -> bool:
     """每 5 轮触发一次;从 UsageStats.steered_by_user 取纠正,分类后写回 SKILL.md。
+
+    ⚠️ docs/02 §14(slice-b):此函数**已不再接进 background_review**——它走的是
+    `steered_by_user`(人的纠正),那是"人训 atom"接反问责链、且全代码库无写入者的死路。
+    atom 层的 improve 现由 `write_critiques_to_skill_md`(role 满意度评语)驱动。本函数暂留
+    (测试覆盖 + 未来若把人的纠正正式接到 role 层时可复用其分类器),但**不在生产改进路径上**。
+
 
     返回 True 表示有写回;False 表示本轮跳过(turn_count % TURN_BATCH_SIZE != 0
     或没有纠正可写)。`force=True` 跳过轮次门(后台维护 background_review 自定节奏用)。
@@ -226,5 +268,6 @@ __all__ = [
     "ClassifiedCorrection",
     "classify_correction", "classify_batch",
     "write_corrections_to_skill_md",
+    "ROLE_CRITIQUE_HEADER", "write_critiques_to_skill_md",
     "maybe_improve",
 ]

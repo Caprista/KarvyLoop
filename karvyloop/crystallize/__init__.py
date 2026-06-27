@@ -42,10 +42,12 @@ from .improve import (
     ClassifiedCorrection,
     CorrectionKind,
     KIND_TO_HEADER,
+    ROLE_CRITIQUE_HEADER,
     classify_batch,
     classify_correction,
     maybe_improve,
     write_corrections_to_skill_md,
+    write_critiques_to_skill_md,
 )
 from .observe import observe
 from .recall import RecallHit, recall
@@ -59,6 +61,8 @@ from .atom_critic import (
     AtomSatisfaction,
     SatisfactionStore,
     evaluate_run,
+    judge_quality,
+    parse_quality,
     record_run,
     score_achievement,
     score_efficiency,
@@ -96,5 +100,7 @@ __all__ = [
     "evict_stale", "restore", "days_since",
     # atom_critic (docs/02 §14: atom 层结晶裁判 = role 多维分级满意度)
     "AtomSatisfaction", "SatisfactionStore", "evaluate_run", "record_run",
-    "score_achievement", "score_efficiency",
+    "score_achievement", "score_efficiency", "judge_quality", "parse_quality",
+    # improve from role critique (slice-b: 取代死的 steered_by_user 路)
+    "write_critiques_to_skill_md",
 ]

@@ -367,6 +367,8 @@ class MainLoop:
         # 3c. docs/02 §14:atom 层结晶裁判 = role 多维分级满意度。**这一跑是否被核验**(achievement
         #     满分前提)= 与下方 mark_verified 同一判据,在此先算好 → 避免"observe 先于 mark_verified
         #     → 首跑被错记 0.5"的时序滞后(对抗验收 C1)。按本跑核验,不查 sig 历史门。信用按 sig 隔离。
+        # 跑评分离(Hardy):热路径**只记确定性满意度**(达成 from verify+success / 效率 from 步数,
+        # 零 LLM、零延迟)。做好·质量维(LLM)是 **trace 的异步消费者**(quality_eval.py),不在此。
         this_run_verified = bool(run.success and not ctx_dependent and run.tool_calls)
         try:
             from karvyloop.crystallize import record_run as _record_satisfaction
@@ -467,32 +469,30 @@ class MainLoop:
     # ---- 后台维护(可选)----
 
     def background_review(self) -> int:
-        """跑一次 evict + **improve**(每轮主循环结束 / 后台 tick 时调)。
+        """跑一次 evict + **atom improve**(每轮主循环结束 / 后台 tick 时调)。
 
         返回被归档的 sig 数。
 
-        **审计修(2026-06-21)**:此前只调 evict、**improve 从没接进来** → 用户对技能的纠正
-        (`steered_by_user`)被记录却永不写回 SKILL.md(技能永不进化)。现接上:对每个有纠正、
-        且已结晶(SKILL.md 在)的技能 force-improve 写回,**写回后清掉已消费的纠正**(防重复写)。
-        improve 是纯本地(regex 分类 + 写文件,无 LLM/token),可每次维护跑。
+        **docs/02 §14(slice-b)拆接反点**:旧实现用 `steered_by_user`(人的纠正)force-improve
+        写回 SKILL.md —— 这是"**人训 atom**",接反了问责链(atom 对 role 负责,不对人)。而且那条
+        本就是**死路**:全代码库无任何写入者,`steered_by_user` 永远为空,improve 从没真跑过。
+        现改为 atom 的 improve 由 **role 的质量评语**(满意度 critique,§14.2 第 3 条)驱动:
+        把每个技能近期评语写回 SKILL.md 的 `Role critique` 段(`write_critiques_to_skill_md`
+        按内容幂等,后台可反复跑)。人的纠正归 role 层决策偏好(§11),不在此。
         """
-        from karvyloop.crystallize import evict_stale, maybe_improve
+        from karvyloop.crystallize import evict_stale, write_critiques_to_skill_md
         now = self._clock()
-        # improve:把累积的用户纠正写回各技能的 SKILL.md(越用越懂你的执行技能半边)
-        for sig, stats in self.store.all():
-            if not getattr(stats, "steered_by_user", None):
-                continue
+        for sig, _stats in self.store.all():
             if self.store.is_archived(sig):
                 continue
             name = self.skill_index.name_for_sig(sig)
             if not name:
                 continue
+            crits = self.satisfaction.critiques(sig)
+            if not crits:
+                continue
             try:
-                wrote = maybe_improve(name, skills_dir=self.skills_dir, store=self.store,
-                                      sig=sig, turn_count=0, now=now, force=True)
-                if wrote:
-                    # 清已消费纠正:否则下次维护会把同一批重复写进 SKILL.md
-                    self.store.put(sig, stats.model_copy(update={"steered_by_user": []}))
+                write_critiques_to_skill_md(self.skills_dir / name / "SKILL.md", crits, now=now)
             except Exception:
                 pass  # 单个技能 improve 失败不拖垮整轮维护
         archived = evict_stale(self.store, skills_dir=self.skills_dir, now=now)
