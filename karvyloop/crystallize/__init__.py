@@ -63,10 +63,12 @@ from .atom_critic import (
     evaluate_run,
     judge_quality,
     parse_quality,
+    record_facts,
     record_run,
     score_achievement,
     score_efficiency,
 )
+from .trace_eval import EVAL_FACT_KIND, SATISFACTION_KIND, evaluate_pending, rehydrate
 
 
 __all__ = [
@@ -99,8 +101,10 @@ __all__ = [
     # evict
     "evict_stale", "restore", "days_since",
     # atom_critic (docs/02 §14: atom 层结晶裁判 = role 多维分级满意度)
-    "AtomSatisfaction", "SatisfactionStore", "evaluate_run", "record_run",
+    "AtomSatisfaction", "SatisfactionStore", "evaluate_run", "record_run", "record_facts",
     "score_achievement", "score_efficiency", "judge_quality", "parse_quality",
+    # trace_eval (docs/40 §3: Trace-派生异步评价器,跑评分离 + §1 学回写 Trace/重启重建)
+    "EVAL_FACT_KIND", "SATISFACTION_KIND", "evaluate_pending", "rehydrate",
     # improve from role critique (slice-b: 取代死的 steered_by_user 路)
     "write_critiques_to_skill_md",
 ]

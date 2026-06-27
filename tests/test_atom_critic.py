@@ -131,26 +131,129 @@ def test_record_run_verified_is_full_unverified_is_half():
     assert f.achievement == 0.0
 
 
-# ---- 集成:真 MainLoop.drive 在**首个被核验的跑**就记满分(锁 C1 时序修复 + C2 存活)----
+# ---- record_facts:异步评价器从 Trace 事实记分 ----
 
-def test_drive_records_satisfaction_on_first_verified_run(tmp_path):
+def test_record_facts_achievement_from_verified():
+    from karvyloop.crystallize import record_facts
+    sat = SatisfactionStore()
+    assert record_facts(sat, "s", success=True, verified=True, steps=1, trace_ref="a").achievement == 1.0
+    assert record_facts(sat, "s", success=True, verified=False, steps=1, trace_ref="b").achievement == 0.5
+    assert record_facts(sat, "s", success=False, verified=False, steps=1, trace_ref="c").achievement == 0.0
+    assert sat.judged("a") and not sat.judged("zzz")   # trace_ref 进了水位
+
+
+# ---- evaluate_pending:只从 Trace 派生 + 按 trace_ref 去重(水位)----
+
+def test_evaluate_pending_derives_from_trace_and_watermarks():
+    from karvyloop.cognition.trace import TraceEntry, TraceStore
+    from karvyloop.crystallize import EVAL_FACT_KIND, evaluate_pending
+
+    trace = TraceStore()
+    trace.append(TraceEntry(task_id="t1", kind=EVAL_FACT_KIND,
+                 payload={"sig": "s1", "success": True, "verified": True, "steps": 3, "trace_ref": "r1"}))
+    trace.append(TraceEntry(task_id="t1", kind=EVAL_FACT_KIND,
+                 payload={"sig": "s1", "success": True, "verified": False, "steps": 3, "trace_ref": "r2"}))
+    sat = SatisfactionStore()
+
+    assert evaluate_pending(trace, sat) == 2            # 两条事实都评了
+    dims = sat.mean_dims("s1")
+    assert dims["achievement"] == pytest.approx(0.75)   # 1.0 + 0.5 → 均值 0.75(verify 事实经 Trace 流入)
+    assert evaluate_pending(trace, sat) == 0            # 再跑 → 幂等(水位按 trace_ref,不重复评)
+
+
+def test_evaluate_pending_skips_without_sig_or_ref(tmp_path):
+    from karvyloop.cognition.trace import TraceEntry, TraceStore
+    from karvyloop.crystallize import EVAL_FACT_KIND, evaluate_pending
+    trace = TraceStore()
+    trace.append(TraceEntry(task_id="t", kind=EVAL_FACT_KIND,
+                 payload={"sig": "s", "success": True, "verified": True, "steps": 1}))  # 无 trace_ref
+    trace.append(TraceEntry(task_id="t", kind=EVAL_FACT_KIND,
+                 payload={"success": True, "verified": True, "steps": 1, "trace_ref": "x"}))  # 无 sig
+    sat = SatisfactionStore()
+    assert evaluate_pending(trace, sat) == 0            # 无 sig / 无 trace_ref 都跳过(没法做水位,宁不评)
+
+
+# ---- 对抗回归:重启不双计 + 跨 task 不孤儿(CRITICAL #1 / #2)----
+
+def test_restart_does_not_double_count_via_rehydrate():
+    from karvyloop.cognition.trace import TraceEntry, TraceStore
+    from karvyloop.crystallize import EVAL_FACT_KIND, evaluate_pending, rehydrate
+    trace = TraceStore()
+    trace.append(TraceEntry(task_id="t1", kind=EVAL_FACT_KIND,
+                 payload={"sig": "s1", "success": True, "verified": True, "steps": 3, "trace_ref": "r1"}))
+    # 进程1:评一次 + 回写 Trace(satisfaction 结果)
+    sat1 = SatisfactionStore()
+    assert evaluate_pending(trace, sat1) == 1
+    assert len(sat1.samples("s1")) == 1
+    # 进程2(重启):新内存 store → 从 Trace 重建水位+样本 → 不重复评(否则 CRITICAL #1 双计)
+    sat2 = SatisfactionStore()
+    rehydrate(trace, sat2)
+    assert sat2.judged("r1")                        # 水位重建
+    assert len(sat2.samples("s1")) == 1             # 样本重建(baseline 不丢)
+    assert evaluate_pending(trace, sat2) == 0       # 不重评
+
+
+def test_evaluate_pending_no_orphans_across_tasks():
+    from karvyloop.cognition.trace import TraceEntry, TraceStore
+    from karvyloop.crystallize import EVAL_FACT_KIND, evaluate_pending
+    trace = TraceStore()
+    trace.append(TraceEntry(task_id="tA", kind=EVAL_FACT_KIND,
+                 payload={"sig": "sA", "success": True, "verified": True, "steps": 1, "trace_ref": "rA"}))
+    trace.append(TraceEntry(task_id="tB", kind=EVAL_FACT_KIND,
+                 payload={"sig": "sB", "success": True, "verified": True, "steps": 1, "trace_ref": "rB"}))
+    sat = SatisfactionStore()
+    assert evaluate_pending(trace, sat) == 2        # 两个 task 的事实都评(tasks=None 自愈,无孤儿)
+    assert sat.judged("rA") and sat.judged("rB")
+
+
+def test_mainloop_restart_no_double_count(tmp_path):
+    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.cognition.trace import TraceStore
+
+    def _slow(text):
+        def sb(intent, *, ctx=None):
+            return text, AtomRun(atom_id="forge", input={"intent": intent}, output={"text": text},
+                                 success=True, tool_calls=[{"name": "write_file"}], trace_ref="tr-x", ts=1.0)
+        return sb
+
+    trace = TraceStore()
+    ml1 = MainLoop(skills_dir=tmp_path / "s", trace=trace)
+    r = ml1.drive("做个 csv 导出", slow_brain=_slow("done"))
+    ml1.background_review()
+    assert len(ml1.satisfaction.samples(r.sig)) == 1
+    # 重启:同一持久 Trace、新 MainLoop → __init__ rehydrate 重建水位 → 不双计
+    ml2 = MainLoop(skills_dir=tmp_path / "s", trace=trace)
+    assert ml2.satisfaction.judged("tr-x")
+    ml2.background_review()
+    assert len(ml2.satisfaction.samples(r.sig)) == 1
+
+
+# ---- 集成:跑评分离 —— drive 只写事实,评价器离热路径算分(锁 C1/C2 + 快慢分离)----
+
+def test_drive_separates_run_from_eval(tmp_path):
     from karvyloop.cli.main_loop import MainLoop
 
     def _slow(text):
         def sb(intent, *, ctx=None):
             return text, AtomRun(atom_id="forge", input={"intent": intent},
                                  output={"text": text}, success=True,
-                                 tool_calls=[{"name": "write_file"}], trace_ref="t", ts=1.0)
+                                 tool_calls=[{"name": "write_file"}], trace_ref="tr-1", ts=1.0)
         return sb
 
     ml = MainLoop(skills_dir=tmp_path / "skills")
     r = ml.drive("把 README 翻译成英文并写回文件", slow_brain=_slow("done"))
 
+    # 跑评分离:热路径跑完,满意度**还没算**(评价在慢侧)
+    assert ml.satisfaction.samples(r.sig) == []
+    # 离热路径评价(background_review 里跑 evaluate_pending,只评最近 task)
+    ml.background_review()
     sats = ml.satisfaction.samples(r.sig)
-    assert len(sats) == 1                              # C2:生产路径真的记了(没被静默吞)
-    # C1:**首个**被核验的跑就是 achievement 1.0,不是滞后的 0.5
-    assert sats[0].achievement == 1.0
-    assert sats[0].overall == pytest.approx(1.0)        # 首跑无基线→效率 1.0→overall 1.0
+    assert len(sats) == 1                               # C2:真的记了(没被静默吞)
+    assert sats[0].achievement == 1.0                   # C1:首个被核验的跑就是 1.0,无滞后
+    assert sats[0].overall == pytest.approx(1.0)
+    assert sats[0].trace_ref == "tr-1"
+    ml.background_review()                              # 再评 → 幂等
+    assert len(ml.satisfaction.samples(r.sig)) == 1
 
 
 # ---- 零回归:observe 还原纯净(不再记满意度,行为与从前一字不差)----

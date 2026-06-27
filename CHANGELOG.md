@@ -12,6 +12,19 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward 1.0 — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **Execution and evaluation are now separated (run/eval split).** A drive used to *score*
+  the run on the hot path; now `drive()` only executes and writes the evaluation *facts*
+  (sig, success, verified, steps) into the Trace, and a Trace-derived evaluator
+  (`crystallize/trace_eval.py`) computes the satisfaction signal off the hot path (in
+  maintenance), so learning never competes with the real-time task for resources. The
+  evaluator is idempotent (watermarked by the run's trace ref) and writes its results back
+  into the Trace — which both realizes the self-reflexive "what did the system learn" record
+  and makes the watermark survive restarts: a new process rehydrates the watermark + samples
+  from the Trace, so historical runs are never re-scored / double-counted. It scans all
+  pending runs (not just the latest task), so a skipped or interleaved maintenance pass never
+  orphans a run. (Trace stays the single source of truth; the satisfaction store is a derived
+  projection of it. Independent adversarial verification caught the restart-double-count and
+  task-orphan failure modes before commit; both fixed with cross-process tests.)
 - **Atom-layer crystallization now has a role-as-critic signal** (the first slice of the
   two-layer-by-accountability redesign, [docs/02 §14]). A skill's runs are scored by a
   *multi-dimensional, graded* satisfaction — `achievement` (did the sub-goal complete and

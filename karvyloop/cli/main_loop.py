@@ -170,6 +170,7 @@ class MainLoop:
         # 与 verify/usage 并行的独立存储,信用按 sig(子目标)隔离。
         from karvyloop.crystallize import SatisfactionStore
         self.satisfaction = SatisfactionStore()
+        self._last_task_id = ""   # drive 记下,background_review 据此只评最近 task(控开销)
         self.skill_index = skill_index if skill_index is not None else SkillIndex()
         self.scope = scope
         # 时钟(测试用);默认 wall clock。生产路径不传,observe/maybe_promote
@@ -186,6 +187,13 @@ class MainLoop:
         # §13.3:结果可缓存性的语义判定器(intent, answer, tool_calls)→ "stable"|"dynamic"。
         # 控制台注入(它有 gateway);无注入(测试/--no-llm)→ 默认 dynamic(宁重跑不投毒)。
         self._result_classifier = result_classifier
+        # docs/40 §1:重启后从 Trace 的 satisfaction 结果重建满意度水位 + 样本,
+        # 否则持久 Trace 里的历史 eval_fact 会被重复评(对抗验收 CRITICAL #1 重启双计)。
+        try:
+            from karvyloop.crystallize import rehydrate as _rehydrate_sat
+            _rehydrate_sat(self.trace, self.satisfaction)
+        except Exception:
+            logger.warning("[trace_eval] 满意度水位重建失败;评价从空水位起(可能重评历史)", exc_info=True)
 
     def set_trace_funnel(self, funnel: object) -> None:
         """接线漏斗原文层(entry 把 IntentAnalyst 共享的 TraceIndex 接进来,9.3c)。"""
@@ -364,18 +372,28 @@ class MainLoop:
                 sig = matched
                 result.sig = sig
 
-        # 3c. docs/02 §14:atom 层结晶裁判 = role 多维分级满意度。**这一跑是否被核验**(achievement
-        #     满分前提)= 与下方 mark_verified 同一判据,在此先算好 → 避免"observe 先于 mark_verified
-        #     → 首跑被错记 0.5"的时序滞后(对抗验收 C1)。按本跑核验,不查 sig 历史门。信用按 sig 隔离。
-        # 跑评分离(Hardy):热路径**只记确定性满意度**(达成 from verify+success / 效率 from 步数,
-        # 零 LLM、零延迟)。做好·质量维(LLM)是 **trace 的异步消费者**(quality_eval.py),不在此。
+        # 3c. 跑评分离(docs/40 §3):drive **只管跑** —— 把"评价事实"(对齐后的 sig、是否核验、
+        #     步数、回链 trace_ref)写进 Trace,**不在热路径算任何满意度**。是否核验 = 与下方
+        #     mark_verified 同一判据(success + 非 ctx_dependent + 用了工具),在此先算好写进事实。
+        #     异步评价器(crystallize.trace_eval)离热路径读这些事实算分(经 background_review/daily_poll),
+        #     评价只从 Trace 派生(docs/40 §1),不旁路、不弱化 Trace。
         this_run_verified = bool(run.success and not ctx_dependent and run.tool_calls)
         try:
-            from karvyloop.crystallize import record_run as _record_satisfaction
-            _record_satisfaction(self.satisfaction, run, sig,
-                                 has_proof=this_run_verified, clock=lambda: now)
-        except Exception:  # 护城河信号是增益不是命脉:不拖垮 drive,但**绝不静默**(对抗验收 C2)
-            logger.warning("[atom_critic] 满意度记账失败(sig=%s);drive 继续", sig[:8], exc_info=True)
+            from karvyloop.crystallize import EVAL_FACT_KIND
+            self.trace.append(TraceEntry(
+                task_id=result.task_id, kind=EVAL_FACT_KIND,
+                payload={
+                    "sig": sig,
+                    "success": bool(run.success),
+                    "verified": this_run_verified,
+                    "steps": len(run.tool_calls),
+                    "trace_ref": run.trace_ref,
+                },
+                ts=now, source="main_loop",
+            ))
+            self._last_task_id = result.task_id
+        except Exception:  # 事实落 Trace 失败不拖垮 drive,但**绝不静默**(对抗验收 C2)
+            logger.warning("[atom_critic] 写 eval_fact 失败(sig=%s);drive 继续", sig[:8], exc_info=True)
 
         # 4. 验证门 + 结晶
         #    CV-11:上下文依赖句(它=文件X 这种临时映射)**绝不**结晶进永久库
@@ -480,8 +498,16 @@ class MainLoop:
         把每个技能近期评语写回 SKILL.md 的 `Role critique` 段(`write_critiques_to_skill_md`
         按内容幂等,后台可反复跑)。人的纠正归 role 层决策偏好(§11),不在此。
         """
-        from karvyloop.crystallize import evict_stale, write_critiques_to_skill_md
+        from karvyloop.crystallize import evict_stale, evaluate_pending, write_critiques_to_skill_md
         now = self._clock()
+        # docs/40 §3 跑评分离:先跑 Trace-派生评价器(离执行热路径)——读 drive 写下的 eval_fact,
+        # 算确定性满意度进 SatisfactionStore,并把结果回写 Trace(自反 + 重启水位源)。
+        # 扫**所有待评**(tasks=None,自愈):水位按 trace_ref 去重,跳过/失败/并发都不会让 run 变孤儿
+        # (对抗验收 CRITICAL #2)。优化:按 task 高水位只读新事实,留后(perf 非 correctness)。
+        try:
+            evaluate_pending(self.trace, self.satisfaction, clock=self._clock)
+        except Exception:
+            logger.warning("[trace_eval] 异步评价失败;维护继续", exc_info=True)
         for sig, _stats in self.store.all():
             if self.store.is_archived(sig):
                 continue

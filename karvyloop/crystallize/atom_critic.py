@@ -73,6 +73,7 @@ class AtomSatisfaction:
     efficiency: float           # 做好·效率(可验证)
     quality: Optional[float] = None   # 做好·质量(LLM 判;①-b 接,做对站住才采信)
     critique: str = ""          # LLM 评语(①-b)
+    trace_ref: str = ""         # 回链 Trace 里那条 run(provenance + 异步评价器去重水位)
     at: float = 0.0
 
     @property
@@ -100,6 +101,7 @@ class SatisfactionStore:
     def __init__(self, cap: int = 64) -> None:
         self._by_sig: dict[str, list[tuple[AtomSatisfaction, int]]] = {}
         self._cap = cap
+        self._judged: set[str] = set()   # 已评过的 run trace_ref(异步评价器去重水位)
         self._lock = threading.Lock()
 
     def baseline_steps(self, sig: str) -> Optional[float]:
@@ -120,6 +122,13 @@ class SatisfactionStore:
             rows.append((sat, steps))
             if len(rows) > self._cap:
                 del rows[0]
+            if sat.trace_ref:
+                self._judged.add(sat.trace_ref)
+
+    def judged(self, trace_ref: str) -> bool:
+        """这条 run(按 trace_ref)是否已评过 —— 异步评价器据此跳过,不重复评(水位)。"""
+        with self._lock:
+            return bool(trace_ref) and trace_ref in self._judged
 
     def samples(self, sig: str) -> list[AtomSatisfaction]:
         with self._lock:
@@ -183,6 +192,27 @@ def record_run(store: SatisfactionStore, run, sig: str, *,
                        baseline_steps=store.baseline_steps(sig),
                        quality=quality, critique=critique, clock=clock)
     store.record(sig, sat, steps)
+    return sat
+
+
+def record_facts(store: SatisfactionStore, sig: str, *, success: bool, verified: bool,
+                 steps: int, trace_ref: str = "", quality: Optional[float] = None,
+                 critique: str = "", clock=time.time) -> AtomSatisfaction:
+    """异步评价器的入口:从 **Trace 里的事实**(sig/success/verified/steps)算 + 存满意度,
+    不需要 run 对象(跑评分离:drive 写事实,评价器读事实算分)。
+
+    achievement = 做对(success + verified 门);efficiency = 步数 vs 历史中位数基线。
+    """
+    sat = AtomSatisfaction(
+        sig=sig,
+        achievement=score_achievement(bool(success), bool(verified)),
+        efficiency=score_efficiency(int(steps), store.baseline_steps(sig)),
+        quality=quality,
+        critique=critique or "",
+        trace_ref=trace_ref or "",
+        at=clock(),
+    )
+    store.record(sig, sat, int(steps))
     return sat
 
 
@@ -298,6 +328,6 @@ __all__ = [
     "W_BASE", "W_GOOD", "UNVERIFIED_SUCCESS_ACHIEVEMENT",
     "score_achievement", "score_efficiency",
     "AtomSatisfaction", "SatisfactionStore",
-    "evaluate_run", "record_run",
+    "evaluate_run", "record_run", "record_facts",
     "QUALITY_SYSTEM", "parse_quality", "sanitize_critique", "judge_quality",
 ]
