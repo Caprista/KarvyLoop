@@ -20,6 +20,7 @@ API_ONLY = {
     "/api/h2a_decide",          # 拍板走 WS(h2a_decision);此 REST 是外部前端团队的契约面
     "/api/memory/ingest",       # 程序化写入;UI 用 /memory/feed
     "/api/roundtable/discuss",  # 历史端点;UI 走对话式 /align
+    "/api/tokens/buckets",      # token 时段时间序列(可配粒度);UI 用 /api/tokens 的 by_hour,此面给外部前端/压测按需取
 }
 
 
