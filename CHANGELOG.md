@@ -11,12 +11,38 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward 1.0 — see [ROADMAP.md](ROADMAP.md)._
 
+## 2026.6.27
+
 ### Added
+- **Imported agents are now LLM-decomposed into a role + reusable atoms** (was a flat skill
+  copy). The import reads the agent and produces a real-persona role plus atoms in the shared
+  pool, referenced by the role's COMPOSITION — and it costs tokens.
+- **Honest atom tool-reality labels** — each atom is `executable` (its tools resolve to real
+  registered tools) or advisory (persona-reasoning only), with the unresolved tool names listed;
+  surfaced in the import response and `/api/atoms`.
+- **Agent-vs-skill import classification** — an import with no executable atoms is reported as
+  `advisory_persona` (a persona/skill, not a tool-agent) with a hint to use skill import,
+  instead of silently force-fitting it as an agent.
+- **Atom semantic consolidation** — `/api/atoms/consolidate/suggest` (LLM clusters near-duplicate
+  atoms) + `/apply` (merge into one canonical atom, rewrite-before-delete so no role is ever left
+  with a dangling reference). Never a silent merge: suggest proposes, you confirm.
+- **Fuzzy-instruction orchestration** — vague instructions ("去X域找几个人分析Y") are
+  LLM-decomposed into a roundtable/delegate/ops plan over *real* domain members (never fabricates
+  participants); plus a deterministic ops-intent fast-path.
+- **50+ participants in one roundtable / workflow** — seat count decoupled from concurrency
+  (batched waves); API caps raised (roundtable 12→64, workflow mentions 8→64).
+- **Time-bucketed token stats** — `TokenLedger.buckets(interval)` + `/api/tokens` `by_hour`/`recent`
+  + `/api/tokens/buckets`: see *when* tokens were spent.
 - **macOS sandbox (Seatbelt).** Native `sandbox-exec` adapter via the PAL, mirroring the Linux
-  bubblewrap fail-closed contract (deny-default; writes confined to the token's workspace;
-  no network unless granted). Adversarially verified on real hardware (Apple Silicon, macOS 26):
-  writes outside the workspace / to `$HOME` and ungranted network are blocked; granted network
-  reaches. macOS is now a supported platform with working agent execution, not just chat.
+  bubblewrap fail-closed contract (deny-default; writes confined to the token's workspace; no
+  network unless granted). Adversarially verified on real Apple Silicon hardware. macOS is now a
+  supported platform with working agent execution, not just chat.
+
+### Fixed
+- **The token ledger now records every LLM call.** Recording lived only on the forge path, so
+  direct `gateway.complete` calls (import decomposition, fuzzy dispatch, ops diagnose, roundtable
+  goal-summary) were invisible and `by_source` was a single "forge". Moved to the one choke point
+  (`GatewayClient.complete`) with the contextvar source — usage is now attributed per feature.
 
 ## 2026.6.26
 
