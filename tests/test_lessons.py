@@ -20,6 +20,7 @@ from karvyloop.crystallize import (  # noqa: E402
     parse_lesson,
     record_facts,
     rehydrate,
+    validate_lessons,
 )
 
 
@@ -88,19 +89,65 @@ def test_distill_skips_without_contrast(tmp_path):
     assert n == 0 and called == []
 
 
-def test_distill_waits_for_new_samples(tmp_path):
+def test_kept_lesson_survives_when_not_harmful(tmp_path):
+    # 戊:规律留下后没让满意度变差 → 监控不撤(乐观地留;不声称"已验证有用")
     trace, sat = TraceStore(), SatisfactionStore()
-    _sig_with_contrast(trace, sat, "s", n_high=4, n_low=2)   # 6 样本
-    idx, _ = _skill_index(tmp_path, "s")
-    assert distill_lessons(trace, sat, judge=lambda m: '{"lesson":"a"}',
-                           skills_dir=tmp_path / "skills", skill_index=idx) == 1
-    _add_run(trace, sat, "s", 99, verified=False)            # +1(<4)→ 还不够
-    assert distill_lessons(trace, sat, judge=lambda m: '{"lesson":"b"}',
+    _sig_with_contrast(trace, sat, "s", n_high=4, n_low=2)
+    idx, skill_md = _skill_index(tmp_path, "s")
+    distill_lessons(trace, sat, judge=lambda m: '{"lesson":"先列要点"}',
+                    skills_dir=tmp_path / "skills", skill_index=idx)
+    assert "先列要点" in skill_md.read_text(encoding="utf-8")   # kept → 进 SKILL.md
+    for i in range(5):                                          # 之后没变差(更好)
+        _add_run(trace, sat, "s", 200 + i, verified=True)
+    assert validate_lessons(trace, sat, skills_dir=tmp_path / "skills", skill_index=idx)["reverted"] == 0
+    assert "先列要点" in skill_md.read_text(encoding="utf-8")   # 没害 → 留着
+
+
+def test_kept_lesson_reverted_when_satisfaction_craters(tmp_path):
+    # 戊:规律落地后满意度**明显变差** → 撤回 + 移出 SKILL.md + 进缓冲(丙 不再蒸同一条)
+    trace, sat = TraceStore(), SatisfactionStore()
+    _sig_with_contrast(trace, sat, "s", n_high=4, n_low=2)
+    idx, skill_md = _skill_index(tmp_path, "s")
+    distill_lessons(trace, sat, judge=lambda m: '{"lesson":"瞎搞"}',
+                    skills_dir=tmp_path / "skills", skill_index=idx)
+    assert "瞎搞" in skill_md.read_text(encoding="utf-8")
+    for i in range(6):                                          # 之后明显变差
+        _add_run(trace, sat, "s", 300 + i, verified=False)
+    assert validate_lessons(trace, sat, skills_dir=tmp_path / "skills", skill_index=idx)["reverted"] == 1
+    assert "瞎搞" not in skill_md.read_text(encoding="utf-8")   # 撤回这条自我编辑
+    _add_run(trace, sat, "s", 400, verified=True)               # 缓冲:不再蒸同一条
+    assert distill_lessons(trace, sat, judge=lambda m: '{"lesson":"瞎搞"}',
                            skills_dir=tmp_path / "skills", skill_index=idx) == 0
-    for k in range(3):                                        # 再 +3 → 够 4 个新样本
-        _add_run(trace, sat, "s", 100 + k, verified=False)
-    assert distill_lessons(trace, sat, judge=lambda m: '{"lesson":"c"}',
-                           skills_dir=tmp_path / "skills", skill_index=idx) == 1
+
+
+def test_kept_lesson_monitored_continuously(tmp_path):
+    # 对抗验收 CRITICAL 3 修复:留了很久的规律,**后来**才变差也会被撤(不发永久通行证)
+    trace, sat = TraceStore(), SatisfactionStore()
+    _sig_with_contrast(trace, sat, "s", n_high=4, n_low=2)
+    idx, skill_md = _skill_index(tmp_path, "s")
+    distill_lessons(trace, sat, judge=lambda m: '{"lesson":"老规律"}',
+                    skills_dir=tmp_path / "skills", skill_index=idx)
+    for i in range(5):                                          # 一段时间不变差 → 不撤
+        _add_run(trace, sat, "s", 200 + i, verified=True)
+    assert validate_lessons(trace, sat, skills_dir=tmp_path / "skills", skill_index=idx)["reverted"] == 0
+    assert "老规律" in skill_md.read_text(encoding="utf-8")
+    for i in range(8):                                          # **后来**世界变了,满意度崩
+        _add_run(trace, sat, "s", 300 + i, verified=False)
+    assert validate_lessons(trace, sat, skills_dir=tmp_path / "skills", skill_index=idx)["reverted"] == 1
+    assert "老规律" not in skill_md.read_text(encoding="utf-8")  # 持续监控 → 仍被撤
+
+
+def test_edit_budget_caps_kept_per_sig(tmp_path):
+    # 戊·编辑预算:每个 sig 最多留 MAX_KEPT 条规律,到顶不再蒸(靠撤回腾位)
+    from karvyloop.crystallize.lessons import LESSON_MAX_KEPT_PER_SIG as CAP
+    trace, sat = TraceStore(), SatisfactionStore()
+    idx, _ = _skill_index(tmp_path, "s")
+    total = 0
+    for j in range(CAP + 2):
+        _sig_with_contrast(trace, sat, "s", n_high=2, n_low=2)   # 每轮 +4 样本 + 对比
+        total += distill_lessons(trace, sat, judge=lambda m, j=j: '{"lesson":"L%d"}' % j,
+                                 skills_dir=tmp_path / "skills", skill_index=idx)
+    assert total == CAP                                          # 到顶就不再蒸
 
 
 def test_parse_lesson_refuses_garbage():

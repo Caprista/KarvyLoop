@@ -258,6 +258,22 @@ def write_lessons_to_skill_md(
     return True
 
 
+def remove_lesson_from_skill_md(skill_path: Path, lesson: str) -> bool:
+    """从 SKILL.md 移除一条 lesson bullet(戊:被拒的自我编辑要撤回,不留在技能里误导)。"""
+    from .atom_critic import sanitize_critique
+    les = sanitize_critique(lesson)
+    if not les or not skill_path.exists():
+        return False
+    text = skill_path.read_text(encoding="utf-8")
+    pat = re.compile(r"^- \([^)]*\) " + re.escape(les) + r"\s*$")
+    lines = text.splitlines()
+    kept = [ln for ln in lines if not pat.match(ln)]
+    if len(kept) == len(lines):
+        return False
+    skill_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    return True
+
+
 # ---- 主入口(每 5 轮触发)----
 
 def maybe_improve(
@@ -301,6 +317,6 @@ __all__ = [
     "classify_correction", "classify_batch",
     "write_corrections_to_skill_md",
     "ROLE_CRITIQUE_HEADER", "write_critiques_to_skill_md",
-    "ROLE_LESSON_HEADER", "write_lessons_to_skill_md",
+    "ROLE_LESSON_HEADER", "write_lessons_to_skill_md", "remove_lesson_from_skill_md",
     "maybe_improve",
 ]

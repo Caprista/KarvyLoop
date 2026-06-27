@@ -47,11 +47,18 @@ from .improve import (
     classify_batch,
     classify_correction,
     maybe_improve,
+    remove_lesson_from_skill_md,
     write_corrections_to_skill_md,
     write_critiques_to_skill_md,
     write_lessons_to_skill_md,
 )
-from .lessons import LESSON_KIND, LESSON_SYSTEM, distill_lessons, parse_lesson
+from .lessons import (
+    LESSON_KIND,
+    LESSON_SYSTEM,
+    distill_lessons,
+    parse_lesson,
+    validate_lessons,
+)
 from .observe import observe
 from .recall import RecallHit, recall
 from .signature import compute_signature, same_signature
@@ -116,9 +123,9 @@ __all__ = [
     # trace_eval (docs/40 §3: Trace-派生异步评价器,跑评分离 + §1 学回写 Trace/重启重建)
     "EVAL_FACT_KIND", "SATISFACTION_KIND", "QUALITY_KIND",
     "evaluate_pending", "judge_pending_quality", "rehydrate",
-    # lessons (docs/40 §6 丙:跨-run 对比式经验蒸馏,学回写做深)
-    "LESSON_KIND", "LESSON_SYSTEM", "distill_lessons", "parse_lesson",
-    "ROLE_LESSON_HEADER", "write_lessons_to_skill_md",
+    # lessons (docs/40 §6 丙 跨-run 蒸馏 + §5 戊 忠实自进化:provisional→验证→confirm/reject)
+    "LESSON_KIND", "LESSON_SYSTEM", "distill_lessons", "validate_lessons", "parse_lesson",
+    "ROLE_LESSON_HEADER", "write_lessons_to_skill_md", "remove_lesson_from_skill_md",
     # improve from role critique (slice-b: 取代死的 steered_by_user 路)
     "write_critiques_to_skill_md",
 ]

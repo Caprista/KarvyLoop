@@ -40,6 +40,24 @@ _LESSON_RUNS_PER_GROUP = 3
 # 每条 run 产出的 token 预算(走 clip_to_tokens)
 _LESSON_OUTPUT_TOKENS = 300
 
+# 戊·忠实自进化(docs/40 §5)——**重定位为"有害自我编辑撤回器",不是"验证盖章器"**。
+# 原因(独立对抗验收 + 纵向场景共同坐实):前后满意度对比是**混杂的**(蒸馏只在有低分时触发→
+# baseline 被压低;之后低分一停满意度就升→没用的规律白白被"confirm")。**混杂下你证明不了一条
+# 规律有用,但你能撤掉明显有害的**。所以:乐观地留(kept),持续监控**所有 kept 规律**,**只在
+# 明显变差时撤(revert)**;不设"confirmed 永久盖章"(否则世界变了它还在毒技能)。
+LESSON_KEPT = "kept"           # 留着(乐观;不声称已验证有用)
+LESSON_REVERTED = "reverted"   # 明显变差 → 撤回 + 进缓冲
+# kept 规律距落地后再积累这么多样本,才开始被监控(给它起效的时间)
+LESSON_VALIDATE_AFTER = 4
+# 撤回判据:新近度满意度较该规律落地基线**变差 ≥ 这个幅度**才撤(稍大于噪声,避免误撤)。
+# 误撤(撤掉其实有用的)是**更安全**的方向:丢点帮助 vs 留着毒;偏向撤。
+LESSON_HARM_MARGIN = 0.05
+# 每个 sig 最多留这么多条规律(编辑预算;到顶不再蒸,靠撤回腾位)
+LESSON_MAX_KEPT_PER_SIG = 3
+
+# ⚠️ 真正的"确认有用"需 **held-out 受控 A/B**(同批留出任务带/不带规律对跑,SkillOpt 式),
+#   本地暂不做;当前只做"撤有害",诚实不声称"证明有用"。升级方向见 docs/40 §5。
+
 
 LESSON_SYSTEM = (
     "你是 role,在复盘**同一个子任务**的多次执行——有几次做得令人满意,有几次不满意。\n"
@@ -167,6 +185,10 @@ def distill_lessons(trace, satisfaction: SatisfactionStore, *, judge,
                                    lows[-_LESSON_RUNS_PER_GROUP:])
         if not material:
             continue                                # 取不到 run 内容(数据形态不对)→ 不烧 judge
+        # 戊·编辑预算:每个 sig 最多留 MAX_KEPT 条规律 → 到顶不再蒸(靠监控撤回腾位,不无限堆)。
+        statuses = _lesson_status_map(trace, sig)
+        if sum(1 for st in statuses.values() if st == LESSON_KEPT) >= LESSON_MAX_KEPT_PER_SIG:
+            continue
         attempts += 1
         try:
             lesson = parse_lesson(judge(material))
@@ -174,33 +196,109 @@ def distill_lessons(trace, satisfaction: SatisfactionStore, *, judge,
             continue
         # 水位前移:无论蒸出与否都前移,避免下轮对同一批反复尝试烧钱(没蒸出=这批没规律)。
         satisfaction.set_lesson_watermark(sig, len(samples))
-        if not lesson or _latest_lesson(trace, sig) == lesson:
-            continue                                # 没规律 / 和上次同一条 → 不重复回写 Trace(防膨胀)
-        _writeback_lesson(trace, sig, lesson, len(samples), clk)
+        if not lesson:
+            continue
+        if statuses.get(lesson) in (LESSON_REVERTED, LESSON_KEPT):
+            continue                                # 撤过的(缓冲)/ 已在留着的 → 不重复写
+        # 戊:乐观地**留下(kept)**,记当下满意度基线供日后"变差就撤"的监控用。
+        baseline = satisfaction.mean_overall_recent(sig)
+        _writeback_lesson(trace, sig, lesson, len(samples), clk,
+                          status=LESSON_KEPT, baseline=baseline)
         _fold_into_skill(sig, lesson, skills_dir=skills_dir, skill_index=skill_index, clock=clk)
         n += 1
     return n
 
 
-def _latest_lesson(trace, sig: str) -> str:
-    """该 sig 在 Trace 里最近一条规律(用于去重,防同一条反复回写膨胀)。"""
+def validate_lessons(trace, satisfaction: SatisfactionStore, *, skills_dir: Path,
+                     skill_index=None, clock=None) -> dict:
+    """戊·有害自我编辑撤回器(docs/40 §5):持续监控**所有 kept 规律**(不只新的),
+    某规律落地后又积累 `LESSON_VALIDATE_AFTER` 样本起,只要新近度满意度较其落地基线
+    **变差 ≥ `LESSON_HARM_MARGIN`** → **撤回**(从 SKILL.md 移除 + 进缓冲,丙 不再蒸同一条)。
+
+    **不声称"确认有用"**(混杂下证明不了);只保证"明显变差的自我编辑会被撤掉",且对**确认过/留着
+    的所有规律持续生效**(世界变了也能撤,不留永久毒)。误撤偏安全(丢点帮助 vs 留毒)。纯测量、不调 LLM。
+    返回 {"reverted": n}。
+    """
+    out = {"reverted": 0}
+    if trace is None or satisfaction is None:
+        return out
+    clk = clock or _time.time
+    for sig in satisfaction.sigs():
+        latest = _lesson_latest_entry(trace, sig)
+        if not any(e.get("status") == LESSON_KEPT for e in latest.values()):
+            continue
+        cur_n = len(satisfaction.samples(sig))
+        current = satisfaction.mean_overall_recent(sig)
+        if current is None:
+            continue
+        for les, entry in latest.items():
+            if entry.get("status") != LESSON_KEPT:
+                continue
+            if cur_n - int(entry.get("n_samples", 0) or 0) < LESSON_VALIDATE_AFTER:
+                continue                            # 还没给它起效的时间 → 先留着
+            baseline = entry.get("baseline", None)
+            if baseline is None:
+                continue
+            if current <= float(baseline) - LESSON_HARM_MARGIN:   # 明显变差 → 撤
+                _writeback_lesson(trace, sig, les, cur_n, clk, status=LESSON_REVERTED,
+                                  baseline=baseline)
+                _unfold_from_skill(sig, les, skills_dir=skills_dir, skill_index=skill_index)
+                out["reverted"] += 1
+            # else:没明显变差 → 继续留着 + 继续监控(下一轮还会再查,不发永久通行证)
+    return out
+
+
+def _lesson_latest_entry(trace, sig: str) -> dict:
+    """该 sig 每条 lesson_text → **最新** payload(含 status;append-only,后写覆盖)。"""
     try:
         entries = trace.query(f"lesson:{sig}", kind=LESSON_KIND)
     except Exception:
-        return ""
-    return str(entries[-1].payload.get("lesson", "") or "") if entries else ""
+        return {}
+    m: dict = {}
+    for e in entries:
+        p = getattr(e, "payload", None) or {}
+        les = p.get("lesson", "")
+        if les:
+            m[les] = p
+    return m
 
 
-def _writeback_lesson(trace, sig: str, lesson: str, n_samples: int, clk) -> None:
-    """规律回写 Trace(自反"学" + 重启重建水位源)。失败不拖垮。"""
+def _lesson_status_map(trace, sig: str) -> dict:
+    """该 sig 每条 lesson_text → 最新 status。"""
+    return {les: p.get("status", LESSON_KEPT)
+            for les, p in _lesson_latest_entry(trace, sig).items()}
+
+
+def _writeback_lesson(trace, sig: str, lesson: str, n_samples: int, clk, *,
+                      status: str = LESSON_KEPT, baseline=None) -> None:
+    """规律(及其状态变更)回写 Trace(自反"学" + 重启重建 + 验证状态机)。append-only,后写覆盖。"""
     try:
         from karvyloop.cognition.trace import TraceEntry
         # task_id 用 sig 占位(lesson 是跨-run 的,不属某次 task);重建只看 payload。
         trace.append(TraceEntry(
             task_id=f"lesson:{sig}", kind=LESSON_KIND,
-            payload={"sig": sig, "lesson": lesson, "n_samples": int(n_samples)},
+            payload={"sig": sig, "lesson": lesson, "n_samples": int(n_samples),
+                     "status": status,
+                     "baseline": (float(baseline) if isinstance(baseline, (int, float)) else None)},
             ts=clk(), source="lessons",
         ))
+    except Exception:
+        pass
+
+
+def _unfold_from_skill(sig: str, lesson: str, *, skills_dir: Path, skill_index) -> None:
+    """被拒的 lesson 从 SKILL.md 移除(忠实自进化:没用的自我编辑要撤回,不留在技能里误导)。"""
+    if skill_index is None:
+        return
+    try:
+        name = skill_index.name_for_sig(sig)
+    except Exception:
+        name = None
+    if not name:
+        return
+    try:
+        from .improve import remove_lesson_from_skill_md
+        remove_lesson_from_skill_md(Path(skills_dir) / name / "SKILL.md", lesson)
     except Exception:
         pass
 
@@ -227,5 +325,7 @@ __all__ = [
     "LESSON_KIND", "LESSON_SYSTEM",
     "LESSON_HIGH_THRESH", "LESSON_LOW_THRESH", "LESSON_MIN_SAMPLES",
     "LESSON_NEW_SAMPLES", "LESSON_LIMIT",
-    "parse_lesson", "distill_lessons", "judge_lesson",
+    "LESSON_KEPT", "LESSON_REVERTED",
+    "LESSON_VALIDATE_AFTER", "LESSON_HARM_MARGIN", "LESSON_MAX_KEPT_PER_SIG",
+    "parse_lesson", "distill_lessons", "validate_lessons", "judge_lesson",
 ]

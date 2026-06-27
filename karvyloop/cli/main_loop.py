@@ -222,12 +222,20 @@ class MainLoop:
         self._lesson_judge = judge
 
     def lessons_review(self) -> int:
-        """**慢侧**(daily_poll)跨-run 经验蒸馏(丙):对比同一子目标的满意/不满意执行 → 提炼
-        一条规律 → 写回 Trace + 折进 SKILL.md。无注入裁判 → 0(0 回归)。"""
+        """**慢侧**(daily_poll)经验学习一轮:① 戊·**验证**已落地的 provisional lesson(纯测量,
+        真提升→confirm / 没提升→reject 并撤出 SKILL.md);② 丙·**蒸馏**新规律(避开被拒缓冲 +
+        编辑预算)。返回本轮新蒸出的规律数。无注入裁判仍会跑①验证(0 回归)。"""
+        from karvyloop.crystallize import distill_lessons, validate_lessons
+        try:
+            v = validate_lessons(self.trace, self.satisfaction, skills_dir=self.skills_dir,
+                                 skill_index=self.skill_index, clock=self._clock)
+            if v.get("reverted"):
+                logger.info("[lessons] 忠实自进化:撤回有害规律 %s 条", v.get("reverted"))
+        except Exception:
+            logger.warning("[lessons] lesson 验证失败;维护继续", exc_info=True)
         judge = self._lesson_judge
         if judge is None:
             return 0
-        from karvyloop.crystallize import distill_lessons
         try:
             return distill_lessons(self.trace, self.satisfaction, judge=judge,
                                    skills_dir=self.skills_dir, skill_index=self.skill_index,
