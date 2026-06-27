@@ -19,16 +19,20 @@ async def run_roundtable(
     *,
     drive_member: Callable[[Any], Awaitable[dict]],
     max_seats: int = 6,
+    concurrency: int = 6,
 ) -> list[dict]:
-    """圆桌:同一 intent 抛给每个成员,各自应答,**并发**收集 [{speaker, text, ...}]。
+    """圆桌:同一 intent 抛给每个成员,各自应答,**分批并发**收集 [{speaker, text, ...}]。
 
     - drive_member(member) -> awaitable dict(至少含 speaker/text);抛错或返 None → 跳过该座。
-    - max_seats:封顶并发座位数(防一桌几十人把 token/时长打爆;超出的不上桌,诚实截断)。
-    - 顺序保持与 members 一致(gather 保序)。
+    - max_seats:**上桌人数**上限(50+ 大桌压测可调大;超出的不上桌,诚实截断 —— 由调用方报)。
+    - concurrency:**同时**在打模型的座位数(批大小)。和 max_seats 解耦:一桌 50 人也只 N 路
+      并发,**别 50 路同时打一把 key 把响应截断**(多渠道并发截断的老教训)。
+    - 顺序保持与 members 一致。
     """
     seats = [m for m in members][:max(0, max_seats)]
     if not seats or not (intent or "").strip():
         return []
+    batch = max(1, int(concurrency))
 
     async def _one(m):
         try:
@@ -37,8 +41,11 @@ async def run_roundtable(
         except Exception:
             return None
 
-    results = await asyncio.gather(*[_one(m) for m in seats])
-    return [r for r in results if r is not None]
+    out: list[dict] = []
+    for i in range(0, len(seats), batch):     # 分批:每批最多 `batch` 路并发,批间串行
+        wave = await asyncio.gather(*[_one(m) for m in seats[i:i + batch]])
+        out.extend(r for r in wave if r is not None)
+    return out
 
 
 async def run_roundtable_session(
@@ -49,6 +56,7 @@ async def run_roundtable_session(
     host_moderate: Callable[..., Awaitable[dict]],
     max_rounds: int = 3,
     max_seats: int = 6,
+    concurrency: int = 6,
 ) -> dict:
     """**小卡主持的圆桌**(ch4 final):围绕 topic 多轮成员发言 + 小卡控场,差不多就收敛。
 
@@ -73,7 +81,7 @@ async def run_roundtable_session(
         replies = await run_roundtable(
             topic, members,
             drive_member=lambda m, _s=snapshot: member_reply(m, topic, _s),
-            max_seats=max_seats,
+            max_seats=max_seats, concurrency=concurrency,
         )
         if not replies:
             break

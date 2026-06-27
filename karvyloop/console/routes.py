@@ -448,7 +448,7 @@ def _repoint_template(tpl, roles):
 
 class WorkflowPlanRequest(BaseModel):
     intent: str = Field(..., min_length=1, max_length=4000)
-    mentions: list[dict] = Field(default_factory=list, max_length=8)
+    mentions: list[dict] = Field(default_factory=list, max_length=64)  # 50+ 步工作流压测放开到 64
     force_fresh: bool = False   # True = 跳过快脑匹配,重新设计
 
 
@@ -2206,7 +2206,7 @@ def _rk_model(rk: dict, model: str) -> dict:
 
 class RoundtableStartRequest(BaseModel):
     intent: str = Field(..., min_length=1, max_length=8000)             # 圆桌主题
-    participants: list[str] = Field(default_factory=list, max_length=12)  # 选的 agent_id;空=全上桌
+    participants: list[str] = Field(default_factory=list, max_length=64)  # 选的 agent_id;空=全上桌(50+ 大桌压测放开到 64)
 
 
 class RoundtableDiscussRequest(BaseModel):
@@ -2957,9 +2957,12 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
     task_id = (task_reg.start(who="🎡 圆桌", domain_id=peer.domain_id, role="group",
                               intent=f"🎡 {topic[:120]}") if task_reg is not None else None)
     from karvyloop.karvy.roundtable import run_roundtable_session
+    # 50+ 大桌:全员上桌(封顶 64,防真·失控),但**并发只 6 路**——别 50 路同时打一把 key 截断。
+    _seats = min(len(members), 64)
     try:
         result = await run_roundtable_session(goal, members, member_reply=member_reply,
-                                              host_moderate=host_moderate, max_rounds=3)
+                                              host_moderate=host_moderate, max_rounds=3,
+                                              max_seats=_seats, concurrency=6)
     except Exception as e:
         if task_reg is not None and task_id is not None:
             task_reg.finish(task_id, error=str(e))
