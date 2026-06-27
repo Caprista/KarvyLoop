@@ -12,6 +12,14 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward 1.0 — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **One-click upgrade from the console.** The "new version" banner now has an *Upgrade*
+  button: you click it (so it's never a silent auto-upgrade — you decide), and the
+  console runs the whole pipeline for you — stop the service → install (`git pull
+  --ff-only --autostash && pip install -e .`, or `pip install -U`) → restart — then the
+  page reconnects automatically. No terminal needed. A detached runner does the work so
+  it survives the console restart; restart goes through `python -m karvyloop` (never
+  bricks a `python -m` launch); guarded by a localhost-only check, a CSRF header, and an
+  exclusive lock (no double-fire); install failures are surfaced, not silently swallowed.
 - **Console handles a busy port intelligently.** If `8766` is taken by a *foreign*
   process, the console binds the next free port and prints the real URL — a port
   collision never blocks you. If it's taken by *another KarvyLoop* (e.g. an old version

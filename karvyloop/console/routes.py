@@ -4055,19 +4055,143 @@ def api_decision_card_judge(req: DecisionCardJudgeRequest, request: Request) -> 
                       basis=req.basis)
 
 
+def _acquire_upgrade_lock(lock) -> bool:
+    """O_EXCL 原子建升级锁(D3/D6)。已存在且新鲜(<10min)→ False(拒,防双 runner);陈旧 → 接管。"""
+    import os as _os
+    import time as _t
+    try:
+        fd = _os.open(str(lock), _os.O_CREAT | _os.O_EXCL | _os.O_WRONLY, 0o644)
+        _os.write(fd, str(_t.time()).encode())
+        _os.close(fd)
+        return True
+    except FileExistsError:
+        try:
+            if _t.time() - lock.stat().st_mtime > 600:    # 崩溃残留的陈旧锁 → 接管
+                lock.unlink()
+                return _acquire_upgrade_lock(lock)
+        except Exception:
+            pass
+        return False
+    except Exception:
+        return True    # 锁机制本身出问题不该挡升级(它是加固不是硬门)
+
+
+def _read_last_upgrade() -> dict:
+    """读最近一次一键升级的结果(供重启后的前端显示成败);无 / 过旧(>10min)→ {}。"""
+    import json as _json
+    import time as _t
+    from pathlib import Path as _P
+    f = _P.home() / ".karvyloop" / "_upgrade_status.json"
+    try:
+        d = _json.loads(f.read_text(encoding="utf-8"))
+        if isinstance(d, dict) and (_t.time() - float(d.get("ts", 0))) < 600:
+            return d
+    except Exception:
+        pass
+    return {}
+
+
 @router.get("/update_status")
 def api_update_status(request: Request) -> dict[str, Any]:
-    """版本检测(只读,缓存一天,零遥测)。前端据此显**可关掉**的"有新版"横幅;**绝不自动升级**。
+    """版本检测(只读,缓存一天,零遥测)。前端据此显**可关掉**的"有新版"横幅。
 
-    升级铁律:detect → notify → 你按下。命令交给你执行(`git pull` / `pip -U`),系统不替你升。
+    升级铁律:**绝不自动升级** = 系统不自作主张;用户**点了**才升(/update/apply),但点完跑完整套。
+    `last_upgrade`:最近一次一键升级的成败(重启后前端据此显示成功刷新 / 失败看日志)。
     """
     try:
         from karvyloop.update import check_update
-        return check_update()       # 缓存优先(不 force),网络不可达 → newer=False,不阻断 UI
+        res = check_update()        # 缓存优先(不 force),网络不可达 → newer=False,不阻断 UI
     except Exception:
         from karvyloop.update import current_version
-        return {"current": current_version(), "latest": None, "newer": False,
-                "command": "", "url": "", "checked": False, "source": "error"}
+        res = {"current": current_version(), "latest": None, "newer": False,
+               "command": "", "url": "", "checked": False, "source": "error"}
+    res["last_upgrade"] = _read_last_upgrade()
+    return res
+
+
+@router.post("/update/apply")
+def api_update_apply(request: Request) -> dict[str, Any]:
+    """一键升级(Hardy 2026-06-27:点了才升=手动,但点完跑完整套,不用敲命令)。
+
+    **绝不自动升级**(本端点只在用户**点了**才被调);流程 = 写升级规格 → detached 拉起升级 runner
+    → 1 秒后 console 自退(停服务)→ runner 停→装→起。安全:**只允许 localhost 触发**(自升级是控自己
+    机器的事,防 LAN 上别人点)。装失败 best-effort 重启 + upgrade.log 留痕(见 upgrade_runner)。
+    """
+    import json as _json
+    import os as _os
+    import subprocess as _sp
+    import sys as _sys
+    import threading as _th
+    import time as _time
+    from pathlib import Path as _P
+
+    # D5 防 CSRF:要求自定义头。跨源 fetch 带自定义头会触发 CORS preflight,本端点不处理 OPTIONS/CORS →
+    # 被浏览器挡;**控制台界面**调用时显式带这个头。少了它 → 拒(挡掉恶意网页偷偷 POST 触发升级)。
+    if (request.headers.get("x-karvyloop-upgrade") or "") != "1":
+        return {"ok": False, "reason": "缺升级标记(防 CSRF);请从控制台界面点升级"}
+    # 安全门:只接受本机来源(request.client.host 是传输层对端,uvicorn 默认不认 X-Forwarded-For,不可伪造)
+    client = (request.client.host if request.client else "") or ""
+    if client not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+        return {"ok": False, "reason": "升级只能从本机(localhost)触发"}
+
+    from karvyloop.update import check_update, detect_install_mode
+    chk = check_update(force=True)
+    if not chk.get("newer"):
+        return {"ok": False, "reason": "已是最新,无需升级", "current": chk.get("current")}
+
+    relaunch = getattr(request.app.state, "console_relaunch", None)
+    if not relaunch or not relaunch.get("argv"):
+        return {"ok": False, "reason": "无法确定如何重启(console_relaunch 未记)"}
+
+    kl = _P.home() / ".karvyloop"
+    kl.mkdir(parents=True, exist_ok=True)
+    # D3/D6 并发锁:O_EXCL 原子建锁;已有且新鲜(<10min)→ 拒(防双击/双标签起两个 runner 抢端口、撞 pip)
+    lock = kl / "_upgrade.lock"
+    if not _acquire_upgrade_lock(lock):
+        return {"ok": False, "reason": "升级已在进行中(稍候,或删 ~/.karvyloop/_upgrade.lock 重试)"}
+
+    import karvyloop
+    py = _sys.executable
+    mode = detect_install_mode()
+    if mode == "git":
+        root = _P(karvyloop.__file__).resolve().parent
+        for p in (root, *root.parents):
+            if (p / ".git").exists():
+                root = p
+                break
+        # D2:--ff-only 防冲突半完成树;--autostash 容忍脏工作区;失败由 rc 反映(runner 写状态)
+        upgrade_cmd = f'git pull --ff-only --autostash && "{py}" -m pip install -e .'
+        cwd = str(root)
+    else:
+        upgrade_cmd = f'"{py}" -m pip install -U karvyloop'
+        cwd = None
+
+    spec = {"upgrade_cmd": upgrade_cmd, "cwd": cwd, "restart_argv": relaunch["argv"],
+            "host": relaunch["host"], "port": relaunch["port"],
+            "old_pid": _os.getpid(), "from": chk.get("current"), "to": chk.get("latest")}
+    (kl / "_upgrade.json").write_text(_json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+    # 升级开始 → 清掉上次的状态(避免前端读到旧的成败)
+    try:
+        (kl / "_upgrade_status.json").unlink()
+    except Exception:
+        pass
+
+    try:
+        _sp.Popen([py, "-m", "karvyloop.console.upgrade_runner"],
+                  stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                  start_new_session=(_os.name != "nt"),
+                  creationflags=(_sp.DETACHED_PROCESS if _os.name == "nt" else 0))
+    except Exception as e:  # noqa: BLE001
+        try:
+            lock.unlink()
+        except Exception:
+            pass
+        return {"ok": False, "reason": f"启动升级器失败: {e}"}
+
+    # 响应发出后 1 秒,console 自退 → 停服务,让 runner 装+起(detached 的 runner 不受影响)
+    _th.Timer(1.0, lambda: _os._exit(0)).start()
+    return {"ok": True, "started": True, "from": chk.get("current"), "to": chk.get("latest"),
+            "log": str(kl / "upgrade.log")}
 
 
 @router.get("/ops/diagnose")

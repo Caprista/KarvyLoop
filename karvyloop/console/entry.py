@@ -317,6 +317,19 @@ def cmd_console(args: argparse.Namespace) -> int:
             sys.stderr.write(t("console.port_fallback", orig=_req_port, port=port) + "\n")
             sys.stderr.flush()
 
+    # === 记下"怎么重启自己"(一键升级用:升级 runner 装完后照这个把 console 拉起来)===
+    # **必须走 sys.executable + `-m karvyloop`**,不能用 sys.argv[0]:若 console 是 `python -m` 启动的,
+    # argv[0] 是 .py 路径、不可直接 exec → 重启失败=把用户装坏(独立对抗验收 D1)。解释器永远可执行。
+    _relaunch = [sys.executable, "-m", "karvyloop", "console",
+                 "--host", host, "--port", str(port), "--no-browser"]
+    if no_llm:
+        _relaunch.append("--no-llm")
+    if config_path:
+        _relaunch += ["--config", str(config_path)]
+    if getattr(args, "lang", None):
+        _relaunch += ["--lang", str(args.lang)]
+    app.state.console_relaunch = {"argv": _relaunch, "host": host, "port": port}
+
     # === 自动开浏览器(非 --no-browser 时,后台 thread 0.5s 后 open)===
     if not no_browser:
         # 绑 0.0.0.0/::(LAN 可达)时浏览器**不能**导航到 0.0.0.0 → 开 localhost(同机可达)

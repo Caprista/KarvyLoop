@@ -485,6 +485,9 @@
     const bar = el("div", { class: "update-banner", id: "update-banner" });
     bar.appendChild(el("span", { class: "update-banner-msg",
       text: t("update.banner", { current: u.current, latest: u.latest }) }));
+    // 一键升级:点了才升(=手动,不是静默自动);点完后端跑 停→装→起 整套,不用敲命令
+    bar.appendChild(el("button", { class: "update-go", text: t("update.upgrade_btn"),
+      onClick: (e) => _doUpgrade(u, e.target) }));
     if (u.command) bar.appendChild(el("code", { class: "update-cmd", text: u.command }));
     if (u.url) bar.appendChild(el("a", { class: "update-link", href: u.url,
       target: "_blank", rel: "noopener", text: t("update.banner_notes") }));
@@ -493,6 +496,44 @@
       bar.remove();
     } }));
     document.body.insertBefore(bar, document.body.firstChild);
+  }
+  async function _doUpgrade(u, btn) {
+    if (!confirm(t("update.upgrade_confirm", { current: u.current, latest: u.latest }))) return;
+    btn.disabled = true;
+    const msg = document.querySelector("#update-banner .update-banner-msg");
+    if (msg) msg.textContent = t("update.upgrading");
+    try {
+      // 带自定义头(防 CSRF:恶意跨源网页 POST 会因 preflight 被挡)
+      const r = await fetch("/api/update/apply", { method: "POST",
+        headers: { "X-Karvyloop-Upgrade": "1" } });
+      const d = await r.json();
+      if (d && d.ok === false) {
+        if (msg) msg.textContent = t("update.upgrade_failed", { reason: d.reason || "" });
+        btn.disabled = false; return;
+      }
+    } catch (e) { /* console 可能正在重启 → 直接进轮询 */ }
+    _pollUpgrade(u.latest, 0);   // 服务会重启:轮询到新版起来再自动刷新
+  }
+  async function _pollUpgrade(latest, tries) {
+    const msg = document.querySelector("#update-banner .update-banner-msg");
+    if (tries > 150) {           // ~5 分钟还没起来 → 提示看日志,别死等
+      if (msg) msg.textContent = t("update.upgrade_timeout");
+      return;
+    }
+    try {
+      const r = await fetch("/api/update_status", { cache: "no-store" });
+      if (r.ok) {
+        const u = await r.json();
+        if (u && String(u.current) === String(latest)) { location.reload(); return; }
+        // 重启回来但版本没变 + 有失败状态 → 升级没成,停轮询、提示看日志(别假装"还在升级")
+        const lu = u && u.last_upgrade;
+        if (lu && lu.restarted && lu.ok === false) {
+          if (msg) msg.textContent = t("update.upgrade_failed", { reason: lu.msg || "see upgrade.log" });
+          return;
+        }
+      }
+    } catch (e) { /* 重启窗口里连不上是正常的 */ }
+    setTimeout(() => _pollUpgrade(latest, tries + 1), 2000);
   }
 
   // 最近拍板流水(只读):拍完卡会从待决列消失,这里留下回看(不可改,拍过的是事实)。
