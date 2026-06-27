@@ -166,6 +166,10 @@ class MainLoop:
         self.thresholds = thresholds if thresholds is not None else DEFAULT_THRESHOLDS
         self.store = store or InMemoryUsageStore()
         self.verify = verify or VerifyStore()
+        # docs/02 §14:atom 层结晶裁判 = role 多维分级满意度(达成 from verify+success / 效率 from 步数)。
+        # 与 verify/usage 并行的独立存储,信用按 sig(子目标)隔离。
+        from karvyloop.crystallize import SatisfactionStore
+        self.satisfaction = SatisfactionStore()
         self.skill_index = skill_index if skill_index is not None else SkillIndex()
         self.scope = scope
         # 时钟(测试用);默认 wall clock。生产路径不传,observe/maybe_promote
@@ -359,6 +363,17 @@ class MainLoop:
             if matched:
                 sig = matched
                 result.sig = sig
+
+        # 3c. docs/02 §14:atom 层结晶裁判 = role 多维分级满意度。**这一跑是否被核验**(achievement
+        #     满分前提)= 与下方 mark_verified 同一判据,在此先算好 → 避免"observe 先于 mark_verified
+        #     → 首跑被错记 0.5"的时序滞后(对抗验收 C1)。按本跑核验,不查 sig 历史门。信用按 sig 隔离。
+        this_run_verified = bool(run.success and not ctx_dependent and run.tool_calls)
+        try:
+            from karvyloop.crystallize import record_run as _record_satisfaction
+            _record_satisfaction(self.satisfaction, run, sig,
+                                 has_proof=this_run_verified, clock=lambda: now)
+        except Exception:  # 护城河信号是增益不是命脉:不拖垮 drive,但**绝不静默**(对抗验收 C2)
+            logger.warning("[atom_critic] 满意度记账失败(sig=%s);drive 继续", sig[:8], exc_info=True)
 
         # 4. 验证门 + 结晶
         #    CV-11:上下文依赖句(它=文件X 这种临时映射)**绝不**结晶进永久库

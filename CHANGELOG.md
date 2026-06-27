@@ -12,6 +12,17 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward 1.0 — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **Atom-layer crystallization now has a role-as-critic signal** (the first slice of the
+  two-layer-by-accountability redesign, [docs/02 §14]). A skill's runs are scored by a
+  *multi-dimensional, graded* satisfaction — `achievement` (did the sub-goal complete and
+  pass its verify gate), `efficiency` (steps vs the sub-goal's median baseline), and a
+  `quality` dimension reserved for the next slice — aggregated `achievement × (base + good)`
+  so that **doing it well can never rescue a run that wasn't done right** (anti reward-hacking),
+  and credit is isolated per sub-goal signature (a role's own outcome can't leak into an
+  atom's score). New `crystallize/atom_critic.py` (AtomSatisfaction / SatisfactionStore),
+  recorded on the live drive path with the run's own verify verdict (no lag) and fail-loud
+  on error. This is the seam that turns "越用越记得你重复过什么" (memory) into "越用越对你管用"
+  (learning); wiring it into promote/improve and adding the LLM quality dimension come next.
 - **One-click upgrade from the console.** The "new version" banner now has an *Upgrade*
   button: you click it (so it's never a silent auto-upgrade — you decide), and the
   console runs the whole pipeline for you — stop the service → install (`git pull

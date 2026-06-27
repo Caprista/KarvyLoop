@@ -55,6 +55,14 @@ from .store import USAGE_DEBOUNCE_SEC, InMemoryUsageStore, UsageStore
 from .verify import VerifyResult, VerifyStore
 from .sqlite_store import SqliteUsageStore, SqliteVerifyStore
 from .auto_suggest import SuggestHit, auto_suggest
+from .atom_critic import (
+    AtomSatisfaction,
+    SatisfactionStore,
+    evaluate_run,
+    record_run,
+    score_achievement,
+    score_efficiency,
+)
 
 
 __all__ = [
@@ -86,4 +94,7 @@ __all__ = [
     "write_corrections_to_skill_md",
     # evict
     "evict_stale", "restore", "days_since",
+    # atom_critic (docs/02 §14: atom 层结晶裁判 = role 多维分级满意度)
+    "AtomSatisfaction", "SatisfactionStore", "evaluate_run", "record_run",
+    "score_achievement", "score_efficiency",
 ]
