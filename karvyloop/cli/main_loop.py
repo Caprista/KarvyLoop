@@ -194,6 +194,26 @@ class MainLoop:
             _rehydrate_sat(self.trace, self.satisfaction)
         except Exception:
             logger.warning("[trace_eval] 满意度水位重建失败;评价从空水位起(可能重评历史)", exc_info=True)
+        # §14.2 做好·质量维(慢侧):同步 callable(intent,产出)→(quality,critique)。
+        # console 用 gateway 桥成同步后经 set_atom_quality_judge 注入;None=只确定性评(0 回归)。
+        self._atom_quality_judge = None
+
+    def set_atom_quality_judge(self, judge) -> None:
+        """接线 atom 质量裁判(慢侧;§14.2)。judge: (intent, output_text) → (quality, critique)。"""
+        self._atom_quality_judge = judge
+
+    def quality_review(self) -> int:
+        """**慢侧**(daily_poll 节奏,docs/40 §3)质量评:读 Trace 里已确定性评、做对站住的 run →
+        LLM 评质量 → 补到样本 + 回写 Trace。无注入裁判 → 0(确定性满意度照常,质量维待接 gateway)。"""
+        judge = self._atom_quality_judge
+        if judge is None:
+            return 0
+        from karvyloop.crystallize import judge_pending_quality
+        try:
+            return judge_pending_quality(self.trace, self.satisfaction, judge=judge, clock=self._clock)
+        except Exception:
+            logger.warning("[trace_eval] 质量评失败;维护继续", exc_info=True)
+            return 0
 
     def set_trace_funnel(self, funnel: object) -> None:
         """接线漏斗原文层(entry 把 IntentAnalyst 共享的 TraceIndex 接进来,9.3c)。"""

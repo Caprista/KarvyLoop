@@ -24,6 +24,8 @@ from .atom_critic import SatisfactionStore, record_facts
 EVAL_FACT_KIND = "eval_fact"
 # 评价**结果**回写 Trace 的事件类型(docs/40 §1 "学"自反闭环 + 重启水位/样本重建)
 SATISFACTION_KIND = "satisfaction"
+# LLM 质量评判结果回写 Trace 的事件类型(慢侧;补在已有满意度上,重启可重放)
+QUALITY_KIND = "quality"
 
 
 def rehydrate(trace, satisfaction: SatisfactionStore) -> int:
@@ -62,6 +64,22 @@ def rehydrate(trace, satisfaction: SatisfactionStore) -> int:
                 at=float(p.get("ts", 0.0) or 0.0),
             ), int(p.get("steps", 0) or 0))
             n += 1
+    # 第二遍:重放 LLM 质量结果,补到刚重建的样本上(慢侧水位也据此重建,不重复质量评)。
+    for tid in task_ids:
+        try:
+            qentries = trace.query(tid, kind=QUALITY_KIND)
+        except Exception:
+            continue
+        for e in qentries:
+            p = getattr(e, "payload", None) or {}
+            ref = p.get("trace_ref", "")
+            if not ref or satisfaction.quality_judged(ref):
+                continue
+            q = p.get("quality", None)
+            satisfaction.set_quality(
+                ref, (float(q) if isinstance(q, (int, float)) else None),
+                str(p.get("critique", "") or ""),
+            )
     return n
 
 
@@ -128,4 +146,84 @@ def evaluate_pending(trace, satisfaction: SatisfactionStore, *,
     return n
 
 
-__all__ = ["EVAL_FACT_KIND", "SATISFACTION_KIND", "evaluate_pending", "rehydrate"]
+def _output_text(run) -> str:
+    """从 atom_run 取一段可判质量的产出文本(duck-type)。"""
+    out = getattr(run, "output", None)
+    if isinstance(out, dict):
+        return str(out.get("text", "") or "")
+    return str(out) if out else ""
+
+
+def _writeback_quality(trace, tid: str, ref: str, sig: str,
+                       quality, critique: str, clk) -> None:
+    """把 LLM 质量评判回写 Trace(慢侧;重启可重放补到样本上)。失败不拖垮。"""
+    try:
+        from karvyloop.cognition.trace import TraceEntry
+        trace.append(TraceEntry(
+            task_id=tid, kind=QUALITY_KIND,
+            payload={"sig": sig, "trace_ref": ref, "quality": quality, "critique": critique},
+            ts=clk(), source="trace_eval.quality",
+        ))
+    except Exception:
+        pass
+
+
+# 每轮慢侧 tick 的 LLM 质量评**上限**(封顶成本尖峰;backlog 按天细水长流,对抗验收 CRITICAL E)
+QUALITY_JUDGE_LIMIT = 25
+
+
+def judge_pending_quality(trace, satisfaction: SatisfactionStore, *, judge,
+                          tasks: Optional[Iterable[str]] = None,
+                          limit: int = QUALITY_JUDGE_LIMIT, clock=None) -> int:
+    """**慢侧**(daily_poll 节奏):读 Trace 里**已确定性评、做对站住、尚未质量评**的 run,
+    用 LLM 评质量,**补到已有样本上**(不新增 → 不双计),并回写 Trace。返回本轮质量评的条数。
+
+    - `judge`:同步 callable `(intent, output_text) -> (quality∈[0,1]|None, critique)`
+      —— 由持有 gateway 的层注入(judge_quality 的 async→sync 桥)。无 judge → 0(不评)。
+    - 三道门:`judged`(确定性已评)+ 样本 `achievement>0`(做对站住才采信)+ 非 `quality_judged`(去重)。
+    - **成本封顶**:每轮最多 `limit` 次 LLM 调用(按**尝试数**计,gateway 全挂也不会扫爆);
+      没评完的 backlog 留下一轮 —— 重度使用后首个 tick 不再几百次串行 LLM(对抗验收 CRITICAL E)。
+    - quality 为 None(判不出/gateway 挂)→ set_quality 拒绝、不标记 → 下轮重试(CRITICAL D 已堵)。
+    """
+    if trace is None or satisfaction is None or judge is None:
+        return 0
+    clk = clock or _time.time
+    try:
+        task_ids = list(tasks) if tasks is not None else list(trace.all_tasks())
+    except Exception:
+        return 0
+    from .atom_critic import sanitize_critique
+    n = 0
+    attempts = 0   # LLM 调用次数(含失败/判不出)—— 封顶的是它,不是成功数
+    for tid in task_ids:
+        if not tid:
+            continue
+        try:
+            runs = trace.query_atom_runs(tid)
+        except Exception:
+            continue
+        for run in runs:
+            if attempts >= limit:
+                return n   # 本轮额度用尽,剩下的 backlog 留下一轮(细水长流)
+            ref = getattr(run, "trace_ref", "")
+            if (not ref or not satisfaction.judged(ref)
+                    or satisfaction.quality_judged(ref)):
+                continue
+            sample = satisfaction.sample_by_ref(ref)
+            if sample is None or sample.achievement <= 0.0:
+                continue   # 做对没站住 → 不评质量(留待将来,不在此标记)
+            intent = run.input.get("intent", "") if isinstance(getattr(run, "input", None), dict) else ""
+            attempts += 1
+            try:
+                quality, critique = judge(intent, _output_text(run))
+            except Exception:
+                continue
+            crit = sanitize_critique(critique)
+            if satisfaction.set_quality(ref, quality, crit):   # None → 拒绝、不标记 → 下轮重试
+                _writeback_quality(trace, tid, ref, sample.sig, quality, crit, clk)
+                n += 1
+    return n
+
+
+__all__ = ["EVAL_FACT_KIND", "SATISFACTION_KIND", "QUALITY_KIND",
+           "evaluate_pending", "judge_pending_quality", "rehydrate"]

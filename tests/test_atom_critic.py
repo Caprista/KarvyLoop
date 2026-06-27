@@ -173,6 +173,131 @@ def test_evaluate_pending_skips_without_sig_or_ref(tmp_path):
     assert evaluate_pending(trace, sat) == 0            # 无 sig / 无 trace_ref 都跳过(没法做水位,宁不评)
 
 
+# ================= 乙:LLM 质量维(慢侧 Trace 消费者)=================
+
+def _trace_with_run(trace, *, ref, sig, success=True, verified=True, steps=1,
+                    intent="导出csv", output="done"):
+    from karvyloop.cognition.trace import TraceEntry
+    from karvyloop.crystallize import EVAL_FACT_KIND
+    trace.append(TraceEntry(task_id="t", kind="atom_run",
+                 payload={"atom_id": "a", "input": {"intent": intent},
+                          "output": ({"text": output} if output is not None else None),
+                          "success": success, "tool_calls": [{"name": "x"}] * steps,
+                          "trace_ref": ref, "ts": 1.0}))
+    trace.append(TraceEntry(task_id="t", kind=EVAL_FACT_KIND,
+                 payload={"sig": sig, "success": success, "verified": verified,
+                          "steps": steps, "trace_ref": ref}))
+
+
+def test_judge_pending_quality_fills_sample_not_double_counts():
+    from karvyloop.cognition.trace import TraceStore
+    from karvyloop.crystallize import evaluate_pending, judge_pending_quality
+    trace = TraceStore()
+    _trace_with_run(trace, ref="r1", sig="s")
+    sat = SatisfactionStore()
+    evaluate_pending(trace, sat)                    # 确定性评 → 样本(quality=None)
+    assert sat.sample_by_ref("r1").quality is None
+
+    calls = []
+    def judge(intent, output):
+        calls.append((intent, output)); return (0.8, "可以更省一步")
+    assert judge_pending_quality(trace, sat, judge=judge) == 1
+    assert calls == [("导出csv", "done")]           # 拿到了 intent + 产出
+    s = sat.sample_by_ref("r1")
+    assert s.quality == 0.8 and s.critique == "可以更省一步"   # 补在原样本上
+    assert len(sat.samples("s")) == 1               # 没新增样本 → 没双计
+    assert judge_pending_quality(trace, sat, judge=judge) == 0   # 幂等(慢侧水位)
+
+
+def test_quality_not_judged_when_not_did_right():
+    from karvyloop.cognition.trace import TraceStore
+    from karvyloop.crystallize import evaluate_pending, judge_pending_quality
+    trace = TraceStore()
+    _trace_with_run(trace, ref="rf", sig="s", success=False, verified=False, steps=0, output=None)
+    sat = SatisfactionStore()
+    evaluate_pending(trace, sat)
+    called = []
+    assert judge_pending_quality(trace, sat, judge=lambda i, o: (called.append(1), (0.9, "x"))[1]) == 0
+    assert called == []                             # 做对没站住 → 质量裁判根本没被调
+
+
+def test_set_quality_rejects_when_not_did_right():
+    from karvyloop.crystallize import record_facts
+    sat = SatisfactionStore()
+    record_facts(sat, "s", success=False, verified=False, steps=1, trace_ref="r")  # achievement 0
+    assert sat.set_quality("r", 1.0, "great") is False   # 做对没站住 → 拒写质量
+
+
+def test_quality_none_not_marked_and_retries():
+    # CRITICAL D:judge 判不出 / gateway 一时挂 → (None,"") → 不标记 → 下轮重试,恢复就补上
+    from karvyloop.cognition.trace import TraceStore
+    from karvyloop.crystallize import evaluate_pending, judge_pending_quality
+    trace = TraceStore()
+    _trace_with_run(trace, ref="r1", sig="s")
+    sat = SatisfactionStore()
+    evaluate_pending(trace, sat)
+    assert judge_pending_quality(trace, sat, judge=lambda i, o: (None, "")) == 0   # 失败:不评
+    assert not sat.quality_judged("r1")                  # **没被永久标记**(否则就是投毒)
+    assert sat.sample_by_ref("r1").quality is None
+    assert judge_pending_quality(trace, sat, judge=lambda i, o: (0.6, "ok")) == 1  # 恢复:补上
+    assert sat.sample_by_ref("r1").quality == 0.6
+
+
+def test_quality_judge_respects_limit():
+    # CRITICAL E:每轮 LLM 调用封顶,backlog 留下一轮(细水长流,不尖峰)
+    from karvyloop.cognition.trace import TraceStore
+    from karvyloop.crystallize import evaluate_pending, judge_pending_quality
+    trace = TraceStore()
+    for i in range(5):
+        _trace_with_run(trace, ref=f"r{i}", sig=f"s{i}")
+    sat = SatisfactionStore()
+    evaluate_pending(trace, sat)
+    calls = []
+    def judge(i, o):
+        calls.append(1); return (0.5, "x")
+    assert judge_pending_quality(trace, sat, judge=judge, limit=2) == 2   # 本轮只评 2
+    assert len(calls) == 2                                                # 只调 2 次 LLM(封顶)
+    assert judge_pending_quality(trace, sat, judge=judge, limit=2) == 2   # 下轮再 2
+    assert judge_pending_quality(trace, sat, judge=judge, limit=2) == 1   # 剩 1
+
+
+def test_rehydrate_replays_quality():
+    from karvyloop.cognition.trace import TraceStore
+    from karvyloop.crystallize import evaluate_pending, judge_pending_quality, rehydrate
+    trace = TraceStore()
+    _trace_with_run(trace, ref="r1", sig="s")
+    sat = SatisfactionStore()
+    evaluate_pending(trace, sat)
+    judge_pending_quality(trace, sat, judge=lambda i, o: (0.7, "crit"))
+    # 重启:新 store 从 Trace 重建 —— 质量也得重放回来
+    sat2 = SatisfactionStore()
+    rehydrate(trace, sat2)
+    s = sat2.sample_by_ref("r1")
+    assert s is not None and s.quality == 0.7 and s.critique == "crit"
+    assert sat2.quality_judged("r1")
+
+
+def test_mainloop_quality_review_seam(tmp_path):
+    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.cognition.trace import TraceStore
+
+    def _slow(text):
+        def sb(intent, *, ctx=None):
+            return text, AtomRun(atom_id="forge", input={"intent": intent}, output={"text": text},
+                                 success=True, tool_calls=[{"name": "write_file"}], trace_ref="tr-q", ts=1.0)
+        return sb
+
+    ml = MainLoop(skills_dir=tmp_path / "s", trace=TraceStore())
+    assert ml.quality_review() == 0                 # 无裁判 → 0(确定性照常,0 回归)
+    ml.set_atom_quality_judge(lambda intent, output: (0.9, "省一步"))
+    r = ml.drive("导出 csv", slow_brain=_slow("done"))
+    ml.background_review()                           # 确定性评(快侧)
+    assert ml.quality_review() == 1                  # 质量评(慢侧)
+    s = ml.satisfaction.sample_by_ref("tr-q")
+    assert s.quality == 0.9 and s.critique == "省一步"
+    assert ml.quality_review() == 0                  # 幂等
+
+
 # ---- 对抗回归:重启不双计 + 跨 task 不孤儿(CRITICAL #1 / #2)----
 
 def test_restart_does_not_double_count_via_rehydrate():

@@ -86,6 +86,13 @@ def build_console_app(
                                 f"[karvyloop console] 小卡 daily 建议 → 推 {sent} client(s): "
                                 f"{proposal.summary[:40]}"
                             )
+                        # docs/40 §3 慢侧:每日 tick 跑一次 atom 质量评(读 Trace、LLM 评质量补样本)。
+                        # 放线程里跑(LLM 可能慢),不阻塞事件循环;离 drive 热路径(跑评分离)。
+                        _ml = getattr(app.state, "main_loop", None)
+                        if _ml is not None and hasattr(_ml, "quality_review"):
+                            judged = await asyncio.to_thread(_ml.quality_review)
+                            if judged:
+                                logger.info(f"[karvyloop console] 慢侧 atom 质量评 {judged} 条")
                     except asyncio.CancelledError:
                         break
                     except Exception as e:

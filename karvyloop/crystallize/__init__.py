@@ -68,7 +68,14 @@ from .atom_critic import (
     score_achievement,
     score_efficiency,
 )
-from .trace_eval import EVAL_FACT_KIND, SATISFACTION_KIND, evaluate_pending, rehydrate
+from .trace_eval import (
+    EVAL_FACT_KIND,
+    QUALITY_KIND,
+    SATISFACTION_KIND,
+    evaluate_pending,
+    judge_pending_quality,
+    rehydrate,
+)
 
 
 __all__ = [
@@ -104,7 +111,8 @@ __all__ = [
     "AtomSatisfaction", "SatisfactionStore", "evaluate_run", "record_run", "record_facts",
     "score_achievement", "score_efficiency", "judge_quality", "parse_quality",
     # trace_eval (docs/40 §3: Trace-派生异步评价器,跑评分离 + §1 学回写 Trace/重启重建)
-    "EVAL_FACT_KIND", "SATISFACTION_KIND", "evaluate_pending", "rehydrate",
+    "EVAL_FACT_KIND", "SATISFACTION_KIND", "QUALITY_KIND",
+    "evaluate_pending", "judge_pending_quality", "rehydrate",
     # improve from role critique (slice-b: 取代死的 steered_by_user 路)
     "write_critiques_to_skill_md",
 ]

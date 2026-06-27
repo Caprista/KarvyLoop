@@ -101,7 +101,8 @@ class SatisfactionStore:
     def __init__(self, cap: int = 64) -> None:
         self._by_sig: dict[str, list[tuple[AtomSatisfaction, int]]] = {}
         self._cap = cap
-        self._judged: set[str] = set()   # 已评过的 run trace_ref(异步评价器去重水位)
+        self._judged: set[str] = set()           # 确定性已评的 run trace_ref(快侧水位)
+        self._quality_judged: set[str] = set()   # LLM 质量已评的 run trace_ref(慢侧水位)
         self._lock = threading.Lock()
 
     def baseline_steps(self, sig: str) -> Optional[float]:
@@ -126,9 +127,45 @@ class SatisfactionStore:
                 self._judged.add(sat.trace_ref)
 
     def judged(self, trace_ref: str) -> bool:
-        """这条 run(按 trace_ref)是否已评过 —— 异步评价器据此跳过,不重复评(水位)。"""
+        """这条 run(按 trace_ref)是否已**确定性评**过 —— 跳过不重复评(确定性水位)。"""
         with self._lock:
             return bool(trace_ref) and trace_ref in self._judged
+
+    def quality_judged(self, trace_ref: str) -> bool:
+        """这条 run 是否已**质量评**过(LLM 慢侧水位,独立于确定性水位)。"""
+        with self._lock:
+            return bool(trace_ref) and trace_ref in self._quality_judged
+
+    def sample_by_ref(self, trace_ref: str) -> Optional[AtomSatisfaction]:
+        """按 run trace_ref 找回那条满意度样本(质量评要补在已评的样本上)。"""
+        if not trace_ref:
+            return None
+        with self._lock:
+            for rows in self._by_sig.values():
+                for s, _ in rows:
+                    if s.trace_ref == trace_ref:
+                        return s
+        return None
+
+    def set_quality(self, trace_ref: str, quality: Optional[float], critique: str = "") -> bool:
+        """把 LLM 质量评判**补到已存在的样本上**(不新增样本 → 不双计;overall 是 property 自动重算)。
+
+        返回 True=补上了(并标记 quality_judged 水位)。两道拒绝:
+        - **做对站住才采信**:achievement<=0 的样本拒绝写质量(质量在做对之后);
+        - **quality 为 None(judge 判不出 / gateway 一时挂)→ 拒绝、不标记**:留待下个慢侧 tick 重试,
+          gateway 恢复就补上。否则一次失败会**永久标记"已评=空"、永不重试**(对抗验收 CRITICAL D 投毒)。
+        """
+        if quality is None:
+            return False
+        s = self.sample_by_ref(trace_ref)
+        if s is None or s.achievement <= 0.0:
+            return False
+        with self._lock:
+            s.quality = quality
+            if critique:
+                s.critique = critique
+            self._quality_judged.add(trace_ref)
+        return True
 
     def samples(self, sig: str) -> list[AtomSatisfaction]:
         with self._lock:

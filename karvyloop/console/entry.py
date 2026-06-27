@@ -205,6 +205,24 @@ def cmd_console(args: argparse.Namespace) -> int:
             # → 提炼器异步 原文→摘要→习惯(与 IntentAnalyst 同一 TraceIndex)
             if main_loop is not None and hasattr(main_loop, "set_trace_funnel"):
                 main_loop.set_trace_funnel(bundle.trace_index)
+            # §14.2 / docs/40 §3 慢侧 atom 质量裁判:复用已接好的 gateway,把 judge_quality(async)
+            # 桥成同步注入 MainLoop;daily_poll 跑 ml.quality_review() → 读 Trace 里已确定性评、做对站住
+            # 的 run,LLM 评质量补到样本(跑评分离:绝不在 drive 热路径,只在每日慢侧 tick)。
+            _gw = runtime_kwargs.get("gateway")
+            if (main_loop is not None and _gw is not None
+                    and hasattr(main_loop, "set_atom_quality_judge")):
+                _mref = runtime_kwargs.get("model_ref", "") or ""
+
+                def _atom_quality_judge(intent, output_text, _gw=_gw, _mref=_mref):
+                    import asyncio
+                    from karvyloop.crystallize.atom_critic import judge_quality
+                    try:
+                        return asyncio.run(judge_quality(intent, output_text,
+                                                         gateway=_gw, model_ref=_mref))
+                    except Exception:
+                        return (None, "")
+
+                main_loop.set_atom_quality_judge(_atom_quality_judge)
             sys.stderr.write(
                 (t("console.karvy_wired_on") if bundle.has_llm
                  else t("console.karvy_wired_off")) + "\n"

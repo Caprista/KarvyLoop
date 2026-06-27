@@ -12,6 +12,17 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward 1.0 — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **The atom's quality is now judged by an LLM on a slow Trace-reading cadence — off the hot
+  path.** Each day the console reads the runs that already passed the cheap deterministic
+  evaluation *and* cleared correctness (做对站住), asks the model "how well was this done", and
+  folds a graded quality score + a one-line critique into that run's existing satisfaction
+  (no new sample, so no double-count). It is wired through the existing daily-poll consumer and
+  gateway bridge — it never adds latency to your turn. Hardened against the failure modes that
+  matter for a learning signal: a gateway hiccup (no judgment) is *not* recorded as "judged with
+  no quality" — it's left to retry when the model is reachable again (so one bad day can't
+  silently poison the signal); the per-day work is capped so a backlog never becomes a burst of
+  LLM calls; quality survives restart (replayed from the Trace). (Independent adversarial
+  verification caught the silent-poison and cost-spike modes before commit; both fixed with tests.)
 - **Execution and evaluation are now separated (run/eval split).** A drive used to *score*
   the run on the hot path; now `drive()` only executes and writes the evaluation *facts*
   (sig, success, verified, steps) into the Trace, and a Trace-derived evaluator
