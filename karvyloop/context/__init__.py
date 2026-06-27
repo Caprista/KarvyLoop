@@ -24,6 +24,7 @@ from .budget import (
     GovConfig,
     GovState,
     autocompact_threshold,
+    clip_to_tokens,
     count_tokens_messages,
     count_tokens_text,
     microcompact_threshold,
@@ -37,7 +38,7 @@ __all__ = [
     "MAX_CONSECUTIVE_FAILURES", "AUTOCOMPACT_BUFFER_TOKENS",
     "MICROCOMPACT_BUFFER_TOKENS", "MANUAL_COMPACT_BUFFER_TOKENS",
     "GovState", "GovConfig", "BlockingLimitError",
-    "count_tokens_text", "count_tokens_messages",
+    "count_tokens_text", "count_tokens_messages", "clip_to_tokens",
     "autocompact_threshold", "microcompact_threshold",
     # boundary
     "SENTINEL", "CACHE_TYPE",

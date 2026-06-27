@@ -34,6 +34,21 @@ def count_tokens_text(s: str) -> int:
     return max(1, len(s) // _CHARS_PER_TOKEN)
 
 
+def clip_to_tokens(s: str, max_tokens: int) -> tuple[str, bool]:
+    """把文本压到 token 预算内,**走 HR-9 唯一截断入口**(context engineering 基建,不许裸截)。
+
+    任何"读 Trace / 组材料喂 LLM"的场合都该走它,而不是 `s[:N]`:预算用 `count_tokens_text` 估,
+    实际截断走 `truncate_str_utf8`(永不切坏 UTF-8 多字节)。token≈4 字符,故字节上限取
+    `max_tokens * _CHARS_PER_TOKEN`。返回 (clipped, truncated)。
+    """
+    from .truncate import truncate_str_utf8
+    if max_tokens <= 0:
+        return "", bool(s)
+    if not s or count_tokens_text(s) <= max_tokens:
+        return s, False
+    return truncate_str_utf8(s, max_tokens * _CHARS_PER_TOKEN)
+
+
 def count_tokens_messages(messages: list[dict]) -> int:
     """粗估一组消息的 token 数。
 

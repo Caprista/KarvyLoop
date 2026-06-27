@@ -264,6 +264,9 @@ QUALITY_SYSTEM = (
 )
 
 _MAX_CRITIQUE = 280
+# 质量评材料的 token 预算(走 context engineering 的 clip_to_tokens,不裸截)
+_QUALITY_INTENT_TOKENS = 200
+_QUALITY_OUTPUT_TOKENS = 600
 
 
 def _first_json_object(s: str) -> Optional[str]:
@@ -346,7 +349,12 @@ async def judge_quality(intent: str, output_text: str, *, gateway,
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
     except Exception:
         ref = model_ref
-    material = f"子任务:{intent}\n\n产出:\n{(output_text or '')[:2000]}"
+    # docs/40 §1 + 第一问:读 Trace 喂 LLM 的材料**走 context engineering 基建**(token 预算 +
+    # HR-9 唯一截断入口),不裸截 `[:2000]`(Hardy:Trace 的压缩/调用本身就是 context engineering)。
+    from karvyloop.context.budget import clip_to_tokens
+    clipped, _ = clip_to_tokens(intent or "", _QUALITY_INTENT_TOKENS)
+    body, _ = clip_to_tokens(output_text or "", _QUALITY_OUTPUT_TOKENS)
+    material = f"子任务:{clipped}\n\n产出:\n{body}"
     out = ""
     try:
         with token_source("atom_quality"):

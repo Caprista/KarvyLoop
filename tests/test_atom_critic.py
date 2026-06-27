@@ -173,6 +173,17 @@ def test_evaluate_pending_skips_without_sig_or_ref(tmp_path):
     assert evaluate_pending(trace, sat) == 0            # 无 sig / 无 trace_ref 都跳过(没法做水位,宁不评)
 
 
+# ---- context engineering 基建:读 Trace 喂 LLM 的材料走 token 预算 + HR-9 截断,不裸截 ----
+
+def test_clip_to_tokens_budgets_via_hr9_truncate():
+    from karvyloop.context.budget import clip_to_tokens
+    assert clip_to_tokens("短文本", 100) == ("短文本", False)     # 预算内不动
+    out, truncated = clip_to_tokens("x" * 4000, 100)              # ~1000 token → 压到 ~100
+    assert truncated and len(out) <= 100 * 4
+    out2, t2 = clip_to_tokens("汉字" * 2000, 50)                  # CJK:走 HR-9,不切坏多字节
+    assert t2 and "�" not in out2
+
+
 # ================= 乙:LLM 质量维(慢侧 Trace 消费者)=================
 
 def _trace_with_run(trace, *, ref, sig, success=True, verified=True, steps=1,
