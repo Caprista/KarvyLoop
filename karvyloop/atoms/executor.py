@@ -331,15 +331,9 @@ async def run(
                 state.cumulative_input_tokens += input_tokens
                 state.cumulative_output_tokens += output_tokens
                 state.cumulative_cost_usd += cost
-                # 拍 9.3a:把本轮真实用量记进 token 账本。**gateway 路径之前漏了这步**
-                # (token 只累进了 state,从没喂账本)→ /api/tokens 看板恒为 0。source 走 contextvar。
-                if input_tokens or output_tokens:
-                    try:
-                        from karvyloop.llm.token_ledger import record as _rec_tokens
-                        _rec_tokens(model=model_ref, input=input_tokens, output=output_tokens,
-                                    cache_read=cache_read, cache_write=cache_write)
-                    except Exception:
-                        pass
+                # token 账本记账已上移到**唯一咽喉** GatewayClient.complete(forge 也走 gateway.complete,
+                # 在那里按 Usage + contextvar source 记一次)→ 这里不再记,否则 forge 双重计数。
+                # 本处只累进 state(供 state.cumulative_* 用),不碰账本。
                 # 把本轮 assistant 消息入历史(Anthropic 协议: content 是 blocks 列表)
                 assistant_content: list[dict] = []
                 if assistant_text:

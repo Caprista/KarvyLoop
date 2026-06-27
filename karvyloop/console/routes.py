@@ -3439,9 +3439,10 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
     if gw is not None and atom_reg is not None:
         try:
             from karvyloop.adapter.bootstrap import bootstrap_decompose
-            decomp = await bootstrap_decompose(
-                manifest, existing_atom_ids=[a.id for a in atom_reg.list_all()],
-                gateway=gw, model_ref=rk.get("model_ref", ""))
+            with _token_src("agent_import"):     # 让导入拆解的 token 进账本 + 归到 agent_import 源
+                decomp = await bootstrap_decompose(
+                    manifest, existing_atom_ids=[a.id for a in atom_reg.list_all()],
+                    gateway=gw, model_ref=rk.get("model_ref", ""))
         except Exception as e:  # noqa: BLE001 — 拆解任何异常都降级,不让导入崩
             decomp = None
             logger.warning(f"[agent/import] LLM 拆解失败,降级 v0: {e}")
