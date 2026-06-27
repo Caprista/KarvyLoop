@@ -24,6 +24,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from karvyloop.llm.token_ledger import token_source as _token_src
+
 from karvyloop.cli.main_loop import MainLoop
 from karvyloop.karvy.h2a import (
     H2A_ACCEPT,
@@ -1104,6 +1106,12 @@ async def maybe_route_to_role(app, mgr, intent: str):
     domain_id = peer.domain_id if peer is not None else "l0"  # 默认私聊小卡
     if not is_karvy_peer(domain_id):
         return None  # 私聊业务 role → 该 role 自己执行(照常 drive)
+    # 运维意图(诊断/排查/运维)→ ops 诊断 H2A。ops 不是"委派给某角色",故不经 should_route 分类
+    # (独立对抗验收点名:"帮我诊断系统" 会被 should_route 判 execute → 永远到不了 ops 路由)。
+    if _looks_like_ops(intent):
+        routed = await _fuzzy_ops_proposal(app, intent)
+        if routed is not None:
+            return routed
     if not dispatch_for_peer(domain_id, intent).should_route:
         return None  # execute / courier → 小卡自己处理(照常)
     registry = getattr(app.state, "proposal_registry", None)
@@ -1131,29 +1139,130 @@ async def maybe_route_to_role(app, mgr, intent: str):
                      f"要在「{rt['group_name']}」开桌讨论「{rt['topic']}」吗?(到 🤝 H2A 处置)"),
         }
 
-    # ② 退回单角色委派(原逻辑)。
+    # ② 退回单角色委派(原逻辑,确定性子串匹配)。
     match = _match_role_for_intent(app, intent)
-    if match is None:
-        return None  # 匹配不到业务 role → 小卡自己干(不强行路由)
+    if match is not None:
+        import time as _t
+        from karvyloop.console.proposals import broadcast_proposal
+        from karvyloop.karvy.proposal_registry import proposal_for_route
+
+        proposal = proposal_for_route(ts=_t.time(), requirement=intent, **match)
+        registry.register(proposal)
+        try:
+            await broadcast_proposal(app, proposal)  # 推到 H2A 列
+        except Exception:
+            pass
+        return {
+            "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
+            "crystallized": False, "skill_name": "", "routed": True,
+            "text": (f"这件事属于业务域「{match['domain_name']}」 — "
+                     f"要不要转给「{match['role']}」去做?(到 🤝 H2A 处置)"),
+        }
+
+    # ③ 模糊指令 LLM 拆解兜底(确定性规则没命中编排时):"去X域找几个人分析Y" 这类
+    #    没点名、没说"圆桌"的模糊话 → LLM 拆出 域+人+方式 → 落到既有 H2A 提案。降级=小卡自己干。
+    routed = await _maybe_fuzzy_dispatch(app, intent)
+    if routed is not None:
+        return routed
+    return None  # 匹配不到 + 拆不出编排 → 小卡自己干(不强行路由)
+
+
+_OPS_KW = (
+    "诊断", "运维", "排查", "自检", "健康检查", "系统问题", "哪里有问题", "哪儿有问题",
+    "哪有问题", "修一下系统", "系统出错", "系统报错", "self-heal", "diagnose", "health check",
+)
+
+
+def _looks_like_ops(intent: str) -> bool:
+    """像不像"诊断/排查系统"这类运维意图(确定性,便宜,让 ops 能从自然语言路由)。"""
+    low = (intent or "").lower()
+    return any(k in intent or k in low for k in _OPS_KW)
+
+
+async def _maybe_fuzzy_dispatch(app, intent: str):
+    """模糊指令 → LLM 拆解 → roundtable/delegate/ops 的 H2A 提案;self/降级 → None。"""
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    if gw is None:
+        return None
+    import time as _t
+
+    from karvyloop.console.proposals import broadcast_proposal
+    from karvyloop.karvy.fuzzy_dispatch import build_roster, decompose_dispatch
+
+    roster = build_roster(app)
+    try:
+        with _token_src("fuzzy_dispatch"):
+            plan = await decompose_dispatch(intent, roster=roster, gateway=gw,
+                                            model_ref=rk.get("model_ref", ""))
+    except Exception as e:  # noqa: BLE001 — 拆解任何异常都降级,不让 drive 崩
+        logger.warning(f"[fuzzy_dispatch] 拆解失败,降级小卡自己干: {e}")
+        return None
+    if plan is None or not plan.is_actionable():
+        return None
     registry = getattr(app.state, "proposal_registry", None)
     if registry is None:
         return None
-    import time as _t
-    from karvyloop.console.proposals import broadcast_proposal
-    from karvyloop.karvy.proposal_registry import proposal_for_route
 
-    proposal = proposal_for_route(ts=_t.time(), requirement=intent, **match)
+    if plan.action == "roundtable":
+        from karvyloop.karvy.proposal_registry import proposal_for_roundtable
+        proposal = proposal_for_roundtable(
+            ts=_t.time(), group_domain_id=plan.domain_id, group_name=plan.domain_name,
+            participants=list(plan.participants), participant_names=list(plan.participant_names),
+            topic=plan.topic or intent)
+        who = "、".join(plan.participant_names)
+        text = (f"我把你这句拆开了:想在「{plan.domain_name}」找 {who} 一起讨论「{plan.topic or intent}」"
+                f"—— 这是开**圆桌**。要开吗?(到 🤝 H2A 处置)")
+    elif plan.action == "delegate":
+        from karvyloop.karvy.proposal_registry import proposal_for_route
+        proposal = proposal_for_route(
+            ts=_t.time(), domain_id=plan.domain_id, role=plan.participant_names[0],
+            agent_id=plan.participants[0], domain_name=plan.domain_name,
+            requirement=plan.topic or intent)
+        text = (f"我理解你想把「{plan.topic or intent}」交给「{plan.domain_name}」的"
+                f"「{plan.participant_names[0]}」。要转过去吗?(到 🤝 H2A 处置)")
+    elif plan.action == "ops":
+        return await _fuzzy_ops_proposal(app, intent)
+    else:
+        return None
+
     registry.register(proposal)
     try:
-        await broadcast_proposal(app, proposal)  # 推到 H2A 列
+        await broadcast_proposal(app, proposal)
     except Exception:
         pass
-    return {
-        "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
-        "crystallized": False, "skill_name": "", "routed": True,
-        "text": (f"这件事属于业务域「{match['domain_name']}」 — "
-                 f"要不要转给「{match['role']}」去做?(到 🤝 H2A 处置)"),
-    }
+    return {"intent": intent, "brain": "SLOW", "fast_brain_hit": False,
+            "crystallized": False, "skill_name": "", "routed": True, "text": text}
+
+
+async def _fuzzy_ops_proposal(app, intent: str):
+    """模糊"帮我诊断/排查系统" → 跑 ops 诊断 → ops_fix H2A 提案(承既有 ops 路径)。"""
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    try:
+        import time as _t
+
+        from karvyloop.console.proposals import broadcast_proposal
+        from karvyloop.karvy.proposal_registry import proposal_for_ops_fix
+        from karvyloop.ops_agent import diagnose
+        with _token_src("ops_diagnose"):
+            d = await diagnose(intent, gateway=gw, model_ref=rk.get("model_ref", ""))
+        codes = [f.get("code", "") for f in (d.to_dict().get("findings", []) or [])]
+        prop = proposal_for_ops_fix(diagnosis=d.to_dict(), finding_codes=codes, ts=_t.time())
+        registry = getattr(app.state, "proposal_registry", None)
+        if registry is None:
+            return None
+        registry.register(prop)
+        try:
+            await broadcast_proposal(app, prop)
+        except Exception:
+            pass
+        return {"intent": intent, "brain": "SLOW", "fast_brain_hit": False, "crystallized": False,
+                "skill_name": "", "routed": True,
+                "text": "我把这当成运维诊断跑了一轮,结论放到 🤝 H2A 处置(诊断是未核验建议,你拍板)。"}
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[fuzzy_dispatch] ops 诊断失败,降级: {e}")
+        return None
 
 
 def _stub_no_main_loop(intent: str):

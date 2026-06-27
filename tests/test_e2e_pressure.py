@@ -212,3 +212,28 @@ def test_j6_agent_import_llm_decompose_real_model(app):
         assert app.state.atom_registry.get(aid) is not None, f"原子 {aid} 没进公共池"
     comp = (app.state.role_registry.root / out["role_id"] / "COMPOSITION.yaml").read_text(encoding="utf-8")
     assert any(f"atom: {aid}" in comp for aid in out["atoms"]), "COMPOSITION 没引原子"
+
+
+# ---- J7:模糊指令 LLM 拆解(真模型)—— "去X域找人做Y" → 拆成 域+人+H2A 提案 ----
+def test_j7_fuzzy_dispatch_real_model(app):
+    """没点名角色、没说"圆桌"的模糊话 → 真模型拆出 域+人 → 落到真实成员的 H2A 提案(非小卡自己干)。
+
+    best-effort:真模型并发可能截断 JSON(宁空勿毒→None 降级)→ 重试几次验"能拆"。
+    """
+    from karvyloop.console.routes import maybe_route_to_role
+    from karvyloop.karvy.proposal_registry import KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE
+
+    # "设计工作室" 域名出现,但成员名"设计师"**不**在句中(避开确定性子串匹配,逼走模糊拆解层)
+    intent = "去设计工作室那边找人帮我评审一下新界面的设计"
+    out = None
+    for _ in range(3):
+        before = len(app.state.proposal_registry.pending())
+        out = asyncio.run(maybe_route_to_role(app, app.state.conversation_manager, intent))
+        if out and out.get("routed") and len(app.state.proposal_registry.pending()) > before:
+            break
+    assert out is not None and out.get("routed") is True, f"模糊指令没被拆成编排(反复降级): {out}"
+    p = app.state.proposal_registry.pending()[-1]
+    assert p.kind in (KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE), f"拆出的不是圆桌/委派: {p.kind}"
+    # 落到的是**真实**域/成员(设计工作室 / 设计师),不是凭空编的
+    blob = str(p.payload)
+    assert "设计" in blob, f"提案没指向真实的设计域/成员: {p.payload}"
