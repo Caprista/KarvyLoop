@@ -11,6 +11,15 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward 1.0 — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **Console handles a busy port intelligently.** If `8766` is taken by a *foreign*
+  process, the console binds the next free port and prints the real URL — a port
+  collision never blocks you. If it's taken by *another KarvyLoop* (e.g. an old version
+  still running during an upgrade), it does **not** silently move; it reports the running
+  instance's version + URL and tells you to stop it first — so you never end up looking at
+  the old UI on 8766 while the new one hides on 8767. The free-port probe matches uvicorn's
+  bind (POSIX `SO_REUSEADDR`), so a quick kill-and-restart reclaims 8766 instead of drifting.
+
 ## 2026.6.27
 
 ### Added

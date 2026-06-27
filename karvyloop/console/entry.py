@@ -22,6 +22,59 @@ from typing import Optional, Sequence
 logger = logging.getLogger(__name__)
 
 
+def _port_free(host: str, port: int) -> bool:
+    """该端口现在能不能绑(探测;探测不了 → 当能绑,交给 uvicorn 决定)。
+
+    **必须设 SO_REUSEADDR**:uvicorn 默认就是带 REUSEADDR 绑的,若这里不设,刚 `fuser -k`/重启时
+    端口处于 TIME_WAIT 会被误判"占用"→ 无谓挪端口(实测 VM 重启后跑到了 8768)。设了之后:TIME_WAIT
+    端口判为可绑(对,uvicorn 能绑),**活着的监听端口仍判占用**(SO_REUSEADDR 不让抢活监听)。
+    """
+    import os
+    import socket
+    test_host = "0.0.0.0" if host in ("", "::") else host
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # 只在 POSIX 设 SO_REUSEADDR(对齐 uvicorn/asyncio):Linux/Mac 上它=复用 TIME_WAIT(不抢活监听);
+    # **Windows 上它=允许抢占同端口**(语义相反),设了会把"被占"误判成"空闲" → 千万别在 Windows 设。
+    if os.name != "nt":
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind((test_host, port))
+        return True
+    except OSError:
+        return False
+    except Exception:
+        return True   # IPv6-only host 之类探测不了 → 别挡
+    finally:
+        s.close()
+
+
+def _next_free_port(host: str, port: int, *, limit: int = 20) -> int:
+    """从 port+1 向上探 limit 个空闲端口;都占满 → 返回原 port(让 uvicorn 照旧报错,不静默吞)。"""
+    for cand in range(port + 1, port + 1 + max(1, limit)):
+        if _port_free(host, cand):
+            return cand
+    return port
+
+
+def _probe_karvyloop_version(host: str, port: int, *, timeout: float = 0.6):
+    """探测 host:port 上是不是 **KarvyLoop console**(GET /api/update_status 有 'current' 字段即是)。
+
+    返回它的版本字符串;不是 KarvyLoop / 连不上 / 不是预期形状 → None。**关键**:用来区分
+    "端口被外部进程占"(可安全挪端口)vs"被 KarvyLoop 自己占"(升级时旧版没退 / 已有实例 —— 这时
+    **不能**静默挪到新端口,否则用户开 8766 看到旧版、新版偷偷在 8767,完全不知道)。
+    """
+    import json
+    import urllib.request
+    h = "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
+    try:
+        with urllib.request.urlopen(f"http://{h}:{port}/api/update_status", timeout=timeout) as r:
+            d = json.loads(r.read().decode())
+        v = d.get("current")
+        return str(v) if v else None
+    except Exception:
+        return None
+
+
 def cmd_console(args: argparse.Namespace) -> int:
     """`karvyloop console` 入口(8.5-C-frontend 实做)。
 
@@ -241,6 +294,28 @@ def cmd_console(args: argparse.Namespace) -> int:
         sys.stderr.flush()
     except Exception as e:
         logger.warning(f"[karvyloop console] 对话编排器接线失败(console 照常起): {e}")
+
+    # === 端口被占的处理(放在开浏览器/opening/uvicorn 之前,三者都用真实端口)===
+    # 撞端口不挡用户,但**要区分**:外部进程占 → 安全挪到下一个空闲端口;KarvyLoop 自己占
+    # (升级时旧版没退 / 已有实例)→ **绝不静默挪**(否则用户开 8766 看旧版、新版偷偷在别处),如实告知 + 退出。
+    _req_port = port
+    if not _port_free(host, port):
+        _running = _probe_karvyloop_version(host, port)
+        if _running is not None:
+            from karvyloop import __version__ as _ver
+            _bh = "localhost" if host in ("0.0.0.0", "::", "") else host
+            _url = f"http://{_bh}:{port}/"
+            if str(_running) == str(_ver):
+                sys.stderr.write(t("console.already_running", url=_url, ver=_running) + "\n")
+            else:   # 旧版还占着 → 升级未生效,提示先停旧版
+                sys.stderr.write(t("console.old_running", url=_url, old=_running, new=_ver) + "\n")
+            sys.stderr.flush()
+            return 0
+        # 占用者是外部进程 → 安全挪到下一个空闲端口
+        port = _next_free_port(host, port)
+        if port != _req_port:
+            sys.stderr.write(t("console.port_fallback", orig=_req_port, port=port) + "\n")
+            sys.stderr.flush()
 
     # === 自动开浏览器(非 --no-browser 时,后台 thread 0.5s 后 open)===
     if not no_browser:
