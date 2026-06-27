@@ -114,7 +114,9 @@ async def suggest_consolidation(atoms: list, *, gateway: Any, model_ref: str = "
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
     except Exception:
         ref = model_ref
+    from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     material = "原子清单:\n" + _format_atoms(atoms)
+    material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板(原子数多时防爆)
     out = ""
     async for ev in gateway.complete(
         [{"role": "user", "content": material}], [], ref,

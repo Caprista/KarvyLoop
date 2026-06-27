@@ -195,7 +195,9 @@ async def bootstrap_decompose(
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
     except Exception:
         ref = model_ref
+    from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     material = _format_input(manifest, existing_atom_ids)
+    material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板(各字段已截,整段再封顶)
     # 重试一次再降级:并发/网络偶发把 JSON 截断 → parse 返 None,多半重发就好(批量导入
     # 实测 70 个里 1-3 个坏 JSON)。只重 1 次,仍 None 才降级回 v0(不无限烧 token)。
     for _attempt in range(2):

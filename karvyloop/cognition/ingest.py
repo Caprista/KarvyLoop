@@ -124,12 +124,15 @@ async def compile_material(material: str, *, gateway: Any, model_ref: str = "") 
     ""(空)或槽位别名(如 console runtime_kwargs)→ 不解析直接喂会让 complete 流空 →
     parse_facts([]) → written=0(真机抓到:单测桩 gateway 忽略 model_ref 故掩盖了它)。
     """
+    from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     from karvyloop.gateway import ResolveScope
     from karvyloop.gateway.system import SystemPrompt
     try:
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
     except Exception:
         ref = model_ref  # 解析不了就用原值(测试桩 gateway 无 resolve_model 也能跑)
+    # 第一问/docs/40 §1:喂 LLM 的材料过 context engineering 基建天花板(宽松,只防病态爆炸)。
+    material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)
     out = ""
     async for ev in gateway.complete(
         [{"role": "user", "content": material}], [], ref,

@@ -258,6 +258,8 @@ async def compile_decisions(samples: list[DecisionSample], *, gateway: Any,
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
     except Exception:
         ref = model_ref
+    from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
+    material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板(批量决策多时防爆)
     out = ""
     async for ev in gateway.complete(
         [{"role": "user", "content": material}], [], ref,
@@ -453,6 +455,8 @@ async def reconcile_decisions(samples: list[DecisionSample], *, existing: list[s
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
     except Exception:
         ref = model_ref
+    from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
+    material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板
     out = ""
     async for ev in gateway.complete(
         [{"role": "user", "content": material}], [], ref,

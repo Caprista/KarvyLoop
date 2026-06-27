@@ -183,7 +183,9 @@ async def decompose_dispatch(intent: str, *, roster: list[dict],
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
     except Exception:
         ref = model_ref
+    from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     material = f"用户说:{intent}\n\n可用业务域和成员:\n{_format_roster(roster)}"
+    material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板(域/成员多时防爆)
     out = ""
     async for ev in gateway.complete(
         [{"role": "user", "content": material}], [], ref,

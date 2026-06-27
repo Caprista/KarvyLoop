@@ -30,7 +30,9 @@ async def extract_concepts_batch(contents: list, *, gateway, model_ref: str = ""
         return []
     from karvyloop.gateway import ResolveScope
     from karvyloop.gateway.system import SystemPrompt
+    from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     numbered = "\n".join(f"{i + 1}. {(c or '').strip()}" for i, c in enumerate(contents))
+    numbered, _ = clip_to_tokens(numbered, LLM_MATERIAL_TOKENS)   # 基建天花板(防一批超大内容爆上下文)
     out = ""
     try:
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))

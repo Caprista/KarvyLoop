@@ -28,6 +28,10 @@ MANUAL_COMPACT_BUFFER_TOKENS = 3_000
 # Token 估算常数
 _CHARS_PER_TOKEN = 4
 
+# 单发 LLM 抽取/判断材料的**宽松天花板**(context engineering 基建:任何直连 gateway 的内容
+# 调用都过它,只防病态爆炸,不伤正常抽取)。第一问"context engineering 要基建化"的收尾。
+LLM_MATERIAL_TOKENS = 6000
+
 
 def count_tokens_text(s: str) -> int:
     """粗估字符串的 token 数(M0:4 字符/token)。"""
