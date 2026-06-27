@@ -223,6 +223,17 @@ def cmd_console(args: argparse.Namespace) -> int:
                         return (None, "")
 
                 main_loop.set_atom_quality_judge(_atom_quality_judge)
+
+                # docs/40 §6 丙 跨-run 经验蒸馏裁判(更慢一档):对比同子目标的满意/不满意执行 → 规律。
+                if hasattr(main_loop, "set_lesson_judge"):
+                    def _lesson_judge(material, _gw=_gw, _mref=_mref):
+                        import asyncio
+                        from karvyloop.crystallize.lessons import judge_lesson
+                        try:
+                            return asyncio.run(judge_lesson(material, gateway=_gw, model_ref=_mref))
+                        except Exception:
+                            return ""
+                    main_loop.set_lesson_judge(_lesson_judge)
             sys.stderr.write(
                 (t("console.karvy_wired_on") if bundle.has_llm
                  else t("console.karvy_wired_off")) + "\n"

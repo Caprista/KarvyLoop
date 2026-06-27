@@ -73,7 +73,8 @@ class AtomSatisfaction:
     efficiency: float           # 做好·效率(可验证)
     quality: Optional[float] = None   # 做好·质量(LLM 判;①-b 接,做对站住才采信)
     critique: str = ""          # LLM 评语(①-b)
-    trace_ref: str = ""         # 回链 Trace 里那条 run(provenance + 异步评价器去重水位)
+    trace_ref: str = ""         # 回链 Trace 里那条 run 的真实 ref(executor 发的 trace://...,provenance + 去重水位)
+    task_id: str = ""           # 那条 run 所在的 Trace task(= eval_fact 所在 task);丙据此定位 run 取 intent/产出
     at: float = 0.0
 
     @property
@@ -103,6 +104,7 @@ class SatisfactionStore:
         self._cap = cap
         self._judged: set[str] = set()           # 确定性已评的 run trace_ref(快侧水位)
         self._quality_judged: set[str] = set()   # LLM 质量已评的 run trace_ref(慢侧水位)
+        self._lesson_wm: dict[str, int] = {}     # 跨-run 蒸馏水位:sig → 上次蒸馏时的样本数(丙)
         self._lock = threading.Lock()
 
     def baseline_steps(self, sig: str) -> Optional[float]:
@@ -170,6 +172,22 @@ class SatisfactionStore:
     def samples(self, sig: str) -> list[AtomSatisfaction]:
         with self._lock:
             return [s for s, _ in (self._by_sig.get(sig) or [])]
+
+    def sigs(self) -> list[str]:
+        """所有有样本的 sig(供跨-run 蒸馏遍历;丙)。"""
+        with self._lock:
+            return list(self._by_sig.keys())
+
+    def lesson_watermark(self, sig: str) -> int:
+        """该 sig 上次跨-run 蒸馏时的样本数(丙水位;无 → 0)。"""
+        with self._lock:
+            return self._lesson_wm.get(sig, 0)
+
+    def set_lesson_watermark(self, sig: str, n: int) -> None:
+        with self._lock:
+            # 只前移(重建/并发下取较大者),不回退
+            if int(n) > self._lesson_wm.get(sig, 0):
+                self._lesson_wm[sig] = int(n)
 
     def mean_overall(self, sig: str) -> Optional[float]:
         s = self.samples(sig)
@@ -253,12 +271,14 @@ def record_run(store: SatisfactionStore, run, sig: str, *,
 
 
 def record_facts(store: SatisfactionStore, sig: str, *, success: bool, verified: bool,
-                 steps: int, trace_ref: str = "", quality: Optional[float] = None,
-                 critique: str = "", clock=time.time) -> AtomSatisfaction:
+                 steps: int, trace_ref: str = "", task_id: str = "",
+                 quality: Optional[float] = None, critique: str = "",
+                 clock=time.time) -> AtomSatisfaction:
     """异步评价器的入口:从 **Trace 里的事实**(sig/success/verified/steps)算 + 存满意度,
     不需要 run 对象(跑评分离:drive 写事实,评价器读事实算分)。
 
     achievement = 做对(success + verified 门);efficiency = 步数 vs 历史中位数基线。
+    `task_id`:该 run 所在 Trace task(丙据此 + trace_ref 定位 run 取 intent/产出)。
     """
     sat = AtomSatisfaction(
         sig=sig,
@@ -267,6 +287,7 @@ def record_facts(store: SatisfactionStore, sig: str, *, success: bool, verified:
         quality=quality,
         critique=critique or "",
         trace_ref=trace_ref or "",
+        task_id=task_id or "",
         at=clock(),
     )
     store.record(sig, sat, int(steps))

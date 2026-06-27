@@ -61,6 +61,7 @@ def rehydrate(trace, satisfaction: SatisfactionStore) -> int:
                 quality=(float(q) if isinstance(q, (int, float)) else None),
                 critique=str(p.get("critique", "") or ""),
                 trace_ref=ref,
+                task_id=str(p.get("task_id", "") or ""),
                 at=float(p.get("ts", 0.0) or 0.0),
             ), int(p.get("steps", 0) or 0))
             n += 1
@@ -80,6 +81,18 @@ def rehydrate(trace, satisfaction: SatisfactionStore) -> int:
                 ref, (float(q) if isinstance(q, (int, float)) else None),
                 str(p.get("critique", "") or ""),
             )
+    # 第三遍:重放跨-run 蒸馏水位(丙)—— 重启后不重复蒸已蒸过的批次。
+    from .lessons import LESSON_KIND
+    for tid in task_ids:
+        try:
+            lentries = trace.query(tid, kind=LESSON_KIND)
+        except Exception:
+            continue
+        for e in lentries:
+            p = getattr(e, "payload", None) or {}
+            sig = p.get("sig", "")
+            if sig:
+                satisfaction.set_lesson_watermark(sig, int(p.get("n_samples", 0) or 0))
     return n
 
 
@@ -90,7 +103,7 @@ def _writeback(trace, tid: str, sat, steps: int, clk) -> None:
         trace.append(TraceEntry(
             task_id=tid, kind=SATISFACTION_KIND,
             payload={
-                "sig": sat.sig, "trace_ref": sat.trace_ref,
+                "sig": sat.sig, "trace_ref": sat.trace_ref, "task_id": sat.task_id,
                 "achievement": sat.achievement, "efficiency": sat.efficiency,
                 "quality": sat.quality, "critique": sat.critique,
                 "overall": sat.overall, "steps": int(steps),
@@ -137,7 +150,7 @@ def evaluate_pending(trace, satisfaction: SatisfactionStore, *,
                     satisfaction, sig,
                     success=bool(p.get("success", False)),
                     verified=bool(p.get("verified", False)),
-                    steps=steps, trace_ref=ref, clock=clk,
+                    steps=steps, trace_ref=ref, task_id=tid, clock=clk,
                 )
                 _writeback(trace, tid, sat, steps, clk)  # 回写 Trace(自反 + 重启水位源)
                 n += 1

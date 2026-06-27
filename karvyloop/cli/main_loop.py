@@ -197,6 +197,8 @@ class MainLoop:
         # §14.2 做好·质量维(慢侧):同步 callable(intent,产出)→(quality,critique)。
         # console 用 gateway 桥成同步后经 set_atom_quality_judge 注入;None=只确定性评(0 回归)。
         self._atom_quality_judge = None
+        # docs/40 §6 丙 跨-run 经验蒸馏裁判(更慢):同步 callable(对比材料)→ lesson_text;None=不蒸。
+        self._lesson_judge = None
 
     def set_atom_quality_judge(self, judge) -> None:
         """接线 atom 质量裁判(慢侧;§14.2)。judge: (intent, output_text) → (quality, critique)。"""
@@ -213,6 +215,25 @@ class MainLoop:
             return judge_pending_quality(self.trace, self.satisfaction, judge=judge, clock=self._clock)
         except Exception:
             logger.warning("[trace_eval] 质量评失败;维护继续", exc_info=True)
+            return 0
+
+    def set_lesson_judge(self, judge) -> None:
+        """接线跨-run 经验蒸馏裁判(慢侧;docs/40 §6 丙)。judge: (对比材料) → lesson_text。"""
+        self._lesson_judge = judge
+
+    def lessons_review(self) -> int:
+        """**慢侧**(daily_poll)跨-run 经验蒸馏(丙):对比同一子目标的满意/不满意执行 → 提炼
+        一条规律 → 写回 Trace + 折进 SKILL.md。无注入裁判 → 0(0 回归)。"""
+        judge = self._lesson_judge
+        if judge is None:
+            return 0
+        from karvyloop.crystallize import distill_lessons
+        try:
+            return distill_lessons(self.trace, self.satisfaction, judge=judge,
+                                   skills_dir=self.skills_dir, skill_index=self.skill_index,
+                                   clock=self._clock)
+        except Exception:
+            logger.warning("[lessons] 跨-run 蒸馏失败;维护继续", exc_info=True)
             return 0
 
     def set_trace_funnel(self, funnel: object) -> None:

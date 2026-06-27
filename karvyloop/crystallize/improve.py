@@ -226,6 +226,38 @@ def write_critiques_to_skill_md(
     return True
 
 
+ROLE_LESSON_HEADER = "## Lessons (cross-run 经验)"
+
+
+def write_lessons_to_skill_md(
+    skill_path: Path,
+    lessons: list[str],
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    """把跨-run 蒸出的规律(lessons.py)折进 SKILL.md 的 Lessons 段(docs/40 §6 丙)。
+
+    与 critiques 同纪律:防御性消毒成安全单行 + 按 bullet 精确幂等(后台可反复跑)。
+    """
+    from .atom_critic import sanitize_critique
+    ls = [c for c in (sanitize_critique(x) for x in (lessons or [])) if c]
+    if not ls or not skill_path.exists():
+        return False
+    text = skill_path.read_text(encoding="utf-8")
+
+    def _already(c: str) -> bool:
+        return re.search(r"- \([^)]*\) " + re.escape(c) + r"\s*$", text, re.MULTILINE) is not None
+
+    ls = [c for c in ls if not _already(c)]
+    if not ls:
+        return False
+    ts = _fmt_ts(now)
+    bullets = [f"- ({ts}) {c}" for c in ls]
+    text = _insert_into_section(text, ROLE_LESSON_HEADER, bullets)
+    skill_path.write_text(text, encoding="utf-8")
+    return True
+
+
 # ---- 主入口(每 5 轮触发)----
 
 def maybe_improve(
@@ -269,5 +301,6 @@ __all__ = [
     "classify_correction", "classify_batch",
     "write_corrections_to_skill_md",
     "ROLE_CRITIQUE_HEADER", "write_critiques_to_skill_md",
+    "ROLE_LESSON_HEADER", "write_lessons_to_skill_md",
     "maybe_improve",
 ]

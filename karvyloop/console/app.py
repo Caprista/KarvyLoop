@@ -93,6 +93,11 @@ def build_console_app(
                             judged = await asyncio.to_thread(_ml.quality_review)
                             if judged:
                                 logger.info(f"[karvyloop console] 慢侧 atom 质量评 {judged} 条")
+                        # docs/40 §6 丙:更慢一档,跨-run 经验蒸馏(质量评之后,材料更全)。
+                        if _ml is not None and hasattr(_ml, "lessons_review"):
+                            learned = await asyncio.to_thread(_ml.lessons_review)
+                            if learned:
+                                logger.info(f"[karvyloop console] 跨-run 蒸出经验 {learned} 条")
                     except asyncio.CancelledError:
                         break
                     except Exception as e:
