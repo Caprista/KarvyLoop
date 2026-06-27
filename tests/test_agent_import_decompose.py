@@ -74,6 +74,38 @@ def test_bootstrap_decompose_none_gateway_returns_none():
     assert asyncio.run(bootstrap_decompose(_manifest(), existing_atom_ids=[], gateway=None)) is None
 
 
+class _FlakyGateway:
+    """第一次吐坏 JSON,第二次吐好的(模拟并发偶发截断)。"""
+    def __init__(self):
+        self.calls = 0
+
+    def resolve_model(self, scope):  # noqa: ANN001
+        return "fake"
+
+    async def complete(self, messages, tools, ref, system=None):  # noqa: ANN001
+        self.calls += 1
+        yield TextDelta("这不是JSON只是一段话" if self.calls == 1 else _GOOD_JSON)
+
+
+def test_bootstrap_retries_once_on_bad_json():
+    gw = _FlakyGateway()
+    r = asyncio.run(bootstrap_decompose(_manifest(), existing_atom_ids=[], gateway=gw))
+    assert gw.calls == 2 and r is not None and r.is_valid(), f"没重试或没救回: calls={gw.calls}"
+
+
+def test_bootstrap_gives_up_after_retry():
+    """两次都坏 → None(不无限烧 token)。"""
+    class _AlwaysBad:
+        def __init__(self): self.calls = 0
+        def resolve_model(self, scope): return "fake"  # noqa: ANN001
+        async def complete(self, messages, tools, ref, system=None):  # noqa: ANN001
+            self.calls += 1
+            yield TextDelta("永远坏")
+    gw = _AlwaysBad()
+    assert asyncio.run(bootstrap_decompose(_manifest(), existing_atom_ids=[], gateway=gw)) is None
+    assert gw.calls == 2, f"重试次数不对: {gw.calls}"
+
+
 # ---- 2. 整条接线:api_agent_import 拆解路径 → 落原子 + 建角色 ----
 def _app_with(tmp: Path, gateway):  # noqa: ANN001
     from karvyloop.atoms.registry import AtomRegistry, AtomStore

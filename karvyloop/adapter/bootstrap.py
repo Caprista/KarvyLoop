@@ -196,14 +196,20 @@ async def bootstrap_decompose(
     except Exception:
         ref = model_ref
     material = _format_input(manifest, existing_atom_ids)
-    out = ""
-    async for ev in gateway.complete(
-        [{"role": "user", "content": material}], [], ref,
-        system=SystemPrompt(static=[DECOMPOSE_SYSTEM]),
-    ):
-        if type(ev).__name__ == "TextDelta":
-            out += getattr(ev, "text", "")
-    return parse_decomposition(out)
+    # 重试一次再降级:并发/网络偶发把 JSON 截断 → parse 返 None,多半重发就好(批量导入
+    # 实测 70 个里 1-3 个坏 JSON)。只重 1 次,仍 None 才降级回 v0(不无限烧 token)。
+    for _attempt in range(2):
+        out = ""
+        async for ev in gateway.complete(
+            [{"role": "user", "content": material}], [], ref,
+            system=SystemPrompt(static=[DECOMPOSE_SYSTEM]),
+        ):
+            if type(ev).__name__ == "TextDelta":
+                out += getattr(ev, "text", "")
+        result = parse_decomposition(out)
+        if result is not None:
+            return result
+    return None
 
 
 __all__ = ["AtomProposal", "DecompositionResult", "bootstrap_decompose", "parse_decomposition", "DECOMPOSE_SYSTEM"]

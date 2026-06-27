@@ -2926,7 +2926,8 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
          + (f"\n小卡:{tn.agent_response}" if tn.agent_response else "")).strip()
         for tn in ctx
     ).strip()
-    goal = await _roundtable_goal_summary(gw, model_ref, topic, align)
+    with _token_src("roundtable_host"):     # 目标收敛归到 roundtable_host 源(原记成 unknown)
+        goal = await _roundtable_goal_summary(gw, model_ref, topic, align)
     # Step 0(a):你的决策标准在**圆桌**里也生效(成员发言按你的标准对齐;fresh 只跳执行记忆,
     # 不跳你的标准 —— governance 显式传仍生效)。query=goal → 按相关性召回。
     from karvyloop.console.decision_wire import assemble_governance
@@ -2951,7 +2952,8 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
         return {"speaker": speaker, "text": (outcome.text or "").strip()}
 
     async def host_moderate(_topic, transcript, *, final):
-        return await _host_moderate_call(gw, model_ref, goal, transcript, final=final)
+        with _token_src("roundtable_host"):    # 主持控场也归 roundtable_host(原 unknown)
+            return await _host_moderate_call(gw, model_ref, goal, transcript, final=final)
 
     task_reg = getattr(app.state, "task_registry", None)
     task_id = (task_reg.start(who="🎡 圆桌", domain_id=peer.domain_id, role="group",
