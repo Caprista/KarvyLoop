@@ -1,0 +1,146 @@
+"""SkillIndex — 已结晶技能的 sig ↔ name 双向索引（crystallize/skill_index.py）。
+
+规格:docs/modules/crystallize.md §3 M1.5 + §4 保守可逆
+- 在内存里维护 sig↔name 的双向映射
+- 启动时从 skills_dir 扫描所有 SKILL.md,把 frontmatter.signature 写进映射
+  (兜底无 signature 的旧技能 —— 不进索引,让 recall 落空走慢脑)
+- 结晶(crystallize)成功后 register
+- recall 命中归档技能时,辅助 restore(把 name 翻成 sig 给 store.restore)
+
+设计意图:把所有"已结晶技能"的可发现信息集中在一个类,recall / auto_suggest /
+管理面(list / delete)都从这里取。避免每次 recall 都 glob 磁盘。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+from karvyloop.registry.skills import parse_frontmatter, system_skills_dir
+
+
+@dataclass
+class IndexEntry:
+    """索引里一条记录(从 SKILL.md frontmatter 投影)。"""
+    name: str
+    sig: str
+    scope: str
+    when_to_use: str
+    description: str
+    path: str  # SKILL.md 绝对路径
+    # 来源:'user'(~/.karvyloop/skills,用户结晶/手写,**清数据时清**)| 'system'(包内
+    # bundled 只读模板,随包发版、**reset 动不到**)。frontmatter 显式 `source:` 优先,否则按所在目录定。
+    source: str = "user"
+
+
+@dataclass
+class SkillIndex:
+    """sig↔name 双向索引。
+
+    内存结构:
+      _by_sig:  sig -> name
+      _by_name: name -> IndexEntry
+    线程安全:本类不内置锁;recall / crystallize 都在主循环同一线程,
+    后台 review 单独线程 —— 共享读多写少,加锁成本不必要(M1 v1 接受)。
+    真要并发安全时再升级。
+    """
+    _by_sig: dict[str, str] = field(default_factory=dict)
+    _by_name: dict[str, IndexEntry] = field(default_factory=dict)
+
+    # ---- 启动重建 ----
+
+    def rebuild_from_disk(self, skills_dir: Path) -> int:
+        """扫描 **包内系统目录 + 用户 skills_dir** 下所有 SKILL.md,把有 signature 的收进索引。
+
+        - **双扫**:先扫 bundled 系统目录(`source=system`,reset 动不到),再扫用户目录
+          (`source=user`)。同 name 冲突时**用户胜**(用户可定制覆盖同名;极少见,可接受)。
+        - 无 signature 的旧技能:不收(让 recall 落空;升级时一次写入即可)。
+        - frontmatter 显式 `source:` 优先于"按目录定"(让 SKILL.md 自报家门)。
+
+        返回收进索引的条数。
+        """
+        self._by_sig.clear()
+        self._by_name.clear()
+        count = 0
+        count += self._scan_dir(system_skills_dir(), default_source="system")
+        count += self._scan_dir(skills_dir, default_source="user")
+        return count
+
+    def _scan_dir(self, skills_dir: Path, *, default_source: str) -> int:
+        """扫一个技能目录(`<dir>/<skill>/SKILL.md`)→ 收进索引,带 source 标签。返回条数。"""
+        if not skills_dir or not Path(skills_dir).is_dir():
+            return 0
+        count = 0
+        for p in sorted(Path(skills_dir).glob("*/SKILL.md")):
+            try:
+                fm, _body = parse_frontmatter(p)
+            except OSError:
+                continue
+            if not fm.name or not fm.signature:
+                continue
+            src = str((fm.raw or {}).get("source", "")).strip().lower() or default_source
+            entry = IndexEntry(
+                name=fm.name,
+                sig=fm.signature,
+                scope=fm.scope or "user",
+                when_to_use=fm.when_to_use or "",
+                description=fm.description or "",
+                path=str(p),
+                source=src,
+            )
+            # 同 name 覆盖(用户技能盖同名系统技能):先清掉旧条目的 sig 反查,避免遗留孤儿
+            # 映射(两个 sig 都指向同一 name 的不一致;对抗验收 LOW)。
+            prev = self._by_name.get(fm.name)
+            if prev is not None and prev.sig != fm.signature:
+                self._by_sig.pop(prev.sig, None)
+            self._by_name[fm.name] = entry
+            self._by_sig[fm.signature] = fm.name
+            count += 1
+        return count
+
+    # ---- 注册(结晶成功后)----
+
+    def register(self, *, name: str, sig: str, scope: str,
+                 when_to_use: str, description: str, path: str) -> None:
+        """结晶/重建时把一条写进索引;同 name 覆盖、同 sig 覆盖。"""
+        entry = IndexEntry(
+            name=name, sig=sig, scope=scope,
+            when_to_use=when_to_use, description=description, path=path,
+        )
+        self._by_name[name] = entry
+        self._by_sig[sig] = name
+
+    def unregister(self, name: str) -> None:
+        """从索引移除(spec:evict 真删时用,默认 evict 不删盘所以不常用)。"""
+        entry = self._by_name.pop(name, None)
+        if entry is not None:
+            self._by_sig.pop(entry.sig, None)
+
+    # ---- 反查 ----
+
+    def lookup_by_name(self, name: str) -> Optional[IndexEntry]:
+        return self._by_name.get(name)
+
+    def lookup_by_sig(self, sig: str) -> Optional[IndexEntry]:
+        n = self._by_sig.get(sig)
+        return self._by_name.get(n) if n else None
+
+    def sig_for_name(self, name: str) -> Optional[str]:
+        e = self._by_name.get(name)
+        return e.sig if e else None
+
+    def name_for_sig(self, sig: str) -> Optional[str]:
+        return self._by_sig.get(sig)
+
+    def all(self) -> list[IndexEntry]:
+        return list(self._by_name.values())
+
+    def __len__(self) -> int:
+        return len(self._by_name)
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._by_name
+
+
+__all__ = ["SkillIndex", "IndexEntry"]

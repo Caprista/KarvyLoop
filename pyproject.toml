@@ -1,0 +1,65 @@
+[project]
+name = "karvyloop"
+dynamic = ["version"]                 # 单一版本源 = karvyloop/__init__.py:__version__(见 [tool.setuptools.dynamic])
+description = "KarvyLoop — 本地优先、AI-Native 的用户态 Agent 运行时"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "textual>=0.50",          # MIT, M3 批 3 workbench 终端 UI 主线
+    "textual-serve>=0.5",     # MIT, M3 批 3c `--serve` 模式
+    "fastapi>=0.115",         # 批 8.5-C:本地 HTML 控制台 后端(MIT,通用基建)
+    "uvicorn[standard]>=0.30",  # 批 8.5-C:ASGI server + WS + 静态文件
+    "croniter>=2.0",          # 定时任务:完整 cron 表达式解析/算 next_run(MIT,通用基建必借,不手搓)
+]
+
+[project.optional-dependencies]
+# 全部可选依赖**缺了也能跑**——优雅降级,绝不报错(见 README「Optional features」表)。
+# 网页产物运行时验收门(karvyloop verify-web):重依赖(要下浏览器);没装则降级到只验语法。
+web = [
+    "playwright>=1.40",   # 装后还需 `playwright install chromium`
+]
+# 接 MCP server(它的工具注入给每个 agent);没装 → 用到时友好报错"pip install karvyloop[mcp]"。
+mcp = [
+    "mcp>=1.0",           # 还需 PATH 有 uvx(`pip install uv`)才能起 stdio MCP server
+]
+# 跨进程 A2A transport(多进程/多机协作);没装 → 自动降级到 in-process(单进程够用)。
+redis = [
+    "redis>=5.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",   # HTTP mock:gateway adapter 的请求体形状/SSE 测试用
+    "psutil>=5.9",   # test_mcp_client.py 验子进程清理(AC6;mcp 组需另装 `pip install mcp`)
+]
+
+[project.scripts]
+karvyloop = "karvyloop.cli.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "karvyloop.__version__"}   # AST-read,不导入包;改版本只改 __init__.py 一处
+
+[tool.setuptools.packages.find]
+include = ["karvyloop*"]
+
+# 非 .py 运行时资产必须随包发布,否则 pip/Nuitka 安装后这些文件消失(源码树里在、装出来没)——
+# 独立对抗验收实测:不声明则 wheel 只含 .py,system_skills/ 与 console/static/ 全丢,
+# data-analyst 系统技能在装好的部署里静默蒸发。
+[tool.setuptools.package-data]
+karvyloop = [
+    "system_skills/**/*",      # 包内只读系统技能/atom 模板(reset 动不到的不可删区)
+    "system_contracts/**/*",   # 包内只读系统契约(尽责下属默认协作契约;同 reset 动不到)
+    "console/static/**/*",     # 本地 HTML 控制台前端(html/js/css/vendor/assets)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
