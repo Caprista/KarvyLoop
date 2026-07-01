@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import re
 import shutil
 import tempfile
@@ -190,6 +191,12 @@ def install_skill_dir(src_root: Path, *, skills_dir: Path, origin: str = "",
         shutil.rmtree(staging, ignore_errors=True)
         return ImportResult(False, name=name, reason=f"拷贝失败:{e}")
     _inject_provenance(dest / _SKILL_FILENAME, origin)
+    # 完整性锁:落一条 <skills_dir>/skills-lock.json 记录(整目录 sha256)。加载/执行前据此查篡改。
+    try:
+        from karvyloop.registry.skill_lock import record_lock
+        record_lock(skills_dir, name, origin)
+    except Exception as e:  # 上锁失败不阻断导入(降级为"未锁"=允许);但记下
+        logging.getLogger(__name__).warning(f"[skill] 导入 {name} 后上锁失败: {e}")
     return ImportResult(True, name=name, path=str(dest), untrusted=True,
                         has_scripts=has_scripts, files=count, origin=origin)
 
