@@ -269,6 +269,35 @@ def build_console_app(
             response.headers["Cache-Control"] = "no-cache"
         return response
 
+    # 访问令牌门:本机(loopback)免 token;非本机必须带 token(?token= / cookie / header)。
+    # 未设 app.state.access_token(编程式/测试)→ 不启用(TestClient 来源非 loopback 但无 token → 放行)。
+    # CLI(cmd_console)启动时**必然**设 token,所以真实部署一定有门。绕不过 = 安全是地基。
+    @app.middleware("http")
+    async def _access_gate(request, call_next):  # type: ignore[no-untyped-def]
+        token = getattr(app.state, "access_token", None)
+        if not token:
+            return await call_next(request)
+        from karvyloop.console import access as _acc
+        client = request.client.host if request.client else ""
+        if _acc.is_loopback(client):
+            return await call_next(request)
+        if not _acc.token_ok(_acc.token_from_request(request), token):
+            from starlette.responses import HTMLResponse, JSONResponse
+            wants_json = request.url.path.startswith("/api") or "application/json" in (request.headers.get("accept") or "")
+            reason = ("需要访问令牌:本机 localhost 免密;从别的设备访问,请在**运行 console 的机器上**"
+                      "执行 `karvyloop url` 取带 token 的链接。")
+            if wants_json:
+                return JSONResponse({"ok": False, "reason": reason}, status_code=401)
+            return HTMLResponse(f"<!doctype html><meta charset=utf-8><h3>KarvyLoop</h3><p>{reason}</p>", status_code=401)
+        resp = await call_next(request)
+        # 首次用带 token 的链接进来 → 落 cookie,之后同源请求(含 WS)免再带
+        try:
+            if request.query_params.get("token"):
+                resp.set_cookie(_acc.COOKIE, token, httponly=True, samesite="lax", path="/")
+        except Exception:
+            pass
+        return resp
+
     # 静态文件
     if STATIC_DIR.is_dir():
         # index.html 由 / 路由直接返(避免 StaticFiles 默认 index.html 兜底)

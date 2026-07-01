@@ -276,7 +276,7 @@ npm install
 npm run verify   # 类型检查 + 构建 → ../static + 运行时 smoke(jsdom)
 ```
 
-> 要做托管/公网网页端,需先在后端补 CORS + 鉴权——KarvyLoop 默认本地优先(绑 `localhost`/局域网即安全边界)。
+> **访问与鉴权。** 默认 console 只绑 `localhost`(仅本机)。本机(loopback)请求免密;一旦你绑到局域网(`--host 0.0.0.0`)好从别的设备访问,**非本机地址必须带 token** —— token 每次启动新生成,在这台机器上跑 `karvyloop url` 获取带 token 的链接。(局域网**不是**信任边界 —— 否则公司/家里同网段任何人都能访问。)放到公网仍需你自己在前面加 TLS + 反向代理鉴权。
 
 ## 贡献
 

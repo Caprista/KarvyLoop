@@ -38,8 +38,18 @@ router = APIRouter()
 @router.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
     """主 WebSocket 端点。"""
-    await websocket.accept()
     app = websocket.app
+    # 访问令牌门(HTTP 中间件不管 WS scope,这里单独查):本机免密;非本机需 cookie/query token,否则拒握手。
+    _token = getattr(app.state, "access_token", None)
+    if _token:
+        from karvyloop.console import access as _acc
+        _client = websocket.client.host if websocket.client else ""
+        if not _acc.is_loopback(_client):
+            _supplied = websocket.cookies.get(_acc.COOKIE) or websocket.query_params.get("token") or ""
+            if not _acc.token_ok(_supplied, _token):
+                await websocket.close(code=1008)   # policy violation
+                return
+    await websocket.accept()
     # 注册 client
     clients: set = app.state.ws_clients
     clients.add(websocket)

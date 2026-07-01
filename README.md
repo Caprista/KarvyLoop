@@ -271,7 +271,7 @@ npm install
 npm run verify   # typecheck + build → ../static + runtime smoke (jsdom)
 ```
 
-> To expose a hosted/public web front end, you'll first need to add CORS and authentication on the back end — KarvyLoop is local-first by default (bound to `localhost`/LAN is the security boundary).
+> **Access & auth.** By default the console binds to `localhost` (this machine only). Local (loopback) requests are password-free; the moment you bind to your LAN (`--host 0.0.0.0`) to reach it from another device, access from a non-loopback address **requires a token** — a fresh token is minted each start; run `karvyloop url` on the host to get the token link. (LAN is *not* a trust boundary — anyone on your office/home network could otherwise reach it.) Exposing it on the public internet still needs TLS + your own reverse-proxy auth on top.
 
 ## Contributing
 

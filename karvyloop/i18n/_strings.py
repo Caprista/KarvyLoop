@@ -16,9 +16,10 @@ from __future__ import annotations
 _EN = {
     # console 启动横幅
     "console.lan_warning": (
-        "[karvyloop] binding 0.0.0.0 = LAN exposure; CLAUDE.md security baseline: "
-        "make sure you only enable this on a trusted network"
+        "[karvyloop] binding 0.0.0.0 = reachable on your LAN. Local (localhost) stays password-free; "
+        "access from other devices requires the token link — run `karvyloop url` on this machine to get it."
     ),
+    "console.remote_url": "[karvyloop console] cross-device access (token link): {url}",
     "console.token_ledger_failed": "[karvyloop console] token ledger wiring failed (startup unaffected): {error}",
     "console.karvy_wired_on": "[karvyloop console] Karvy intent analysis wired (LLM on)",
     "console.karvy_wired_off": "[karvyloop console] Karvy intent analysis wired (LLM off — proactive suggestions paused)",
@@ -39,6 +40,11 @@ _EN = {
     "cli.unknown_cmd": "unknown subcommand: {cmd}",
     "cli.no_key_setup": "No usable model/API key yet — KarvyLoop can't run without one. Launching setup (or run `karvyloop init`; or set the provider's API-key env var).",
     "cli.help.update": "check whether a newer version exists (only checks + tells you — never auto-upgrades)",
+    "cli.help.url": "print the running console's access links (local + tokened cross-device link)",
+    "cli.url.no_runtime": "No running console found (no runtime recorded). Start it with `karvyloop console` first.",
+    "cli.url.local": "Local (no token):     {url}",
+    "cli.url.remote": "Cross-device (token): {url}",
+    "cli.url.remote_none": "Cross-device: this console is bound to localhost only. To reach it from another device, restart with `--host 0.0.0.0`.",
     "update.disabled": "[karvyloop] update check is off (KARVYLOOP_NO_UPDATE_CHECK set). Current: {current}",
     "update.unreachable": "[karvyloop] couldn't reach the release feed (offline / rate-limited). Current: {current}",
     "update.uptodate": "[karvyloop] you're on the latest ({current}).",
@@ -143,8 +149,10 @@ _EN = {
 # ---- 中文 ----
 _ZH = {
     "console.lan_warning": (
-        "[karvyloop] 绑 0.0.0.0 = LAN 暴露;CLAUDE.md 安全地基:确认仅在受信网络开启"
+        "[karvyloop] 绑 0.0.0.0 = 局域网可达。本机(localhost)免密;从别的设备访问需要带 token 的链接 —— "
+        "在这台机器上跑 `karvyloop url` 获取。"
     ),
+    "console.remote_url": "[karvyloop console] 跨设备访问(带 token 链接): {url}",
     "console.token_ledger_failed": "[karvyloop console] token 账本接线失败(不影响启动): {error}",
     "console.karvy_wired_on": "[karvyloop console] 小卡意图分析已接线(LLM on)",
     "console.karvy_wired_off": "[karvyloop console] 小卡意图分析已接线(LLM off — 暂不主动建议)",
@@ -164,6 +172,11 @@ _ZH = {
     "cli.unknown_cmd": "未知子命令:{cmd}",
     "cli.no_key_setup": "还没有可用模型/API Key —— 没有它 KarvyLoop 跑不起来。正在进入配置(或运行 `karvyloop init`;或设置对应 provider 的 API key 环境变量)。",
     "cli.help.update": "检查有没有新版本(只检测+提示,绝不自动升级)",
+    "cli.help.url": "打印当前运行中 console 的访问链接(本机免密 + 跨设备带 token 链接)",
+    "cli.url.no_runtime": "没有正在运行的 console(未记录 runtime)。先 `karvyloop console` 起服务。",
+    "cli.url.local": "本机访问(免 token):    {url}",
+    "cli.url.remote": "跨设备访问(带 token):  {url}",
+    "cli.url.remote_none": "跨设备:当前 console 只绑了本机(localhost)。要从别的设备访问,用 `--host 0.0.0.0` 重启。",
     "update.disabled": "[karvyloop] 更新检测已关闭(设了 KARVYLOOP_NO_UPDATE_CHECK)。当前:{current}",
     "update.unreachable": "[karvyloop] 连不上发布源(离线 / 被限流)。当前:{current}",
     "update.uptodate": "[karvyloop] 已是最新({current})。",

@@ -75,6 +75,9 @@ def _build_parser() -> argparse.ArgumentParser:
     from karvyloop.console.entry import build_console_parser
     build_console_parser(sub)
 
+    # url — 打印当前正在运行的 console 的访问链接(本机免密 + 跨设备带 token)
+    sub.add_parser("url", help=t("cli.help.url"))
+
     return p
 
 
@@ -198,9 +201,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         from karvyloop.console.entry import cmd_console
         return cmd_console(args)
 
+    if args.cmd == "url":
+        return _cmd_url()
+
     from karvyloop.i18n import t
     parser.error(t("cli.unknown_cmd", cmd=args.cmd))
     return 2
+
+
+def _cmd_url() -> int:
+    """打印当前运行中的 console 访问链接:本机免密 + 跨设备带 token(读 ~/.karvyloop/console.runtime.json)。"""
+    from karvyloop.i18n import t
+    from karvyloop.console.access import read_runtime, access_urls
+    rt = read_runtime()
+    if not rt:
+        sys.stderr.write(t("cli.url.no_runtime") + "\n")
+        return 1
+    urls = access_urls(str(rt.get("host", "127.0.0.1")), int(rt.get("port", 8766)), str(rt.get("token", "")))
+    lines = [t("cli.url.local", url=urls["local"])]
+    if urls["remote"]:
+        lines.append(t("cli.url.remote", url=urls["remote"]))
+    else:
+        lines.append(t("cli.url.remote_none"))
+    print("\n".join(lines))
+    return 0
 
 
 if __name__ == "__main__":

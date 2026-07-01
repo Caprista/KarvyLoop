@@ -363,6 +363,20 @@ def cmd_console(args: argparse.Namespace) -> int:
         _relaunch += ["--lang", str(args.lang)]
     app.state.console_relaunch = {"argv": _relaunch, "host": host, "port": port}
 
+    # === 访问令牌:本机 loopback 免密,跨设备必须带 token。每次启动**新生成**(重启即刷新)。===
+    # 写进 ~/.karvyloop/console.runtime.json(0600),`karvyloop url` 可随时取当前带 token 的链接。
+    from karvyloop.console import access as _access
+    _token = _access.new_token()
+    app.state.access_token = _token
+    try:
+        _access.write_runtime(_token, host, port)
+    except Exception as e:
+        logger.warning(f"[karvyloop console] 写 access token runtime 失败: {e}")
+    _urls = _access.access_urls(host, port, _token)
+    if _urls["remote"]:   # 绑了非 loopback → 打印跨设备带 token 链接(本机 localhost 仍免密)
+        sys.stderr.write(t("console.remote_url", url=_urls["remote"]) + "\n")
+        sys.stderr.flush()
+
     # === 自动开浏览器(非 --no-browser 时,后台 thread 0.5s 后 open)===
     if not no_browser:
         # 绑 0.0.0.0/::(LAN 可达)时浏览器**不能**导航到 0.0.0.0 → 开 localhost(同机可达)
