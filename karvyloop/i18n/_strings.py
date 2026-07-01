@@ -20,6 +20,7 @@ _EN = {
         "access from other devices requires the token link — run `karvyloop url` on this machine to get it."
     ),
     "console.remote_url": "[karvyloop console] cross-device access (token link): {url}",
+    "console.url_hint": "[karvyloop console] get this link again anytime: `{cmd} url`",
     "console.token_ledger_failed": "[karvyloop console] token ledger wiring failed (startup unaffected): {error}",
     "console.karvy_wired_on": "[karvyloop console] Karvy intent analysis wired (LLM on)",
     "console.karvy_wired_off": "[karvyloop console] Karvy intent analysis wired (LLM off — proactive suggestions paused)",
@@ -153,6 +154,7 @@ _ZH = {
         "在这台机器上跑 `karvyloop url` 获取。"
     ),
     "console.remote_url": "[karvyloop console] 跨设备访问(带 token 链接): {url}",
+    "console.url_hint": "[karvyloop console] 以后再取这条链接: `{cmd} url`",
     "console.token_ledger_failed": "[karvyloop console] token 账本接线失败(不影响启动): {error}",
     "console.karvy_wired_on": "[karvyloop console] 小卡意图分析已接线(LLM on)",
     "console.karvy_wired_off": "[karvyloop console] 小卡意图分析已接线(LLM off — 暂不主动建议)",

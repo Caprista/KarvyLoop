@@ -285,7 +285,7 @@ def build_console_app(
             from starlette.responses import HTMLResponse, JSONResponse
             wants_json = request.url.path.startswith("/api") or "application/json" in (request.headers.get("accept") or "")
             reason = ("需要访问令牌:本机 localhost 免密;从别的设备访问,请在**运行 console 的机器上**"
-                      "执行 `karvyloop url` 取带 token 的链接。")
+                      "执行 `karvyloop url`(命令找不到就用 `python -m karvyloop url`,永远可用)取带 token 的链接。")
             if wants_json:
                 return JSONResponse({"ok": False, "reason": reason}, status_code=401)
             return HTMLResponse(f"<!doctype html><meta charset=utf-8><h3>KarvyLoop</h3><p>{reason}</p>", status_code=401)

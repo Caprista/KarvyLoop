@@ -375,6 +375,10 @@ def cmd_console(args: argparse.Namespace) -> int:
     _urls = _access.access_urls(host, port, _token)
     if _urls["remote"]:   # 绑了非 loopback → 打印跨设备带 token 链接(本机 localhost 仍免密)
         sys.stderr.write(t("console.remote_url", url=_urls["remote"]) + "\n")
+        # 稍后再取链接:给能用的命令形式 —— `karvyloop` 在 PATH 就用它,否则用 `python -m karvyloop`(永远可用)。
+        import shutil as _shutil
+        _cli = "karvyloop" if _shutil.which("karvyloop") else f"{Path(sys.executable).name} -m karvyloop"
+        sys.stderr.write(t("console.url_hint", cmd=_cli) + "\n")
         sys.stderr.flush()
 
     # === 自动开浏览器(非 --no-browser 时,后台 thread 0.5s 后 open)===
