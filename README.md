@@ -48,8 +48,9 @@ KarvyLoop is a cross-platform user-space runtime (pure Python; it doesn't ride o
 **Requirements**: Python 3.11+. Sandboxed skill execution needs Linux + `bubblewrap` or macOS (built-in `sandbox-exec`); everything else is cross-platform.
 
 ```bash
-# 1) Install (editable)
-pip install -e .
+# 1) Install — puts `karvyloop` on your PATH, isolated (safe on PEP 668 / "externally managed" distros)
+curl -fsSL https://raw.githubusercontent.com/Caprista/KarvyLoop/main/scripts/install.sh | bash
+#    (developing against a clone instead?  pip install -e .  — but see "karvyloop not found?" below)
 
 # 2) Configure a model (keys live OUTSIDE the repo)
 mkdir -p ~/.karvyloop

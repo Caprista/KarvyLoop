@@ -48,8 +48,9 @@ KarvyLoop 是跨平台的用户态运行时(纯 Python,不吃 Linux 内核红利
 **环境**:Python 3.11+。**安装命令两个平台一样**(`pip install -e .`);只有沙箱隔离原语不同 —— **Linux 需装 `bubblewrap`**(如 `apt install bubblewrap`),**macOS 用系统自带的 `sandbox-exec`,无需安装**。其余全跨平台。
 
 ```bash
-# 1) 安装(可编辑模式;macOS / Linux 相同)
-pip install -e .
+# 1) 安装 —— 把 `karvyloop` 装上 PATH、隔离(在 PEP 668「externally managed」发行版上也安全)
+curl -fsSL https://raw.githubusercontent.com/Caprista/KarvyLoop/main/scripts/install.sh | bash
+#    (要对着 clone 开发?  pip install -e .  —— 但见下方「karvyloop 命令找不到?」)
 #    Linux 还需沙箱:  sudo apt install bubblewrap
 #    macOS 沙箱自带:  无需安装(sandbox-exec 系统自带)
 
