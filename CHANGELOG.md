@@ -38,6 +38,17 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 - **Capability overview** (`/api/capability/overview` + a card in the Skills panel): one table for
   tools × mode floors and skills × trust/network/integrity-lock.
 
+### Changed
+- Internal restructuring, no behavior change: the workflow / distill / roundtable engines moved out of
+  `console/routes.py` into their own console modules, and the core loop moved from `cli/main_loop.py`
+  to the new `karvyloop/runtime/` package (`karvyloop.cli.main_loop` remains as a compatibility shim).
+
+### Removed
+- Six unreachable packages from an earlier architecture cycle (`ethos`, `syntonos`, `instance`,
+  `onboarding`, `l0`, `bus`, ~2.6k lines): superseded by the current design (verify gate + evaluators,
+  per-role paradigm compiler, H2A decision cards, `a2a/` transport) or parked concepts whose designs
+  live in the design docs. No live code imported them; recoverable from git history.
+
 ### Planned
 - **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
   near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the

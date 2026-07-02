@@ -230,10 +230,10 @@ karvyloop/                    ← all source
   crystallize/    ⭐ the wedge: skill crystallization + decision-interface crystallization
   system_skills/  bundled, read-only system skills/atoms (ship with the product; a data reset never touches them)
   cognition/      Belief / Pursuit / Trace + spreading-activation mesh recall (graph, no vector DB)
-  domain/ a2a/ karvy/ l0/   collaboration: business domains / A2A protocol / Karvy / big group
-  roles/ paradigm/ wizard/ adapter/ ethos/ syntonos/ instance/ onboarding/   identity & paradigm layers
+  domain/ a2a/ karvy/   collaboration: business domains / A2A protocol / Karvy
+  roles/ paradigm/ wizard/ adapter/   identity & paradigm layers
   console/        local web console (FastAPI REST + WebSocket + static SPA)
-  workbench/ cli/ terminal TUI + main-loop orchestration (fast/slow brain)
+  runtime/ workbench/ cli/   core loop (fast/slow brain) + terminal TUI + CLI
   i18n/           bilingual (en/zh) presentation layer
 tests/                        ← pytest suite (also the best usage examples)
 ```

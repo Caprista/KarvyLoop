@@ -235,10 +235,10 @@ karvyloop/                    ← 全部源码
   crystallize/    ⭐ 楔子:技能结晶 + 决策接口结晶
   system_skills/  包内只读的系统技能/原子(随产品发布;清数据动不到)
   cognition/      Belief / Pursuit / Trace + 激活扩散网状召回(图,无向量库)
-  domain/ a2a/ karvy/ l0/   协作:业务域 / A2A 协议 / 小卡 / 大群
-  roles/ paradigm/ wizard/ adapter/ ethos/ syntonos/ instance/ onboarding/   身份与范式层
+  domain/ a2a/ karvy/   协作:业务域 / A2A 协议 / 小卡
+  roles/ paradigm/ wizard/ adapter/   身份与范式层
   console/        本地网页控制台(FastAPI REST + WebSocket + 静态 SPA)
-  workbench/ cli/ 终端 TUI + 主循环编排(快慢脑)
+  runtime/ workbench/ cli/   核心循环(快慢脑)+ 终端 TUI + CLI
   i18n/           中英双语表现层
 tests/                        ← pytest 测试套件(也是最好的用法示例)
 ```

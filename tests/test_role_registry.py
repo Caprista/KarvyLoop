@@ -61,16 +61,6 @@ def test_materialized_role_passes_existing_validator(tmp_path):
     assert errs == (), f"validator 报错: {errs}"
 
 
-def test_materialized_role_passes_auditor_atom_check(tmp_path):
-    """COMPOSITION 引的原子都注册 → auditor 不报 composition_atoms_valid。"""
-    from karvyloop.ethos.auditor import check_composition_atoms_valid
-    atoms = _atoms_with("web_search")
-    reg = RoleRegistry(tmp_path / "roles", atom_registry=atoms)
-    v = reg.create("pm", atom_ids=["web_search"])
-    finding = check_composition_atoms_valid(v.path, registered_atoms=("web_search",))
-    assert finding is None  # 引用合法
-
-
 def test_unknown_atom_rejected(tmp_path):
     """甲:挑的原子不在公共库 → 拦(先买糖)。"""
     atoms = _atoms_with("web_search")
