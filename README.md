@@ -134,6 +134,8 @@ That shift sounds incremental. It isn't — because of one uncomfortable fact ab
 
 Everything below is how KarvyLoop is built so you stay the engineer.
 
+> **Everyone is building agents that need you less. KarvyLoop builds the agent that learns how you decide — and proves it by never deciding for you.**
+
 ### Two loops, not one
 
 Look closely and a running loop is really *two* loops with opposite natures:
