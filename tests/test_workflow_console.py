@@ -156,3 +156,13 @@ def test_no_match_falls_through_to_fresh(app):
     body = TestClient(a).post("/api/workflow/plan",
                               json={"intent": "搞一场年会策划", "mentions": _ms(d1, d2)}).json()
     assert body["ok"] is True and not body.get("matched")   # 没匹配 → 现设计
+
+
+# ---- mentions 也接纯字符串(API 直调最自然写法;之前 422 无提示 = 压测实测踩到)----
+def test_workflow_plan_accepts_string_mentions(app):
+    a, mgr, reg, d1, d2 = app
+    body = TestClient(a).post("/api/workflow/plan",
+                              json={"intent": "做个登录页", "mentions": ["产品经理", "设计师"]}).json()
+    assert body["ok"] is True
+    aids = {s["agent_id"] for s in body["plan"]["steps"]}
+    assert "产品经理" in aids and "设计师" in aids

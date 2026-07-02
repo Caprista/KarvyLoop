@@ -321,13 +321,17 @@ def _extract_json_obj(text: str) -> str:
 
 
 def _workflow_roles_from_mentions(app, peer, mentions):
-    """把 @ 的 mentions 解析成角色 [{role_id, display, agent_id, domain_id, domain_name}](去重保序)。"""
+    """把 @ 的 mentions 解析成角色 [{role_id, display, agent_id, domain_id, domain_name}](去重保序)。
+
+    mentions 元素接 dict {agent_id, domain_id?} 或纯字符串 "agent_id"(API 直调最自然的写法)。"""
     from karvyloop.karvy.capability import is_karvy_peer
     dom_reg = getattr(app.state, "domain_registry", None)
     roster = _roundtable_roster(app, peer)
     is_world = is_karvy_peer(peer.domain_id)
     out, seen = [], set()
     for m in (mentions or []):
+        if isinstance(m, str):
+            m = {"agent_id": m}
         aid = (m.get("agent_id") or "").strip()
         did = (m.get("domain_id") or "").strip()
         for a in roster:
@@ -517,7 +521,9 @@ def _repoint_template(tpl, roles):
 
 class WorkflowPlanRequest(BaseModel):
     intent: str = Field(..., min_length=1, max_length=4000)
-    mentions: list[dict] = Field(default_factory=list, max_length=64)  # 50+ 步工作流压测放开到 64
+    # 标准形状 [{agent_id, domain_id?}];也接纯字符串 ["role-a", ...](API 直调最自然的写法,
+    # 之前直接 422 无提示——caller-injected 形状要尊重,能明确解释的就别拒)
+    mentions: list[dict | str] = Field(default_factory=list, max_length=64)  # 50+ 步工作流压测放开到 64
     force_fresh: bool = False   # True = 跳过快脑匹配,重新设计
 
 
