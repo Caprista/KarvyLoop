@@ -158,6 +158,7 @@ async function renderSkillsPanel(): Promise<void> {
   const data = await _getJSON("/api/skills");
   if (data && data.no_llm) { body.appendChild(el("div", { class: "mgmt-empty", text: t("skills.no_llm") })); return; }
   await _renderCodingCapability(body);    // #1:内建「Coding」技能 —— 编码能力露在技能库里
+  _renderCapabilityOverviewCard(body);    // P3-d:能力合一清单 —— 工具下限 + 技能授予一张表
   body.appendChild(_skillImportForm());   // 导入入口常驻顶部(空库时也能先导)
   const skills = (data && data.skills) || [];
   if (!skills.length) { body.appendChild(el("div", { class: "mgmt-empty", text: t("skills.empty") })); return; }
@@ -268,6 +269,62 @@ function _openCodingDetail(cap: any): void {
         el("div", { class: "mc-meta", text: (tl.description || "").slice(0, 200) }))));
   }
   b.appendChild(list);
+}
+
+// P3-d:能力合一清单 —— 此前工具能力(capability 决策链)和技能授予(grants/锁)两套账,
+// 审计"谁能干什么"要拼两处。一张表:工具×模式下限 + 技能×信任/联网/完整性锁。
+function _renderCapabilityOverviewCard(body: HTMLElement): void {
+  const actions = el("div", { class: "dpref-actions" });
+  actions.appendChild(el("button", { class: "dpref-edit", text: t("skills.view"),
+    onclick: () => _openCapabilityOverview() }));
+  body.appendChild(el("div", { class: "mgmt-list" },
+    el("div", { class: "mgmt-card" },
+      el("div", { class: "mc-main" },
+        el("div", { class: "mc-name" }, el("span", { text: "🔐 " + t("capov.name") })),
+        el("div", { class: "mc-meta", text: t("capov.subtitle") })),
+      actions)));
+}
+
+async function _openCapabilityOverview(): Promise<void> {
+  openMgmtModal(t("capov.name")); const b = mgmtBody(); if (!b) return; b.innerHTML = "";
+  const ov = await _getJSON("/api/capability/overview");
+  if (!ov) { b.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.failed", { err: "" }) })); return; }
+  // 工具 × 模式下限(不在表里 = FULL 最严,fail-closed)
+  b.appendChild(el("div", { class: "mgmt-section-title", text: t("capov.tools_title") }));
+  b.appendChild(el("div", { class: "mgmt-hint", text: t("capov.tools_hint") }));
+  const tl = el("div", { class: "mgmt-list" });
+  for (const t_ of (ov.tools || [])) {
+    const mode = (t_.required_mode || "full");
+    const modeCls = mode === "read_only" ? "confirmed" : (mode === "workspace_write" ? "provisional" : "");
+    tl.appendChild(el("div", { class: "mgmt-card" },
+      el("div", { class: "mc-main" },
+        el("div", { class: "mc-name" }, el("span", { text: "· " + t_.name }), " ",
+          el("span", { class: "dpref-badge " + modeCls, text: t("capov.mode_" + mode) }),
+          t_.kind === "mcp" ? " " : null,
+          t_.kind === "mcp" ? el("span", { class: "dpref-badge provisional", text: "MCP" }) : null))));
+  }
+  b.appendChild(tl);
+  // 技能 × 信任级/联网/完整性锁
+  b.appendChild(el("div", { class: "mgmt-section-title", text: t("capov.skills_title") }));
+  b.appendChild(el("div", { class: "mgmt-hint", text: t("capov.skills_hint") }));
+  const sl = el("div", { class: "mgmt-list" });
+  const skl = ov.skills || [];
+  if (!skl.length) sl.appendChild(el("div", { class: "mgmt-empty", text: t("skills.empty") }));
+  for (const s of skl) {
+    const trustBadge = el("span", { class: "dpref-badge " + (s.trust === "trusted" ? "confirmed" : "provisional"),
+      text: t("capov.trust_" + s.trust) });
+    const bits: (HTMLElement | string | null)[] = [el("span", { text: "🧩 " + s.name }), " ", trustBadge];
+    if (s.net_granted) { bits.push(" "); bits.push(el("span", { class: "dpref-badge provisional", text: "🌐 " + t("capov.net_on") })); }
+    if (s.lock) {
+      const lockCls = s.lock === "ok" ? "confirmed" : "provisional";
+      bits.push(" "); bits.push(el("span", { class: "dpref-badge " + lockCls, text: "🔒 " + t("capov.lock_" + s.lock) }));
+    }
+    sl.appendChild(el("div", { class: "mgmt-card" },
+      el("div", { class: "mc-main" },
+        el("div", { class: "mc-name" }, ...bits),
+        el("div", { class: "mc-meta", text: (s.has_scripts ? t("capov.has_scripts") : t("capov.no_scripts")) }))));
+  }
+  b.appendChild(sl);
 }
 
 // 技能详情 + 沙箱试跑(P0-c:让第三方脚本在笼子里跑给你看)

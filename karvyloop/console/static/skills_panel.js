@@ -211,6 +211,7 @@ var KarvySkillsPanelBundle = (function(exports) {
       return;
     }
     await _renderCodingCapability(body);
+    _renderCapabilityOverviewCard(body);
     body.appendChild(_skillImportForm());
     const skills = data && data.skills || [];
     if (!skills.length) {
@@ -390,6 +391,97 @@ var KarvySkillsPanelBundle = (function(exports) {
       ));
     }
     b.appendChild(list);
+  }
+  function _renderCapabilityOverviewCard(body) {
+    const actions = el("div", { class: "dpref-actions" });
+    actions.appendChild(el("button", {
+      class: "dpref-edit",
+      text: t("skills.view"),
+      onclick: () => _openCapabilityOverview()
+    }));
+    body.appendChild(el(
+      "div",
+      { class: "mgmt-list" },
+      el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el("div", { class: "mc-name" }, el("span", { text: "🔐 " + t("capov.name") })),
+          el("div", { class: "mc-meta", text: t("capov.subtitle") })
+        ),
+        actions
+      )
+    ));
+  }
+  async function _openCapabilityOverview() {
+    openMgmtModal(t("capov.name"));
+    const b = mgmtBody();
+    if (!b) return;
+    b.innerHTML = "";
+    const ov = await _getJSON("/api/capability/overview");
+    if (!ov) {
+      b.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.failed", { err: "" }) }));
+      return;
+    }
+    b.appendChild(el("div", { class: "mgmt-section-title", text: t("capov.tools_title") }));
+    b.appendChild(el("div", { class: "mgmt-hint", text: t("capov.tools_hint") }));
+    const tl = el("div", { class: "mgmt-list" });
+    for (const t_ of ov.tools || []) {
+      const mode = t_.required_mode || "full";
+      const modeCls = mode === "read_only" ? "confirmed" : mode === "workspace_write" ? "provisional" : "";
+      tl.appendChild(el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el(
+            "div",
+            { class: "mc-name" },
+            el("span", { text: "· " + t_.name }),
+            " ",
+            el("span", { class: "dpref-badge " + modeCls, text: t("capov.mode_" + mode) }),
+            t_.kind === "mcp" ? " " : null,
+            t_.kind === "mcp" ? el("span", { class: "dpref-badge provisional", text: "MCP" }) : null
+          )
+        )
+      ));
+    }
+    b.appendChild(tl);
+    b.appendChild(el("div", { class: "mgmt-section-title", text: t("capov.skills_title") }));
+    b.appendChild(el("div", { class: "mgmt-hint", text: t("capov.skills_hint") }));
+    const sl = el("div", { class: "mgmt-list" });
+    const skl = ov.skills || [];
+    if (!skl.length) sl.appendChild(el("div", { class: "mgmt-empty", text: t("skills.empty") }));
+    for (const s of skl) {
+      const trustBadge = el("span", {
+        class: "dpref-badge " + (s.trust === "trusted" ? "confirmed" : "provisional"),
+        text: t("capov.trust_" + s.trust)
+      });
+      const bits = [el("span", { text: "🧩 " + s.name }), " ", trustBadge];
+      if (s.net_granted) {
+        bits.push(" ");
+        bits.push(el("span", { class: "dpref-badge provisional", text: "🌐 " + t("capov.net_on") }));
+      }
+      if (s.lock) {
+        const lockCls = s.lock === "ok" ? "confirmed" : "provisional";
+        bits.push(" ");
+        bits.push(el("span", { class: "dpref-badge " + lockCls, text: "🔒 " + t("capov.lock_" + s.lock) }));
+      }
+      sl.appendChild(el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el("div", { class: "mc-name" }, ...bits),
+          el("div", { class: "mc-meta", text: s.has_scripts ? t("capov.has_scripts") : t("capov.no_scripts") })
+        )
+      ));
+    }
+    b.appendChild(sl);
   }
   function _openSkillDetail(s) {
     openMgmtModal(s.name);

@@ -1728,6 +1728,47 @@ def api_coding_capability(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/capability/overview")
+def api_capability_overview(request: Request) -> dict[str, Any]:
+    """能力合一清单(P3-d):**一张表**审计全系统能力面。
+
+    此前两套能力系统各说各话 —— 工具走 capability 决策链(模式下限/规则),技能走 grants
+    (信任级/联网授权/完整性锁),"谁能干什么"要拼两处才知道。本端点合一:
+    - tools:真实装上的工具(内建+MCP,复用 /coding/capability)+ 每个的**模式下限**
+      (required_mode;不在表里=FULL 最严,HR-1 fail-closed)。
+    - skills:每个技能的信任级(自家 trusted / 第三方 untrusted)+ 是否带脚本 + 联网授权
+      + **完整性锁状态**(untrusted 才有:ok/unlocked/mismatch)。
+    """
+    from pathlib import Path as _P
+    from karvyloop.capability.policy import required_mode
+    cap = api_coding_capability(request)
+    tools = [{**t_, "required_mode": required_mode(t_.get("name", "")).name.lower()}
+             for t_ in cap.get("tools", [])]
+    skills_out: list[dict[str, Any]] = []
+    sk = api_skills(request)
+    skills_dir = _P.home() / ".karvyloop" / "skills"
+    for s in sk.get("skills", []):
+        entry = {
+            "name": s["name"], "source": s.get("source", "user"),
+            "trust": "untrusted" if s.get("untrusted") else "trusted",
+            "net_granted": bool(s.get("net_granted")),
+            "has_scripts": bool(s.get("scripts")),
+            "status": s.get("status", ""),
+            "lock": "",   # 只有 untrusted 有锁语义
+        }
+        if s.get("untrusted"):
+            try:
+                from karvyloop.registry.skill_lock import verify_lock
+                st, _detail = verify_lock(skills_dir, s["name"])
+                entry["lock"] = st
+            except Exception:
+                entry["lock"] = "unknown"
+        skills_out.append(entry)
+    return {"tools": tools, "skills": skills_out,
+            "executor": cap.get("executor", ""), "sandboxed": cap.get("sandboxed", False),
+            "no_llm": bool(sk.get("no_llm"))}
+
+
 @router.post("/coding/config")
 async def api_coding_config(request: Request) -> dict[str, Any]:
     """#3:保存/清除外接编码工具命令(高级用户想用自己的 coder,如 Claude Code CLI)。
