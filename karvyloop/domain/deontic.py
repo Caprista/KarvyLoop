@@ -83,6 +83,33 @@ def derive_soul_subset(deontic: Deontic) -> tuple[str, ...]:
     return tuple(out)
 
 
+def deontic_guardrail_text(deontic: Deontic) -> str:
+    """把域的 deontic(forbid/oblige/permit)渲染成**运行时护栏文本**,前置进慢脑 system 指令。
+
+    **为什么是文本护栏而非确定性工具闸**:forbid/oblige 是自然语言"行为"(如"对外发邮件前必须复核"),
+    不是工具名 —— 确定性 `tool in forbid` 匹配对它们基本不命中(=假接线)。NL 规则的正确 enforcement
+    是①**运行时软护栏**(本函数:把规则摆进慢脑 system,让模型受约束)+ ②**建时** skill×域冲突检测
+    (rules_from_domain + LLM judge)。真确定性硬闸只在 capability 链(denied_tools/deny 规则/安全检查)
+    + 网关预算地板,那些是工具/命令级的、可确定判定的。
+
+    此前的洞:`governance_text` 只注入 value.md,forbid/oblige 从不进运行时护栏 —— 域的硬规则
+    在执行路径上形同虚设。本函数补上;空 deontic → 空串(0 回归)。
+    """
+    if not deontic:
+        return ""
+    lines: list[str] = []
+    if deontic.forbid:
+        lines.append("你在本业务域**绝不能**做以下事(违反即失职):")
+        lines += [f"  - {f}" for f in deontic.forbid]
+    if deontic.oblige:
+        lines.append("你在本业务域**必须**做到以下事:")
+        lines += [f"  - {o}" for o in deontic.oblige]
+    if deontic.permit:
+        lines.append("本业务域**明确允许**(即便一般情况下会犹豫):")
+        lines += [f"  - {p}" for p in deontic.permit]
+    return "\n".join(lines)
+
+
 def apply_deontic(
     deontic: Deontic,
     action: str,

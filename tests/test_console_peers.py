@@ -179,6 +179,58 @@ def test_governance_empty_when_no_registry(tmp_path):
     assert m.governance_text() == ""
 
 
+# ---- P2-a: deontic 硬规则(forbid/oblige/permit)进运行时护栏 ----
+
+def test_deontic_guardrail_text_renders():
+    from karvyloop.domain.deontic import Deontic, deontic_guardrail_text
+    assert deontic_guardrail_text(None) == ""
+    assert deontic_guardrail_text(Deontic()) == ""   # 空 deontic → 空
+    g = deontic_guardrail_text(Deontic(forbid=("对外发邮件",), oblige=("先复核",), permit=("加班",)))
+    assert "绝不能" in g and "对外发邮件" in g
+    assert "必须" in g and "先复核" in g
+    assert "允许" in g and "加班" in g
+
+
+def test_governance_injects_deontic(tmp_path):
+    """域有 forbid/oblige → governance_text 把它们摆进护栏(此前只注 value.md 的洞)。"""
+    from karvyloop.domain.deontic import Deontic
+
+    class _D:
+        def __init__(self):
+            self.id = "dom-fin"
+            self.name = "财务域"
+            self.value_md = _FakeValueMd(VALUE_TEXT)
+            self.deontic = Deontic(forbid=("擅自转账",), oblige=("双人复核",))
+            self._members = [Address(domain_id="dom-fin", role="agent", agent_id="会计")]
+
+    reg = _FakeRegistry([_D()])
+    mgr = ConversationManager(ConversationStore(tmp_path / "c"), domain_registry=reg)
+    mgr.set_peer(Address(domain_id="dom-fin", role="agent", agent_id="会计"))
+    gov = mgr.governance_text()
+    assert "诚实第一" in gov          # value.md 仍在
+    assert "擅自转账" in gov          # forbid 进护栏
+    assert "双人复核" in gov          # oblige 进护栏
+
+
+def test_governance_deontic_without_value_md(tmp_path):
+    """域有 forbid 但无 value.md → 护栏仍出现(此前 value.md 空整段丢弃的裸奔洞)。"""
+    from karvyloop.domain.deontic import Deontic
+
+    class _D:
+        def __init__(self):
+            self.id = "dom-x"
+            self.name = "X域"
+            self.value_md = _FakeValueMd("")   # 空 value.md
+            self.deontic = Deontic(forbid=("删生产库",))
+            self._members = []
+
+    reg = _FakeRegistry([_D()])
+    mgr = ConversationManager(ConversationStore(tmp_path / "c"), domain_registry=reg)
+    mgr.set_peer(Address(domain_id="dom-x", role="agent", agent_id="a"))
+    gov = mgr.governance_text()
+    assert "删生产库" in gov and "X域" in gov
+
+
 # ---- AC8: 业务域线 intent → governance 注入慢脑 ----
 
 

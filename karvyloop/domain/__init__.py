@@ -30,6 +30,7 @@ from .deontic import (
     Deontic,
     DeonticResult,
     apply_deontic,
+    deontic_guardrail_text,
     derive_soul_subset,
 )
 from .registry import (
@@ -64,6 +65,7 @@ __all__ = [
     "Deontic",
     "DeonticResult",
     "apply_deontic",
+    "deontic_guardrail_text",
     "derive_soul_subset",
     # registry
     "ADDR_AGENT",

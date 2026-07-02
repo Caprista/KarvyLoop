@@ -446,10 +446,13 @@ class ConversationManager:
         return self._current.context_view(self._context_turns)
 
     def governance_text(self) -> str:
-        """当前场的治理文本(CV-14):业务域线 = 该域 value.md(继承父域已在 registry 解析);
-        私聊(l0)/ 无 registry / 域不存在 → 空串。
+        """当前场的治理文本(CV-14):业务域线 = 该域 value.md **+ deontic 硬规则**(forbid/oblige/permit,
+        继承父域已在 registry 解析);私聊(l0)/ 无 registry / 域不存在 → 空串。
 
-        框成系统指令喂慢脑前缀 —— 让同一角色在不同企业受不同价值观约束 → 不同表现。
+        框成系统指令喂慢脑前缀 —— 让同一角色在不同企业受不同价值观 + 硬规则约束 → 不同表现。
+
+        P2-a:此前只注入 value.md,deontic 的 forbid/oblige 从不进运行时护栏(域的硬规则在执行路径
+        形同虚设),且 value.md 空时整段丢弃(有 forbid 无 value.md 的域裸奔)。现在两者独立装配。
         """
         if self._peer is None or self._peer.domain_id == KARVY_WORLD_DOMAIN:
             return ""
@@ -462,18 +465,28 @@ class ConversationManager:
             domain = None
         if domain is None:
             return ""
-        value_text = getattr(getattr(domain, "value_md", None), "text", "") or ""
-        if not value_text:
-            return ""
-        # 拍 9.3b:value.md 封顶(docs/28 TK token 纪律)—— 防超长 value.md 每轮重付;
-        # 域级稳定文本本就靠 prompt cache 复用,这里再兜一道上限。
-        if len(value_text) > 1500:
-            value_text = value_text[:1500] + "…"
         name = getattr(domain, "name", self._peer.domain_id)
-        return (
-            f"你正在业务域「{name}」里工作,必须遵循该域的价值观(value.md):\n"
-            f"{value_text}"
-        )
+        blocks: list[str] = []
+        value_text = getattr(getattr(domain, "value_md", None), "text", "") or ""
+        if value_text:
+            # 拍 9.3b:value.md 封顶(docs/28 TK token 纪律)—— 防超长 value.md 每轮重付;
+            # 域级稳定文本本就靠 prompt cache 复用,这里再兜一道上限。
+            if len(value_text) > 1500:
+                value_text = value_text[:1500] + "…"
+            blocks.append(
+                f"你正在业务域「{name}」里工作,必须遵循该域的价值观(value.md):\n{value_text}"
+            )
+        # deontic 硬规则(forbid/oblige/permit)→ 运行时软护栏(NL 规则的正确 enforcement)
+        try:
+            from karvyloop.domain.deontic import deontic_guardrail_text
+            guard = deontic_guardrail_text(getattr(domain, "deontic", None))
+        except Exception:
+            guard = ""
+        if guard:
+            if not blocks:
+                guard = f"你正在业务域「{name}」里工作。\n" + guard
+            blocks.append(guard)
+        return "\n\n".join(blocks)
 
     def record_turn(
         self,
