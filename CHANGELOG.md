@@ -11,6 +11,33 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Security
+- **Same-origin gate** on the console: cross-origin browser requests are rejected on both HTTP and the
+  WebSocket handshake (closes cross-site WebSocket hijacking and file-endpoint CSRF; non-browser clients
+  and the console's own frontend are unaffected). Applies even on loopback.
+- **Skill integrity lock enforced on the production paths**: a tampered `trust: untrusted` skill is refused
+  at the recall index, at every disk-scan fallback, and again before sandbox execution.
+- **Deterministic context ceiling** at the LLM gateway choke-point: a request whose assembled context
+  (messages + system + tools schema, CJK-aware estimate) exceeds the model's window is refused fail-loud
+  instead of being sent to fail.
+
+### Fixed
+- H2A decision cards: every proposal kind now lands in the decision column (reject button + payload intact);
+  multiple pending cards no longer overwrite each other; pending cards (incl. deferred) survive restart.
+- Domain deontic rules (`forbid`/`oblige`/`permit`) now reach the runtime guardrail (previously only
+  `value.md` did — and it was dropped entirely when `value.md` was blank); no double-injection with compiled
+  per-role prompts.
+- Decisions made over REST now feed the preference flywheel and the decision log exactly like WebSocket ones.
+- Task terminal states (done/error) are recorded into Trace, so the async evaluators see task-level outcomes.
+- Backend Chinese reason/detail strings are translated in the English UI (contract-tested: a new backend
+  reason without a translation fails the suite).
+
+### Added
+- **Semantic tag layer for skill recall** (`tags:` in SKILL.md, matched alongside token overlap — no vectors),
+  with a daily slow-side backfill that tags untagged own skills once (untrusted skills untouched).
+- **Capability overview** (`/api/capability/overview` + a card in the Skills panel): one table for
+  tools × mode floors and skills × trust/network/integrity-lock.
+
 ### Planned
 - **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
   near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the
