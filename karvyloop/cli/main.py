@@ -78,6 +78,15 @@ def _build_parser() -> argparse.ArgumentParser:
     # url — 打印当前正在运行的 console 的访问链接(本机免密 + 跨设备带 token)
     sub.add_parser("url", help=t("cli.help.url"))
 
+    # export — 你的实例是个文件夹:打包带走(排除 config.yaml 等秘密)。文案暂英文硬编码,
+    # i18n 键待补(en/zh 表由并行工作占用;t() 缺键回退是 key 本身救不了 help)。
+    p_export = sub.add_parser(
+        "export",
+        help="pack your instance (~/.karvyloop) into one portable archive — secrets excluded")
+    p_export.add_argument(
+        "--out", type=str, default=None,
+        help="output archive path (.zip or .tar.gz; default: ./karvyloop-instance-<YYYYMMDD>.zip)")
+
     return p
 
 
@@ -203,6 +212,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.cmd == "url":
         return _cmd_url()
+
+    if args.cmd == "export":
+        from .export_cmd import cmd_export
+        return cmd_export(out=args.out)
 
     from karvyloop.i18n import t
     parser.error(t("cli.unknown_cmd", cmd=args.cmd))
