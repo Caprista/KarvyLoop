@@ -2174,7 +2174,13 @@ def api_decision_pref_stats(request: Request) -> dict[str, Any]:
         "decisions_total": 0, "accept_rate": None, "recent_accept_rate": None,
         "trend": None, "enough_for_trend": False,
     }
-    return {"prefs_total": total, "confirmed": confirmed, "by_kind": by_kind, **outcome}
+    # 口味命中率(taste_eval):"越用越像你"的可证明刻度 —— 前瞻押注的滚动对账
+    tstore = getattr(app.state, "taste_predictions", None)
+    taste = tstore.stats() if tstore is not None else {
+        "taste_n": 0, "taste_hit_rate": None, "taste_prev_rate": None,
+        "taste_trend": None, "taste_enough": False, "taste_need_more": 10,
+    }
+    return {"prefs_total": total, "confirmed": confirmed, "by_kind": by_kind, **outcome, **taste}
 
 
 def _persona_for_role_addr(app, addr, domain, workspace_root: str):

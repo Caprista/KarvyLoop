@@ -310,6 +310,10 @@ def cmd_console(args: argparse.Namespace) -> int:
         app.state.decision_log = DecisionLog(
             path=_Path.home() / ".karvyloop" / "decision_log.json",
         )
+        # 口味命中率:押注/对账存储(前瞻预测,"越用越像你"的可证明刻度)。落盘。
+        from karvyloop.crystallize.taste_eval import TastePredictionStore
+        app.state.taste_predictions = TastePredictionStore(
+            _Path.home() / ".karvyloop" / "taste_predictions.json")
         # 撤回抑制:你撤过的偏好,冷却窗口内别自动结晶回来(让"撤回"有牙)。落盘=跨重启算数。
         app.state.decision_revocations = RevocationStore(
             path=_Path.home() / ".karvyloop" / "decision_revoked.json",

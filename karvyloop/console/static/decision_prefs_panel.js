@@ -22,12 +22,27 @@ var KarvyDecisionPrefsBundle = (function(exports) {
     }
     return txt;
   }
+  function _tasteHitText(s) {
+    if (!s || !s.taste_enough || typeof s.taste_hit_rate !== "number") {
+      const need = s && s.taste_need_more || 0;
+      return s && (s.taste_n || 0) > 0 || need > 0 ? t("dpref.taste_warming", { need }) : "";
+    }
+    let txt = t("dpref.taste_rate", { pct: Math.round(s.taste_hit_rate * 100), n: s.taste_n });
+    if (typeof s.taste_prev_rate === "number") {
+      txt += " · " + t("dpref.taste_prev", { pct: Math.round(s.taste_prev_rate * 100) });
+    }
+    return txt;
+  }
   async function renderDecisionPrefs() {
     const body = mgmtBody();
     if (!body) return;
     body.innerHTML = "";
     const stats = await _getJSON("/api/decision_prefs/stats");
     if (stats) body.appendChild(el("div", { class: "dpref-signal", text: _dprefSignalText(stats) }));
+    if (stats) {
+      const tasteTxt = _tasteHitText(stats);
+      if (tasteTxt) body.appendChild(el("div", { class: "dpref-signal dpref-taste", text: "🎯 " + tasteTxt }));
+    }
     body.appendChild(el("div", { class: "mgmt-section-title", text: t("dpref.subtitle") }));
     const data = await _getJSON("/api/decision_prefs");
     const prefs = data && data.prefs || [];

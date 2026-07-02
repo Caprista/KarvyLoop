@@ -95,6 +95,13 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
             if pairs:
                 eff_reason = (f"[用户改了再批] {'; '.join(pairs[:3])}"
                               + (f" || {reason}" if reason else ""))
+        # 口味命中率对账:拍板了 → 押过的注开奖(纯查表零 LLM;没押过=不计入,诚实)
+        tstore = getattr(app.state, "taste_predictions", None)
+        if tstore is not None:
+            try:
+                tstore.resolve(proposal_id, decision)
+            except Exception:
+                pass
         observe_decision(app, DecisionSample(
             decision=decision, context=(ctx or proposal_id),
             reason=eff_reason, scope="personal",

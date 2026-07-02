@@ -38,10 +38,30 @@ function _dprefSignalText(s: any): string {
   return txt;
 }
 
+// 口味命中率:"越用越像你"的可证明刻度 —— 系统在你拍板前押注"我猜你会怎么拍",拍完对账。
+// 诚实:样本不足不报百分比("还在学你");趋势要两期都够样本才亮。
+function _tasteHitText(s: any): string {
+  if (!s || !s.taste_enough || typeof s.taste_hit_rate !== "number") {
+    const need = (s && s.taste_need_more) || 0;
+    return (s && (s.taste_n || 0) > 0) || need > 0
+      ? t("dpref.taste_warming", { need: need })
+      : "";
+  }
+  let txt = t("dpref.taste_rate", { pct: Math.round(s.taste_hit_rate * 100), n: s.taste_n });
+  if (typeof s.taste_prev_rate === "number") {
+    txt += " · " + t("dpref.taste_prev", { pct: Math.round(s.taste_prev_rate * 100) });
+  }
+  return txt;
+}
+
 async function renderDecisionPrefs(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
   const stats = await _getJSON("/api/decision_prefs/stats");
   if (stats) body.appendChild(el("div", { class: "dpref-signal", text: _dprefSignalText(stats) }));
+  if (stats) {
+    const tasteTxt = _tasteHitText(stats);
+    if (tasteTxt) body.appendChild(el("div", { class: "dpref-signal dpref-taste", text: "🎯 " + tasteTxt }));
+  }
   body.appendChild(el("div", { class: "mgmt-section-title", text: t("dpref.subtitle") }));
   const data = await _getJSON("/api/decision_prefs");
   const prefs = (data && data.prefs) || [];

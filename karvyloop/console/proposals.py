@@ -51,6 +51,10 @@ async def broadcast_proposal(app: Any, proposal: Any) -> int:
         except Exception as e:  # 登记失败不该阻断推送
             logger.debug(f"[proposals] registry.register 失败(不阻断推送): {e}")
 
+    # 口味命中率(taste_eval):卡片发出=系统**先押注**"我猜你会怎么拍"(fire-and-forget,
+    # 绝不拖慢推送;押注失败不计入=宁空勿毒)。拍板后在 record_decision_signals 对账。
+    _schedule_taste_bet(app, proposal)
+
     clients = getattr(app.state, "ws_clients", None)
     if not clients:
         return 0
@@ -139,3 +143,53 @@ __all__ = [
     "ProposalPump",
     "broadcast_proposal",
 ]
+
+def _schedule_taste_bet(app: Any, proposal: Any) -> None:
+    """异步押一注"用户会 ACCEPT 还是 REJECT"(口味命中率的前瞻端)。
+
+    诚实三律:押注必须在拍板前落库;LLM 失败/无 loop → 不押不计入;元循环 kind 跳过。"""
+    import asyncio
+    from karvyloop.crystallize.taste_eval import SKIP_KINDS
+    store = getattr(app.state, "taste_predictions", None)
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    pid = getattr(proposal, "proposal_id", "") or ""
+    kind = getattr(proposal, "kind", "") or ""
+    if store is None or gw is None or not pid or kind in SKIP_KINDS:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _bet() -> None:
+        try:
+            from karvyloop.crystallize.decision_pref import is_decision_pref, prealign_block
+            from karvyloop.crystallize.taste_eval import predict_decision
+            from karvyloop.llm.token_ledger import token_source
+            prefs_block = ""
+            mem = getattr(app.state, "memory", None)
+            if mem is not None:
+                try:
+                    beliefs = [b for sc in ("personal", "domain") for b in mem.index.all(sc)
+                               if is_decision_pref(b)]
+                    prefs_block = prealign_block(beliefs, query=getattr(proposal, "summary", "") or "")
+                except Exception:
+                    prefs_block = ""
+            with token_source("taste_predict"):
+                got = await predict_decision(
+                    gw, rk.get("model_ref", "") or "",
+                    summary=getattr(proposal, "summary", "") or "",
+                    basis=getattr(proposal, "basis", "") or "", kind=kind,
+                    prefs_block=prefs_block)
+            if got is not None:
+                store.record_prediction(pid, got[0], got[1])
+        except Exception as e:
+            logger.debug(f"[taste] 押注失败(不计入): {e}")
+
+    task = loop.create_task(_bet())
+    tasks = getattr(app.state, "_taste_tasks", None)
+    if tasks is None:
+        tasks = app.state._taste_tasks = set()
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
