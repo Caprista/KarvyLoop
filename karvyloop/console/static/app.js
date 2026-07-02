@@ -295,6 +295,16 @@
       const r = await fetch("/api/update_status");
       if (!r.ok) return;
       const u = await r.json();
+      // E(升级预检+回滚):上次升级失败已自动回滚 → 大声横幅告知(fail-loud,不静默);
+      // 可回滚且刚升过 → 横幅带「回滚到上一版」按钮(一键后悔药)。
+      const lu = u && u.last_upgrade;
+      if (lu && lu.rolled_back && !document.getElementById("update-banner")) {
+        const bar = el("div", { class: "update-banner update-banner-err", id: "update-banner" });
+        bar.appendChild(el("span", { class: "update-banner-msg",
+          text: t("update.rolled_back", { reason: lu.rollback_reason || lu.msg || "" }) }));
+        bar.appendChild(el("button", { class: "update-x", text: "✕", onClick: () => bar.remove() }));
+        document.body.insertBefore(bar, document.body.firstChild);
+      }
       if (!u || !u.newer || !u.latest) return;
       let dismissed = null;
       try { dismissed = localStorage.getItem("karvyloop_update_dismissed"); } catch (e) {}
@@ -312,6 +322,20 @@
     // 一键升级:点了才升(=手动,不是静默自动);点完后端跑 停→装→起 整套,不用敲命令
     bar.appendChild(el("button", { class: "update-go", text: t("update.upgrade_btn"),
       onClick: (e) => _doUpgrade(u, e.target) }));
+    if (u.rollback_available) {
+      bar.appendChild(el("button", { class: "update-rollback", text: t("update.rollback_btn", { prev: u.prev_version || "?" }),
+        onClick: async (e) => {
+          if (!confirm(t("update.rollback_confirm", { prev: u.prev_version || "?" }))) return;
+          e.target.disabled = true;
+          try {
+            const rr = await fetch("/api/update/rollback", { method: "POST",
+              headers: { "X-Karvyloop-Upgrade": "1" } });
+            const dd = await rr.json();
+            if (dd && dd.ok === false) { alert(t("update.upgrade_failed", { reason: dd.reason || "" })); e.target.disabled = false; return; }
+          } catch (err) { /* 服务重启中 → 轮询 */ }
+          _pollUpgrade(u.prev_version || "", 0);
+        } }));
+    }
     if (u.command) bar.appendChild(el("code", { class: "update-cmd", text: u.command }));
     if (u.url) bar.appendChild(el("a", { class: "update-link", href: u.url,
       target: "_blank", rel: "noopener", text: t("update.banner_notes") }));

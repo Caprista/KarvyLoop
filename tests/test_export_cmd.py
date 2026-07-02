@@ -22,6 +22,16 @@ from karvyloop.cli.export_cmd import cmd_export
 from karvyloop.cli.main import main
 
 
+@pytest.fixture(autouse=True)
+def _pin_locale():
+    """export 输出走后端 i18n;别的测试可能把 locale 切成 zh 不还原 → 这里钉死 en 再还原,免疫顺序污染。"""
+    from karvyloop.i18n import get_locale, set_locale
+    prev = get_locale()
+    set_locale("en")
+    yield
+    set_locale(prev)
+
+
 @pytest.fixture()
 def fake_home(tmp_path: Path, monkeypatch) -> Path:
     """伪 ~/.karvyloop:真数据 + 秘密(fixture key 带 FAKE/DO-NOT-LEAK,防泄露纪律)。"""
