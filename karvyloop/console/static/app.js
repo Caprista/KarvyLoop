@@ -1929,10 +1929,16 @@
             el("span", { class: "step-name", text: s.display || "?" }))));
       }
     }
-    return el("div", { class: "task-card",
+    // 主动报阻塞(借鉴 Multica):最新事件是 blocked → 卡片直接冒 ⚠「卡在哪」,不用点开、不用去问
+    let blockedEl = null;
+    if (tk.status === "running" && tk.blocked && tk.last_event) {
+      blockedEl = el("div", { class: "task-blocked", text: "⚠ " + t("task.blocked_on", { what: tk.last_event.text || "?" }) });
+    }
+    return el("div", { class: "task-card" + (blockedEl ? " has-blocked" : ""),
       onclick: (e) => { if (e.target && e.target.classList.contains("task-check")) return; openTaskDetail(tk); } },
       top,
       el("div", { class: "task-intent", text: tk.intent || "" }),
+      blockedEl,
       stepsEl,
       (tk.status !== "running" && tk.result) ? el("div", { class: "task-result", text: tk.result }) : null,
       (tk.status !== "running") ? el("div", { class: "task-jump", text: t("task.view_result") }) : null);
@@ -2014,13 +2020,29 @@
     body.appendChild(el("div", { class: "mgmt-section-title",
       text: _localizeWho(tk.who) + " · " + statusLbl }));
     body.appendChild(el("div", { class: "task-detail-intent", text: tk.intent || "" }));
+    const data = await _getJSON("/api/task/" + encodeURIComponent(tk.id));
+    const detail = (data && data.task) || {};
+    // 活动时间线(借鉴 Multica"可读的同事"):这个任务经历了什么 —— 持久、刷新/重启后仍在
+    const events = detail.events || [];
+    if (events.length) {
+      body.appendChild(el("div", { class: "mgmt-section-title", text: t("task.timeline") }));
+      const tl = el("div", { class: "task-timeline" });
+      const marks = { start: "▶", step: "✓", blocked: "⚠", done: "✔", error: "✗" };
+      for (const ev of events) {
+        const when = new Date((ev.ts || 0) * 1000).toLocaleTimeString();
+        tl.appendChild(el("div", { class: "task-ev " + (ev.kind || "") },
+          el("span", { class: "task-ev-mark", text: marks[ev.kind] || "·" }),
+          el("span", { class: "task-ev-time", text: when }),
+          el("span", { class: "task-ev-text", text: ev.text || t("task.ev_" + (ev.kind || "step")) })));
+      }
+      body.appendChild(tl);
+    }
     const resBox = el("div", { class: "task-detail-result" });
     if (tk.status === "running") {
       resBox.appendChild(el("span", { class: "busy-dot" }));
       resBox.appendChild(el("span", { text: " " + t("chat.executing") }));
     } else {
-      const data = await _getJSON("/api/task/" + encodeURIComponent(tk.id));
-      const full = (data && data.task && data.task.result_full) || tk.result || "";
+      const full = detail.result_full || tk.result || "";
       if (window.KarvyRender) KarvyRender.appendMarkdown(resBox, full);
       else resBox.textContent = full;
     }

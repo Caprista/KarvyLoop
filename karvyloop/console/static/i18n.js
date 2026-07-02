@@ -577,6 +577,13 @@
         "task.result_doc": "📄 Task result",
         "task.failed_notice": "⚠ {who} failed: {err}",
         "task.step_failed": "✗ {who} — this step failed: {err}",
+        "task.blocked_on": "blocked: {what}",
+        "task.timeline": "Activity timeline",
+        "task.ev_start": "started",
+        "task.ev_step": "step done",
+        "task.ev_blocked": "blocked",
+        "task.ev_done": "completed",
+        "task.ev_error": "failed",
         "system.bg_error": "⚠ Background task error ({source}): {err}"
       },
       zh: {
@@ -1154,6 +1161,13 @@
         "task.result_doc": "📄 任务结果",
         "task.failed_notice": "⚠ {who} 出错:{err}",
         "task.step_failed": "✗ {who} —— 这步失败:{err}",
+        "task.blocked_on": "卡在:{what}",
+        "task.timeline": "活动时间线",
+        "task.ev_start": "开始",
+        "task.ev_step": "完成一步",
+        "task.ev_blocked": "卡住",
+        "task.ev_done": "完成",
+        "task.ev_error": "失败",
         "system.bg_error": "⚠ 后台任务出错({source}):{err}"
       }
     };

@@ -96,3 +96,54 @@ def test_detail_has_full_result():
     d = reg.get(tid)
     assert d is not None and len(d["result_full"]) == 1000
     assert reg.get("nope") is None
+
+
+# ---- 活动时间线(借鉴 Multica:任务=可读的同事,经历了什么持久记在任务身上)----
+def test_timeline_records_lifecycle():
+    """start → start 事件;中途 add_event(step/blocked);finish → done/error 事件。"""
+    reg = TaskRegistry()
+    tid = reg.start(who="⚙ 工作流", intent="做登录页")
+    reg.add_event(tid, "step", "产品:需求梳理")
+    reg.add_event(tid, "blocked", "前端:npm install 失败")
+    t = reg.list()[0]
+    assert t["blocked"] is True                              # 最新事件是 blocked → 卡片直接可见
+    assert t["last_event"]["text"].startswith("前端")
+    reg.add_event(tid, "step", "前端:重试成功")
+    assert reg.list()[0]["blocked"] is False                 # 恢复推进 → 不再标卡
+    reg.finish(tid, result="上线了")
+    events = reg.get(tid)["events"]
+    kinds = [e["kind"] for e in events]
+    assert kinds == ["start", "step", "blocked", "step", "done"]
+    assert all("ts" in e for e in events)
+
+
+def test_timeline_persists_across_reload(tmp_path):
+    """时间线随任务落盘 —— 重启后"经历了什么"仍在(不再是前端易失缓存)。"""
+    from karvyloop.console.tasks import TaskStore
+    store = TaskStore(tmp_path / "tasks.json")
+    reg = TaskRegistry(store=store)
+    tid = reg.start(who="a", intent="x")
+    reg.add_event(tid, "blocked", "卡在依赖")
+    reg.finish(tid, error="没跑完")
+    reg2 = TaskRegistry(store=TaskStore(tmp_path / "tasks.json"))
+    events = reg2.get(tid)["events"]
+    assert [e["kind"] for e in events] == ["start", "blocked", "error"]
+    assert events[1]["text"] == "卡在依赖"
+
+
+def test_timeline_cap_keeps_head_and_tail():
+    """时间线超上限 → 砍中段,保头部 start + 最新(不无界膨胀)。"""
+    reg = TaskRegistry()
+    tid = reg.start(who="a", intent="x")
+    for i in range(200):
+        reg.add_event(tid, "step", f"s{i}")
+    events = reg.get(tid)["events"]
+    assert len(events) <= 80
+    assert events[0]["kind"] == "start"                      # 头部保住
+    assert events[-1]["text"] == "s199"                      # 最新保住
+
+
+def test_add_event_unknown_task_is_noop():
+    reg = TaskRegistry()
+    reg.add_event("ghost", "step", "x")                      # 不炸
+    assert reg.list() == []

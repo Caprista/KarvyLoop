@@ -1532,6 +1532,20 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .task-step.done .step-mark { color: var(--green); }
 .task-step.failed { color: var(--danger); }
 .task-step.failed .step-mark { color: var(--danger); }
+/* 主动报阻塞:卡片上直接冒 ⚠(不用点开、不用去问) */
+.task-blocked { font-size: 12px; font-weight: 700; color: #8a5a1e; background: #fbf1dc;
+  border: 1px solid var(--gold, #c39a45); border-radius: 8px; padding: 5px 9px; margin: 5px 0 2px; }
+.task-card.has-blocked { border-color: var(--gold, #c39a45); }
+/* 活动时间线(任务详情):这个任务经历了什么 */
+.task-timeline { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 14px; }
+.task-ev { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: var(--text-dim); }
+.task-ev-mark { flex: 0 0 16px; text-align: center; font-weight: 700; }
+.task-ev.step .task-ev-mark, .task-ev.done .task-ev-mark { color: var(--green); }
+.task-ev.blocked { color: #8a5a1e; }
+.task-ev.blocked .task-ev-mark { color: var(--gold, #c39a45); }
+.task-ev.error, .task-ev.error .task-ev-mark { color: var(--danger); }
+.task-ev-time { flex: 0 0 auto; font-size: 11px; color: var(--muted, #857a68); font-variant-numeric: tabular-nums; }
+.task-ev-text { min-width: 0; overflow-wrap: anywhere; }
 .task-detail-intent {
   font-size: 14px; font-weight: 600; margin-bottom: 12px;
   padding-bottom: 10px; border-bottom: 1px solid var(--border);

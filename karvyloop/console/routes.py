@@ -881,6 +881,16 @@ async def _push_step(app: Any, task_id: Optional[str], step_id: str, display: st
     """§0.7 P2:把一步的完成/失败推给 UI(实时进度,不等整体跑完)。失败不阻塞。"""
     if not task_id:
         return
+    # 活动时间线(借鉴 Multica):这步**持久**记到任务身上 —— 失败 = blocked(主动报阻塞,
+    # 看板卡直接冒 ⚠,不等人来问"怎么样了");刷新/重启后时间线仍在。
+    try:
+        reg = getattr(app.state, "task_registry", None)
+        if reg is not None:
+            kind = "blocked" if status == "failed" else "step"
+            text = display + ((":" + (error or "")[:200]) if status == "failed" else "")
+            reg.add_event(task_id, kind, text)
+    except Exception:
+        pass
     try:
         from karvyloop.console.task_events import broadcast_task_step
         await broadcast_task_step(app, {

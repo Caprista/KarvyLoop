@@ -33,9 +33,22 @@ class TaskRecord:
         self.trace_id = ""          # 这次执行写进对话的 turn.task_id —— 料→去聊天靠它**定位到那一轮**
         self.started = time.time()
         self.finished: Optional[float] = None
+        # 活动时间线(借鉴 Multica"agent=可读的同事"):这个任务**经历了什么**,持久记在任务身上 ——
+        # start / step(某步完成)/ blocked(卡住:步失败等)/ done / error。此前步级进度只是前端易失
+        # 缓存(刷新即没),跑完的任务查无"过程" → 决策者只能去问"怎么样了?",正是 §0.7 反模式。
+        self.events: list = []
+
+    _EVENTS_CAP = 80   # 单任务时间线上限(防失控长;超了砍中段,保留头部 start + 最新)
+
+    def add_event(self, kind: str, text: str = "") -> dict:
+        ev = {"ts": time.time(), "kind": kind, "text": (text or "")[:280]}
+        self.events.append(ev)
+        if len(self.events) > self._EVENTS_CAP:
+            self.events = [self.events[0]] + self.events[-(self._EVENTS_CAP - 1):]
+        return ev
 
     def to_dict(self) -> dict:
-        """列表用:只带摘要(poll 每 2s,不塞完整结果)。"""
+        """列表用:只带摘要(poll 每 2s,不塞完整结果/完整时间线)。"""
         return {
             "id": self.id, "who": self.who,
             "domain_id": self.domain_id, "role": self.role,
@@ -43,12 +56,16 @@ class TaskRecord:
             "result": self.result, "conversation_id": self.conversation_id,
             "trace_id": self.trace_id,
             "started": self.started, "finished": self.finished,
+            # 看板卡直接可读:最新一条事件 + 是否卡着(最新事件是 blocked)→ 不点开也知道跑到哪/卡没卡
+            "last_event": (self.events[-1] if self.events else None),
+            "blocked": bool(self.events and self.events[-1].get("kind") == "blocked"),
         }
 
     def detail(self) -> dict:
-        """详情用 + 落盘用:带完整结果文档。"""
+        """详情用 + 落盘用:带完整结果文档 + 完整时间线。"""
         d = self.to_dict()
         d["result_full"] = self.result_full
+        d["events"] = list(self.events)
         return d
 
     @classmethod
@@ -63,6 +80,8 @@ class TaskRecord:
         t.result_full = d.get("result_full", "") or t.result
         t.conversation_id = d.get("conversation_id", "") or ""
         t.trace_id = d.get("trace_id", "") or ""
+        ev = d.get("events")
+        t.events = [e for e in ev if isinstance(e, dict)] if isinstance(ev, list) else []
         # 类型强制(手改坏文件里的字符串时间戳 → 抛 → load_all 丢掉该坏项,不污染前端排序)
         t.started = float(d.get("started") or time.time())
         _f = d.get("finished")
@@ -128,6 +147,7 @@ class TaskRegistry:
 
     def start(self, *, who: str, domain_id: str = "l0", role: str = "", intent: str = "") -> str:
         t = TaskRecord(uuid.uuid4().hex[:12], who, domain_id, role, intent)
+        t.add_event("start", intent)
         if len(self._tasks) == self._tasks.maxlen and self._tasks:
             oldest = self._tasks[-1]
             self._by_id.pop(oldest.id, None)
@@ -146,8 +166,19 @@ class TaskRegistry:
         t.result_full = full[:16000]   # 结果文档(封顶防爆)
         t.result = full[:280]          # 卡片摘要
         t.finished = time.time()
+        t.add_event("error" if error else "done", full[:280])
         self._persist()
         self._notify(t)                # §0.7:完成/失败 = 事件,主动 push(不等人轮询)
+
+    def add_event(self, task_id: str, kind: str, text: str = "") -> None:
+        """往任务时间线追加一条中途事件(step 完成 / blocked 卡住…)→ 持久 + push。
+        blocked 是"主动报阻塞":卡住必须**自己冒出来**(看板卡直接可见),不是等人来问。"""
+        t = self._by_id.get(task_id)
+        if t is None:
+            return
+        t.add_event(kind, text)
+        self._persist()
+        self._notify(t)                # last_event/blocked 随 task_status push → 卡片实时更新
 
     def _notify(self, t: TaskRecord) -> None:
         """状态变化同步回调(start/finish)→ 接线层接 WS 广播。失败不阻塞主流程。"""
