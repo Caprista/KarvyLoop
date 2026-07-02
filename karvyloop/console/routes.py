@@ -3569,6 +3569,9 @@ class H2ADecideRequest(BaseModel):
     proposal_id: str = Field(..., min_length=1, max_length=512)
     decision: str = Field(..., pattern="^(ACCEPT|REJECT|DEFER)$")
     reason: str = Field(default="", max_length=2000)
+    # #42 优化①「改了再批」:就地改过的 payload 字段(白名单覆盖在 registry.decide 做;
+    # 只许覆盖已有 str 键)。修改是楔子最富的偏好信号,记录在 record_decision_signals。
+    edits: dict = Field(default_factory=dict)
     user_address_domain_id: str = Field(default="dom-1")
     user_address_role: str = Field(default="user")
     user_address_agent_id: str = Field(default="console-user")
@@ -3632,7 +3635,8 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
     record_decision_signals(request.app, decision=req.decision, proposal_id=req.proposal_id,
                             reason=eff_reason,
                             domain=req.to_address_domain_id or "",
-                            role=req.to_address_role or "")
+                            role=req.to_address_role or "",
+                            edits=(req.edits or None))
 
     # D5:按 kind 兑现(若接了 registry)。reason 可选,不拦 REJECT。
     def _dispatch() -> dict[str, Any] | None:
@@ -3640,7 +3644,8 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
         if registry is None:
             return None
         handlers = getattr(request.app.state, "proposal_handlers", None) or {}
-        res = registry.decide(req.proposal_id, req.decision, handlers=handlers)
+        res = registry.decide(req.proposal_id, req.decision, handlers=handlers,
+                              edits=(req.edits or None))
         return res.to_dict() if res is not None else None
 
     if req.decision == H2A_DEFER:

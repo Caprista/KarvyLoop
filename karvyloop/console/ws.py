@@ -307,7 +307,8 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
         record_decision_signals(app, decision=req.decision, proposal_id=req.proposal_id,
                                 reason=eff_reason,
                                 domain=req.to_address_domain_id or "",
-                                role=req.to_address_role or "")
+                                role=req.to_address_role or "",
+                                edits=(req.edits or None))
         # D5(docs/30):按 kind 兑现(若接了 registry)— 与 REST /api/h2a_decide 同语义。
         # 9.4-门2:route_to_role handler 会同步 drive(一次 LLM)→ 用 to_thread 包,
         # 不阻塞 WS 事件循环(REST 路径是 sync def,FastAPI 已自动线程池化)。
@@ -319,7 +320,8 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
                 return None
             handlers = getattr(app.state, "proposal_handlers", None) or {}
             res = await asyncio.to_thread(
-                registry.decide, req.proposal_id, req.decision, handlers=handlers
+                lambda: registry.decide(req.proposal_id, req.decision, handlers=handlers,
+                                        edits=(req.edits or None))
             )
             return res.to_dict() if res is not None else None
 

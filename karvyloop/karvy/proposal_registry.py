@@ -158,12 +158,17 @@ class PendingProposalRegistry:
         decision: str,
         *,
         handlers: Optional[Dict[str, ProposalHandler]] = None,
+        edits: Optional[Dict[str, str]] = None,
     ) -> Optional[DispatchResult]:
         """按用户决策处置一条 Proposal(PR-3)。
 
         - ACCEPT → 查回 Proposal → 按 kind dispatch 兑现 → 移除 → 返 DispatchResult。
         - REJECT → 移除丢弃 → 返 DispatchResult(ok=True, "rejected")。
         - DEFER  → 留在 registry(下次再呈现)→ 返 DispatchResult(ok=True, "deferred")。
+
+        edits(#42 优化①「改了再批」):ACCEPT 时把用户就地改过的 payload 字段**覆盖后兑现**。
+        安全边界:只允许覆盖 payload 里**已存在**的字符串字段(不许注入新键/改类型),单值封顶 8k。
+        修改本身是楔子最富的偏好信号 —— 信号记录在 decision_wire(不在此处)。
 
         未知 proposal_id → 返 None(caller 决定 404 / 忽略)。
         handlers 缺某 kind → ok=False, detail 说明(不抛,不副作用)。
@@ -181,12 +186,29 @@ class PendingProposalRegistry:
             return DispatchResult(proposal_id, getattr(proposal, "kind", ""), True, "deferred")
 
         if decision == "ACCEPT":
-            kind = getattr(proposal, "kind", "")
-            result = dispatch_accept(proposal, handlers or {})
+            eff = apply_payload_edits(proposal, edits) if edits else proposal
+            result = dispatch_accept(eff, handlers or {})
             self.remove(proposal_id)  # 兑现后离开待决议表
             return result
 
         return DispatchResult(proposal_id, getattr(proposal, "kind", ""), False, f"unknown decision: {decision}")
+
+
+def apply_payload_edits(proposal, edits: Dict[str, str]):
+    """把「改了再批」的字段覆盖进 payload,返回新 Proposal(原对象不动,frozen)。
+
+    白名单式:只覆盖 payload 里**已有**且原值为 str 的键;新值必须是 str(封顶 8000 字);
+    其余一律忽略(不抛 —— 决策流是命脉,坏 edits 静默降级成原样兑现)。"""
+    import dataclasses
+    try:
+        base = dict(getattr(proposal, "payload", {}) or {})
+        clean = {k: str(v)[:8000] for k, v in (edits or {}).items()
+                 if k in base and isinstance(base.get(k), str) and isinstance(v, str) and str(v).strip()}
+        if not clean:
+            return proposal
+        return dataclasses.replace(proposal, payload={**base, **clean})
+    except Exception:
+        return proposal
 
 
 def dispatch_accept(proposal, handlers: Dict[str, ProposalHandler]) -> DispatchResult:
@@ -586,6 +608,7 @@ __all__ = [
     "PendingProposalRegistry",
     "DispatchResult",
     "dispatch_accept",
+    "apply_payload_edits",
     "ProposalHandler",
     "proposal_from_conflict",
     "proposal_for_route",

@@ -617,6 +617,29 @@
     const judgeState = { engaged: false, edited: [], basis: "" };
     _renderDecisionCard(card, proposalId, judgeState);
 
+    // #42 优化①「改了再批」:kind→可编辑的"行动文本"字段。你不只认/拒,还能亲手改到该有的样子
+    // 再批 —— 修改本身是楔子最富的偏好信号(原文→改文的对照会进偏好结晶)。
+    const _EDITABLE_FIELD = { route_to_role: "requirement", merge_knowledge: "merged_content",
+                              merge_atoms: "merged_purpose", run_task: "intent" };
+    const _editField = _EDITABLE_FIELD[payload.kind];
+    const _editSrc = _editField && payload.payload && typeof payload.payload[_editField] === "string"
+      ? payload.payload[_editField] : "";
+    let editArea = null;   // 展开后 = textarea;拍板时若有改动随 edits 带上
+    if (_editSrc) {
+      const editWrap = el("div", { class: "h2a-edit-wrap" });
+      const editBtn = el("button", { class: "h2a-edit-toggle", text: "✏️ " + t("proposal.edit_then_accept"),
+        onClick: () => {
+          if (editArea) return;
+          editArea = el("textarea", { class: "h2a-edit-area" });
+          editArea.value = _editSrc;
+          editWrap.appendChild(editArea);
+          editWrap.appendChild(el("div", { class: "h2a-edit-hint", text: t("proposal.edit_hint") }));
+          editBtn.disabled = true;
+        } });
+      editWrap.appendChild(editBtn);
+      card.appendChild(editWrap);
+    }
+
     const btnRow = el("div", { class: "h2a-buttons" });
     // 拍板:点了就拍。REJECT 不强制 reason(Hardy:不想说为什么就能拒)——
     // reason 通过卡上可选输入框带上(填了就传,空也照拒)。K5(人拍板/by=[])与 reason 无关。
@@ -626,6 +649,14 @@
     });
     reasonInput.placeholder = t("proposal.reason_optional");
     const decide = (decision) => {
+      // 「改了再批」:改动过 → 随 ACCEPT 带 edits。改过=亲手判断过(最强的 engaged 信号),
+      // 放在逼判断闸**之前**标记 —— 改过的人不该再被闸拦。
+      let _edits = null;
+      if (decision === "ACCEPT" && editArea && editArea.value.trim() &&
+          editArea.value.trim() !== _editSrc.trim()) {
+        _edits = {}; _edits[_editField] = editArea.value.trim();
+        judgeState.engaged = true;
+      }
       // 逼判断闸(过度判断=没判断的反面:稀有的高价值/已投降 streak 别被橡皮图章)。
       // 在**拍之前**拦,取消=不拍;只拦"没真判断过"的 ACCEPT(改/删依据 或 陈述判断依据都算判断过)。
       if (decision === "ACCEPT" && !_engagedNow(judgeState)) {
@@ -635,11 +666,13 @@
       }
       // 回喂判断(engaged + 改/删的依据)→ 反投降计数;再走既有 K5 拍板路径(不动)。
       _judgeDecisionCard(proposalId, decision, judgeState).then(() => {
-        sendWS("h2a_decision", {
+        const msg = {
           proposal_id: proposalId,
           decision: decision,
           reason: (decision === "REJECT") ? (reasonInput.value || "") : "",
-        });
+        };
+        if (_edits) msg.edits = _edits;
+        sendWS("h2a_decision", msg);
       });
     };
     btnRow.appendChild(el("button", { class: "h2a-accept", onClick: () => decide("ACCEPT"), text: t("proposal.accept") }));

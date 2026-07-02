@@ -141,6 +141,53 @@ def test_handler_exception_contained():
     assert not res.ok and "handler error" in res.detail
 
 
+# ---- #42 优化①「改了再批」:edits 白名单覆盖 + 兑现吃改后值 + 信号带对照 ----
+def test_apply_payload_edits_whitelist():
+    from karvyloop.karvy.proposal_registry import apply_payload_edits
+    p = _mk(kind=KIND_ROUTE_TO_ROLE, payload={"requirement": "做个方案", "role": "agent", "n": 3})
+    # 已有 str 键 → 覆盖;新键/非 str 原值/非 str 新值 → 全忽略;原对象不动(frozen)
+    e = apply_payload_edits(p, {"requirement": "做个方案,预算控制在5万内",
+                                "evil_new_key": "x", "n": "9"})
+    assert e.payload["requirement"] == "做个方案,预算控制在5万内"
+    assert "evil_new_key" not in e.payload and e.payload["n"] == 3
+    assert p.payload["requirement"] == "做个方案"   # 原提案不被改
+    # 空/无效 edits → 原样返回
+    assert apply_payload_edits(p, {"requirement": "   "}) is p
+
+
+def test_decide_accept_with_edits_dispatches_edited():
+    reg = PendingProposalRegistry()
+    seen = {}
+    handlers = {KIND_ROUTE_TO_ROLE: lambda pr: (seen.setdefault("req", pr.payload["requirement"]), (True, "ok"))[1]}
+    p = _mk(kind=KIND_ROUTE_TO_ROLE, payload={"requirement": "出一版 logo"})
+    reg.register(p)
+    res = reg.decide(p.proposal_id, "ACCEPT", handlers=handlers,
+                     edits={"requirement": "出一版 logo,走极简风,别用渐变"})
+    assert res.ok
+    assert seen["req"] == "出一版 logo,走极简风,别用渐变"   # 兑现吃的是改后值
+
+
+def test_rest_decide_with_edits_signal_carries_diff():
+    """REST 带 edits → ①兑现吃改后值 ②偏好样本 reason 带 原文→改文 对照(楔子最富信号)。"""
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.proposal_registry = PendingProposalRegistry()
+    seen = {}
+    app.state.proposal_handlers = {
+        KIND_ROUTE_TO_ROLE: lambda pr: (seen.setdefault("req", pr.payload["requirement"]), (True, "ok"))[1]}
+    p = _mk(kind=KIND_ROUTE_TO_ROLE, payload={"requirement": "调研竞品"})
+    app.state.proposal_registry.register(p)
+    client = TestClient(app)
+    r = client.post("/api/h2a_decide", json={
+        "proposal_id": p.proposal_id, "decision": "ACCEPT", "reason": "",
+        "edits": {"requirement": "调研竞品,只看近半年动态"}})
+    assert r.status_code == 200
+    assert seen["req"] == "调研竞品,只看近半年动态"
+    samples = getattr(app.state, "decision_samples", [])
+    assert len(samples) == 1
+    assert "用户改了再批" in samples[0].reason
+    assert "调研竞品" in samples[0].reason and "只看近半年动态" in samples[0].reason
+
+
 # ---- P1-c: 待决卡落盘 → 重启存活 ----
 def test_from_dict_roundtrip():
     """Proposal.to_dict → from_dict 无损往返(tuple 字段复原 + id 不重派生)。"""

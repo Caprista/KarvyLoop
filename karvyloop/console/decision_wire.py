@@ -56,30 +56,48 @@ def observe_decision(app: Any, sample: DecisionSample) -> None:
 
 
 def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
-                            reason: str = "", domain: str = "", role: str = "") -> None:
+                            reason: str = "", domain: str = "", role: str = "",
+                            edits: Optional[dict] = None) -> None:
     """一次 H2A 拍板 → 三路信号(样本缓冲→结晶 / stats 复利 / decision_log 回看)**单一接缝**。
 
     P3-a 病根:此前只有 WS 路径接了这三路,REST `/api/h2a_decide` 一路都没接 ——
     走 REST 拍的板从不进偏好结晶回路(决策 loop 白拍)。两条传输路都调本函数,信号对齐。
     绝不打断决策流(H2A 是命脉)→ 整段自吞;confirm_decision_pref 不观察(防结晶元循环)。
+
+    edits(#42 优化①):「改了再批」的字段修改是**最富的偏好信号**(你不只认/拒,还亲手示范
+    了"该是什么样")→ 把 原文→改文 的对照折进样本 reason,偏好结晶的 LLM 能直接读出你的标准。
     """
     try:
         import time as _time
         ctx = ""
         kind = ""
+        orig_payload: dict = {}
         reg = getattr(app.state, "proposal_registry", None)
         if reg is not None:
             try:
                 p = reg.get(proposal_id)
                 ctx = getattr(p, "summary", "") or ""
                 kind = getattr(p, "kind", "") or ""
+                orig_payload = dict(getattr(p, "payload", {}) or {})
             except Exception:
                 pass
         if kind == "confirm_decision_pref":
             return   # 确认"决策偏好"本身不是工作决策(否则确认偏好又生样本)
+        eff_reason = reason
+        if edits:
+            pairs = []
+            for k, v in edits.items():
+                if not isinstance(v, str) or not v.strip():
+                    continue
+                old = orig_payload.get(k)
+                if isinstance(old, str) and old.strip() and old.strip() != v.strip():
+                    pairs.append(f"{k}:「{old.strip()[:120]}」→「{v.strip()[:120]}」")
+            if pairs:
+                eff_reason = (f"[用户改了再批] {'; '.join(pairs[:3])}"
+                              + (f" || {reason}" if reason else ""))
         observe_decision(app, DecisionSample(
             decision=decision, context=(ctx or proposal_id),
-            reason=reason, scope="personal",
+            reason=eff_reason, scope="personal",
             domain=domain or "", role=role or "", ts=_time.time()))
         schedule_decision_crystallize(app)
         stats = getattr(app.state, "decision_stats", None)
@@ -88,7 +106,7 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
         log = getattr(app.state, "decision_log", None)
         if log is not None:
             log.record(decision=decision, summary=ctx, proposal_id=proposal_id,
-                       reason=reason, kind=kind, domain=domain or "", role=role or "")
+                       reason=eff_reason, kind=kind, domain=domain or "", role=role or "")
     except Exception:
         pass
 

@@ -1715,3 +1715,11 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .deontic-list { border-radius: 8px; padding: 6px 10px; font-size: 12.5px; }
 .deontic-list.forbid { background: #f8eef0; } .deontic-list.oblige { background: #eef6ef; } .deontic-list.permit { background: #eef2f8; }
 .deontic-item { line-height: 1.6; color: var(--ink); }
+
+/* #42 优化①「改了再批」:决策卡上的就地编辑 */
+.h2a-edit-wrap { margin: 6px 0; }
+.h2a-edit-toggle { font-size: 12px; opacity: .85; cursor: pointer; }
+.h2a-edit-toggle:disabled { opacity: .4; cursor: default; }
+.h2a-edit-area { width: 100%; min-height: 72px; margin-top: 6px; font-size: 13px;
+  border: 1px solid var(--border, #444); border-radius: 6px; padding: 6px; box-sizing: border-box; }
+.h2a-edit-hint { font-size: 11px; opacity: .6; margin-top: 3px; }
