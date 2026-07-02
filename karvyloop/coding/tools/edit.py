@@ -40,7 +40,10 @@ class EditTool:
 
     async def __call__(self, inp: dict) -> CodingResult:
         path = inp.get("file_path", "")
-        if not path or not is_within_workspace(path, self.workspace_root):
+        from karvyloop.capability.fs_grants import note_denied, path_allowed
+        if not path or not path_allowed(path, "write", workspace_root=self.workspace_root):
+            if path:
+                note_denied(path, "write")
             return CodingResult(ok=False, payload=None, error_code=1,
                                 error_message=f"路径 {path} 越出工作区")
         old = inp.get("old_string", "")

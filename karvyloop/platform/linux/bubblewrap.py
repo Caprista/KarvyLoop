@@ -103,6 +103,19 @@ class BubblewrapSandbox:
             )
 
         ro, rw = mounts_from_token(token)
+        # 授权台账(fs_grants):人批过的工作区外路径也挂进沙箱(read→ro / write→rw)。
+        # 敏感地板在台账 allows/record 层已绝对优先,这里只会拿到干净授权。
+        try:
+            from karvyloop.capability.fs_grants import get_store
+            _st = get_store()
+            if _st is not None:
+                import time as _t
+                for g in _st.list():
+                    if g.get("expired"):
+                        continue
+                    (rw if "write" in (g.get("ops") or []) else ro).append(g["path"])
+        except Exception:
+            pass
         net = has_net(token)
 
         bwrap: list[str] = [

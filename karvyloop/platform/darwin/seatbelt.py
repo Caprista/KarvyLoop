@@ -49,6 +49,15 @@ def build_profile(token: CapabilityToken) -> str:
     纯函数,平台无关可单测（无需 macOS）。realpath 留给 exec 时按真实 cwd/挂载解析。
     """
     _ro, rw = mounts_from_token(token)
+    # 授权台账(fs_grants):人批过的工作区外可写路径也放开写(读 v1 本就放宽)
+    try:
+        from karvyloop.capability.fs_grants import get_store
+        _st = get_store()
+        if _st is not None:
+            rw = list(rw) + [g["path"] for g in _st.list()
+                             if not g.get("expired") and "write" in (g.get("ops") or [])]
+    except Exception:
+        pass
     net = has_net(token)
     lines = [
         "(version 1)",
@@ -66,6 +75,12 @@ def build_profile(token: CapabilityToken) -> str:
     if subpaths:
         lines.append("(allow file-write* " + " ".join(subpaths) + ")")
     lines.append("(allow network*)" if net else "(deny network*)")
+    # 敏感地板(fs_grants 同源):密钥/凭据类显式 deny —— SBPL 后写的规则赢,盖过上面的读放宽。
+    home = os.path.expanduser("~")
+    for sens in (f"{home}/.karvyloop/config.yaml", f"{home}/.ssh", f"{home}/.aws",
+                 f"{home}/.gnupg", f"{home}/.netrc"):
+        kind = "subpath" if os.path.isdir(sens) else "literal"
+        lines.append(f"(deny file-read* file-write* ({kind} {_sbpl_str(os.path.realpath(sens))}))")
     return "\n".join(lines)
 
 

@@ -82,6 +82,14 @@ def _safety_check(ctx: PermissionContext) -> Optional[Decision]:
     inp = ctx.input or {}
     subject = _extract_subject(tool, inp)
 
+    # 敏感路径硬地板(fs_grants):密钥/ssh/凭据库 —— 读写运行一律拒,**免疫 bypass 与任何授权**。
+    # 与 rm -rf 检测同级:这是"拿到即约等于拿到你的账号"的类别,谁批都不行。
+    if tool in ("read_file", "write_file", "edit_file", "run_command", "delete_file") and subject:
+        from .fs_grants import is_sensitive_path
+        if is_sensitive_path(subject):
+            return Deny(message=f"敏感路径(密钥/凭据类),永不放行:{subject}",
+                        reason="safety:sensitive_path")
+
     # 写/编辑/运行涉及危险目录
     if tool in ("write_file", "edit_file", "run_command", "delete_file"):
         # `.git` / `.claude` 任意位置出现 → 拦
@@ -175,13 +183,16 @@ def authorize(ctx: PermissionContext) -> Decision:
         return Allow(reason=f"rule:allow:{r.tool}({r.subject})")
     from .policy import required_mode
     if ctx.mode >= required_mode(tool):
-        # 写动作额外加路径边界校验
+        # 写动作额外加路径边界校验;工作区外但**授权台账放行过**的路径 → 行(fs_grants)
         if tool in ("write_file", "edit_file") and ctx.workspace_root and subject:
             if not is_within_workspace(subject, ctx.workspace_root):
-                return Deny(
-                    message=f"路径 {subject} 越出工作区 {ctx.workspace_root}",
-                    reason="pathnorm:out_of_workspace",
-                )
+                from .fs_grants import get_store
+                _st = get_store()
+                if _st is None or not _st.allows(subject, "write"):
+                    return Deny(
+                        message=f"路径 {subject} 越出工作区 {ctx.workspace_root}",
+                        reason="pathnorm:out_of_workspace",
+                    )
         return Allow(reason=f"mode:{ctx.mode.value} >= required:{required_mode(tool).value}")
 
     # 9) 默认 → Ask（fail-closed）

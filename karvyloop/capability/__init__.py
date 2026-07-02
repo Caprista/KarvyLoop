@@ -33,3 +33,8 @@ __all__ = [
     # token
     "mint", "verify", "is_expired", "has_grant",
 ]
+
+from .fs_grants import (  # noqa: E402
+    FsGrantsStore, is_sensitive_path, path_allowed, register_store as register_fs_grants,
+    get_store as get_fs_grants,
+)

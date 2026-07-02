@@ -310,6 +310,10 @@ def cmd_console(args: argparse.Namespace) -> int:
         app.state.decision_log = DecisionLog(
             path=_Path.home() / ".karvyloop" / "decision_log.json",
         )
+        # fs_grants:工作区外访问授权台账(敏感路径硬地板;工具层/沙箱/能力链共用全局注册)
+        from karvyloop.capability.fs_grants import FsGrantsStore, register_store as _reg_fs
+        app.state.fs_grants = FsGrantsStore(_Path.home() / ".karvyloop" / "fs_grants.json")
+        _reg_fs(app.state.fs_grants)
         # 口味命中率:押注/对账存储(前瞻预测,"越用越像你"的可证明刻度)。落盘。
         from karvyloop.crystallize.taste_eval import TastePredictionStore
         app.state.taste_predictions = TastePredictionStore(

@@ -41,9 +41,13 @@ class ReadTool:
 
     async def __call__(self, inp: dict) -> CodingResult:
         path = inp.get("file_path", "")
-        if not path or not is_within_workspace(path, self.workspace_root):
+        from karvyloop.capability.fs_grants import note_denied, path_allowed
+        if not path or not path_allowed(path, "read", workspace_root=self.workspace_root):
+            # 授权台账:工作区外且未授权 → 记"想要"(console 会升 H2A 授权卡),这次仍拒
+            if path:
+                note_denied(path, "read")
             return CodingResult(ok=False, payload=None, error_code=1,
-                                error_message=f"路径 {path} 越出工作区")
+                                error_message=f"路径 {path} 越出工作区(可授权:等待你在决策卡上放行)")
         offset = int(inp.get("offset", 0))
         limit = int(inp.get("limit", 2000))
         try:

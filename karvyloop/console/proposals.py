@@ -142,6 +142,7 @@ __all__ = [
     "WS_TYPE_H2A_PROPOSAL",
     "ProposalPump",
     "broadcast_proposal",
+    "raise_fs_access_cards",
 ]
 
 def _schedule_taste_bet(app: Any, proposal: Any) -> None:
@@ -193,3 +194,35 @@ def _schedule_taste_bet(app: Any, proposal: Any) -> None:
         tasks = app.state._taste_tasks = set()
     tasks.add(task)
     task.add_done_callback(tasks.discard)
+
+async def raise_fs_access_cards(app: Any) -> int:
+    """drive 收尾:把工具层攒的"想要碰工作区外路径"(note_denied)升成授权卡。
+
+    去重靠 proposal 的稳定 id(path+ops 派生)——同路径反复碰壁只挂一张卡;敏感路径在
+    note_denied 已滤掉,永不出卡。返回升卡数。"""
+    from karvyloop.capability.fs_grants import get_store
+    st = get_store()
+    if st is None:
+        return 0
+    denied = st.pop_denied()
+    if not denied:
+        return 0
+    import time as _t
+    from karvyloop.karvy.proposal_registry import proposal_for_fs_access
+    raised = 0
+    # 同 path 多 op 合并成一张卡(read+write)
+    by_path: dict = {}
+    for d in denied:
+        by_path.setdefault(d["path"], set()).add(d["op"])
+    reg = getattr(app.state, "proposal_registry", None)
+    for path, ops in by_path.items():
+        card = proposal_for_fs_access(path=path, ops=sorted(ops), ts=_t.time())
+        if reg is not None and reg.get(card.proposal_id) is not None:
+            continue   # 同路径卡已挂着,不重复骚扰
+        try:
+            await broadcast_proposal(app, card)
+            raised += 1
+        except Exception as e:
+            logger.debug(f"[fs_grants] 升授权卡失败: {e}")
+    return raised
+

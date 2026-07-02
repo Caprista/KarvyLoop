@@ -43,6 +43,7 @@ KIND_INFEASIBLE_REPORT = "infeasible_report"  # docs/02 §15.3:role 自助重规
 KIND_MERGE_ATOMS = "merge_atoms"  # docs/14 §11.2 / docs/02 §15.5:原子语义合并**不静默**——建议成卡,ACCEPT 才 rewire-before-delete
 KIND_CONFIRM_RESULT = "confirm_result"  # docs/02 §15.5:人 accept role 结果=依据;ACCEPT→role 综合裁自造 atom 留不留
 KIND_MERGE_KNOWLEDGE = "merge_knowledge"  # 知识库自动整理(daily 慢侧):近重复知识点升合并建议卡,ACCEPT 才 apply_belief_merge(先写后删)
+KIND_FS_ACCESS = "fs_access"  # fs_grants:role 碰壁工作区外路径 → 授权卡;ACCEPT=台账放行(敏感路径永不出卡)
 
 ALL_KINDS = (
     KIND_CRYSTALLIZE_SKILL,
@@ -57,6 +58,7 @@ ALL_KINDS = (
     KIND_MERGE_ATOMS,
     KIND_CONFIRM_RESULT,
     KIND_MERGE_KNOWLEDGE,
+    KIND_FS_ACCESS,
 )
 
 # Handler 协议:(proposal) -> (ok: bool, detail: str)。注入式,默认无副作用。
@@ -444,6 +446,34 @@ def proposal_for_merge_atoms(
     )
 
 
+def proposal_for_fs_access(*, path: str, ops: list, role: str = "", ts: float,
+                           strength: float = 0.9):
+    """fs_grants:工作区外路径的**授权卡**(docs/42 安全骨架)。
+
+    role 干活碰壁(读/写工作区外文件被拒)→ 这张卡问你:"放行吗?"。ACCEPT → 授权台账
+    落一条(能力总览可见、可撤);REJECT → 不放行(同路径短期内靠稳定 id 不重复骚扰)。
+    敏感路径(密钥/凭据)在 note_denied 就被滤掉,**永远走不到这张卡**。"""
+    from karvyloop.karvy.atoms import Proposal
+    clean_ops = sorted({o for o in (ops or []) if o in ("read", "write")}) or ["read"]
+    op_disp = "读写" if clean_ops == ["read", "write"] else ("写入" if clean_ops == ["write"] else "读取")
+    who = f"角色「{role}」" if role else "执行中的角色"
+    digest = hashlib.sha1(f"{path}|{','.join(clean_ops)}".encode("utf-8")).hexdigest()[:8]
+    return Proposal(
+        summary=f"{who}请求{op_disp}工作区外路径:{path}",
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_FS_ACCESS,
+        payload={"path": path, "ops": clean_ops, "role": role or ""},
+        proposal_id=f"{KIND_FS_ACCESS}-0-{digest}",
+        basis=(f"它在干活时需要碰这个路径,但该路径在你的工作区之外 —— 按最小权限原则默认关闭。"
+               f"ACCEPT=永久放行该路径(能力总览随时可撤);密钥/凭据类路径永远不会出现在这里(硬地板)。"),
+    )
+
+
 def proposal_for_merge_knowledge(
     *,
     member_contents: List[str],
@@ -617,6 +647,8 @@ __all__ = [
     "proposal_for_infeasible_report",
     "proposal_for_merge_atoms",
     "proposal_for_merge_knowledge",
+    "proposal_for_fs_access",
+    "KIND_FS_ACCESS",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",

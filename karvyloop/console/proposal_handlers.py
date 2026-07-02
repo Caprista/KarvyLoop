@@ -19,6 +19,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_CONFIRM_DECISION_PREF, KIND_CONFIRM_RESULT, KIND_CRYSTALLIZE_SKILL,
     KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
     KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
+    KIND_FS_ACCESS,
 )
 
 logger = logging.getLogger(__name__)
@@ -519,6 +520,26 @@ def _merge_knowledge_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     return handler
 
 
+def _fs_access_handler(proposal: Any) -> Tuple[bool, str]:
+    """KIND_FS_ACCESS 兑现:你 ACCEPT 了授权卡 → 授权台账落一条(能力总览可见、可撤)。
+
+    敏感路径双保险:note_denied 出卡前滤过一次,store.record 再拒一次(硬地板)。"""
+    from karvyloop.capability.fs_grants import get_store
+    payload = getattr(proposal, "payload", {}) or {}
+    path = (payload.get("path") or "").strip()
+    ops = payload.get("ops") or ["read"]
+    role = payload.get("role") or ""
+    st = get_store()
+    if st is None:
+        return False, "授权台账未接(fs_grants store 未注册)"
+    if not path:
+        return False, "缺 path"
+    g = st.record(path, ops, role=role, origin="h2a")
+    if g is None:
+        return False, f"敏感路径,硬地板拒绝(不该出这张卡):{path}"
+    return True, f"已放行 {path}({'/'.join(g['ops'])});能力总览可撤"
+
+
 def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool, str]]]:
     """构造 ACCEPT 兑现 handler 表(注入 app.state.proposal_handlers)。
 
@@ -535,6 +556,7 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_MERGE_ATOMS: _merge_atoms_handler(app),
         KIND_CONFIRM_RESULT: _confirm_result_handler(app),
         KIND_MERGE_KNOWLEDGE: _merge_knowledge_handler(app),
+        KIND_FS_ACCESS: _fs_access_handler,
     }
 
 

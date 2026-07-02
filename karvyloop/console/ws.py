@@ -231,6 +231,12 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         })
         return
 
+    # fs_grants:这轮 drive 里碰壁的工作区外路径 → 升授权卡(去重;敏感路径永不出卡)
+    try:
+        from karvyloop.console.proposals import raise_fs_access_cards
+        await raise_fs_access_cards(app)
+    except Exception:
+        pass
     from .routes import speaker_display
     _turn_speaker = m_speaker or speaker_display(app, mgr)   # @ 命中=角色花名,否则当前场署名
     if workbench_app is not None and not outcome.error:

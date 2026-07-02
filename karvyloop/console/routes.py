@@ -839,6 +839,12 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
 
     if task_reg is not None and task_id is not None:
         task_reg.finish(task_id, result=(outcome.text or ""), error=(outcome.error or ""))
+    # fs_grants:这轮 drive 里碰壁的工作区外路径 → 升授权卡(去重;敏感路径永不出卡)
+    try:
+        from karvyloop.console.proposals import raise_fs_access_cards
+        await raise_fs_access_cards(request.app)
+    except Exception:
+        pass
 
     _turn_speaker = m_speaker or speaker_display(request.app, mgr)   # @ 命中=角色花名,否则当前场署名
     if workbench_app is not None and not outcome.error:
@@ -1479,9 +1485,49 @@ def api_capability_overview(request: Request) -> dict[str, Any]:
             except Exception:
                 entry["lock"] = "unknown"
         skills_out.append(entry)
+    st = getattr(request.app.state, "fs_grants", None)
     return {"tools": tools, "skills": skills_out,
+            "fs_grants": st.list() if st is not None else [],
             "executor": cap.get("executor", ""), "sandboxed": cap.get("sandboxed", False),
             "no_llm": bool(sk.get("no_llm"))}
+
+
+class FsGrantRequest(BaseModel):
+    path: str = Field(..., min_length=1, max_length=1024)
+    ops: list = Field(default_factory=lambda: ["read"])
+
+
+class FsGrantRevokeRequest(BaseModel):
+    grant_id: str = Field(..., min_length=1, max_length=64)
+
+
+@router.get("/fs_grants")
+def api_fs_grants(request: Request) -> dict[str, Any]:
+    """授权台账:所有工作区外路径授权(能力总览的数据源;敏感地板清单一并给,UI 可解释)。"""
+    from karvyloop.capability.fs_grants import SENSITIVE_MARKERS
+    st = getattr(request.app.state, "fs_grants", None)
+    return {"grants": st.list() if st is not None else [],
+            "sensitive_markers": list(SENSITIVE_MARKERS)}
+
+
+@router.post("/fs_grants")
+def api_fs_grants_add(req: FsGrantRequest, request: Request) -> dict[str, Any]:
+    """手动放行一条路径(能力总览里的"授权新路径")。敏感路径 → 硬地板拒。"""
+    st = getattr(request.app.state, "fs_grants", None)
+    if st is None:
+        return {"ok": False, "reason": "授权台账未接"}
+    g = st.record(req.path, list(req.ops or ["read"]), origin="manual")
+    if g is None:
+        return {"ok": False, "reason": "敏感路径(密钥/凭据类),永不放行"}
+    return {"ok": True, "grant": g}
+
+
+@router.post("/fs_grants/revoke")
+def api_fs_grants_revoke(req: FsGrantRevokeRequest, request: Request) -> dict[str, Any]:
+    st = getattr(request.app.state, "fs_grants", None)
+    if st is None:
+        return {"ok": False, "reason": "授权台账未接"}
+    return {"ok": st.revoke(req.grant_id)}
 
 
 @router.post("/coding/config")
