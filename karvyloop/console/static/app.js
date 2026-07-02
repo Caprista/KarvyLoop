@@ -2100,6 +2100,37 @@
       }
       body.appendChild(tl);
     }
+    // #42 优化③「时间线→Trace 下钻」:把"信我"的叙述变成可检视证据 —— 展开看底层真实动作
+    // (工具调用/事件,读的是 Trace 切片)。Devin 级 Follow 的最小版;数据本来就在,纯接线。
+    const traceWrap = el("div", { class: "task-trace-wrap" });
+    const traceBtn = el("button", { class: "mgmt-inline-link", text: "🔬 " + t("task.view_trace"),
+      onclick: async () => {
+        traceBtn.disabled = true;
+        const tr = await _getJSON("/api/task/" + encodeURIComponent(tk.id) + "/trace");
+        const box = el("div", { class: "task-trace" });
+        const entries = (tr && tr.entries) || [];
+        if (!tr || !tr.ok || !entries.length) {
+          box.appendChild(el("div", { class: "mgmt-hint",
+            text: (tr && tr.reason) ? tB(tr.reason) : t("task.trace_empty") }));
+        }
+        for (const en of entries) {
+          const row = el("div", { class: "task-trace-row" });
+          row.appendChild(el("span", { class: "task-trace-kind", text: en.kind || "?" }));
+          if (en.tools && en.tools.length) {
+            const tlist = el("div", { class: "task-trace-tools" });
+            for (const c of en.tools) {
+              tlist.appendChild(el("div", { class: "task-trace-tool",
+                text: "· " + c.name + (c.input ? "(" + c.input + ")" : "") }));
+            }
+            row.appendChild(tlist);
+          }
+          if (en.gist) row.appendChild(el("div", { class: "task-trace-gist", text: en.gist }));
+          box.appendChild(row);
+        }
+        traceWrap.appendChild(box);
+      } });
+    traceWrap.appendChild(traceBtn);
+    body.appendChild(traceWrap);
     const resBox = el("div", { class: "task-detail-result" });
     if (tk.status === "running") {
       resBox.appendChild(el("span", { class: "busy-dot" }));

@@ -147,3 +147,44 @@ def test_add_event_unknown_task_is_noop():
     reg = TaskRegistry()
     reg.add_event("ghost", "step", "x")                      # 不炸
     assert reg.list() == []
+
+
+# ---- #42 优化③:时间线→Trace 下钻 ----
+
+def test_task_trace_drilldown():
+    """/api/task/{id}/trace 把叙述变证据:返回该任务 Trace 切片(工具调用+摘要)。"""
+    from fastapi.testclient import TestClient
+    from karvyloop.console import build_console_app
+    from karvyloop.karvy.observer import WorkbenchObserver
+    from karvyloop.cognition.trace import TraceEntry, TraceStore
+    from karvyloop.console.tasks import TaskRegistry
+
+    class _ML:
+        trace = TraceStore()
+
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=_ML())
+    reg = TaskRegistry()
+    app.state.task_registry = reg
+    tid = reg.start(who="工程师", intent="汇总数据")
+    reg.set_conversation(tid, "conv-1", trace_id="drive-trace-9")
+    _ML.trace.append(TraceEntry(task_id="drive-trace-9", kind="atom_run", payload={
+        "atom_id": "a1", "success": True, "output": "三行结论……",
+        "tool_calls": [{"id": "t1", "name": "read_file", "input": {"path": "/tmp/x.csv"}}],
+    }))
+    client = TestClient(app)
+    r = client.get(f"/api/task/{tid}/trace")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] and body["trace_id"] == "drive-trace-9"
+    row = body["entries"][0]
+    assert row["kind"] == "atom_run" and row["success"] is True
+    assert row["tools"][0]["name"] == "read_file" and "x.csv" in row["tools"][0]["input"]
+    # 无 trace(--no-llm)→ 诚实 reason 不炸
+    app2 = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app2.state.task_registry = reg
+    r2 = TestClient(app2).get(f"/api/task/{tid}/trace")
+    assert r2.json()["ok"] is False and r2.json()["entries"] == []
+    # 前端接线在位(不是 backend self-hype)
+    import pathlib
+    app_js = (pathlib.Path(__file__).resolve().parents[1] / "karvyloop" / "console" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "/trace" in app_js and "task.view_trace" in app_js

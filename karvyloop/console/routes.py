@@ -1734,6 +1734,43 @@ def api_task_detail(task_id: str, request: Request) -> dict[str, Any]:
     return {"ok": True, "task": d}
 
 
+@router.get("/task/{task_id}/trace")
+def api_task_trace(task_id: str, request: Request) -> dict[str, Any]:
+    """#42 优化③「时间线→Trace 下钻」:任务详情里展开**底层真实动作**(工具调用/事件)。
+
+    把"信我"的叙述变成可检视的证据(与决策卡"已核验区"同一哲学)——Trace 本来就记全了,
+    这里只是把 registry 任务 id 翻成 drive trace id、取那条切片、投影成人能读的行。
+    """
+    reg = getattr(request.app.state, "task_registry", None)
+    d = reg.get(task_id) if reg is not None else None
+    if d is None:
+        return {"ok": False, "reason": "not found", "entries": []}
+    trace = getattr(getattr(request.app.state, "main_loop", None), "trace", None)
+    if trace is None:
+        return {"ok": False, "reason": "未接认知库", "entries": []}
+    tid = (d.get("trace_id") or "").strip() or task_id   # l0 任务回填过 drive trace id;没有则试 registry id
+    out: list[dict[str, Any]] = []
+    try:
+        for e in trace.query(tid):
+            p = getattr(e, "payload", {}) or {}
+            row: dict[str, Any] = {"seq": getattr(e, "seq", 0), "kind": getattr(e, "kind", ""),
+                                   "ts": getattr(e, "ts", 0.0)}
+            if e.kind == "atom_run":
+                calls = p.get("tool_calls") or []
+                row["tools"] = [{"name": c.get("name", ""),
+                                 "input": str(c.get("input", ""))[:400]} for c in calls[:40]]
+                row["success"] = bool(p.get("success"))
+                row["gist"] = str(p.get("output") or "")[:280]
+            else:
+                # 其余 kind(user_turn/task_run/fast_brain_hit/satisfaction…):给个诚实的摘要行
+                row["gist"] = str(p.get("intent") or p.get("text") or p.get("result")
+                                  or p.get("summary") or "")[:280]
+            out.append(row)
+    except Exception as ex:
+        return {"ok": False, "reason": f"trace 读取失败:{ex}", "entries": []}
+    return {"ok": True, "entries": out, "trace_id": tid}
+
+
 # ---- loop step4b:个人知识库(摄入编译 + 列表)----
 
 class MemoryIngestRequest(BaseModel):
