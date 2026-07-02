@@ -141,7 +141,11 @@ Look closely and a running loop is really *two* loops with opposite natures:
 - **The execution loop** — *how to do X.* An atom (L1) does one job and can write a verify gate for its own output. This loop is fully automatable, and it's becoming a commodity — everyone's execution loop converges to roughly the same thing.
 - **The decision loop** — *whether, and on whose terms.* This runs between a role (L2) and you. It **can't** be automated, because automating it *is* the failure mode above. It's where your intent, taste, and accountability live.
 
+How do you tell which loop something belongs to? One knife, and it never wavers: **"does it carry your responsibility?"** Direction, trade-offs, sign-off → decision loop, stays with you. Purely getting the work out → execution loop, goes to the machine.
+
 So KarvyLoop automates the execution loop hard (cheap, fast, self-verifying) and **refuses** to automate the decision loop. The role/atom split in the architecture *is* this cut. **H2A** (the AI proposes, you decide) isn't a setting you can switch off — it's the structural guarantee that the decision loop stays yours.
+
+One more consequence of taking the decision loop seriously: **if you ever have to ask "how's that task going?", the decision loop has already collapsed** — you've become the system's heartbeat monitor. Roles here work under a *resourceful subordinate* contract: hit a wall, exhaust self-help first (swap plan, swap atom, find or forge a skill); come back only when it's genuinely infeasible — **with evidence** ("tried these three routes, stuck here, need you to decide this"), never a silent hang, never a bare "failed". Blocked work surfaces itself; your attention is spent on *deciding*, not *checking up*.
 
 ### Staying the decider takes more than a yes/no button
 
@@ -159,14 +163,17 @@ Concretely, this is the **decision card**: the problem and approach in your term
 
 > The verified ✓ region appears for a step that passed an **automatic verify gate**; many steps have nothing to auto-verify, so they show honestly as narration marked "not verified" rather than a fake ✓. That region lights up for more of your work as verify gates get wired into more flows — we'd rather show you less green than green you can't trust.
 
-### The compounding wedge
+### The compounding wedge: two loops, two crystallizations
 
-Two things compound, turn over turn:
+The two loops don't just run — each one **sediments**, and each sediments a different thing:
 
-- **Skills** — *how to do X.* Every run is observed; once it passes a verify gate and is used enough, it **crystallizes into a persistent skill**. Next time a "fast brain" hits it directly: cheaper, and shaped to you.
-- **Decision preferences** — *how you decide.* Your accept / reject / edit choices crystallize into standards that **pre-align** future proposals, so you're asked less and re-explain yourself less. These are deliberately easy to revoke — a contradicting decision weakens or retires one — because the goal is to *fit* you, never to lock you in.
+- **The execution loop crystallizes into skills** — *how you work.* Every run is observed; once it passes a verify gate and is used enough, it **crystallizes into a persistent skill**. Next time a "fast brain" hits it directly: cheaper, and shaped to you.
 
-The second kind is the part almost no one else builds. It's why the loop becomes **yours**, not merely good.
+  And a rule we consider load-bearing: a skill stores **the method, never the answer**. Caching last quarter's competitor list and replaying it six months later isn't memory — it's **poisoning your own library** with stale conclusions. So a skill records *how you do it* (where to look, what to check, what counts as done), and every hit **re-runs the method on fresh inputs**. What compounds is your way of working — answers expire, methods don't.
+
+- **The decision loop crystallizes into taste** — *how you decide.* Your accept / reject / edit choices crystallize into standards that **pre-align** future proposals, so you're asked less and re-explain yourself less. These are deliberately easy to revoke — a contradicting decision weakens or retires one — because the goal is to *fit* you, never to lock you in.
+
+The first kind, others will eventually build. The second is the part almost no one else builds — and it's why the loop becomes **yours**, not merely good.
 
 ### The flywheel underneath: how it actually compounds
 
