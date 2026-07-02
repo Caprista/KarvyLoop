@@ -88,7 +88,8 @@ def auto_suggest(
         for e in skill_index.all():
             entries.append((
                 e.name, e.sig, e.scope,
-                _tokenize(e.when_to_use) | _tokenize(e.description),
+                _tokenize(e.when_to_use) | _tokenize(e.description)
+                | _tokenize(" ".join(getattr(e, "tags", ()) or ())),   # P3-c 语义标签层
                 e.when_to_use, e.description,
             ))
     else:
@@ -108,7 +109,8 @@ def auto_suggest(
                     continue
                 entries.append((
                     fm.name, fm.signature or "", fm.scope or "user",
-                    _tokenize(fm.when_to_use) | _tokenize(fm.description),
+                    _tokenize(fm.when_to_use) | _tokenize(fm.description)
+                    | _tokenize(" ".join(fm.tags or ())),   # P3-c 语义标签层
                     fm.when_to_use, fm.description,
                 ))
 

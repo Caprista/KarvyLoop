@@ -48,6 +48,9 @@ class SkillFrontmatter:
     # #2 §13:结果可复用性。'dynamic'(默认)=结果会变,命中**重跑**不回放;'stable'=语义稳定可回放。
     # 旧 SKILL.md 缺省 → dynamic:让历史"存了答案"的技能也走重跑,不再吐 stale(回填式修复)。
     result_reuse: str = "dynamic"
+    # P3-c 三层匹配的语义层:LLM 语义标签(创建后 daily 慢侧打一次,无向量)——
+    # 召回把它并进匹配 token 集(词面 overlap 之上的语义命中面)。缺省空(旧 SKILL.md 兼容)。
+    tags: list[str] = None  # type: ignore
     raw: dict = None  # type: ignore
 
 
@@ -188,6 +191,8 @@ def parse_frontmatter(skill_path: Path) -> tuple[SkillFrontmatter, str]:
         scope=fm_raw.get("scope", "user"),
         arguments=fm_raw.get("arguments", []) or [],
         result_reuse=(fm_raw.get("result_reuse") or "dynamic").strip().lower(),
+        tags=[str(x).strip() for x in (fm_raw.get("tags") or []) if str(x).strip()]
+             if isinstance(fm_raw.get("tags"), list) else [],
         raw=fm_raw,
     )
     return fm, body

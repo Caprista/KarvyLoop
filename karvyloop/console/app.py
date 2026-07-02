@@ -153,6 +153,11 @@ def build_console_app(
                         kres = await knowledge_consolidate_tick(app)
                         if kres.get("suggested"):
                             logger.info(f"[karvyloop console] 知识整理:升 {kres['suggested']} 张合并建议卡")
+                        # P3-c:技能语义标签回填(没标签的自家技能补一次;watermark=有标签即跳过)
+                        from karvyloop.console.skill_tags_tick import skill_tags_tick
+                        tres = await skill_tags_tick(app)
+                        if tres.get("tagged"):
+                            logger.info(f"[karvyloop console] 技能语义标签:补 {tres['tagged']} 个")
                     except asyncio.CancelledError:
                         break
                     except Exception as e:

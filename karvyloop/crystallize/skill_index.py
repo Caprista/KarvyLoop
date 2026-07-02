@@ -35,6 +35,8 @@ class IndexEntry:
     # 来源:'user'(~/.karvyloop/skills,用户结晶/手写,**清数据时清**)| 'system'(包内
     # bundled 只读模板,随包发版、**reset 动不到**)。frontmatter 显式 `source:` 优先,否则按所在目录定。
     source: str = "user"
+    # P3-c 语义标签(LLM 打一次,无向量):召回/建议把它并进匹配 token 集。
+    tags: tuple = ()
 
 
 @dataclass
@@ -98,6 +100,7 @@ class SkillIndex:
                 description=fm.description or "",
                 path=str(p),
                 source=src,
+                tags=tuple(fm.tags or ()),
             )
             # 同 name 覆盖(用户技能盖同名系统技能):先清掉旧条目的 sig 反查,避免遗留孤儿
             # 映射(两个 sig 都指向同一 name 的不一致;对抗验收 LOW)。

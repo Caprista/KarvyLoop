@@ -61,7 +61,7 @@ def _load_skill_index(skills_dir: Path) -> list[dict]:
             continue
         when_tokens = _tokenize(fm.when_to_use)
         desc_tokens = _tokenize(fm.description)
-        all_tokens = when_tokens | desc_tokens
+        all_tokens = when_tokens | desc_tokens | _tokenize(" ".join(fm.tags or ()))   # P3-c 语义标签层
         out.append({
             "name": fm.name,
             "when_tokens": when_tokens,
@@ -174,7 +174,10 @@ def recall(
                 _fm, body = parse_frontmatter(Path(entry.path))
             except OSError:
                 continue
-            all_tokens = _tokenize(entry.when_to_use) | _tokenize(entry.description)
+            # P3-c 三层匹配的语义层:LLM 语义标签并进匹配集(词面 overlap 之上的语义命中面;
+            # 标签是 daily 慢侧打的,无向量 —— [[matching-is-grep-overlap-tags-no-vectors]])
+            all_tokens = (_tokenize(entry.when_to_use) | _tokenize(entry.description)
+                          | _tokenize(" ".join(_fm.tags or ())))
             candidates.append({
                 "name": entry.name,
                 "body": body,
