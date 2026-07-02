@@ -280,10 +280,18 @@ def build_console_app(
     # CLI(cmd_console)启动时**必然**设 token,所以真实部署一定有门。绕不过 = 安全是地基。
     @app.middleware("http")
     async def _access_gate(request, call_next):  # type: ignore[no-untyped-def]
+        from karvyloop.console import access as _acc
+        # 同源门(**始终生效,不受 token/loopback 免密影响**):堵 CSRF —— 恶意网页从你本机浏览器
+        # 跨源打过来,带的是 evil.com 的 Origin,这里拦掉;我们自己的前端同源(Origin==Host)放行,
+        # curl/CLI/测试不带 Origin 放行。补上"loopback 无条件可信"的盲区。
+        if not _acc.origin_ok(request.headers.get("origin", ""),
+                              request.headers.get("sec-fetch-site", ""),
+                              request.headers.get("host", "")):
+            from starlette.responses import JSONResponse
+            return JSONResponse({"ok": False, "reason": "跨源请求被拒(same-origin only)"}, status_code=403)
         token = getattr(app.state, "access_token", None)
         if not token:
             return await call_next(request)
-        from karvyloop.console import access as _acc
         client = request.client.host if request.client else ""
         if _acc.is_loopback(client):
             return await call_next(request)

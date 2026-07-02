@@ -38,6 +38,27 @@ def is_loopback(host: str) -> bool:
     return h.startswith("127.")
 
 
+def origin_ok(origin: str, sec_fetch_site: str, host: str) -> bool:
+    """**同源门**(堵 CSRF + 跨站 WebSocket 劫持 CSWSH)。浏览器对跨源请求/WS 握手**必带** Origin,
+    且无法被攻击页伪造/去除;非浏览器客户端(curl/CLI/我们自己的 CLI/测试)不带 Origin,也不是 CSRF 载体。
+
+    - `Sec-Fetch-Site: cross-site` → 拒(现代浏览器显式跨站标记)。
+    - 有 Origin 且其 host:port ≠ 本请求 Host → 拒(经典跨源;含 localhost 不同端口的本地恶意页)。
+    - 无 Origin → 放行(非浏览器客户端 / 用户直接输 URL 的顶层导航,Sec-Fetch-Site: none)。
+
+    **关键**:loopback 对 token 免密,但**不对同源门免密** —— 恶意网页从本机浏览器打 127.0.0.1
+    也带着 evil.com 的 Origin,这道门照拦(补上 token 门把 localhost 当无条件可信的盲区)。
+    """
+    if (sec_fetch_site or "").strip().lower() == "cross-site":
+        return False
+    o = (origin or "").strip()
+    if o:
+        from urllib.parse import urlparse
+        netloc = (urlparse(o).netloc or "").lower()
+        return bool(netloc) and netloc == (host or "").strip().lower()
+    return True   # 无 Origin → 非浏览器 / 同源顶层导航
+
+
 def _lan_ip() -> str:
     """尽力探测本机 LAN IP(绑 0.0.0.0 时拼出别的设备能访问的链接)。探不到 → 空(不真发包,只选路由)。"""
     try:

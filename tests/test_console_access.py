@@ -84,3 +84,36 @@ def test_url_command_reads_runtime(tmp_path, monkeypatch, capsys):
     assert _cmd_url() == 0
     out = capsys.readouterr().out
     assert "http://192.168.1.5:8766/?token=TK123" in out   # 打印带 token 的跨设备链接
+
+
+# ---- 同源门(P0-C1/H2:堵 CSRF + 跨站 WebSocket 劫持)----
+def test_origin_ok_unit():
+    from karvyloop.console.access import origin_ok
+    # 同源:Origin==Host → 放行
+    assert origin_ok("http://localhost:8766", "same-origin", "localhost:8766")
+    assert origin_ok("http://192.168.1.5:8766", "", "192.168.1.5:8766")
+    # 跨源:Origin≠Host → 拒(含 localhost 不同端口的本地恶意页)
+    assert not origin_ok("https://evil.com", "", "localhost:8766")
+    assert not origin_ok("http://localhost:9999", "", "localhost:8766")
+    # Sec-Fetch-Site: cross-site → 拒(即便没 Origin,如跨站 <script> GET)
+    assert not origin_ok("", "cross-site", "localhost:8766")
+    # 无 Origin(curl/CLI/顶层导航)→ 放行
+    assert origin_ok("", "", "localhost:8766")
+    assert origin_ok("", "none", "localhost:8766")
+
+
+def test_gate_rejects_cross_origin(client):
+    """带 evil.com Origin 的请求(=恶意网页 CSRF)→ 403,即便同机 loopback。"""
+    r = client.get("/api/snapshot", headers={"origin": "https://evil.com", "host": "localhost:8766"})
+    assert r.status_code == 403 and "跨源" in r.json()["reason"]
+    # sec-fetch-site: cross-site 同样拒
+    assert client.get("/api/snapshot", headers={"sec-fetch-site": "cross-site"}).status_code == 403
+
+
+def test_gate_allows_same_origin_and_nonbrowser(client):
+    """同源(Origin==Host)+ 非浏览器(无 Origin,如 TestClient/curl)→ 放行(不破坏正常前端和工具)。"""
+    # TestClient 默认不带 Origin → 放行(现有 200 端点不受影响)
+    assert client.get("/api/snapshot").status_code == 200
+    # 显式同源 → 放行
+    r = client.get("/api/snapshot", headers={"origin": "http://testserver", "host": "testserver"})
+    assert r.status_code == 200

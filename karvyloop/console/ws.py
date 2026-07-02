@@ -39,10 +39,18 @@ router = APIRouter()
 async def ws_endpoint(websocket: WebSocket) -> None:
     """主 WebSocket 端点。"""
     app = websocket.app
+    from karvyloop.console import access as _acc
+    # 同源门(**C1 修复,始终生效**):浏览器对 WS 握手必带 Origin。恶意网页 `new WebSocket("ws://127.0.0.1:8766/ws")`
+    # 带的是 evil.com 的 Origin ≠ 本机 Host → 拒握手,堵住跨站 WebSocket 劫持(CSWSH=本机 RCE+数据外泄)。
+    # loopback 对 token 免密**但不对同源门免密** —— 这正是之前"把 localhost 当无条件可信"的盲区。
+    if not _acc.origin_ok(websocket.headers.get("origin", ""),
+                          websocket.headers.get("sec-fetch-site", ""),
+                          websocket.headers.get("host", "")):
+        await websocket.close(code=1008)   # policy violation(跨源)
+        return
     # 访问令牌门(HTTP 中间件不管 WS scope,这里单独查):本机免密;非本机需 cookie/query token,否则拒握手。
     _token = getattr(app.state, "access_token", None)
     if _token:
-        from karvyloop.console import access as _acc
         _client = websocket.client.host if websocket.client else ""
         if not _acc.is_loopback(_client):
             _supplied = websocket.cookies.get(_acc.COOKIE) or websocket.query_params.get("token") or ""
