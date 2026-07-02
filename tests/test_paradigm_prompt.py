@@ -40,6 +40,22 @@ def test_compiles_soul_and_value_into_prompt(tmp_path):
     assert "/home/ws" in text
 
 
+def test_compiled_prompt_marks_domain_governance_covered(tmp_path):
+    """P2-a 去重(对抗验收):编译成功的 per-role prompt 已含域治理(value.md+deontic)→
+    带 covers_domain_governance 标记,直聊路径据此**不再**把 governance_text 域块重复注入。"""
+    roles = RoleRegistry(tmp_path / "roles")
+    rv = roles.create("designer", identity="我是资深设计师", soul="克制", atom_ids=[])
+    domain = _domain_with_value(tmp_path)
+    cp = build_role_paradigm_prompt(rv, domain, intent="x", cwd="/w")
+    assert getattr(cp, "covers_domain_governance", False) is True
+    # 直聊两条路径(ws + routes)都做了尾段剥除(接线在位;逻辑由本标记驱动)
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    for rel in ("karvyloop/console/ws.py", "karvyloop/console/routes.py"):
+        src = (root / rel).read_text(encoding="utf-8")
+        assert "covers_domain_governance" in src, f"{rel} 缺双注入去重接线"
+
+
 def test_no_role_dir_returns_none(tmp_path):
     """不是 materialized 角色目录 → 返 None(调用方回退 persona)。"""
     class _Fake:

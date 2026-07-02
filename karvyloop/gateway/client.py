@@ -21,28 +21,43 @@ class ContextCeilingError(Exception):
     """组装后的上下文超模型硬窗口 —— 网关咽喉 fail-loud 拒发(不打注定 4xx/被静默截断的请求)。"""
 
 
-def _estimate_tokens(messages: list[dict], system: Optional[SystemPrompt]) -> int:
-    """粗估请求 token(house 口径 len//4,与 context.budget 一致)。**不跨层 import**
-    (gateway 是底层,不该反向依赖 context)—— 只做确定性地板判定,精度由预留裕度吸收。"""
-    chars = 0
+def _text_tokens(s: str) -> int:
+    """CJK 感知的 token 粗估:CJK ≈ 1 tok/字,其余 ≈ len//4。对抗验收点破:纯 len//4 对中文
+    低估 ~4x,固定裕度吸收不了 —— 本项目双语、中文占比高,地板必须按 CJK 记账才真兜得住。"""
+    cjk = sum(1 for ch in s if "一" <= ch <= "鿿" or "　" <= ch <= "ヿ" or "＀" <= ch <= "￯")
+    return cjk + (len(s) - cjk) // 4
+
+
+def _estimate_tokens(messages: list[dict], system: Optional[SystemPrompt],
+                     tools: Optional[list[dict]] = None) -> int:
+    """粗估请求 token(CJK 感知)。**不跨层 import**(gateway 是底层,不该反向依赖 context)——
+    只做确定性地板判定,残余误差由预留裕度吸收。tools schema 也计(MCP 工具定义动辄数 KB,
+    不计 = 低估放行注定 4xx 的请求,对抗验收揪出的洞)。"""
+    total = 0
     for msg in messages or []:
         c = msg.get("content") if isinstance(msg, dict) else None
         if isinstance(c, str):
-            chars += len(c)
+            total += _text_tokens(c)
         elif isinstance(c, list):
             for b in c:
                 if isinstance(b, dict):
-                    chars += len(str(b.get("text", ""))) + len(str(b.get("content", ""))) + len(str(b.get("input", "")))
+                    total += _text_tokens(str(b.get("text", ""))) + _text_tokens(str(b.get("content", ""))) + _text_tokens(str(b.get("input", "")))
                 else:
-                    chars += len(str(b))
+                    total += _text_tokens(str(b))
         elif c is not None:
-            chars += len(str(c))
+            total += _text_tokens(str(c))
     if system is not None:
         try:
-            chars += sum(len(s) for s in (system.static or [])) + sum(len(s) for s in (system.dynamic or []))
+            total += sum(_text_tokens(s) for s in (system.static or [])) + \
+                     sum(_text_tokens(s) for s in (system.dynamic or []))
         except Exception:
             pass
-    return chars // 4
+    for t in tools or []:
+        try:
+            total += _text_tokens(str(t))
+        except Exception:
+            pass
+    return total
 
 
 class GatewayClient:
@@ -76,7 +91,7 @@ class GatewayClient:
         threshold = cw - reserve
         # cw<=0(未知窗口)或 threshold<=0(窗口比预留还小 = 退化/测试桩模型)→ 不判(0 回归)。
         if cw > 0 and threshold > 0:
-            used = _estimate_tokens(messages, system)
+            used = _estimate_tokens(messages, system, tools)
             if used > threshold:
                 raise ContextCeilingError(
                     f"上下文超模型「{m.id}」硬窗口:约 {used} tok > {cw - reserve}(窗口 {cw} − 预留 {reserve})"

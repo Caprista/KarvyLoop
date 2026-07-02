@@ -101,6 +101,29 @@ def test_run_skill_script_refuses_tampered(tmp_path):
         assert "完整性校验失败" in str(e)
 
 
+def test_recall_disk_fallbacks_skip_tampered(tmp_path):
+    """对抗验收揪出的绕过面:recall 的**三个扫盘兜底**(无索引兜底 / auto_suggest 兜底 /
+    load_bound_skills 按名直取)绕开索引直接读盘 —— 也必须拒载被篡改的 untrusted 技能,
+    否则 SKILL.md body 仍会混进召回上下文(提示注入面)。"""
+    from karvyloop.crystallize.recall import _load_skill_index, load_bound_skills
+    skills_dir = tmp_path / "skills"
+    res = install_skill_dir(_make_src(tmp_path), skills_dir=skills_dir, origin="o")
+    name = res.name
+    # 未篡改 → 三条路都看得见
+    assert any(e["name"] == name for e in _load_skill_index(skills_dir))
+    assert [h.name for h in load_bound_skills([name], skills_dir=skills_dir)] == [name]
+    # 篡改 script
+    (skills_dir / name / "scripts" / "run.sh").write_text("rm -rf /  # evil", encoding="utf-8")
+    # ① 无索引扫盘兜底:不装载
+    assert not any(e["name"] == name for e in _load_skill_index(skills_dir))
+    # ② 绑定直取(含"索引拒收后反被扫盘兜底接住"的尖角):不装载
+    assert load_bound_skills([name], skills_dir=skills_dir) == []
+    # ③ auto_suggest 扫盘兜底:不出建议
+    from karvyloop.crystallize.auto_suggest import auto_suggest
+    hits = auto_suggest("a demo skill demo", skills_dir=skills_dir, skill_index=None)
+    assert not any(h.name == name for h in hits)
+
+
 def test_unlocked_history_is_allowed(tmp_path):
     """锁里没有记录(旧导入/未锁)→ unlocked(放行,不误杀)。"""
     skills_dir = tmp_path / "skills"

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from karvyloop.registry.skill_lock import reject_tampered_untrusted
 from karvyloop.registry.skills import parse_frontmatter
 
 from .signature import _intent_cluster
@@ -54,6 +55,9 @@ def _load_skill_index(skills_dir: Path) -> list[dict]:
         except OSError:
             continue
         if not fm.name:
+            continue
+        # 完整性锁:扫盘兜底也不装载被篡改的 untrusted 技能(对抗验收:别让 body 混进召回上下文)
+        if reject_tampered_untrusted(skills_dir, p.parent.name, fm.raw or {}):
             continue
         when_tokens = _tokenize(fm.when_to_use)
         desc_tokens = _tokenize(fm.description)
@@ -124,6 +128,10 @@ def load_bound_skills(
         try:
             fm, body = parse_frontmatter(Path(info["path"]))
         except OSError:
+            continue
+        # 完整性锁:绑定直取(含扫盘兜底)同样不装载被篡改的 untrusted 技能。
+        # 对抗验收点破的尖角:被篡改的技能被索引拒收后,这里的扫盘兜底反而会接住它 —— 必须同门。
+        if reject_tampered_untrusted(Path(info["path"]).parent.parent, nm, fm.raw or {}):
             continue
         out.append(RecallHit(name=nm, body=body, path=info["path"], score=1.0,
                              manifest=fm.raw or {}, sig=info.get("sig", ""),

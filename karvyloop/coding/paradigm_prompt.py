@@ -87,7 +87,11 @@ def build_role_paradigm_prompt(
             return None
         # 工作区块照旧(9.5 P1):告诉它写哪
         ws = f"你的工作区:{cwd}(要写文件/跑代码就在这,有读写权限,别往 /tmp 写)"
-        return CodingPrompt(static=[text], dynamic_blocks=[ws])
+        cp = CodingPrompt(static=[text], dynamic_blocks=[ws])
+        # 本 prompt 已编入域治理(value.md + deontic forbid/oblige)—— 调用方据此**不再**把
+        # governance_text 的域块重复注入 user 前缀(对抗验收:直聊路径曾双注入,浪费 token)。
+        cp.covers_domain_governance = True
+        return cp
     except Exception:
         # 真异常(非"无目录"那种 explicit return None)→ 记一笔,别静默吞掉
         logger.warning("build_role_paradigm_prompt 编译失败,回退 persona", exc_info=True)

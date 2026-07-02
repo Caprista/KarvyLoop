@@ -128,6 +128,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     mgr = getattr(app.state, "conversation_manager", None)
     ctx = mgr.context_view() if mgr is not None else None
     governance = mgr.governance_text() if mgr is not None else ""
+    _domain_gov = governance   # 域治理块(value.md+deontic);persona 已编入时在下方去重
 
     # loop step4b 地基:从个人知识库召回相关 Belief,注入上下文最前(token 纪律:封顶 8 条)。
     # 让"关于你"的长期记忆真的喂进模型 —— 否则摄入/蒸馏写进的库没人读。
@@ -194,6 +195,13 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     else:
         persona = _persona_for_current_peer(app, mgr, ws_root, intent=intent)
         eff_scope = scope_for_peer(mgr)
+
+    # 去重(对抗验收):paradigm 编译的 persona 已把域治理(value.md+deontic)编进 system prompt,
+    # governance 里再带一份 = 双注入白烧 token。域块是 governance 的**尾段**(召回/预对齐都往前贴),
+    # 精准剥掉尾段,保留召回 + 决策偏好预对齐。与委派路径 proposal_handlers 的 _base="" 同一策略。
+    if getattr(persona, "covers_domain_governance", False) and _domain_gov and \
+            governance.endswith(_domain_gov):
+        governance = governance[: -len(_domain_gov)].strip()
 
     # P4 逐字流式:drive 在 worker 线程跑,每个 render 事件经 run_coroutine_threadsafe 桥回本 loop
     # 推 `drive_event`(loop 不被 to_thread 阻塞,可即时广播)→ 前端逐字追加。失败不拖垮 drive。

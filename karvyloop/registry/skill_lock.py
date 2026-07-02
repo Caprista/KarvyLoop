@@ -102,4 +102,25 @@ def remove_lock(skills_dir: Path, name: str) -> None:
         write_lock(skills_dir, d)
 
 
-__all__ = ["content_hash", "read_lock", "write_lock", "record_lock", "verify_lock", "remove_lock", "_LOCK_NAME"]
+def reject_tampered_untrusted(skills_dir: Path, name: str, raw: dict) -> bool:
+    """所有"从盘装载技能"的路径共用的一道门:untrusted 第三方技能与锁不符 → True(调用方应跳过)。
+
+    对抗验收揪出的洞:锁只接在 SkillIndex._scan_dir / run_skill_script,而 recall 的
+    **三个扫盘兜底**(_load_skill_index / auto_suggest 兜底 / load_bound_skills 按名直取)
+    绕过索引直接读盘 —— 被篡改的技能虽然进不了索引、跑不起来,SKILL.md body 却仍可能被
+    带进召回上下文(提示注入面)。任何读盘装载点都该过这一道;非 untrusted / 锁没记录 → False(放行)。
+    """
+    if str((raw or {}).get("trust", "")).strip().lower() != "untrusted":
+        return False
+    try:
+        status, detail = verify_lock(skills_dir, name)
+    except Exception:
+        return False   # 锁自身出错 → fail-safe 放行(与 read_lock 同调,不误杀)
+    if status == "mismatch":
+        logger.warning("完整性锁失败,拒绝装载被篡改的第三方技能:%s(%s)", name, detail)
+        return True
+    return False
+
+
+__all__ = ["content_hash", "read_lock", "write_lock", "record_lock", "verify_lock",
+           "remove_lock", "reject_tampered_untrusted", "_LOCK_NAME"]

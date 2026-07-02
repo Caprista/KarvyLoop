@@ -80,6 +80,30 @@ def test_unknown_window_no_enforcement():
     assert adapter.called
 
 
+def test_tools_schema_counted():
+    """tools 定义也计入(对抗验收:MCP 工具 schema 动辄数 KB,不计=低估放行注定 4xx 的请求)。"""
+    adapter = _Adapter()
+    gw = GatewayClient(_Reg(_M(cw=8_000, max_tokens=1000)), adapters={"fake": adapter})
+    big_tools = [{"name": "t", "description": "d" * 30_000, "input_schema": {}}]  # ≈7500 tok > 阈值 5000
+
+    async def go():
+        async for _ in gw.complete([{"role": "user", "content": "hi"}], big_tools, "test/model"):
+            pass
+    with pytest.raises(ContextCeilingError):
+        asyncio.run(go())
+    assert adapter.called is False
+
+
+def test_cjk_counted_realistically():
+    """CJK ≈ 1 tok/字(对抗验收:len//4 对中文低估 4x,中文超窗会溜过)。
+    8000 字中文 ≈ 8000 tok > 阈值 5000 —— len//4 只算 2000 会放行,CJK 感知必须拦。"""
+    adapter = _Adapter()
+    gw = GatewayClient(_Reg(_M(cw=8_000, max_tokens=1000)), adapters={"fake": adapter})
+    with pytest.raises(ContextCeilingError):
+        _drain(gw, [{"role": "user", "content": "汉" * 8_000}])
+    assert adapter.called is False
+
+
 def test_over_window_counts_system_and_blocks():
     """system prompt 也计入 —— messages 不大但 system 超窗也拦。"""
     from karvyloop.gateway.system import SystemPrompt

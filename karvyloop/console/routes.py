@@ -946,6 +946,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     mgr = getattr(request.app.state, "conversation_manager", None)
     ctx = mgr.context_view() if mgr is not None else None
     governance = mgr.governance_text() if mgr is not None else ""
+    _domain_gov = governance   # 域治理块(value.md+deontic);persona 已编入时在下方去重
 
     # loop step4b 地基:个人知识库召回注入(同 ws._handle_intent_ws,封顶 8 条)
     # §2.6:在某业务域里 drive → 召回共享层 + 本域私有层(域专属认知不跨域漏)。
@@ -1006,6 +1007,13 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     else:
         persona = _persona_for_current_peer(request.app, mgr, ws_root, intent=req.intent)
         eff_scope = scope_for_peer(mgr)
+
+    # 去重(对抗验收):paradigm 编译的 persona 已把域治理(value.md+deontic)编进 system prompt,
+    # governance 再带一份 = 双注入白烧 token。域块是 governance 尾段(召回/预对齐都往前贴),
+    # 剥尾段、保留召回 + 预对齐。与委派路径 proposal_handlers 的 _base="" 同一策略。
+    if getattr(persona, "covers_domain_governance", False) and _domain_gov and \
+            governance.endswith(_domain_gov):
+        governance = governance[: -len(_domain_gov)].strip()
 
     # 9.5 P2:任务看板 —— 把本次 drive 登记成一个任务(running),完成/出错再 finish。
     task_reg = getattr(request.app.state, "task_registry", None)

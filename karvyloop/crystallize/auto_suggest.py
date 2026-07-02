@@ -93,6 +93,7 @@ def auto_suggest(
             ))
     else:
         # 兜底:无 SkillIndex 时,走 _load_skill_index 等价
+        from karvyloop.registry.skill_lock import reject_tampered_untrusted
         from karvyloop.registry.skills import parse_frontmatter
         if skills_dir.is_dir():
             for p in sorted(skills_dir.glob("*/SKILL.md")):
@@ -101,6 +102,9 @@ def auto_suggest(
                 except OSError:
                     continue
                 if not fm.name:
+                    continue
+                # 完整性锁:扫盘兜底不收被篡改的 untrusted 技能(与 recall/_scan_dir 同门)
+                if reject_tampered_untrusted(skills_dir, p.parent.name, fm.raw or {}):
                     continue
                 entries.append((
                     fm.name, fm.signature or "", fm.scope or "user",
