@@ -4033,6 +4033,13 @@ def api_update_status(request: Request) -> dict[str, Any]:
         res = {"current": current_version(), "latest": None, "newer": False,
                "command": "", "url": "", "checked": False, "source": "error"}
     res["last_upgrade"] = _read_last_upgrade()
+    # 诚实 UX:能不能一键回到上一个已知好版本、那是哪个版本(preflight 记的 update_rollback.json)
+    try:
+        from karvyloop.update import rollback_status
+        res.update(rollback_status())   # {"rollback_available": bool, "prev_version": str|None}
+    except Exception:
+        res.setdefault("rollback_available", False)
+        res.setdefault("prev_version", None)
     return res
 
 
@@ -4100,9 +4107,22 @@ def api_update_apply(request: Request) -> dict[str, Any]:
         return {"ok": False, "reason": "当前不是 git 安装、karvyloop 也未发布到 PyPI;"
                                        "请用 git clone 部署后再一键升级,或手动更新。"}
 
+    # 升级前置(动手前留后悔药):记回滚点(update_rollback.json)+ 备份实例状态(backups/,留 3 份)。
+    # 失败 → 中止升级(没有回滚点就不动手,fail-loud);prev_commit 交给 runner 做装后自检失败的自动回滚。
+    from karvyloop.update import preflight
+    pf = preflight(str(chk.get("latest") or ""), root=_P(cwd))
+    if not pf.get("ok"):
+        try:
+            lock.unlink()
+        except Exception:
+            pass
+        return {"ok": False, "reason": f"升级前置检查失败,未动任何东西"
+                                       f"({pf.get('stage', '?')}): {pf.get('reason', '')}"}
+
     spec = {"upgrade_cmd": upgrade_cmd, "cwd": cwd, "restart_argv": relaunch["argv"],
             "host": relaunch["host"], "port": relaunch["port"],
-            "old_pid": _os.getpid(), "from": chk.get("current"), "to": chk.get("latest")}
+            "old_pid": _os.getpid(), "from": chk.get("current"), "to": chk.get("latest"),
+            "python": py, "prev_commit": pf.get("prev_commit", ""), "kind": "upgrade"}
     (kl / "_upgrade.json").write_text(_json.dumps(spec, ensure_ascii=False), encoding="utf-8")
     # 升级开始 → 清掉上次的状态(避免前端读到旧的成败)
     try:
@@ -4126,6 +4146,83 @@ def api_update_apply(request: Request) -> dict[str, Any]:
     _th.Timer(1.0, lambda: _os._exit(0)).start()
     return {"ok": True, "started": True, "from": chk.get("current"), "to": chk.get("latest"),
             "log": str(kl / "upgrade.log")}
+
+
+@router.post("/update/rollback")
+def api_update_rollback(request: Request) -> dict[str, Any]:
+    """一键回滚:回到 update_rollback.json 记的上一个已知好版本("每次更新都比之前更烂"的解药)。
+
+    安全门与 /update/apply 完全同款(CSRF 头 + 本机/私网来源 + 并发锁);流程也同款 —— 写规格 →
+    detached runner(停 → `git reset --hard <prev>` + `pip install -e .` → 起)。数据不动:升/降级
+    从不触碰 ~/.karvyloop(preflight 备份只是迁移事故的后悔药)。回滚规格不带 prev_commit → runner
+    不会对回滚再递归回滚。
+    """
+    import json as _json
+    import os as _os
+    import re as _re
+    import subprocess as _sp
+    import sys as _sys
+    import threading as _th
+    from pathlib import Path as _P
+
+    if (request.headers.get("x-karvyloop-upgrade") or "") != "1":
+        return {"ok": False, "reason": "缺升级标记(防 CSRF);请从控制台界面点回滚"}
+    client = (request.client.host if request.client else "") or ""
+    if not _is_trusted_upgrade_origin(client):
+        return {"ok": False, "reason": f"回滚只能从本机或同局域网触发(你的来源 {client} 不在可信网内)"}
+
+    from karvyloop.update import current_version, detect_install_mode, read_rollback_point
+    if detect_install_mode() != "git":
+        return {"ok": False, "reason": "当前不是 git 安装,无法 git 回滚"}
+    info = read_rollback_point()
+    if not info:
+        return {"ok": False, "reason": "没有可用的回滚点(还没做过带 preflight 的升级)"}
+    prev = str(info.get("prev_commit") or "")
+    if not _re.fullmatch(r"[0-9a-fA-F]{7,64}", prev):   # 进 shell 命令,只认 commit hash 形态
+        return {"ok": False, "reason": f"回滚点 commit 不合法: {prev[:40]!r}"}
+
+    relaunch = getattr(request.app.state, "console_relaunch", None)
+    if not relaunch or not relaunch.get("argv"):
+        return {"ok": False, "reason": "无法确定如何重启(console_relaunch 未记)"}
+
+    kl = _P.home() / ".karvyloop"
+    kl.mkdir(parents=True, exist_ok=True)
+    lock = kl / "_upgrade.lock"
+    if not _acquire_upgrade_lock(lock):
+        return {"ok": False, "reason": "升级/回滚已在进行中(稍候,或删 ~/.karvyloop/_upgrade.lock 重试)"}
+
+    import karvyloop
+    py = _sys.executable
+    root = _P(karvyloop.__file__).resolve().parent
+    for p in (root, *root.parents):
+        if (p / ".git").exists():
+            root = p
+            break
+    spec = {"upgrade_cmd": f'git reset --hard {prev} && "{py}" -m pip install -e .',
+            "cwd": str(root), "restart_argv": relaunch["argv"],
+            "host": relaunch["host"], "port": relaunch["port"], "old_pid": _os.getpid(),
+            "from": current_version(), "to": info.get("prev_version") or prev[:12],
+            "python": py, "kind": "rollback"}
+    (kl / "_upgrade.json").write_text(_json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+    try:
+        (kl / "_upgrade_status.json").unlink()
+    except Exception:
+        pass
+    try:
+        _sp.Popen([py, "-m", "karvyloop.console.upgrade_runner"],
+                  stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                  start_new_session=(_os.name != "nt"),
+                  creationflags=(_sp.DETACHED_PROCESS if _os.name == "nt" else 0))
+    except Exception as e:  # noqa: BLE001
+        try:
+            lock.unlink()
+        except Exception:
+            pass
+        return {"ok": False, "reason": f"启动回滚器失败: {e}"}
+
+    _th.Timer(1.0, lambda: _os._exit(0)).start()
+    return {"ok": True, "started": True, "from": current_version(),
+            "to": info.get("prev_version"), "log": str(kl / "upgrade.log")}
 
 
 @router.get("/ops/diagnose")

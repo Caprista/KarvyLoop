@@ -33,6 +33,13 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   reason without a translation fails the suite).
 
 ### Added
+- **Upgrades now snapshot state, verify the install, and auto-roll back on failure** (one click back on
+  the console): before switching versions the updater records the current commit
+  (`~/.karvyloop/update_rollback.json`) and backs up your instance state files
+  (`~/.karvyloop/backups/`, last 3 kept, honest scope in each `manifest.json`); after install it
+  smoke-checks that the new code actually imports, and a broken build is rolled back to the previous
+  known-good commit automatically — with the reason stated out loud, never a silent broken restart.
+  `POST /api/update/rollback` + `rollback_available`/`prev_version` in the update status payload.
 - **`karvyloop export`** — your instance is a folder, now with a button: packs `~/.karvyloop`
   (skills, knowledge, preferences, history) into one portable archive with a self-explaining
   `MANIFEST.txt`; secrets (`config.yaml` with your API keys, `console.runtime.json`, `*.lock`)

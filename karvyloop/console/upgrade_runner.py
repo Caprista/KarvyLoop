@@ -17,8 +17,12 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+# 启动即载入内存(与本模块同一不变量):升级中途改盘上文件不影响本次跑完。
+from karvyloop import update as _update
 
 _KL = Path.home() / ".karvyloop"
 _SPEC = _KL / "_upgrade.json"
@@ -109,6 +113,23 @@ def main() -> int:
             L(f"升级命令异常: {e}")
         L(f"升级命令结束 rc={rc}")
 
+        # 2.5) 验 + 必要时自动回滚(装出坏版本绝不静默带病重启:smoke 导入自检失败 / 装挂 →
+        #      git reset --hard 回 preflight 记的已知好 commit + 重装;回滚 spec 不带 prev_commit,
+        #      天然不会递归回滚)。全部经 karvyloop.update(启动时已载入内存)。
+        verb = "回滚" if spec.get("kind") == "rollback" else "升级"
+        py = spec.get("python") or sys.executable
+        fin = _update.finalize_install(rc, spec.get("prev_commit") or "",
+                                       root=spec.get("cwd") or None, python=py, log=L)
+        ok_final, rolled_back, fail_reason = fin["ok"], fin["rolled_back"], fin["reason"]
+        if ok_final:
+            msg = ""
+        elif rolled_back:
+            # 诚实 UX:重启后前端读到的 msg 必须说清"回滚了 + 为什么"(fail-loud,不静默)
+            msg = (f"{verb}到 {to} 失败({fail_reason});已自动回滚到 {frm} 并重启,"
+                   f"你的数据没动。详见 upgrade.log")
+        else:
+            msg = f"{verb}失败且未能自动回滚({fail_reason});已用当前盘上版本尽力重启,详见 upgrade.log"
+
         # 3) 起:端口空了才重启(否则盲目重启会撞"已在跑"直接退,反而没起)
         if _wait_free(host, port, 12):
             try:
@@ -116,16 +137,19 @@ def main() -> int:
                                  start_new_session=(os.name != "nt"),
                                  creationflags=(subprocess.DETACHED_PROCESS if os.name == "nt" else 0))
                 L(f"已重启 console: {' '.join(spec['restart_argv'])}")
-                _write_status({"ok": rc == 0, "rc": rc, "from": frm, "to": to, "restarted": True,
-                               "msg": "" if rc == 0 else "升级命令非 0,已用当前盘上版本重启,详见 upgrade.log"})
+                _write_status({"ok": ok_final, "rc": rc, "from": frm, "to": to, "restarted": True,
+                               "rolled_back": rolled_back, "rollback_reason": fail_reason,
+                               "msg": msg})
             except Exception as e:
                 L(f"⚠ 重启失败: {e} —— 请手动 `karvyloop console`")
                 _write_status({"ok": False, "rc": rc, "from": frm, "to": to, "restarted": False,
-                               "msg": f"重启失败: {e};请手动 karvyloop console"})
+                               "rolled_back": rolled_back, "rollback_reason": fail_reason,
+                               "msg": (f"{msg};" if msg else "") + f"重启失败: {e};请手动 karvyloop console"})
         else:
             L("⚠ 端口仍被占,未重启(旧 console 可能没退干净)。请手动停掉它再 `karvyloop console`")
             _write_status({"ok": False, "rc": rc, "from": frm, "to": to, "restarted": False,
-                           "msg": "端口仍被占,未重启;请手动停掉旧 console 再启动"})
+                           "rolled_back": rolled_back, "rollback_reason": fail_reason,
+                           "msg": (f"{msg};" if msg else "") + "端口仍被占,未重启;请手动停掉旧 console 再启动"})
         L("=== 升级结束 ===")
     finally:
         log.close()
