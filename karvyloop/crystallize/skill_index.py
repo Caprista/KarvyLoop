@@ -13,11 +13,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from karvyloop.registry.skills import parse_frontmatter, system_skills_dir
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,6 +82,18 @@ class SkillIndex:
                 continue
             if not fm.name or not fm.signature:
                 continue
+            # 完整性锁(生产索引防线):untrusted 第三方技能与锁不符(被篡改/损坏)→ **不进索引**,
+            # recall 永不命中它 → 永不被跑。fail-loud 记一条,绝不静默吞。系统技能随包发版,
+            # 完整性等同包本身,不在此门(无 trust=untrusted 标签)。
+            if str((fm.raw or {}).get("trust", "")).strip().lower() == "untrusted":
+                try:
+                    from karvyloop.registry.skill_lock import verify_lock
+                    status, detail = verify_lock(skills_dir, p.parent.name)
+                except Exception:
+                    status, detail = "unlocked", ""
+                if status == "mismatch":
+                    logger.warning("完整性锁失败,拒绝索引被篡改的第三方技能:%s(%s)", fm.name, detail)
+                    continue
             src = str((fm.raw or {}).get("source", "")).strip().lower() or default_source
             entry = IndexEntry(
                 name=fm.name,

@@ -79,6 +79,13 @@ async def run_skill_script(
     sd = Path(skill_dir).resolve()
     target = resolve_script(sd, script_rel)
     fm, _body = parse_frontmatter(sd / "SKILL.md")
+    # 完整性锁(生产 run 防线):untrusted 第三方技能执行前查篡改 —— 改过的脚本绝不进沙箱。
+    # 这是"加载前校验"在**执行**路径的兜底,不只靠索引层(索引可能被绕、直接 run 也得挡)。
+    if trusted is not True and (fm.raw or {}).get("trust") == "untrusted":
+        from karvyloop.registry.skill_lock import verify_lock
+        status, detail = verify_lock(sd.parent, sd.name)
+        if status == "mismatch":
+            raise ValueError(f"技能「{sd.name}」完整性校验失败,拒绝执行(第三方代码被改动/损坏):{detail}")
     token = token_for_skill(fm, skill_dir=str(sd), workspace=str(workspace),
                             ttl_seconds=ttl_seconds, trusted=trusted, net=net)
     interp = _INTERP.get(target.suffix.lower(), ["bash"])

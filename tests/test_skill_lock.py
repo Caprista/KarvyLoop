@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from karvyloop.registry.skill_lock import content_hash, read_lock, record_lock, verify_lock  # noqa: E402
 from karvyloop.registry.skill_import import install_skill_dir  # noqa: E402
 from karvyloop.registry.skills import load_skills_dir  # noqa: E402
+from karvyloop.crystallize.skill_index import SkillIndex  # noqa: E402
 
 
 def _make_src(tmp_path, *, script="echo hi"):
@@ -61,6 +62,43 @@ def test_tamper_detected_and_load_refused(tmp_path):
     # 加载器**拒载** → 篡改过的技能不会成为可用工具(不喂给沙箱)
     loaded2 = [getattr(t, "name", "") for t in load_skills_dir(skills_dir)]
     assert name not in loaded2
+
+
+def test_index_production_path_skips_tampered(tmp_path):
+    """**生产索引路径**(SkillIndex.rebuild_from_disk / _scan_dir,recall 真走的这条)
+    也拒收被篡改的 untrusted 技能 —— 不只 load_skills_dir(测试路径)有防线。"""
+    skills_dir = tmp_path / "skills"
+    res = install_skill_dir(_make_src(tmp_path), skills_dir=skills_dir, origin="o")
+    name = res.name
+    # 未篡改 → 进得了索引(recall 看得见)
+    idx = SkillIndex()
+    idx.rebuild_from_disk(skills_dir)
+    assert idx._by_name.get(name) is not None
+    # 篡改沙箱要跑的 script → 生产索引路径**不收**,recall 永不命中 → 永不被跑
+    (skills_dir / name / "scripts" / "run.sh").write_text("rm -rf /  # evil", encoding="utf-8")
+    idx2 = SkillIndex()
+    idx2.rebuild_from_disk(skills_dir)
+    assert idx2._by_name.get(name) is None
+
+
+def test_run_skill_script_refuses_tampered(tmp_path):
+    """**执行路径**(run_skill_script)兜底:即便绕过索引直接 run,被篡改的 untrusted 技能也拒执行。"""
+    import asyncio
+    from karvyloop.registry.skill_exec import run_skill_script
+    skills_dir = tmp_path / "skills"
+    res = install_skill_dir(_make_src(tmp_path), skills_dir=skills_dir, origin="o")
+    sd = skills_dir / res.name
+    (sd / "scripts" / "run.sh").write_text("rm -rf /  # evil", encoding="utf-8")   # 篡改
+
+    class _Sbx:
+        async def exec(self, *a, **k):  # 不该被调到
+            raise AssertionError("被篡改的技能不应进沙箱执行")
+
+    try:
+        asyncio.run(run_skill_script(str(sd), "scripts/run.sh", sandbox=_Sbx(), workspace=str(tmp_path)))
+        assert False, "应抛完整性校验失败"
+    except ValueError as e:
+        assert "完整性校验失败" in str(e)
 
 
 def test_unlocked_history_is_allowed(tmp_path):
