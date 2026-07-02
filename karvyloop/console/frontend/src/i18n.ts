@@ -555,6 +555,7 @@
       "rt.aligning": "🎯 Aligning the goal with Karvy · {n} on deck — just chat; Karvy starts the discussion when it’s clear",
       "rt.begin_discuss": "▶ Begin discussion",
       "rt.discuss_started": "🎡 Karvy is convening the members…",
+      "rt.discuss_failed": "discussion failed",
       "tokens.title": "💰 Token usage",
       "tokens.loading": "loading…",
       "tokens.none": "no usage yet",
@@ -1139,6 +1140,7 @@
       "rt.aligning": "🎯 正在和小卡对齐目标 · 已选 {n} 位 —— 直接聊就行,聊清了小卡会自己开始讨论",
       "rt.begin_discuss": "▶ 开始圆桌讨论",
       "rt.discuss_started": "🎡 小卡正在组织成员讨论…",
+      "rt.discuss_failed": "讨论失败",
       "tokens.title": "💰 Token 用量",
       "tokens.loading": "加载中…",
       "tokens.none": "还没有用量",
@@ -1235,6 +1237,75 @@
     return s;
   }
 
+  // ---- P2-c:后端中文 reason/summary 透传 → 双语 ----
+  // 后端 API 的 reason/detail 是中文写死的(语言只有前端知道,后端无法按语言产文案)。
+  // 以**中文原文为稳定 key**建 zh→en 表:zh 界面原样显,en 界面查表译;查不到(f-string 动态
+  // 拼接的)诚实回退原文 —— 宁可漏译,不显示 key 名/空白。契约:tests/test_i18n_backend_reasons.py
+  // grep 后端静态中文 reason 逐条断言在此表 —— 新加后端 reason 不补翻译会挂测试。
+  const BACKEND_ZH_EN: Record<string, string> = {
+    "memory 未接": "memory not wired",
+    "memory 未接(--no-llm?)": "memory not wired (--no-llm?)",
+    "memory/gateway 未接(--no-llm?)": "memory/gateway not wired (--no-llm?)",
+    "memory/gateway 未接,沉淀失败(待办保留,可重试)": "memory/gateway not wired; distill failed (kept as pending, retryable)",
+    "memory/gateway/proposal_registry 未接": "memory/gateway/proposal_registry not wired",
+    "workflow 需要 @ 两个及以上角色": "workflow needs @-mentioning 2+ roles",
+    "偏好不存在(可能已被你删/改)": "preference not found (may have been deleted/edited)",
+    "分析完成,但没抽出可沉淀的知识点(0 条,已保留待办)。": "analysis done, but no distillable knowledge extracted (0 items; kept as pending).",
+    "升级已在进行中(稍候,或删 ~/.karvyloop/_upgrade.lock 重试)": "upgrade already in progress (wait, or delete ~/.karvyloop/_upgrade.lock to retry)",
+    "圆桌在群场里开(先切到大群或某个域群)": "roundtables open in a group (switch to the world group or a domain group first)",
+    "圆桌成员不在了(域里角色变动?)": "roundtable member is gone (domain roles changed?)",
+    "在群场里 @ 角色协作": "@-mention roles in a group to collaborate",
+    "在群场里执行 workflow": "run workflows in a group",
+    "已是最新,无需升级": "already up to date, no upgrade needed",
+    "当前不是 git 安装、karvyloop 也未发布到 PyPI;": "not a git install, and karvyloop is not on PyPI;",
+    "提案不存在或未接 registry": "proposal not found or registry not wired",
+    "新内容不能为空": "new content must not be empty",
+    "无 gateway(--no-llm?)": "no gateway (--no-llm?)",
+    "无 gateway,无法编译(--no-llm?)": "no gateway, cannot compile (--no-llm?)",
+    "无法确定如何重启(console_relaunch 未记)": "cannot determine how to restart (console_relaunch not recorded)",
+    "无法访问授权存储": "cannot access the grants store",
+    "未接 LLM(--no-llm?)": "LLM not wired (--no-llm?)",
+    "未接 LLM(--no-llm?)无法语义聚类": "LLM not wired (--no-llm?) — cannot cluster semantically",
+    "未接 atom_registry / role_registry": "atom_registry / role_registry not wired",
+    "未接 atom_registry": "atom_registry not wired",
+    "未接 config(--no-llm?)": "config not wired (--no-llm?)",
+    "未接 domain_registry": "domain_registry not wired",
+    "未接 domain_registry(console 未启用业务域)": "domain_registry not wired (business domains disabled in console)",
+    "未接 role/domain registry": "role/domain registry not wired",
+    "未接 role_registry": "role_registry not wired",
+    "未接决策流水": "decision log not wired",
+    "未接对话编排器": "conversation manager not wired",
+    "未接技能库(--no-llm?)": "skill library not wired (--no-llm?)",
+    "未接认知库": "memory store not wired",
+    "本机沙箱不可用(需 Linux + bubblewrap);拒绝无隔离执行": "sandbox unavailable on this host (needs Linux + bubblewrap); refusing to run without isolation",
+    "没有待沉淀的料": "nothing pending to distill",
+    "没有待讨论的圆桌": "no roundtable pending discussion",
+    "没有待讨论的圆桌(可能已开过,或服务重启丢了待办)": "no roundtable pending discussion (maybe already held, or lost on restart)",
+    "知识库没变(watermark),零 LLM 跳过": "knowledge base unchanged (watermark); skipped with zero LLM calls",
+    "空 workflow": "empty workflow",
+    "缺 proposal_id": "missing proposal_id",
+    "缺升级标记(防 CSRF);请从控制台界面点升级": "missing upgrade marker (CSRF guard); trigger the upgrade from the console UI",
+    "跨源请求被拒(same-origin only)": "cross-origin request rejected (same-origin only)",
+    "还有一条料在沉淀流程里没结束 —— 先把它聊完(确认沉淀或拒绝)再喂下一条。": "another item is still mid-distill — finish it (persist or reject) before feeding the next.",
+    "这个群里没有可上桌的角色(先去业务域入职 agent)": "no roles available for a roundtable in this group (onboard agents into a domain first)",
+    "这条圆桌不在对齐中(可能已开始或结束)": "this roundtable is not aligning (it may have started or ended)",
+    "请在圆桌窗里对齐": "align inside the roundtable window",
+    "请在圆桌窗里开始": "start inside the roundtable window",
+  };
+
+  function tBackend(text: unknown): string {
+    const s = String(text == null ? "" : text);
+    if (!s) return s;
+    if (getLang() === "zh") return s;          // zh 界面:后端本就中文,原样
+    const hit = BACKEND_ZH_EN[s];
+    if (hit) return hit;
+    // 动态拼接(f-string)整句匹配不到 → 试最长前缀(如「归档失败:{e}」类);仍无 → 原文
+    for (const k in BACKEND_ZH_EN) {
+      if (s.indexOf(k) === 0) return BACKEND_ZH_EN[k] + s.slice(k.length);
+    }
+    return s;
+  }
+
   // 把带 data-i18n / data-i18n-title / data-i18n-ph 的静态元素填上当前语言。
   function applyStatic(root?: Document | Element): void {
     const r: Document | Element = root || document;
@@ -1272,11 +1343,13 @@
 
   (window as unknown as { KarvyI18n: unknown }).KarvyI18n = {
     t,
+    tBackend,
     getLang,
     setLang,
     applyStatic,
     mountSwitcher,
     _strings: STRINGS, // 测试用
+    _backendZhEn: BACKEND_ZH_EN, // 测试用(后端 reason 契约)
   };
 })();
 

@@ -7,6 +7,8 @@
   // ============ i18n (纯表现层;默认 en,可切 zh)============
   var T = window.KarvyI18n;
   function t(key, vars) { return T.t(key, vars); }
+  // 后端中文 reason/detail 透传 → 双语(P2-c;zh 原样,en 查表译,查不到诚实回退原文)
+  function tB(text) { return (T.tBackend ? T.tBackend(text) : text); }
 
   // ============ 叶子工具 + 模态基建(已迁 TS,源 frontend/src/{dom,modal}.ts)============
   // 裸名重绑到全局 → 下面成百上千处调用点一行不改(el 760+、模态基建 ~100)。
@@ -146,7 +148,7 @@
       console.log("[h2a] envelope", msg.payload);
       // D5:回显兑现结果(让 ACCEPT 不再是"空响应")
       const d = msg.payload && msg.payload.dispatch;
-      if (d) pushChatLine("system", t("proposal.dispatch", { kind: d.kind, detail: d.detail }));
+      if (d) pushChatLine("system", t("proposal.dispatch", { kind: d.kind, detail: tB(d.detail) }));
       // 决策已发 → **只撤刚拍的那张卡**(带 proposal_id),保留还挂着的兄弟卡(多卡不覆盖);
       // 若兑现产了执行后回报卡,就地追加"它到底验过没";列真空了才回填"已处置"空态。
       const list = document.getElementById("h2a-list");
@@ -722,7 +724,7 @@
         refreshPeers();
       } else {
         const body = await r.json().catch(() => ({}));
-        pushChatLine("system", t("domain.create_failed", { err: body.detail || ("HTTP " + r.status) }));
+        pushChatLine("system", t("domain.create_failed", { err: tB(body.detail) || ("HTTP " + r.status) }));
       }
     } catch (e) {
       pushChatLine("system", t("domain.create_failed", { err: e.message }));
@@ -1319,7 +1321,7 @@
         clearBusy();
         if (!r.ok) { pushChatLine("system", t("chat.http_error", { status: r.status })); return; }
         const res = await r.json();
-        if (!res.ok) { pushChatLine("system", "⚠ " + (res.reason || "roundtable failed")); return; }
+        if (!res.ok) { pushChatLine("system", "⚠ " + (tB(res.reason) || "roundtable failed")); return; }
         const log = document.getElementById("chat-log"); if (log) log.innerHTML = "";
         pushChatLine("user", t("rt.opened", { topic: topic }));
         _chatSpeaker = "";                       // 开场是主持小卡
@@ -1432,7 +1434,7 @@
       clearBusy();
       const res = await r.json();
       if (res.ok) _renderWorkflowPlan(res.plan, intent, null, mentions);
-      else pushChatLine("system", "⚠ " + (res.reason || "plan failed"));
+      else pushChatLine("system", "⚠ " + (tB(res.reason) || "plan failed"));
     } catch (e) { clearBusy(); pushChatLine("system", "⚠ " + e.message); }
   }
 
@@ -1583,7 +1585,7 @@
           clearBusy();
           const res = await r.json();
           if (res.ok) renderWorkflow(res.workflow, res.crystallizable, res.plan);
-          else pushChatLine("system", "⚠ " + (res.reason || "workflow failed"));
+          else pushChatLine("system", "⚠ " + (tB(res.reason) || "workflow failed"));
         } catch (e) { clearBusy(); pushChatLine("system", "⚠ " + e.message); }
       } }));
     body.appendChild(msg);
@@ -2195,7 +2197,7 @@
           if (res.started) {            // 小卡判定聊清了 → 自己开始,渲讨论结果
             _hideRoundtableBanner();
             if (res.result && res.result.ok) renderRoundtable(res.result);
-            else pushChatLine("system", "⚠ " + ((res.result && res.result.reason) || "讨论失败"));
+            else pushChatLine("system", "⚠ " + (tB(res.result && res.result.reason) || t("rt.discuss_failed")));
           }
         }
       } catch (e) { clearBusy(); pushChatLine("system", "⚠ " + e.message); }
@@ -2224,7 +2226,7 @@
         else {
           const res = await r.json();
           if (res.ok) _renderWorkflowPlan(res.plan, sendText, res.matched, mentions);   // 弹可编辑步骤表(命中则提议复用)
-          else pushChatLine("system", "⚠ " + (res.reason || "plan failed"));
+          else pushChatLine("system", "⚠ " + (tB(res.reason) || "plan failed"));
         }
       } catch (e) { clearBusy(); pushChatLine("system", "⚠ " + e.message); }
       if (send) send.disabled = false;
