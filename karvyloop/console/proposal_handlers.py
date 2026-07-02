@@ -17,8 +17,8 @@ from typing import Any, Callable, Dict, Tuple
 
 from karvyloop.karvy.proposal_registry import (
     KIND_CONFIRM_DECISION_PREF, KIND_CONFIRM_RESULT, KIND_CRYSTALLIZE_SKILL,
-    KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_OPS_FIX, KIND_ROUNDTABLE,
-    KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
+    KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
+    KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
 )
 
 logger = logging.getLogger(__name__)
@@ -497,6 +497,28 @@ def _confirm_result_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     return handler
 
 
+def _merge_knowledge_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """知识整理建议卡 ACCEPT 兑现(daily 慢侧自动升):apply_belief_merge —— 先写合并条、再删被并旧条
+    (中途失败不丢数据);成员被先前操作删过(真实存在 < 2)→ ok=False 如实回执,不假装合并了。"""
+    def handler(proposal) -> Tuple[bool, str]:
+        mem = getattr(app.state, "memory", None)
+        if mem is None:
+            return False, "未接 memory —— 无法合并知识"
+        payload = getattr(proposal, "payload", None) or {}
+        members = list(payload.get("member_contents") or [])
+        merged = (payload.get("merged_content") or "").strip()
+        if len(members) < 2 or not merged:
+            return False, "合并方案不完整(成员 < 2 或合并内容为空)"
+        from karvyloop.cognition.consolidate import apply_belief_merge
+        res = apply_belief_merge(members, merged,
+                                 merged_title=payload.get("merged_title", ""), mem=mem)
+        if not res.get("ok"):
+            return False, f"未合并:{res.get('reason', '成员已变化')}"
+        return True, f"已把 {res.get('removed', len(members))} 条近重复知识合并成一条(先写后删,不丢数据)。"
+
+    return handler
+
+
 def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool, str]]]:
     """构造 ACCEPT 兑现 handler 表(注入 app.state.proposal_handlers)。
 
@@ -512,6 +534,7 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_INFEASIBLE_REPORT: _infeasible_report_handler,
         KIND_MERGE_ATOMS: _merge_atoms_handler(app),
         KIND_CONFIRM_RESULT: _confirm_result_handler(app),
+        KIND_MERGE_KNOWLEDGE: _merge_knowledge_handler(app),
     }
 
 

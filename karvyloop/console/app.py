@@ -147,6 +147,12 @@ def build_console_app(
                             if res["confirmed"] or res["reverted"]:
                                 logger.info(f"[karvyloop console] 临时原子巡检:转正 {len(res['confirmed'])} 个、"
                                             f"撤回孤儿 {len(res['reverted'])} 个")
+                        # 知识库自动整理(Bug2 后台版):库变了才跑一次 LLM 聚类,近重复升 H2A 建议卡
+                        # (ACCEPT 才合并,绝不自动)。watermark + 冷却防唠叨,离热路径。
+                        from karvyloop.console.knowledge_tick import knowledge_consolidate_tick
+                        kres = await knowledge_consolidate_tick(app)
+                        if kres.get("suggested"):
+                            logger.info(f"[karvyloop console] 知识整理:升 {kres['suggested']} 张合并建议卡")
                     except asyncio.CancelledError:
                         break
                     except Exception as e:

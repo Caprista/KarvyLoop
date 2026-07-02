@@ -40,6 +40,7 @@ KIND_OPS_FIX = "ops_fix"  # L1 自愈 slice3:把运维诊断升成正式 H2A 决
 KIND_INFEASIBLE_REPORT = "infeasible_report"  # docs/02 §15.3:role 自助重规划耗尽/彻底不可行 → 带证据回头(非裸问题)
 KIND_MERGE_ATOMS = "merge_atoms"  # docs/14 §11.2 / docs/02 §15.5:原子语义合并**不静默**——建议成卡,ACCEPT 才 rewire-before-delete
 KIND_CONFIRM_RESULT = "confirm_result"  # docs/02 §15.5:人 accept role 结果=依据;ACCEPT→role 综合裁自造 atom 留不留
+KIND_MERGE_KNOWLEDGE = "merge_knowledge"  # 知识库自动整理(daily 慢侧):近重复知识点升合并建议卡,ACCEPT 才 apply_belief_merge(先写后删)
 
 ALL_KINDS = (
     KIND_CRYSTALLIZE_SKILL,
@@ -53,6 +54,7 @@ ALL_KINDS = (
     KIND_INFEASIBLE_REPORT,
     KIND_MERGE_ATOMS,
     KIND_CONFIRM_RESULT,
+    KIND_MERGE_KNOWLEDGE,
 )
 
 # Handler 协议:(proposal) -> (ok: bool, detail: str)。注入式,默认无副作用。
@@ -373,6 +375,58 @@ def proposal_for_merge_atoms(
     )
 
 
+def proposal_for_merge_knowledge(
+    *,
+    member_contents: List[str],
+    merged_content: str,
+    ts: float,
+    member_titles: Optional[List[str]] = None,
+    merged_title: str = "",
+    reason: str = "",
+    strength: float = 0.55,
+):
+    """知识库整理建议卡(daily 慢侧自动升;手动按钮路径不经此)。ACCEPT → apply_belief_merge。
+
+    proposal_id 由成员内容稳定哈希 → 同簇幂等(registry 同 id 覆盖;tick 层再加冷却防唠叨)。"""
+    from .atoms import Proposal
+
+    members = [str(c).strip() for c in (member_contents or []) if str(c).strip()]
+    merged = (merged_content or "").strip()
+    if len(members) < 2 or not merged:
+        raise ValueError("merge_knowledge 需要 ≥2 条成员 + 非空合并内容")
+    titles = [str(x).strip() for x in (member_titles or []) if str(x).strip()]
+    label = merged_title.strip() or merged[:24]
+    shown = "、".join((titles or [m[:18] for m in members])[:4])
+    parts: List[str] = [f"这 {len(members)} 条知识点讲的基本是同一件事:{shown}。"]
+    if reason:
+        parts.append(f"判断依据:{reason}")
+    parts.append(f"建议合并成一条「{label}」。ACCEPT = 先写入合并条、再删被并旧条(中途失败不丢数据);"
+                 "不动也安全(只是库里留着近重复)。")
+    basis = "  ".join(parts)
+
+    stable = "\n".join(sorted(members))
+    pid = "merge_knowledge-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
+    return Proposal(
+        summary=f"🧹 合并 {len(members)} 条近重复知识 → 「{label}」",
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_MERGE_KNOWLEDGE,
+        payload={
+            "member_contents": members,
+            "member_titles": titles,
+            "merged_title": merged_title.strip()[:80],
+            "merged_content": merged[:2000],
+            "reason": (reason or "").strip()[:200],
+        },
+        proposal_id=pid,
+        basis=basis,
+    )
+
+
 def proposal_for_confirm_result(
     *,
     role: str,
@@ -492,6 +546,7 @@ __all__ = [
     "proposal_for_ops_fix",
     "proposal_for_infeasible_report",
     "proposal_for_merge_atoms",
+    "proposal_for_merge_knowledge",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",
@@ -503,6 +558,7 @@ __all__ = [
     "KIND_OPS_FIX",
     "KIND_INFEASIBLE_REPORT",
     "KIND_MERGE_ATOMS",
+    "KIND_MERGE_KNOWLEDGE",
     "KIND_CONFIRM_RESULT",
     "ALL_KINDS",
 ]
