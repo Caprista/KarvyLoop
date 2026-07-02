@@ -1501,6 +1501,29 @@ class FsGrantRevokeRequest(BaseModel):
     grant_id: str = Field(..., min_length=1, max_length=64)
 
 
+@router.get("/domain/templates")
+def api_domain_templates(request: Request) -> dict[str, Any]:
+    """开箱域模板清单(「一键开公司」;docs/42 优化④,Lindy 验证的冷启动)。"""
+    from karvyloop.domain.templates import list_templates
+    return {"templates": list_templates()}
+
+
+class DomainTemplateRequest(BaseModel):
+    template_id: str = Field(..., min_length=1, max_length=64)
+
+
+@router.post("/domain/templates/instantiate")
+def api_domain_template_instantiate(req: DomainTemplateRequest, request: Request) -> dict[str, Any]:
+    """一键开公司:建角色(带尽责下属契约 seed)+ 建域(value.md+deontic+成员)+ 持久化。"""
+    from karvyloop.domain.templates import instantiate_template
+    app = request.app
+    return instantiate_template(
+        req.template_id,
+        domain_registry=getattr(app.state, "domain_registry", None),
+        role_registry=getattr(app.state, "role_registry", None),
+        domain_store=getattr(app.state, "domain_store", None))
+
+
 @router.get("/fs_grants")
 def api_fs_grants(request: Request) -> dict[str, Any]:
     """授权台账:所有工作区外路径授权(能力总览的数据源;敏感地板清单一并给,UI 可解释)。"""

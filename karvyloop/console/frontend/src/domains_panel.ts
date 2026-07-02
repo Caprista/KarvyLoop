@@ -37,6 +37,10 @@ const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
 const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
 const t = (k: string, vars?: Record<string, unknown>) =>
   (window as unknown as { KarvyI18n: I18n }).KarvyI18n.t(k, vars);
+const tB = (x: unknown): string => {
+  const w = (window as unknown as { KarvyI18n: { tBackend?: (s: unknown) => string } }).KarvyI18n;
+  return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
+};
 
 let _deps: Deps = { refreshPeers: () => {}, pushChatLine: () => {}, openPeerChat: () => {} };
 
@@ -88,8 +92,41 @@ async function _openDomainEdit(d: any): Promise<void> {
     msg));
 }
 
+
+// 一键开公司:开箱域模板(价值观+硬规矩+配好灵魂的角色;实例化那刻起长成你的)
+async function _renderDomainTemplates(body: HTMLElement): Promise<void> {
+  const data = await _getJSON("/api/domain/templates");
+  const tpls = (data && data.templates) || [];
+  if (!tpls.length) return;
+  body.appendChild(el("div", { class: "mgmt-section-title", text: t("domtpl.title") }));
+  body.appendChild(el("div", { class: "mgmt-hint", text: t("domtpl.hint") }));
+  const list = el("div", { class: "mgmt-list domtpl-list" });
+  for (const tp of tpls) {
+    const rolesTxt = (tp.roles || []).map((r: any) => r.nickname + "·" + r.title).join(" / ");
+    const btn = el("button", { class: "dpref-confirm", text: t("domtpl.open"),
+      onclick: async () => {
+        btn.textContent = t("domtpl.opening");
+        (btn as HTMLButtonElement).disabled = true;
+        const r = await _postJSON("/api/domain/templates/instantiate", { template_id: tp.id });
+        if (r.ok && r.data && r.data.ok) {
+          _deps.refreshPeers(); await renderDomainsPanel();
+        } else {
+          btn.textContent = (r.data && r.data.reason) ? tB(r.data.reason) : "?";
+        }
+      } });
+    list.appendChild(el("div", { class: "mgmt-card" },
+      el("div", { class: "mc-main" },
+        el("div", { class: "mc-name", text: (tp.emoji || "🏢") + " " + tp.name }),
+        el("div", { class: "mc-meta", text: tp.description || "" }),
+        el("div", { class: "mc-meta", text: rolesTxt })),
+      el("div", { class: "dpref-actions" }, btn)));
+  }
+  body.appendChild(list);
+}
+
 async function renderDomainsPanel(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
+  await _renderDomainTemplates(body);               // 一键开公司(docs/42 优化④:从能跑的开始)
   const data = await _getJSON("/api/domains");      // P0 审计:专用列表(含归档,带 value/成员)
   const rolesData = await _getJSON("/api/roles");
   const roles = (rolesData && rolesData.roles) || [];

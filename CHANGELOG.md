@@ -33,6 +33,15 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   reason without a translation fails the suite).
 
 ### Added
+- **Out-of-workspace access, governed**: roles are confined to the workspace by default; when one needs
+  a path outside it, the denial surfaces as a decision card ("grant this folder?") — approve once and
+  the grants ledger opens exactly that path (tool boundary + capability chain + sandbox mounts all honor
+  it; revocable in the Capability overview). **Sensitive paths (API keys, ssh, credential stores) are a
+  hard floor: never grantable, immune even to bypass mode.**
+- **Open a company (starter templates)**: five staffed, working domains — personal research, finance
+  research, job hunt, content studio, home ops — each with values, hard deontic rules, and roles with
+  souls; one click in the Domains panel, yours from the first use.
+
 - **Upgrades now snapshot state, verify the install, and auto-roll back on failure** (one click back on
   the console): before switching versions the updater records the current commit
   (`~/.karvyloop/update_rollback.json`) and backs up your instance state files

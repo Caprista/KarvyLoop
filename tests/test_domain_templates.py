@@ -75,3 +75,28 @@ def test_instantiate_idempotent_roles_and_dup_domain_refused(tmp_path):
 def test_instantiate_unknown_and_unwired():
     assert not instantiate_template("nope", domain_registry=None, role_registry=None)["ok"]
     assert "未接" in instantiate_template("job-hunt", domain_registry=None, role_registry=None)["reason"]
+
+
+def test_api_templates_and_instantiate(tmp_path):
+    """API 全链路:列模板 → 一键开公司 → 域和角色真在;前端接线在位(非 self-hype)。"""
+    from fastapi.testclient import TestClient
+    from karvyloop.console import build_console_app
+    from karvyloop.karvy.observer import WorkbenchObserver
+
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.domain_registry = BusinessDomainRegistry()
+    app.state.role_registry = RoleRegistry(tmp_path / "roles")
+    app.state.domain_store = None
+    client = TestClient(app)
+    lst = client.get("/api/domain/templates").json()["templates"]
+    assert any(t["id"] == "home-ops" for t in lst)
+    r = client.post("/api/domain/templates/instantiate", json={"template_id": "home-ops"}).json()
+    assert r["ok"], r
+    assert any(getattr(d, "name", "") == "家庭运营部" for d in app.state.domain_registry.list_active())
+    # 未接 registry → 诚实 reason
+    app2 = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    r2 = TestClient(app2).post("/api/domain/templates/instantiate", json={"template_id": "home-ops"}).json()
+    assert not r2["ok"]
+    # 前端接线
+    src = (ROOT / "karvyloop" / "console" / "frontend" / "src" / "domains_panel.ts").read_text(encoding="utf-8")
+    assert "/api/domain/templates" in src and "domtpl.open" in src

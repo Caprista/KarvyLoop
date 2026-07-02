@@ -145,6 +145,11 @@ _EN = {
     "cli.help.console.no_browser": "do not auto-open the browser (headless / smoke)",
     "cli.help.console.no_llm": "skip LLM injection (read-only view + chat_history still work)",
     "cli.help.lang": "UI language: en (default) or zh",
+    # karvyloop export(打包带走)
+    "cli.export.help": "pack your instance (~/.karvyloop) into one portable archive — secrets excluded",
+    "cli.export.done": "Exported your instance: {n} files ({size}) -> {path}",
+    "cli.export.excluded": "Excluded on purpose: config.yaml (your API keys stay put), console.runtime.json, *.lock",
+    "cli.export.restore": "Restore: unpack into ~/.karvyloop on the new machine, add your key, then run karvyloop console",
 }
 
 # ---- 中文 ----
@@ -274,6 +279,11 @@ _ZH = {
     "cli.help.console.no_browser": "不自动开浏览器(headless / smoke 用)",
     "cli.help.console.no_llm": "跳过 LLM 注入(只读视图 + chat_history 仍可用)",
     "cli.help.lang": "UI 语言:en(默认)或 zh",
+    # karvyloop export(打包带走)
+    "cli.export.help": "把你的实例(~/.karvyloop)打成一个可携带压缩包 —— 密钥除外",
+    "cli.export.done": "已导出你的实例:{n} 个文件({size})-> {path}",
+    "cli.export.excluded": "刻意排除:config.yaml(你的 API 密钥留在原地)、console.runtime.json、*.lock",
+    "cli.export.restore": "恢复:在新机器解压到 ~/.karvyloop,补上密钥,然后 karvyloop console",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

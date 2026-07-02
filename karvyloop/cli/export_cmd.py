@@ -180,11 +180,10 @@ def cmd_export(out: Optional[str] = None) -> int:
     _write_archive(out_path, included, manifest)
 
     total = sum(src.stat().st_size for src, _ in included)
-    print(f"Exported your instance: {len(included)} files ({_human_size(total)}) -> {out_path}")
-    print("Excluded on purpose: config.yaml (your API keys stay put), "
-          "console.runtime.json, *.lock")
-    print("Restore: unpack into ~/.karvyloop on the new machine, add your key, "
-          "then `karvyloop console`. Details in MANIFEST.txt inside the archive.")
+    from karvyloop.i18n import t as _t
+    print(_t("cli.export.done", n=len(included), size=_human_size(total), path=str(out_path)))
+    print(_t("cli.export.excluded"))
+    print(_t("cli.export.restore"))
     return 0
 
 

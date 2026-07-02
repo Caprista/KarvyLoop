@@ -6,6 +6,10 @@ var KarvyDomainsPanelBundle = (function(exports) {
   const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
   const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
+  const tB = (x) => {
+    const w = window.KarvyI18n;
+    return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
+  };
   let _deps = { refreshPeers: () => {
   }, pushChatLine: () => {
   }, openPeerChat: () => {
@@ -78,10 +82,50 @@ var KarvyDomainsPanelBundle = (function(exports) {
       msg
     ));
   }
+  async function _renderDomainTemplates(body) {
+    const data = await _getJSON("/api/domain/templates");
+    const tpls = data && data.templates || [];
+    if (!tpls.length) return;
+    body.appendChild(el("div", { class: "mgmt-section-title", text: t("domtpl.title") }));
+    body.appendChild(el("div", { class: "mgmt-hint", text: t("domtpl.hint") }));
+    const list = el("div", { class: "mgmt-list domtpl-list" });
+    for (const tp of tpls) {
+      const rolesTxt = (tp.roles || []).map((r) => r.nickname + "·" + r.title).join(" / ");
+      const btn = el("button", {
+        class: "dpref-confirm",
+        text: t("domtpl.open"),
+        onclick: async () => {
+          btn.textContent = t("domtpl.opening");
+          btn.disabled = true;
+          const r = await _postJSON("/api/domain/templates/instantiate", { template_id: tp.id });
+          if (r.ok && r.data && r.data.ok) {
+            _deps.refreshPeers();
+            await renderDomainsPanel();
+          } else {
+            btn.textContent = r.data && r.data.reason ? tB(r.data.reason) : "?";
+          }
+        }
+      });
+      list.appendChild(el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el("div", { class: "mc-name", text: (tp.emoji || "🏢") + " " + tp.name }),
+          el("div", { class: "mc-meta", text: tp.description || "" }),
+          el("div", { class: "mc-meta", text: rolesTxt })
+        ),
+        el("div", { class: "dpref-actions" }, btn)
+      ));
+    }
+    body.appendChild(list);
+  }
   async function renderDomainsPanel() {
     const body = mgmtBody();
     if (!body) return;
     body.innerHTML = "";
+    await _renderDomainTemplates(body);
     const data = await _getJSON("/api/domains");
     const rolesData = await _getJSON("/api/roles");
     const roles = rolesData && rolesData.roles || [];
