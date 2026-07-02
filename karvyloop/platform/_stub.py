@@ -14,8 +14,9 @@ from karvyloop.sandbox.exec_result import ExecResult
 
 
 _UNSUPPORTED = (
-    f"KarvyLoop sandbox 在此平台（{sys.platform}）未实现。"
-    "v1 仅支持 Linux（bubblewrap）。macOS/Windows/Android 适配器按 docs/modules/sandbox.md §4 推迟。"
+    f"KarvyLoop sandbox 在此平台（{sys.platform}）未实现：第三方技能脚本已禁用（fail-closed），"
+    "不会退化成无隔离执行。运行时/控制台/自有结晶技能（无脚本，知识型）不受影响——这是降级模式，"
+    "不是故障。完整沙箱在 Linux（bubblewrap）/ macOS（sandbox-exec）可用。"
 )
 
 

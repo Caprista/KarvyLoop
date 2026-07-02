@@ -35,7 +35,7 @@ Where most agent frameworks make a *single* LLM call more reliable, KarvyLoop is
 |----|--------|
 | **Linux** | ✅ First-class — full security sandbox (bubblewrap). |
 | **macOS** | ✅ Supported — built-in Seatbelt sandbox (`sandbox-exec`), same fail-closed contract as Linux; newer, so rougher. |
-| **Windows** | ⛔ Not yet. |
+| **Windows** | ✅ Supported (degraded) — runs fully; third-party skill scripts disabled (no sandbox yet); Linux/macOS get the full sandbox. |
 
 KarvyLoop is a cross-platform user-space runtime (pure Python; it doesn't ride on the Linux kernel). The only platform-specific piece is the sandbox: **Linux uses bubblewrap, macOS uses the built-in `sandbox-exec`** — same write-isolation + network-gate behavior (macOS adversarially verified on Apple Silicon / macOS 26).
 
@@ -45,11 +45,12 @@ KarvyLoop is a cross-platform user-space runtime (pure Python; it doesn't ride o
 
 ## Quickstart
 
-**Requirements**: Python 3.11+. Sandboxed skill execution needs Linux + `bubblewrap` or macOS (built-in `sandbox-exec`); everything else is cross-platform.
+**Requirements**: Python 3.11+. Sandboxed skill execution needs Linux + `bubblewrap` or macOS (built-in `sandbox-exec`); everything else is cross-platform — Windows runs in degraded mode (third-party skill scripts disabled, all else works).
 
 ```bash
 # 1) Install — puts `karvyloop` on your PATH, isolated (safe on PEP 668 / "externally managed" distros)
 curl -fsSL https://raw.githubusercontent.com/Caprista/KarvyLoop/main/scripts/install.sh | bash
+#    Windows (PowerShell):  irm https://raw.githubusercontent.com/Caprista/KarvyLoop/main/scripts/install.ps1 | iex
 #    (developing against a clone instead?  pip install -e .  — but see "karvyloop not found?" below)
 
 # 2) Configure a model (keys live OUTSIDE the repo)
@@ -257,6 +258,7 @@ KarvyLoop ships **by version** ([CHANGELOG](CHANGELOG.md)), and it tells you whe
 - **One-click upgrade**: the banner has an **Upgrade** button — click it and the console runs the whole pipeline itself (stop → install → restart) and reconnects the page. No terminal needed. (Localhost-only, CSRF-guarded, single-flight; it's still *you* deciding — just without the command.)
 - **Or by hand**: from a clone → `git pull && pip install -e .`; from PyPI (once published) → `pip install -U karvyloop`. The banner also shows the exact command for your install.
 - **Your data survives.** Everything you grow lives in `~/.karvyloop/` (config, beliefs, skills, roles/atoms, decision log) — outside the repo — and stays across upgrades. A breaking data change always ships with a migration and is called out loudly in the release notes.
+- **Take it with you.** `karvyloop export` packs your whole instance (skills, knowledge, preferences, history) into one portable archive — API keys are deliberately left behind; unpack it into `~/.karvyloop` on the new machine and you're home.
 
 ## Running the tests
 

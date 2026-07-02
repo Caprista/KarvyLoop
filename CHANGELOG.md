@@ -33,6 +33,21 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   reason without a translation fails the suite).
 
 ### Added
+- **`karvyloop export`** — your instance is a folder, now with a button: packs `~/.karvyloop`
+  (skills, knowledge, preferences, history) into one portable archive with a self-explaining
+  `MANIFEST.txt`; secrets (`config.yaml` with your API keys, `console.runtime.json`, `*.lock`)
+  are deliberately left behind. Unpack on the new machine, add your key, `karvyloop console` — home.
+- **Idle = 0 LLM calls is now a tested contract** (`tests/test_idle_zero_llm.py`): when nothing
+  changed, the daily slow side burns nothing — knowledge consolidation and skill tagging hit their
+  watermarks without touching the gateway, and the daily loop's idle path provably exits before any
+  LLM work. No overnight heartbeat bills.
+- **Windows is now a supported (degraded) platform**: the runtime, console and your own crystallized
+  (knowledge-only) skills run fully on Windows; only third-party skill scripts are refused — fail-closed,
+  with a clear message explaining the degraded mode (no sandbox on Windows yet; Linux/macOS keep the full
+  sandbox). Ships a one-line PowerShell installer mirroring `install.sh`
+  (`irm https://raw.githubusercontent.com/Caprista/KarvyLoop/main/scripts/install.ps1 | iex`): dedicated
+  venv under `%LOCALAPPDATA%\karvyloop`, a `karvyloop.cmd` shim on the user PATH, Python 3.11+ guard with
+  `py -3.11` fallback.
 - **Edit, then accept** on decision cards: kinds with an actionable text field let you fix the proposal
   in place and approve your version — the original→edited contrast feeds decision-preference
   crystallization (the richest taste signal there is), and an edit counts as real judgment for the
