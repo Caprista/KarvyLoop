@@ -349,7 +349,7 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
             return res.to_dict() if res is not None else None
 
         if req.decision == H2A_DEFER:
-            await websocket.send_json({"type": "h2a_envelope", "payload": {"envelope": None, "decision": req.decision, "dispatch": await _dispatch()}})
+            await websocket.send_json({"type": "h2a_envelope", "payload": {"envelope": None, "proposal_id": req.proposal_id, "decision": req.decision, "dispatch": await _dispatch()}})
             return
         # REJECT 不强制 reason(Hardy):reason 空也照拒;K5(人拍板/by=[])由工厂保证,与 reason 无关。
         env = decision_to_envelope(decision_obj, to_addr)
@@ -357,7 +357,7 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
         from karvyloop.console.proposal_handlers import pop_report_card
         await websocket.send_json({
             "type": "h2a_envelope",
-            "payload": {"envelope": envelope_to_dict(env), "decision": req.decision,
+            "payload": {"envelope": envelope_to_dict(env), "proposal_id": req.proposal_id, "decision": req.decision,
                         "dispatch": _disp, "report_card": pop_report_card(app, req.proposal_id)},
         })
     except Exception as e:

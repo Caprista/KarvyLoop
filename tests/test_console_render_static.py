@@ -138,12 +138,47 @@ def test_predict_quadrant_wired():
     for fn in ("_routeProposal", "renderPredict", "_clearPredict"):
         assert fn in js, f"app.js 缺 {fn}"
     assert "predict-list" in js                       # 渲进预判列
-    assert "_DECISION_KINDS" in js                    # 真决策(派活/解冲突)走拍板,其余走预判
-    assert "route_to_role" in js and "resolve_conflict" in js
+    # P1-b:改成"预判白名单 + 默认进决策列"(新 kind 不再被误丢进预判)
+    assert "_PREDICT_KINDS" in js
+    assert "renderPredict(payload)" in js and "renderProposal(payload)" in js
     css = _read("styles.css")
     assert ".predict-card" in css and ".predict-yes" in css
     i18n = _read("i18n.js")
     assert i18n.count('"predict.do"') == 2 and i18n.count('"predict.ignore"') == 2
+
+
+# ---- P1-b 接线契约:H2A kind → 渲染列(fail-safe 默认进【拍板】,新 kind 不漏)----
+def test_h2a_kind_routing_contract():
+    """把前端 kind 分流与后端 ALL_KINDS 锁在一起:除了明确的"习惯预判"kind,
+    其余每个后端 kind 都必须走**决策列**(有认/改/删 + 拒 + 依据)。防止再出现
+    merge_knowledge 那种"新 kind 被误丢进预判列、无拒绝按钮、丢 payload"的接线漏。"""
+    import re
+    from karvyloop.karvy.proposal_registry import ALL_KINDS, KIND_RUN_TASK
+    js = _read("app.js")
+    m = re.search(r"_PREDICT_KINDS\s*=\s*\[([^\]]*)\]", js)
+    assert m, "app.js 未定义 _PREDICT_KINDS 数组"
+    predict_kinds = set(re.findall(r'"([^"]+)"', m.group(1)))
+    # 只有习惯预判(KIND_RUN_TASK)在预判列;其余全走决策列(fail-safe)
+    assert predict_kinds == {KIND_RUN_TASK}, f"预判列 kind 应只有 run_task,实际 {predict_kinds}"
+    # 每个后端决策 kind 都不在预判白名单 → 自动进决策列(含曾漏的 merge_knowledge)
+    decision_kinds = set(ALL_KINDS) - {KIND_RUN_TASK}
+    for k in ("merge_knowledge", "merge_atoms", "confirm_result",
+              "crystallize_skill", "set_preference", "confirm_decision_pref",
+              "infeasible_report", "route_to_role", "roundtable", "resolve_conflict", "ops_fix"):
+        assert k in decision_kinds, f"后端 ALL_KINDS 缺 {k}(契约漂移)"
+        assert k not in predict_kinds, f"{k} 是决策 kind,不该在预判列"
+
+
+# ---- P1-b 多卡不覆盖:提案卡按 proposal_id 键控,不再 innerHTML="" 抹兄弟卡 ----
+def test_h2a_multicard_no_overwrite():
+    js = _read("app.js")
+    for fn in ("_placeCard", "_removeCardById", "_stripEmpty"):
+        assert fn in js, f"app.js 缺多卡键控辅助 {fn}"
+    assert "data-proposal-id" in js                    # 卡上挂 id 供替换/移除
+    # renderProposal / renderPredict 结尾用 _placeCard(键控追加),不再 list.appendChild(card)
+    assert js.count("_placeCard(list,") >= 2
+    # h2a_envelope 只撤刚拍的卡(带 proposal_id),不整列 innerHTML=""
+    assert "_removeCardById(list, pid)" in js
 
 
 # ---- @ 多人回应(fanout)的重开渲染仍在(@多人新路由到 workflow,旧记录仍可重开)----

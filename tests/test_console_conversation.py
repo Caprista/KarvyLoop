@@ -133,12 +133,13 @@ def test_static_has_turn_locate():
 
 
 def test_static_roundtable_is_decision_kind():
-    """roundtable 提案必须进【拍板】H2A 卡(_DECISION_KINDS),不是【你可能想做】预判卡。"""
+    """roundtable 提案必须进【拍板】H2A 卡,不是【你可能想做】预判卡。
+    P1-b 后:分流改成"预判白名单 + 默认进决策列",roundtable 不在预判白名单 → 走决策列。"""
     app_js = (ROOT / "karvyloop" / "console" / "static" / "app.js").read_text(encoding="utf-8")
     import re
-    m = re.search(r"_DECISION_KINDS\s*=\s*\[([^\]]*)\]", app_js)
-    assert m, "_DECISION_KINDS 数组没找到"
-    assert '"roundtable"' in m.group(1), "roundtable 不在拍板 kind 白名单 → 降级成软预判卡"
+    m = re.search(r"_PREDICT_KINDS\s*=\s*\[([^\]]*)\]", app_js)
+    assert m, "_PREDICT_KINDS 数组没找到"
+    assert '"roundtable"' not in m.group(1), "roundtable 落进预判白名单 → 会被降级成软预判卡"
 
 
 # ---- AC4-AC5: intent 走对话(record_turn + 喂 ctx)----

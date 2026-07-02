@@ -147,12 +147,16 @@
       // D5:回显兑现结果(让 ACCEPT 不再是"空响应")
       const d = msg.payload && msg.payload.dispatch;
       if (d) pushChatLine("system", t("proposal.dispatch", { kind: d.kind, detail: d.detail }));
-      // 决策已发 → 清掉当前建议卡;若兑现产了执行后回报卡,就地显示"它到底验过没"
+      // 决策已发 → **只撤刚拍的那张卡**(带 proposal_id),保留还挂着的兄弟卡(多卡不覆盖);
+      // 若兑现产了执行后回报卡,就地追加"它到底验过没";列真空了才回填"已处置"空态。
       const list = document.getElementById("h2a-list");
       if (list) {
-        list.innerHTML = "";
+        const pid = (msg.payload && (msg.payload.proposal_id || (d && d.proposal_id))) || "";
+        _removeCardById(list, pid);
         if (msg.payload && msg.payload.report_card) _renderReportCard(list, msg.payload.report_card);
-        else list.innerHTML = '<div class="h2a-empty">' + t("h2a.handled") + '</div>';
+        if (_countCards("h2a-list", "h2a-empty") === 0) {
+          list.innerHTML = '<div class="h2a-empty">' + t("h2a.handled") + '</div>';
+        }
       }
       updatePulse();   // step5:拍板清空 → 刷脉搏
       pollSnapshot();
@@ -556,6 +560,26 @@
 
   // ============ 9.0e:小卡主动建议(h2a_proposal)渲染 ============
 
+  // ── 多卡不覆盖:同 proposal_id 替换、新 id 追加;清空态占位;绝不 innerHTML="" 抹掉兄弟卡 ──
+  // (病根:renderProposal/renderPredict 原来每次都 innerHTML="",第二张卡一来就抹掉第一张;
+  //  fetchPendingProposals 遍历所有 pending 也只剩最后一张。决策 loop 不该让待拍的板互相顶掉。)
+  function _stripEmpty(list, emptyClass) {
+    Array.from(list.children).forEach((ch) => {
+      if (ch.classList && ch.classList.contains(emptyClass)) list.removeChild(ch);
+    });
+  }
+  function _removeCardById(list, proposalId) {
+    if (!list || !proposalId) return;
+    Array.from(list.children).forEach((ch) => {
+      if (ch.getAttribute && ch.getAttribute("data-proposal-id") === String(proposalId)) list.removeChild(ch);
+    });
+  }
+  function _placeCard(list, proposalId, card) {
+    card.setAttribute("data-proposal-id", String(proposalId));
+    _removeCardById(list, proposalId);   // 同 id 先撤旧卡(幂等重推不叠)
+    list.appendChild(card);
+  }
+
   function renderProposal(payload) {
     const list = document.getElementById("h2a-list");
     if (!list) return;
@@ -563,7 +587,7 @@
       // 沉默 / 未接 analyst:保持空态,不刷屏
       return;
     }
-    list.innerHTML = "";
+    _stripEmpty(list, "h2a-empty");   // 清空态占位,但**保留已挂的兄弟卡**(多卡不覆盖)
     const card = el("div", { class: "h2a-card" });
     card.appendChild(el("div", { class: "h2a-summary", text: "💡 " + (payload.summary || t("proposal.no_desc")) }));
     // ch4 #6.1:拍板必须带决策依据(为什么)—— 否则凭啥拍
@@ -621,23 +645,27 @@
     btnRow.appendChild(el("button", { class: "h2a-reject", onClick: () => decide("REJECT"), text: t("proposal.reject") }));
     card.appendChild(btnRow);
     card.appendChild(reasonInput);   // 可选拒绝理由(不填也能拒)
-    list.appendChild(card);
+    _placeCard(list, proposalId, card);   // 多卡不覆盖:同 id 替换、新 id 追加
     updatePulse();   // step5:拍板数变了 → 刷脉搏
   }
 
-  // ch4 预判:主动建议按 kind 分流 —— 真决策进【拍板】,习惯预判进【你可能想做】。
-  const _DECISION_KINDS = ["route_to_role", "roundtable", "resolve_conflict", "ops_fix"];
+  // ch4 预判:主动建议按 kind 分流。**显式映射 + fail-safe 默认进【拍板】**:真决策(需你判断
+  // + 可拒 + 带依据)进决策列;只有**习惯预判**(proactive 用 KIND_RUN_TASK,小卡从习惯猜你想做)
+  // 进【你可能想做】。旧实现用"决策 kind 白名单",任何新 kind(merge_knowledge / merge_atoms /
+  // confirm_result / crystallize_skill / set_preference / confirm_decision_pref / infeasible_report)
+  // 都被误丢进预判列 —— 无拒绝按钮、丢 payload。改成"预判白名单",新 kind 一律进决策列。
+  const _PREDICT_KINDS = ["run_task"];
   function _routeProposal(payload) {
     if (!payload) return;   // null = 沉默/未接,保持空态
-    if (_DECISION_KINDS.indexOf(payload.kind) >= 0) renderProposal(payload);
-    else renderPredict(payload);
+    if (_PREDICT_KINDS.indexOf(payload.kind) >= 0) renderPredict(payload);
+    else renderProposal(payload);   // 其余全部(含未来新 kind)→ 决策列
   }
 
   // 【你可能想做】预判卡:小卡从你的习惯预判的想做的事 —— 轻提示,你去做 / 忽略。
   function renderPredict(payload) {
     const list = document.getElementById("predict-list");
     if (!list || !payload) return;
-    list.innerHTML = "";
+    _stripEmpty(list, "empty-state");   // 清空态占位,保留兄弟卡(多卡不覆盖)
     const card = el("div", { class: "predict-card" });
     card.appendChild(el("div", { class: "predict-summary", text: "🔮 " + (payload.summary || t("proposal.no_desc")) }));
     if (payload.basis) card.appendChild(el("div", { class: "predict-basis", text: payload.basis }));
@@ -659,7 +687,7 @@
       onClick: () => { sendWS("h2a_decision", { proposal_id: pid, decision: "DEFER", reason: "" });
                        _clearPredict(); } }));
     card.appendChild(row);
-    list.appendChild(card);
+    _placeCard(list, pid, card);   // 多卡不覆盖:同 id 替换、新 id 追加
     updatePulse();
   }
   function _clearPredict() {
