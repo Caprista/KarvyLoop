@@ -23,7 +23,7 @@ def _workflow_roles_from_mentions(app, peer, mentions):
 
     mentions 元素接 dict {agent_id, domain_id?} 或纯字符串 "agent_id"(API 直调最自然的写法)。"""
     from karvyloop.karvy.capability import is_karvy_peer
-    from .routes import _member_display, _roundtable_roster
+    from .roundtable_engine import _member_display, _roundtable_roster
     dom_reg = getattr(app.state, "domain_registry", None)
     roster = _roundtable_roster(app, peer)
     is_world = is_karvy_peer(peer.domain_id)
