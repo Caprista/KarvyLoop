@@ -215,7 +215,7 @@ def build_console_app(
 
         # #39 ①:持久化执行 —— 续跑上次被中断的 workflow(console 崩/重启后,已完成步秒命中、剩余续)。
         try:
-            from karvyloop.console.routes import resume_workflows
+            from karvyloop.console.workflow_engine import resume_workflows
             n = await resume_workflows(app)
             if n:
                 print(f"[karvyloop console] 续跑了 {n} 个被中断的 workflow", flush=True)
