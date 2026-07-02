@@ -3808,7 +3808,41 @@ async def api_model_validate(request: Request) -> dict[str, Any]:
             break   # 收到第一个事件 = 端点+key 通了,够了
         return {"ok": True, "model": ref} if got else {"ok": False, "reason": "no_response"}
     except Exception as e:
-        return {"ok": False, "reason": _scrub_secret(f"{type(e).__name__}: {e}")}
+        msg = _scrub_secret(f"{type(e).__name__}: {e}")
+        # #42 优化②:错误分类学 —— 别把裸异常甩给用户,告诉他是 key 坏了/地址错了/没网
+        return {"ok": False, "reason": msg, "error_class": _classify_model_error(msg)}
+
+
+def _classify_model_error(msg: str) -> str:
+    """把模型试调异常粗分类(bad_key / unreachable / bad_url / unknown),前端映射成人话提示。"""
+    m = (msg or "").lower()
+    if any(x in m for x in ("401", "403", "unauthorized", "invalid api key", "authentication")):
+        return "bad_key"
+    if any(x in m for x in ("404", "not found", "unknown path")):
+        return "bad_url"
+    if any(x in m for x in ("connecterror", "connecttimeout", "connection refused", "getaddrinfo",
+                            "nodename", "timed out", "timeout", "ssl", "network")):
+        return "unreachable"
+    return "unknown"
+
+
+@router.get("/providers/detect_local")
+async def api_detect_local_models(request: Request) -> dict[str, Any]:
+    """#42 优化②:探测本机 Ollama(11434)→ 给「零 key 直用本地模型」路径。
+
+    Ollama 提供 OpenAI 兼容端点(/v1);探测到就返回可用模型名,前端引导一键预填
+    (base_url=http://127.0.0.1:11434/v1,api_key 任意占位)。探不到 → found=False,不报错。
+    """
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=1.5) as c:
+            r = await c.get("http://127.0.0.1:11434/api/tags")
+            if r.status_code == 200:
+                names = [m.get("name", "") for m in (r.json().get("models") or [])][:20]
+                return {"found": True, "models": [n for n in names if n]}
+    except Exception:
+        pass
+    return {"found": False, "models": []}
 
 
 class ModelDeleteRequest(BaseModel):

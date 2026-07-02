@@ -259,3 +259,32 @@ def test_static_assets_send_no_cache(client):
         pytest.skip("static 未构建(裸仓)")
     assert r.status_code == 200
     assert "no-cache" in r.headers.get("cache-control", ""), r.headers.get("cache-control")
+
+
+# ---- #42 优化②:首跑预检错误分类 + Ollama 本地探测 ----
+
+def test_model_error_taxonomy():
+    from karvyloop.console.routes import _classify_model_error
+    assert _classify_model_error("HTTPStatusError: 401 Unauthorized") == "bad_key"
+    assert _classify_model_error("invalid api key provided") == "bad_key"
+    assert _classify_model_error("404 Not Found for url") == "bad_url"
+    assert _classify_model_error("ConnectError: connection refused") == "unreachable"
+    assert _classify_model_error("ReadTimeout: timed out") == "unreachable"
+    assert _classify_model_error("something exotic") == "unknown"
+
+
+def test_detect_local_ollama_absent_is_graceful():
+    """探测端点在无 Ollama 的机器上必须优雅 found=False(不 500 不慢);前端接线在位。"""
+    from fastapi.testclient import TestClient
+    from karvyloop.console import build_console_app
+    from karvyloop.karvy.observer import WorkbenchObserver
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    r = TestClient(app).get("/api/providers/detect_local")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] in (True, False) and isinstance(body["models"], list)
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1] / "karvyloop" / "console"
+           / "frontend" / "src" / "models_panel.ts").read_text(encoding="utf-8")
+    assert "/api/providers/detect_local" in src and "onb.ollama_found" in src
+    assert "error_class" in src   # 错误分类学真被前端消费

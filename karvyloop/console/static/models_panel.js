@@ -193,6 +193,32 @@ var KarvyModelsPanelBundle = (function(exports) {
   function _onbPicker(wrap, presets, onDone) {
     wrap.innerHTML = "";
     wrap.appendChild(el("div", { class: "mgmt-hint", text: t("onb.pick_provider") }));
+    const ollamaSlot = el("div", { class: "onb-ollama-slot" });
+    wrap.appendChild(ollamaSlot);
+    _getJSON("/api/providers/detect_local").then((d) => {
+      if (!d || !d.found || !d.models || !d.models.length) return;
+      const model = d.models[0];
+      ollamaSlot.appendChild(el("button", {
+        class: "mgmt-submit onb-ollama",
+        text: "🦙 " + t("onb.ollama_found", { n: d.models.length }),
+        onClick: () => {
+          const msg = _formMsg();
+          ollamaSlot.appendChild(msg);
+          _onbSave({
+            id: "ollama",
+            model_id: "ollama/" + model,
+            model_name: model,
+            api: "openai-completions",
+            base_url: "http://127.0.0.1:11434/v1",
+            auth_header: "Authorization",
+            messages_path: "",
+            context_window: 32768,
+            max_tokens: 4096
+          }, "ollama", msg, onDone);
+        }
+      }));
+    }).catch(() => {
+    });
     const picker = el("div", { class: "onb-picker" });
     presets.forEach((p) => picker.appendChild(el("button", {
       class: "onb-prov" + (p.is_local ? " onb-prov-local" : ""),
@@ -272,7 +298,10 @@ var KarvyModelsPanelBundle = (function(exports) {
     if (v.ok && v.data && v.data.ok) {
       _setMsg(msg, true, t("onb.ok"));
     } else {
-      _setMsg(msg, false, t("onb.validate_failed", { err: v.data && v.data.reason || "?" }));
+      const cls = v.data && v.data.error_class || "";
+      const hintKey = cls === "bad_key" ? "onb.err_bad_key" : cls === "bad_url" ? "onb.err_bad_url" : cls === "unreachable" ? "onb.err_unreachable" : "";
+      const hint = hintKey ? t(hintKey) + " — " : "";
+      _setMsg(msg, false, hint + t("onb.validate_failed", { err: v.data && v.data.reason || "?" }));
     }
     if (onDone) await onDone();
   }
