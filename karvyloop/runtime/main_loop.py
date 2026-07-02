@@ -1,4 +1,4 @@
-"""主循环 driver — 把 recall ↔ slow-brain ↔ observe ↔ crystallize 拼成一条线（cli/main_loop.py）。
+"""主循环 driver — 把 recall ↔ slow-brain ↔ observe ↔ crystallize 拼成一条线（runtime/main_loop.py,P2-f 自 cli/ 搬入）。
 
 规格:docs/modules/workbench-cli.md §3 main_loop.py + #6 M1 验收门(快脑命中率)
 - 一句话 intent 进来 → 走"快脑(已结晶)/ 慢脑(forge)" 二选一
