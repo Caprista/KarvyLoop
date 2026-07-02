@@ -290,15 +290,16 @@ def cmd_console(args: argparse.Namespace) -> int:
         app.state.role_registry = role_registry
         # 9.5 P2/step2:任务看板登记 + 落盘(重启记得住;running 中断标 interrupted)
         from karvyloop.console.tasks import TaskRegistry, TaskStore
-        from karvyloop.console.task_events import schedule_task_broadcast
         app.state.task_registry = TaskRegistry(
             store=TaskStore(_Path.home() / ".karvyloop" / "tasks.json"),
         )
         # §0.7 fail-loud:start/finish → 自动 push task_status 给 WS clients(状态即事件,
         # 不靠前端 2s 轮询)。结构性保证:所有调 start/finish 的路径都推,含未来新增。
-        app.state.task_registry.on_change = (
-            lambda task, _app=app: schedule_task_broadcast(_app, task)
-        )
+        # P3-b 跑评分离:同一接缝把任务终态(done/error)补进 Trace(评价唯一数据源)——
+        # 此前任务结果只进 tasks.json,评价飞轮永远看不见任务级成败(两本账)。
+        from karvyloop.console.task_events import make_task_change_sink
+        app.state.task_registry.on_change = make_task_change_sink(
+            app, getattr(getattr(app.state, "main_loop", None), "trace", None))
         # §11 MVP 复利信号:记 H2A 决策结果 → 算"提案接受率"趋势(越用越懂你的可测证据)
         from karvyloop.console.decision_stats import DecisionStats
         app.state.decision_stats = DecisionStats(

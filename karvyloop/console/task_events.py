@@ -91,8 +91,35 @@ def schedule_system_error(app: Any, source: str, message: str) -> None:
     _schedule(lambda: broadcast_system_error(app, source, message))
 
 
+def make_task_change_sink(app: Any, trace: Any) -> Callable[[dict], None]:
+    """`TaskRegistry.on_change` 的标准接线:WS 推送 + **任务终态落 Trace**(P3-b)。
+
+    跑评分离:Trace 是所有评价的唯一数据源(镜像 [[trace-is-universal-eval-source]])。
+    此前任务结果只进 tasks.json(看板私账),异步评价器(trace_eval/lessons)从 Trace 读,
+    永远看不见任务级成败 —— 看板与评价飞轮是两本账。本 sink 在同一个 on_change 接缝上
+    把 done/error 终态补进 Trace(kind="task_run");registry 保持纯粹,不 import console。
+    trace=None(--no-llm / 无 main_loop)→ 只推送,不记账(0 回归)。
+    """
+    def _sink(task: dict) -> None:
+        schedule_task_broadcast(app, task)
+        try:
+            if trace is not None and task.get("status") in ("done", "error"):
+                from karvyloop.cognition.trace import TraceEntry
+                trace.append(TraceEntry(
+                    task_id=str(task.get("trace_id") or task.get("id") or ""),
+                    kind="task_run",
+                    payload={"registry_id": task.get("id"), "who": task.get("who", ""),
+                             "intent": task.get("intent", ""), "status": task.get("status"),
+                             "result": (task.get("result") or "")[:280],
+                             "domain": task.get("domain_id", ""), "role": task.get("role", "")},
+                    agent=task.get("who", ""), source="task_registry"))
+        except Exception:
+            pass   # 评价记账失败绝不拖垮任务流(评是慢侧的事)
+    return _sink
+
+
 __all__ = [
     "WS_TYPE_TASK_STATUS", "WS_TYPE_TASK_STEP", "WS_TYPE_SYSTEM_ERROR",
     "broadcast_task_status", "broadcast_task_step", "broadcast_system_error",
-    "schedule_task_broadcast", "schedule_system_error",
+    "schedule_task_broadcast", "schedule_system_error", "make_task_change_sink",
 ]

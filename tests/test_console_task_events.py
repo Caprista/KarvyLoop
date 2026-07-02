@@ -179,3 +179,37 @@ async def test_wired_registry_auto_pushes_status() -> None:
     statuses = [m["payload"]["status"] for m in c1.sent if m["type"] == WS_TYPE_TASK_STATUS]
     assert "running" in statuses
     assert "error" in statuses   # 失败 = 事件,自动冒到 UI(不靠轮询)
+
+
+# ---- P3-b: 任务终态落 Trace(跑评分离 —— Trace = 所有评价的唯一数据源)----
+
+
+@pytest.mark.asyncio
+async def test_task_change_sink_writes_terminal_states_to_trace() -> None:
+    """entry.py 真接线(make_task_change_sink):done/error 落 Trace(kind=task_run),
+    running 不落(只有终态才是可评的);WS 推送照旧;trace=None → 只推不记(0 回归)。"""
+    from karvyloop.cognition.trace import TraceStore
+    from karvyloop.console.task_events import make_task_change_sink
+    app = _FakeApp()
+    c1 = _FakeWs()
+    app.state.ws_clients = {c1}
+    trace = TraceStore()
+    reg = TaskRegistry(on_change=make_task_change_sink(app, trace))
+    tid = reg.start(who="设计师", domain_id="dom-x", role="agent", intent="画个图")
+    reg.finish(tid, result="图画完了")
+    tid2 = reg.start(who="工程师", intent="跑测试")
+    reg.finish(tid2, error="挂了")
+    await asyncio.sleep(0); await asyncio.sleep(0)
+    # done + error 各一条 task_run;running 不落
+    e1 = trace.query(tid, kind="task_run")
+    assert len(e1) == 1 and e1[0].payload["status"] == "done" and "图画完了" in e1[0].payload["result"]
+    assert e1[0].payload["domain"] == "dom-x" and e1[0].agent == "设计师"
+    e2 = trace.query(tid2, kind="task_run")
+    assert len(e2) == 1 and e2[0].payload["status"] == "error"
+    # WS 推送不受影响
+    statuses = [m["payload"]["status"] for m in c1.sent if m["type"] == WS_TYPE_TASK_STATUS]
+    assert "running" in statuses and "done" in statuses and "error" in statuses
+    # trace=None(--no-llm)→ 不炸、只推
+    reg2 = TaskRegistry(on_change=make_task_change_sink(app, None))
+    t3 = reg2.start(who="x", intent="y")
+    reg2.finish(t3, result="z")   # 不抛即过
