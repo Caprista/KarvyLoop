@@ -215,10 +215,15 @@ async def raise_fs_access_cards(app: Any) -> int:
     for d in denied:
         by_path.setdefault(d["path"], set()).add(d["op"])
     reg = getattr(app.state, "proposal_registry", None)
+    from karvyloop.karvy.proposal_registry import KIND_FS_ACCESS
+    pending_paths = set()
+    if reg is not None:
+        pending_paths = {(getattr(pr, "payload", {}) or {}).get("path", "")
+                         for pr in reg.pending() if getattr(pr, "kind", "") == KIND_FS_ACCESS}
     for path, ops in by_path.items():
+        if path in pending_paths:
+            continue   # 同路径卡已挂着(不管 op 组合),不重复骚扰
         card = proposal_for_fs_access(path=path, ops=sorted(ops), ts=_t.time())
-        if reg is not None and reg.get(card.proposal_id) is not None:
-            continue   # 同路径卡已挂着,不重复骚扰
         try:
             await broadcast_proposal(app, card)
             raised += 1

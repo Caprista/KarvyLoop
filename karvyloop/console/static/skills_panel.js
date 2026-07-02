@@ -6,6 +6,10 @@ var KarvySkillsPanelBundle = (function(exports) {
   const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
   const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
+  const tB = (x) => {
+    const w = window.KarvyI18n;
+    return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
+  };
   function _skillImportForm() {
     const srcIn = el("input", { type: "text", placeholder: t("skills.import_ph") });
     srcIn.style.flex = "1";
@@ -482,6 +486,60 @@ var KarvySkillsPanelBundle = (function(exports) {
       ));
     }
     b.appendChild(sl);
+    b.appendChild(el("div", { class: "mgmt-section-title", text: t("capov.grants_title") }));
+    b.appendChild(el("div", { class: "mgmt-hint", text: t("capov.grants_hint") }));
+    const gl = el("div", { class: "mgmt-list" });
+    const grants = ov.fs_grants || [];
+    if (!grants.length) gl.appendChild(el("div", { class: "mgmt-empty", text: t("capov.grants_empty") }));
+    for (const g of grants) {
+      const opsBadge = el("span", {
+        class: "dpref-badge " + (g.ops && g.ops.includes("write") ? "provisional" : "confirmed"),
+        text: (g.ops || ["read"]).join("/")
+      });
+      const actions = el("div", { class: "dpref-actions" });
+      actions.appendChild(el("button", {
+        class: "dpref-edit",
+        text: t("capov.grant_revoke"),
+        onclick: async () => {
+          const r = await _postJSON("/api/fs_grants/revoke", { grant_id: g.id });
+          if (r.ok && r.data && r.data.ok) _openCapabilityOverview();
+        }
+      }));
+      gl.appendChild(el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el("div", { class: "mc-name" }, el("span", { text: "📂 " + g.path }), " ", opsBadge),
+          el("div", { class: "mc-meta", text: (g.role ? t("capov.grant_role", { role: g.role }) + " · " : "") + (g.origin || "") })
+        ),
+        actions
+      ));
+    }
+    b.appendChild(gl);
+    const addWrap = el("div", { class: "mgmt-buysugar" });
+    const pathIn = el("input", {
+      class: "mgmt-input",
+      type: "text",
+      placeholder: t("capov.grant_path_ph")
+    });
+    const writeChk = el("input", { type: "checkbox" });
+    const addMsg = el("div", { class: "mgmt-hint" });
+    addWrap.appendChild(pathIn);
+    addWrap.appendChild(el("label", {}, writeChk, el("span", { text: " " + t("capov.grant_write") })));
+    addWrap.appendChild(el("button", {
+      class: "dpref-confirm",
+      text: t("capov.grant_add"),
+      onclick: async () => {
+        const ops = writeChk.checked ? ["read", "write"] : ["read"];
+        const r = await _postJSON("/api/fs_grants", { path: (pathIn.value || "").trim(), ops });
+        if (r.ok && r.data && r.data.ok) _openCapabilityOverview();
+        else addMsg.textContent = r.data && r.data.reason ? tB(r.data.reason) : "?";
+      }
+    }));
+    addWrap.appendChild(addMsg);
+    b.appendChild(addWrap);
   }
   function _openSkillDetail(s) {
     openMgmtModal(s.name);
