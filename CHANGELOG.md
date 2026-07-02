@@ -33,6 +33,15 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   reason without a translation fails the suite).
 
 ### Added
+- **Edit, then accept** on decision cards: kinds with an actionable text field let you fix the proposal
+  in place and approve your version — the original→edited contrast feeds decision-preference
+  crystallization (the richest taste signal there is), and an edit counts as real judgment for the
+  high-stakes gate.
+- **Under-the-hood drill-down** on task details: expand any task to see the real actions beneath the
+  narration (tool calls and outcomes, projected from the Trace).
+- **Kinder first-run**: model-connection failures now say what's actually wrong (bad key / wrong
+  endpoint / unreachable) before the raw error, and a local **Ollama** install is auto-detected and
+  offered as a one-click, no-API-key path.
 - **Semantic tag layer for skill recall** (`tags:` in SKILL.md, matched alongside token overlap — no vectors),
   with a daily slow-side backfill that tags untagged own skills once (untrusted skills untouched).
 - **Capability overview** (`/api/capability/overview` + a card in the Skills panel): one table for
