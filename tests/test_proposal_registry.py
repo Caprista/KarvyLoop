@@ -247,6 +247,54 @@ def test_h2a_decide_accept_dispatches_via_route():
     assert body["envelope"] is not None
 
 
+def test_rest_decide_feeds_decision_signals():
+    """P3-a:REST /api/h2a_decide 与 WS 同喂三路决策信号(样本缓冲/stats/decision_log)。
+    此前只有 WS 接了 —— 走 REST 拍的板从不进偏好结晶回路(决策 loop 白拍)。"""
+    from karvyloop.console.decision_log import DecisionLog
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.proposal_registry = PendingProposalRegistry()
+    app.state.decision_log = DecisionLog()
+
+    class _Stats:
+        def __init__(self):
+            self.seen = []
+
+        def record(self, d):
+            self.seen.append(d)
+
+    app.state.decision_stats = _Stats()
+    p = _mk(summary="要不要接这单")
+    app.state.proposal_registry.register(p)
+    client = TestClient(app)
+    r = client.post("/api/h2a_decide", json={
+        "proposal_id": p.proposal_id, "decision": "ACCEPT", "reason": "值得做",
+    })
+    assert r.status_code == 200
+    # ① 样本进结晶缓冲
+    samples = getattr(app.state, "decision_samples", [])
+    assert len(samples) == 1 and samples[0].decision == "ACCEPT" and "要不要接这单" in samples[0].context
+    # ② stats 复利信号
+    assert app.state.decision_stats.seen == ["ACCEPT"]
+    # ③ decision_log 回看流水(summary/kind 在 dispatch 移除提案**之前**取到)
+    recent = app.state.decision_log.recent(5)
+    assert len(recent) == 1 and recent[0]["decision"] == "ACCEPT"
+    assert recent[0]["summary"] == "要不要接这单" and recent[0]["kind"] == KIND_CRYSTALLIZE_SKILL
+
+
+def test_rest_decide_skips_confirm_decision_pref_meta_loop():
+    """确认"决策偏好"本身不是工作决策 → 不观察(防结晶元循环),与 WS 同语义。"""
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.proposal_registry = PendingProposalRegistry()
+    p = _mk(kind="confirm_decision_pref")
+    app.state.proposal_registry.register(p)
+    client = TestClient(app)
+    r = client.post("/api/h2a_decide", json={
+        "proposal_id": p.proposal_id, "decision": "ACCEPT", "reason": "",
+    })
+    assert r.status_code == 200
+    assert not getattr(app.state, "decision_samples", [])   # 未观察
+
+
 def test_h2a_decide_no_registry_backward_compat():
     """AC11:未接 registry → dispatch=None,K5 envelope 照常(0 回归)。"""
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)

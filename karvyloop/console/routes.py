@@ -4303,6 +4303,15 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
+    # §11 决策信号(P3-a 对齐):REST 拍板与 WS 同喂 样本→结晶 / stats / decision_log。
+    # 此前只有 WS 接了 —— 走 REST 拍的板从不进偏好结晶回路(决策 loop 白拍)。
+    # 必须在 _dispatch()(会把提案移出 registry)之前记,才能取到 summary/kind。
+    from karvyloop.console.decision_wire import record_decision_signals
+    record_decision_signals(request.app, decision=req.decision, proposal_id=req.proposal_id,
+                            reason=eff_reason,
+                            domain=req.to_address_domain_id or "",
+                            role=req.to_address_role or "")
+
     # D5:按 kind 兑现(若接了 registry)。reason 可选,不拦 REJECT。
     def _dispatch() -> dict[str, Any] | None:
         registry = getattr(request.app.state, "proposal_registry", None)

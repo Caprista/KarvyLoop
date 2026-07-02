@@ -55,6 +55,44 @@ def observe_decision(app: Any, sample: DecisionSample) -> None:
     buf.append(sample)
 
 
+def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
+                            reason: str = "", domain: str = "", role: str = "") -> None:
+    """一次 H2A 拍板 → 三路信号(样本缓冲→结晶 / stats 复利 / decision_log 回看)**单一接缝**。
+
+    P3-a 病根:此前只有 WS 路径接了这三路,REST `/api/h2a_decide` 一路都没接 ——
+    走 REST 拍的板从不进偏好结晶回路(决策 loop 白拍)。两条传输路都调本函数,信号对齐。
+    绝不打断决策流(H2A 是命脉)→ 整段自吞;confirm_decision_pref 不观察(防结晶元循环)。
+    """
+    try:
+        import time as _time
+        ctx = ""
+        kind = ""
+        reg = getattr(app.state, "proposal_registry", None)
+        if reg is not None:
+            try:
+                p = reg.get(proposal_id)
+                ctx = getattr(p, "summary", "") or ""
+                kind = getattr(p, "kind", "") or ""
+            except Exception:
+                pass
+        if kind == "confirm_decision_pref":
+            return   # 确认"决策偏好"本身不是工作决策(否则确认偏好又生样本)
+        observe_decision(app, DecisionSample(
+            decision=decision, context=(ctx or proposal_id),
+            reason=reason, scope="personal",
+            domain=domain or "", role=role or "", ts=_time.time()))
+        schedule_decision_crystallize(app)
+        stats = getattr(app.state, "decision_stats", None)
+        if stats is not None:
+            stats.record(decision)
+        log = getattr(app.state, "decision_log", None)
+        if log is not None:
+            log.record(decision=decision, summary=ctx, proposal_id=proposal_id,
+                       reason=reason, kind=kind, domain=domain or "", role=role or "")
+    except Exception:
+        pass
+
+
 def _existing_pref_list(mem: Any) -> list:
     """已有决策偏好(有序;1-based 编号给 LLM 标矛盾用)。"""
     out: list = []
@@ -308,7 +346,7 @@ def prealign_governance(app: Any, mem: Any, *, query: str = "", domain: str = ""
 
 
 __all__ = [
-    "DECISION_BATCH", "observe_decision", "maybe_crystallize_decisions",
+    "DECISION_BATCH", "observe_decision", "record_decision_signals", "maybe_crystallize_decisions",
     "crystallize_candidates", "schedule_decision_crystallize", "prealign_governance",
     "assemble_governance",
     "proposal_for_confirm_decision",

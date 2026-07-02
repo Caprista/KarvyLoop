@@ -301,46 +301,13 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
         # §11 决策接口结晶:把这次拍板记成样本(信号源),攒够批量后结晶成"决策偏好"。
-        # 观察决策**绝不**打断决策流(H2A 是命脉)→ 整段裹 try。
-        try:
-            import time as _time
-            from karvyloop.console.decision_wire import (
-                observe_decision, schedule_decision_crystallize,
-            )
-            from karvyloop.crystallize.decision_pref import DecisionSample
-            _ctx = ""
-            _kind = ""
-            _skip = False
-            _reg = getattr(app.state, "proposal_registry", None)
-            if _reg is not None:
-                try:
-                    _p = _reg.get(req.proposal_id)
-                    _ctx = getattr(_p, "summary", "") or ""
-                    _kind = getattr(_p, "kind", "") or ""
-                    # 确认"决策偏好"本身不是工作决策 → 别观察(否则结晶元循环:确认偏好又生样本)
-                    if _kind == "confirm_decision_pref":
-                        _skip = True
-                except Exception:
-                    pass
-            if not _skip:
-                observe_decision(app, DecisionSample(
-                    decision=req.decision, context=(_ctx or req.proposal_id),
-                    reason=eff_reason, scope="personal",
-                    domain=req.to_address_domain_id or "", role=req.to_address_role or "",
-                    ts=_time.time()))
-                schedule_decision_crystallize(app)
-                # §11 MVP 复利信号:记真实提案决策结果(confirm 类已被 _skip 排除,不计入)
-                _stats = getattr(app.state, "decision_stats", None)
-                if _stats is not None:
-                    _stats.record(req.decision)
-                # 最近拍板流水(只读回看):拍完会从待决列消失,但人能回看拍过什么
-                _log = getattr(app.state, "decision_log", None)
-                if _log is not None:
-                    _log.record(decision=req.decision, summary=_ctx, proposal_id=req.proposal_id,
-                                reason=eff_reason, kind=_kind,
-                                domain=req.to_address_domain_id or "", role=req.to_address_role or "")
-        except Exception:
-            pass
+        # 单一接缝 record_decision_signals(样本→结晶 / stats / decision_log;REST 路径同调,
+        # P3-a 对齐)。绝不打断决策流(内部自吞)。
+        from karvyloop.console.decision_wire import record_decision_signals
+        record_decision_signals(app, decision=req.decision, proposal_id=req.proposal_id,
+                                reason=eff_reason,
+                                domain=req.to_address_domain_id or "",
+                                role=req.to_address_role or "")
         # D5(docs/30):按 kind 兑现(若接了 registry)— 与 REST /api/h2a_decide 同语义。
         # 9.4-门2:route_to_role handler 会同步 drive(一次 LLM)→ 用 to_thread 包,
         # 不阻塞 WS 事件循环(REST 路径是 sync def,FastAPI 已自动线程池化)。
