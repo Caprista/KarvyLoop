@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from .client import GatewayClient
+from .client import ContextCeilingError, GatewayClient
 from .cost import CostMeter
 from .events import (
     Done,
@@ -25,7 +25,7 @@ from .resolve import ResolveScope, resolve_model
 from .system import SystemPrompt
 
 __all__ = [
-    "GatewayClient", "ModelRegistry", "UnknownModelError", "ResolveScope", "resolve_model",
+    "GatewayClient", "ContextCeilingError", "ModelRegistry", "UnknownModelError", "ResolveScope", "resolve_model",
     "SystemPrompt", "CostMeter", "UnsupportedApiError", "ProviderAdapter",
     "MockAdapter", "AnthropicAdapter", "default_adapters",
     "Event", "TextDelta", "ToolUseStart", "ToolUseDelta", "ToolUseStop",
