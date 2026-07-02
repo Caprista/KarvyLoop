@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from karvyloop.cli.main_loop import MainLoop
+from karvyloop.runtime.main_loop import MainLoop
 from karvyloop.karvy.fastbrain.trace_index import TraceIndex
 from karvyloop.karvy.fastbrain.trace_poll import distill_raw_to_summary
 from karvyloop.schemas import AtomRun

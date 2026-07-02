@@ -147,7 +147,7 @@ def test_static_roundtable_is_decision_kind():
 
 def test_intent_records_turn_and_feeds_ctx(tmp_path, monkeypatch):
     """intent 经 console → drive 收到 ctx + 这一轮 record 进当前对话。"""
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     import karvyloop.console.routes as routes_mod
 
     # 假 drive_in_tui:记录收到的 ctx,返成功 outcome
@@ -196,7 +196,7 @@ def test_intent_task_carries_conversation_and_trace_for_locate(tmp_path, monkeyp
     trace id(16-hex)——两个 id 空间。若任务不回填 trace_id,前端按 tk.id querySelector 永远落空,
     定位静默失效。本测试 drive 真路径(只 stub drive_in_tui 返回一个已知 trace task_id),断言闭环。
     """
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     from karvyloop.console.tasks import TaskRegistry
     import karvyloop.console.routes as routes_mod
 

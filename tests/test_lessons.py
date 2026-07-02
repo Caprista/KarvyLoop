@@ -187,7 +187,7 @@ def test_lesson_cannot_inject_skill_structure(tmp_path):
 def test_drive_populates_task_id_so_lessons_can_locate_run(tmp_path):
     # 对抗验收 CRITICAL 的真·闭环:真 MainLoop.drive → 满意度样本带上真 task_id →
     # 丙 用 (task_id, trace_ref) 能从真实 Trace 取回那条 run(executor 风格 ref:trace://...)。
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     from karvyloop.crystallize.lessons import _run_by_ref
     from karvyloop.schemas.atom import AtomRun
 

@@ -160,7 +160,7 @@ def test_switch_to_created_domain_has_governance(app):
 
 
 def test_end_to_end_create_switch_intent_injects_value_md(app, monkeypatch):
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     import karvyloop.console.routes as routes_mod
 
     seen = {}

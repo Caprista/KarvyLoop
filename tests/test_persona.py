@@ -77,7 +77,7 @@ def test_generate_and_run_accepts_system_prompt_override():
 
 def test_slow_brain_factory_accepts_persona():
     """forge_slow_brain_factory 必须接 persona 并透传(链路不断)。"""
-    from karvyloop.cli.main_loop import forge_slow_brain_factory
+    from karvyloop.runtime.main_loop import forge_slow_brain_factory
     sig = inspect.signature(forge_slow_brain_factory)
     assert "persona" in sig.parameters
 

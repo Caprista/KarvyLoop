@@ -234,7 +234,7 @@ def test_list_conversations_per_peer(store: ConversationStore) -> None:
 
 
 def test_slow_brain_accepts_ctx_detection() -> None:
-    from karvyloop.cli.main_loop import _slow_brain_accepts_ctx
+    from karvyloop.runtime.main_loop import _slow_brain_accepts_ctx
 
     def with_ctx(intent, *, ctx=None):
         return intent, None
@@ -251,7 +251,7 @@ def test_slow_brain_accepts_ctx_detection() -> None:
 
 
 def test_render_ctx_prefix() -> None:
-    from karvyloop.cli.main_loop import _render_ctx_prefix
+    from karvyloop.runtime.main_loop import _render_ctx_prefix
 
     assert _render_ctx_prefix(None) == ""
     assert _render_ctx_prefix(()) == ""
@@ -264,7 +264,7 @@ def test_render_ctx_prefix() -> None:
 
 def test_drive_passes_ctx_to_ctx_aware_slow_brain(tmp_path: Path) -> None:
     """drive 把 ctx 传给接 ctx 的慢脑(消解多轮)。"""
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     from karvyloop.schemas import AtomRun
 
     loop = MainLoop(skills_dir=tmp_path / "s", scope="private")
@@ -284,7 +284,7 @@ def test_drive_passes_ctx_to_ctx_aware_slow_brain(tmp_path: Path) -> None:
 
 def test_drive_old_slow_brain_still_works_with_ctx(tmp_path: Path) -> None:
     """老 slow_brain(只接 intent)+ 传 ctx → drive 只传 intent(0 回归)。"""
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     from karvyloop.schemas import AtomRun
 
     loop = MainLoop(skills_dir=tmp_path / "s", scope="private")

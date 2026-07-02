@@ -57,7 +57,7 @@ def test_factory_passes_emitter(monkeypatch):
         return types.SimpleNamespace(text="ok", run=types.SimpleNamespace(tool_calls=[]))
 
     monkeypatch.setattr(forge_mod, "generate_and_run", _fake_gen)
-    from karvyloop.cli.main_loop import forge_slow_brain_factory
+    from karvyloop.runtime.main_loop import forge_slow_brain_factory
     sentinel = RenderEventCollector()
     forge_slow_brain_factory(token=1, sandbox=2, gateway=3, workspace_root="/tmp", emitter=sentinel)("x")
     assert captured["emitter"] is sentinel
@@ -134,7 +134,7 @@ def test_drive_in_tui_accepts_and_forwards_mcp_tools(monkeypatch):
 def test_serializer_includes_events():
     from karvyloop.console.serializers import drive_outcome_to_dict
     from karvyloop.workbench.main_loop_bridge import DriveOutcome
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     o = DriveOutcome(intent="x", brain=Brain.SLOW, text="t", skill_name="", fast_brain_hit=False,
                      crystallized=False, events=[{"seq": 1, "type": "text", "text": "hi"}])
     assert drive_outcome_to_dict(o)["events"] == [{"seq": 1, "type": "text", "text": "hi"}]

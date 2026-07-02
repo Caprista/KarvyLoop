@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from .init import CONFIG_PATH, DEFAULT_CONFIG_YAML, cmd_init, default_config_path
 from .main import VERSION, main
-from .main_loop import (
+from karvyloop.runtime.main_loop import (  # P2-f:核心循环已搬 runtime/
     Brain,
     DriveResult,
     DriveStats,

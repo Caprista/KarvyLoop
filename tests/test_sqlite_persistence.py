@@ -35,7 +35,7 @@ from karvyloop.crystallize import (  # noqa: E402
 )
 from karvyloop.schemas import UsageStats  # noqa: E402
 from karvyloop.schemas.atom import AtomRun  # noqa: E402
-from karvyloop.cli.main_loop import MainLoop  # noqa: E402
+from karvyloop.runtime.main_loop import MainLoop  # noqa: E402
 from karvyloop.cli.replay import cmd_replay  # noqa: E402
 from karvyloop.cli.run_loop import build_main_loop, run_intent_via_loop  # noqa: E402
 

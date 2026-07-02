@@ -139,7 +139,7 @@ def test_conflict_to_proposal():
 
 # ---- AC9 (SC-1): 不在 drive 热路径 ----
 def test_detector_not_in_drive_hotpath():
-    ml = Path(__file__).resolve().parents[1] / "karvyloop" / "cli" / "main_loop.py"
+    ml = Path(__file__).resolve().parents[1] / "karvyloop" / "runtime" / "main_loop.py"
     src = ml.read_text(encoding="utf-8")
     assert "skill_conflict" not in src
     assert "SkillDomainConflictDetector" not in src

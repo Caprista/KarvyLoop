@@ -104,7 +104,7 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
         if not requirement:
             return False, "委派需求为空"
         try:
-            from karvyloop.cli.main_loop import forge_slow_brain_factory
+            from karvyloop.runtime.main_loop import forge_slow_brain_factory
             from karvyloop.coding.checker import verdict_suffix
             from karvyloop.cli.pursuit_loop import pursue
             from karvyloop.console.decision_wire import assemble_governance
@@ -236,7 +236,7 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
                 role=payload.get("role", ""), intent=intent,
             )
         try:
-            from karvyloop.cli.main_loop import forge_slow_brain_factory
+            from karvyloop.runtime.main_loop import forge_slow_brain_factory
             from karvyloop.console.decision_wire import assemble_governance
             did = payload.get("domain_id", "l0")
             # Step 0(a):你的决策标准在**重跑任务**时也生效(l0 也注入 —— 重跑就是替你做事)。

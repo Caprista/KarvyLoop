@@ -11,7 +11,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from karvyloop.cli.main_loop import MainLoop, Brain  # noqa: E402
+from karvyloop.runtime.main_loop import MainLoop, Brain  # noqa: E402
 from karvyloop.schemas.atom import AtomRun  # noqa: E402
 
 

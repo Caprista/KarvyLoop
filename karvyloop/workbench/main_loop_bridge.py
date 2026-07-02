@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass, field as dataclass_field
 from typing import Any, Optional
 
-from karvyloop.cli.main_loop import Brain, MainLoop
+from karvyloop.runtime.main_loop import Brain, MainLoop
 from karvyloop.cli.run_loop import forge_slow_brain_factory  # noqa: F401 — patched in tests
 
 logger = logging.getLogger(__name__)

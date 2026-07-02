@@ -23,7 +23,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 
-from karvyloop.cli.main_loop import MainLoop
+from karvyloop.runtime.main_loop import MainLoop
 from karvyloop.karvy.observer import WorkbenchObserver
 from karvyloop.workbench.main_loop_bridge import drive_in_tui
 

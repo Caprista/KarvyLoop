@@ -416,7 +416,7 @@ def test_rehydrate_replays_quality():
 
 
 def test_mainloop_quality_review_seam(tmp_path):
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     from karvyloop.cognition.trace import TraceStore
 
     def _slow(text):
@@ -470,7 +470,7 @@ def test_evaluate_pending_no_orphans_across_tasks():
 
 
 def test_mainloop_restart_no_double_count(tmp_path):
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     from karvyloop.cognition.trace import TraceStore
 
     def _slow(text):
@@ -494,7 +494,7 @@ def test_mainloop_restart_no_double_count(tmp_path):
 # ---- 集成:跑评分离 —— drive 只写事实,评价器离热路径算分(锁 C1/C2 + 快慢分离)----
 
 def test_drive_separates_run_from_eval(tmp_path):
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
 
     def _slow(text):
         def sb(intent, *, ctx=None):
@@ -618,7 +618,7 @@ def test_critique_not_dropped_when_substring_of_unrelated_text(tmp_path):
 
 def test_background_review_writes_role_critique_not_human_steer(tmp_path):
     # 拆接反点:atom improve 由 role 评语驱动,且不碰 steered_by_user(已无写入者)
-    import karvyloop.cli.main_loop as ml_mod
+    import karvyloop.runtime.main_loop as ml_mod
     src = (ml_mod.__file__)
     text = open(src, encoding="utf-8").read()
     # background_review 体内不得再引用 steered_by_user(死路已拆)

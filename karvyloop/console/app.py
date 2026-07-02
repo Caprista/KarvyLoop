@@ -24,7 +24,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from karvyloop.cli.main_loop import MainLoop
+from karvyloop.runtime.main_loop import MainLoop
 from karvyloop.karvy.observer import WorkbenchObserver
 
 from .routes import router as api_router

@@ -19,7 +19,7 @@ from typing import Optional
 from textual.app import App
 
 from karvyloop.a2a import Envelope, EnvelopeType
-from karvyloop.cli.main_loop import Brain, MainLoop
+from karvyloop.runtime.main_loop import Brain, MainLoop
 from karvyloop.domain import Address
 from karvyloop.karvy.observer import WorkbenchObserver
 from karvyloop.karvy.h2a import (

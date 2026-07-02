@@ -110,7 +110,7 @@ def test_funnel_per_scope_chain_survives_eviction(tmp_path):
 
 
 def test_funnel_event_large_field_truncated(tmp_path):
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
 
     captured = {}
 

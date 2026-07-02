@@ -81,7 +81,7 @@ def test_route_handler_executes(monkeypatch):
             captured["gov"] = slow_brain[1]  # 桩 forge 返回 ("sb", governance)
             return _Result()
 
-    import karvyloop.cli.main_loop as ml_mod
+    import karvyloop.runtime.main_loop as ml_mod
     monkeypatch.setattr(ml_mod, "forge_slow_brain_factory",
                         lambda **kw: ("sb", kw.get("governance", "")))
     app = _app(main_loop=_ML(),
@@ -186,7 +186,7 @@ def test_route_handler_injects_your_standards(monkeypatch):
             captured["gov"] = slow_brain[1]
             return _Result()
 
-    import karvyloop.cli.main_loop as ml_mod
+    import karvyloop.runtime.main_loop as ml_mod
     monkeypatch.setattr(ml_mod, "forge_slow_brain_factory",
                         lambda **kw: ("sb", kw.get("governance", "")))
     app = _app(main_loop=_ML(),

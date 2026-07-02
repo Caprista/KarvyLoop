@@ -72,7 +72,7 @@ def test_workflow_plan_needs_two(app):
 def test_workflow_run(app, monkeypatch):
     a, mgr, reg, d1, d2 = app
     import karvyloop.console.routes as routes_mod
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     from karvyloop.workbench.main_loop_bridge import DriveOutcome
 
     async def fake_drive(intent, ml, *, persona=None, **kw):

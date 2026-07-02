@@ -152,7 +152,7 @@ def _stub_slow_brain(terminal_value: str):
 
 
 def test_drive_surfaces_terminal_on_result_and_trace(tmp_path: Path):
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
 
     ml = MainLoop(skills_dir=tmp_path / "skills", clock=lambda: 1000.0)
     ml.bootstrap()
@@ -198,7 +198,7 @@ def test_query_atom_runs_preserves_terminal(tmp_path: Path):
 
 def test_annotate_terminal_has_infra_note():
     """infra-dead 的诚实提示:明确"不是任务本身的问题",别让人当任务失败去改。"""
-    from karvyloop.cli.main_loop import _annotate_terminal
+    from karvyloop.runtime.main_loop import _annotate_terminal
 
     out = _annotate_terminal("半截结果", Terminal.INFRA_DEAD)
     assert "半截结果" in out

@@ -23,7 +23,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from karvyloop.cli.main_loop import Brain  # noqa: E402
+from karvyloop.runtime.main_loop import Brain  # noqa: E402
 from karvyloop.coding.persona import build_karvy_persona_prompt  # noqa: E402
 from karvyloop.cognition.conversation import ConversationManager, ConversationStore  # noqa: E402
 from karvyloop.domain.registry import Address  # noqa: E402

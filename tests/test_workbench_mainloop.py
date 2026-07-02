@@ -26,7 +26,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from karvyloop.cli.main_loop import MainLoop  # noqa: E402
+from karvyloop.runtime.main_loop import MainLoop  # noqa: E402
 from karvyloop.domain import Address  # noqa: E402
 from karvyloop.karvy.observer import WorkbenchObserver  # noqa: E402
 from karvyloop.workbench.app import WorkbenchApp  # noqa: E402

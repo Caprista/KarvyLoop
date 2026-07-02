@@ -73,7 +73,7 @@ def test_dependent_markers_exposed() -> None:
 
 
 def _build_loop(tmp_path: Path):
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
 
     return MainLoop(
         skills_dir=tmp_path / "skills",
@@ -121,7 +121,7 @@ def test_ctx_dependent_skips_fast_brain(tmp_path: Path, monkeypatch) -> None:
     """有上下文 + 指代句 → 跳过 recall(快脑),直接慢脑。"""
     loop = _build_loop(tmp_path)
     # 监视 recall 是否被调
-    import karvyloop.cli.main_loop as ml
+    import karvyloop.runtime.main_loop as ml
     recall_calls = {"n": 0}
     real_recall = ml.recall
 
@@ -142,7 +142,7 @@ def test_ctx_dependent_skips_fast_brain(tmp_path: Path, monkeypatch) -> None:
 def test_ctx_dependent_false_when_no_ctx(tmp_path: Path, monkeypatch) -> None:
     """同样的指代句,但 ctx=None(无前文)→ 不判依赖,正常走快脑 recall。"""
     loop = _build_loop(tmp_path)
-    import karvyloop.cli.main_loop as ml
+    import karvyloop.runtime.main_loop as ml
     recall_calls = {"n": 0}
     real_recall = ml.recall
     monkeypatch.setattr(ml, "recall", lambda *a, **k: (recall_calls.__setitem__("n", recall_calls["n"] + 1) or real_recall(*a, **k)))
@@ -197,7 +197,7 @@ def test_context_gate_no_karvy_atoms_dependency() -> None:
 
 
 def test_render_ctx_prefix_budget_keeps_recent_drops_old() -> None:
-    from karvyloop.cli.main_loop import _render_ctx_prefix
+    from karvyloop.runtime.main_loop import _render_ctx_prefix
     from karvyloop.cognition.conversation import Turn
 
     # 20 轮,每轮内容较长;小预算 → 只保留最近几轮 + 标"更早已省略"
@@ -213,7 +213,7 @@ def test_render_ctx_prefix_budget_keeps_recent_drops_old() -> None:
 
 
 def test_render_ctx_prefix_no_truncate_when_under_budget() -> None:
-    from karvyloop.cli.main_loop import _render_ctx_prefix
+    from karvyloop.runtime.main_loop import _render_ctx_prefix
     from karvyloop.cognition.conversation import Turn
 
     turns = (Turn("短问", "短答", ts=1.0),)
@@ -223,7 +223,7 @@ def test_render_ctx_prefix_no_truncate_when_under_budget() -> None:
 
 
 def test_render_ctx_prefix_empty() -> None:
-    from karvyloop.cli.main_loop import _render_ctx_prefix
+    from karvyloop.runtime.main_loop import _render_ctx_prefix
     assert _render_ctx_prefix(None) == ""
     assert _render_ctx_prefix(()) == ""
 

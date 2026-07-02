@@ -14,7 +14,7 @@ def test_skills_no_llm_graceful():
 
 
 def test_skills_lists_crystallized(tmp_path):
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
     ml = MainLoop(skills_dir=tmp_path / "skills")
     sd = ml.skills_dir / "daily"; sd.mkdir(parents=True, exist_ok=True)
@@ -36,7 +36,7 @@ def test_skill_restore_no_llm():
 
 def test_skill_import_endpoint_local(tmp_path):
     """POST /api/skill/import 从本地导入第三方技能 → 进库 + 进索引 + 可召回。"""
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
     ml = MainLoop(skills_dir=tmp_path / "skills")
     app.state.main_loop = ml
@@ -71,7 +71,7 @@ def test_skill_run_no_llm():
 
 def test_skill_run_sandbox_unavailable_on_windows(tmp_path):
     """非 Linux:沙箱不可用 → 明确拒绝,绝不无隔离跑(fail-closed)。"""
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
     ml = MainLoop(skills_dir=tmp_path / "skills")
     d = ml.skills_dir / "demo"; (d / "scripts").mkdir(parents=True)
@@ -87,7 +87,7 @@ def test_skill_run_sandbox_unavailable_on_windows(tmp_path):
 
 def test_skill_grant_net_endpoint(tmp_path):
     """POST /api/skill/grant 授网 → /api/skills 里 net_granted 反映。"""
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
     ml = MainLoop(skills_dir=tmp_path / "skills")
     d = ml.skills_dir / "demo"; (d / "scripts").mkdir(parents=True)
@@ -125,7 +125,7 @@ def test_skill_catalog_endpoint_shape(monkeypatch):
 
 def test_skill_sources_seed_and_save(tmp_path):
     """GET 默认 seed 两源;POST 全关 → 拒(≥1 开)。"""
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
     app.state.main_loop = MainLoop(skills_dir=tmp_path / "skills")
     c = TestClient(app)

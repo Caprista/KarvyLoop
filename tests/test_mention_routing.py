@@ -88,7 +88,7 @@ def test_resolve_mention_misses(setup):
 def test_intent_with_mention_routes_to_role(setup, monkeypatch):
     app, mgr, reg, d = setup
     import karvyloop.console.routes as routes_mod
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     from karvyloop.workbench.main_loop_bridge import DriveOutcome
 
     seen = {}
@@ -123,7 +123,7 @@ def test_mention_uses_role_model(setup, monkeypatch, tmp_path):
     rr.create("设计师", identity="设计", model="minimax/MiniMax-M3")   # 这个角色配了模型
     app.state.role_registry = rr
     import karvyloop.console.routes as routes_mod
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     from karvyloop.workbench.main_loop_bridge import DriveOutcome
     seen = {}
 

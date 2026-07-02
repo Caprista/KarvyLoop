@@ -34,7 +34,7 @@ from karvyloop.crystallize import (
     SqliteVerifyStore,
 )
 
-from .main_loop import Brain, MainLoop, forge_slow_brain_factory
+from karvyloop.runtime.main_loop import Brain, MainLoop, forge_slow_brain_factory  # P2-f:核心循环已搬 runtime/
 from .render import Renderer
 
 

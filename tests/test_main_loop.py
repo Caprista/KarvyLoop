@@ -22,7 +22,7 @@ from typing import Callable
 
 import pytest
 
-from karvyloop.cli.main_loop import (
+from karvyloop.runtime.main_loop import (
     Brain,
     DriveResult,
     DriveStats,
@@ -412,7 +412,7 @@ def test_slow_brain_records_bare_intent_not_governance(monkeypatch):
                                      run=types.SimpleNamespace(input={"intent": effective_intent}))
 
     monkeypatch.setattr(forge_mod, "generate_and_run", fake_gen)
-    from karvyloop.cli.main_loop import forge_slow_brain_factory
+    from karvyloop.runtime.main_loop import forge_slow_brain_factory
     sb = forge_slow_brain_factory(token=None, sandbox=None, gateway=None,
                                   workspace_root="/ws",
                                   governance="【你的决策偏好】- 总用表格")
@@ -426,7 +426,7 @@ def test_slow_brain_no_governance_is_noop():
     """无 governance / ctx → effective_intent 就是裸意图,不动 run.input(0 回归)。"""
     import types
     import karvyloop.coding.forge as forge_mod
-    import karvyloop.cli.main_loop as ml_mod
+    import karvyloop.runtime.main_loop as ml_mod
 
     async def fake_gen(effective_intent, *a, **k):
         return types.SimpleNamespace(text="ok",
@@ -454,7 +454,7 @@ def test_slow_brain_surfaces_max_turns_truncation(monkeypatch):
                                      run=types.SimpleNamespace(input={"intent": effective_intent}))
 
     monkeypatch.setattr(forge_mod, "generate_and_run", fake_gen)
-    from karvyloop.cli.main_loop import forge_slow_brain_factory
+    from karvyloop.runtime.main_loop import forge_slow_brain_factory
     sb = forge_slow_brain_factory(token=None, sandbox=None, gateway=None, workspace_root="/ws")
     text, _run = sb("做个大项目")
     assert "写了 3 个文件" in text and "步数上限" in text and "继续" in text   # 老实说没做完
@@ -471,7 +471,7 @@ def test_slow_brain_completed_no_truncation_note(monkeypatch):
                                      run=types.SimpleNamespace(input={"intent": effective_intent}))
 
     monkeypatch.setattr(forge_mod, "generate_and_run", fake_gen)
-    from karvyloop.cli.main_loop import forge_slow_brain_factory
+    from karvyloop.runtime.main_loop import forge_slow_brain_factory
     sb = forge_slow_brain_factory(token=None, sandbox=None, gateway=None, workspace_root="/ws")
     text, _run = sb("小活")
     assert text == "done"

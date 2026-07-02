@@ -11,7 +11,7 @@ import dataclasses
 from typing import Any
 
 from karvyloop.a2a import Envelope
-from karvyloop.cli.main_loop import DriveResult
+from karvyloop.runtime.main_loop import DriveResult
 from karvyloop.workbench.main_loop_bridge import DriveOutcome
 from karvyloop.workbench.snapshot import WidgetSnapshot
 

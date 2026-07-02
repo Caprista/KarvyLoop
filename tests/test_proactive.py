@@ -44,7 +44,7 @@ def test_skips_failed_with_empty_intent():
 def test_run_task_handler_reruns_and_tracks_new_task(monkeypatch):
     from karvyloop.console import proposal_handlers as ph
     from karvyloop.console.tasks import TaskRegistry
-    import karvyloop.cli.main_loop as ml_mod
+    import karvyloop.runtime.main_loop as ml_mod
     from karvyloop.karvy.atoms import Proposal
 
     # stub forge 工厂(不真调 LLM);stub main_loop.drive 返成功结果

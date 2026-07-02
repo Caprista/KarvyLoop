@@ -235,7 +235,7 @@ def test_governance_deontic_without_value_md(tmp_path):
 
 
 def test_business_intent_injects_governance(tmp_path, monkeypatch):
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     import karvyloop.console.routes as routes_mod
 
     seen = {}
@@ -261,7 +261,7 @@ def test_business_intent_injects_governance(tmp_path, monkeypatch):
 
 
 def test_private_intent_no_governance(tmp_path, monkeypatch):
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     import karvyloop.console.routes as routes_mod
 
     seen = {}

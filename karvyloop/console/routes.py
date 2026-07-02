@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from karvyloop.llm.token_ledger import token_source as _token_src
 
-from karvyloop.cli.main_loop import MainLoop
+from karvyloop.runtime.main_loop import MainLoop
 from karvyloop.karvy.h2a import (
     H2A_ACCEPT,
     H2A_DEFER,
@@ -1090,7 +1090,7 @@ async def _fuzzy_ops_proposal(app, intent: str):
 
 def _stub_no_main_loop(intent: str):
     """main_loop=None 时返 DriveOutcome stub(error,不 500)。"""
-    from karvyloop.cli.main_loop import Brain
+    from karvyloop.runtime.main_loop import Brain
     from karvyloop.workbench.main_loop_bridge import DriveOutcome
     return DriveOutcome(
         intent=intent,

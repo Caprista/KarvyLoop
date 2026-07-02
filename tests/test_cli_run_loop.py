@@ -27,7 +27,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from karvyloop.cli.main_loop import MainLoop  # noqa: E402
+from karvyloop.runtime.main_loop import MainLoop  # noqa: E402
 from karvyloop.cli.run_loop import build_main_loop, run_intent_via_loop  # noqa: E402
 
 
@@ -89,7 +89,7 @@ def _stub_slow_brain_factory(*, n_runs_max: int = 100, vary_input: bool = False)
 
 def _build_loop_with_clock(tmp_path, *, clock_offset=0.0):
     """构造 MainLoop 并用可控 clock(避开 60s 去抖 + 模拟时间流逝)。"""
-    from karvyloop.cli.main_loop import MainLoop as ML
+    from karvyloop.runtime.main_loop import MainLoop as ML
 
     base_ts = 1000.0 + clock_offset
     state = {"now": base_ts}

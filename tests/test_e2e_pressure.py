@@ -375,7 +375,7 @@ def test_j11_tool_and_skill_capability(app):
 
 # ---- J12:跑评分离飞轮(drive 写 facts → 异步评满意度+真模型质量 → 置信累积 → Trace 保留 → token 记账)----
 def test_j12_flywheel_run_eval_quality_confidence_real(app):
-    from karvyloop.cli.main_loop import MainLoop
+    from karvyloop.runtime.main_loop import MainLoop
     from karvyloop.crystallize.trace_eval import evaluate_pending
     from karvyloop.llm.token_ledger import TokenLedger, get_ledger, register_ledger
 
