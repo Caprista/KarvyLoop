@@ -171,9 +171,13 @@ def cmd_console(args: argparse.Namespace) -> int:
     # handlers 默认空(诚实:结构修好了 — 有 proposal_id + 有消费路径 + ACCEPT 回显 dispatch;
     # 各 kind 的真副作用 handler 随子系统成熟逐个 register,不为对称而假兑现)。
     try:
+        from pathlib import Path as _PathProp
         from karvyloop.karvy.proposal_registry import PendingProposalRegistry
         from karvyloop.console.proposal_handlers import build_proposal_handlers
-        app.state.proposal_registry = PendingProposalRegistry()
+        # P1-c:落盘 → 待决卡(含 DEFER 挂起的)跨重启存活,决策 loop 不因重启丢板。
+        app.state.proposal_registry = PendingProposalRegistry(
+            persist_path=_PathProp.home() / ".karvyloop" / "pending_proposals.json"
+        )
         # 门2(D5 live):注册有真实目的地的 kind handler(crystallize_skill 采纳确认);
         # 其余 kind 靠 registry 默认诚实回执,接线随子系统成熟补(docs/30 §5.1)。
         app.state.proposal_handlers = build_proposal_handlers(app)

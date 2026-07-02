@@ -202,6 +202,25 @@ class Proposal:
             "context_ref": dict(self.context_ref),  # ch4:上下文跳转目标
         }
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Proposal":
+        """从 to_dict() 还原(待决卡落盘 → 重启恢复)。tuple 字段从 list 复原;
+        proposal_id 已在 → __post_init__ 不重派生(跨进程稳定一致)。"""
+        return cls(
+            summary=str(d.get("summary", "") or ""),
+            options=tuple(d.get("options", ()) or ()),
+            strength=float(d.get("strength", 0.0) or 0.0),
+            evidence_refs=tuple(d.get("evidence_refs", ()) or ()),
+            habit_id=int(d.get("habit_id", 0) or 0),
+            model_ref=str(d.get("model_ref", "") or ""),
+            ts=float(d.get("ts", 0.0) or 0.0),
+            kind=str(d.get("kind", "crystallize_skill") or "crystallize_skill"),
+            payload=dict(d.get("payload", {}) or {}),
+            proposal_id=str(d.get("proposal_id", "") or ""),
+            basis=str(d.get("basis", "") or ""),
+            context_ref=dict(d.get("context_ref", {}) or {}),
+        )
+
 
 # 解析 model_ref 的函数类型(避免 IntentAnalyst 直接依赖 fastbrain.trace_habit)
 ModelRefResolver = Callable[[str], object]

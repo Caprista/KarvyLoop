@@ -141,6 +141,58 @@ def test_handler_exception_contained():
     assert not res.ok and "handler error" in res.detail
 
 
+# ---- P1-c: 待决卡落盘 → 重启存活 ----
+def test_from_dict_roundtrip():
+    """Proposal.to_dict → from_dict 无损往返(tuple 字段复原 + id 不重派生)。"""
+    p = _mk(payload={"sig": "abc"})
+    r = Proposal.from_dict(p.to_dict())
+    assert r.proposal_id == p.proposal_id and r.kind == p.kind
+    assert r.summary == p.summary and r.payload == p.payload
+    assert isinstance(r.options, tuple) and isinstance(r.evidence_refs, tuple)
+    assert r.options == p.options and r.evidence_refs == p.evidence_refs
+
+
+def test_persist_survives_restart(tmp_path):
+    """register 落盘 → 新实例(模拟重启)从盘恢复;DEFER 挂起的也在。"""
+    path = tmp_path / "pending_proposals.json"
+    reg = PendingProposalRegistry(persist_path=path)
+    a = _mk(summary="板A", habit_id=1)
+    b = _mk(summary="板B", habit_id=2)
+    reg.register(a)
+    reg.register(b)
+    reg.decide(b.proposal_id, "DEFER")   # DEFER 留在表里,应随盘存活
+    assert path.exists()
+    # 模拟重启:全新实例,只给同一路径
+    reg2 = PendingProposalRegistry(persist_path=path)
+    assert len(reg2) == 2
+    ga = reg2.get(a.proposal_id)
+    assert ga is not None and ga.summary == "板A"
+    assert reg2.get(b.proposal_id) is not None
+
+
+def test_persist_removed_card_gone_after_restart(tmp_path):
+    """ACCEPT/REJECT 移除后落盘 → 重启不再出现(不复活已处置的板)。"""
+    path = tmp_path / "pending_proposals.json"
+    reg = PendingProposalRegistry(persist_path=path)
+    p = _mk()
+    reg.register(p)
+    reg.decide(p.proposal_id, "REJECT")   # 移除 + 落盘
+    reg2 = PendingProposalRegistry(persist_path=path)
+    assert reg2.get(p.proposal_id) is None and len(reg2) == 0
+
+
+def test_persist_corrupt_file_failsafe(tmp_path):
+    """落盘文件损坏 → 当空表(不误杀、不炸),靠后续 register 重建。"""
+    path = tmp_path / "pending_proposals.json"
+    path.write_text("{ not json", encoding="utf-8")
+    reg = PendingProposalRegistry(persist_path=path)   # 不抛
+    assert len(reg) == 0
+    p = _mk()
+    reg.register(p)   # 重建
+    reg2 = PendingProposalRegistry(persist_path=path)
+    assert reg2.get(p.proposal_id) is not None
+
+
 # ---- AC9-AC11: console 活接线(register on broadcast + dispatch on /api/h2a_decide)----
 
 import asyncio

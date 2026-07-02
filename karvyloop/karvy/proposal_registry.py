@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import logging
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -79,10 +81,51 @@ class DispatchResult:
 
 
 class PendingProposalRegistry:
-    """待决议表(PR-2):proposal_id → Proposal。单进程内存表(本地 console 场景足够)。"""
+    """待决议表(PR-2):proposal_id → Proposal。
 
-    def __init__(self) -> None:
+    P1-c:可选**落盘持久化** —— 传 `persist_path` 后,待决卡跨重启存活(决策 loop
+    不该因为一次重启就丢掉"还挂着待你拍的板";DEFER 挂起的更该活着)。落盘失败/文件损坏
+    一律 fail-safe(不阻断、不误杀,靠后续 register 重建),与 skills-lock 同调。
+    """
+
+    def __init__(self, persist_path=None) -> None:
         self._pending: Dict[str, object] = {}
+        self._persist_path = Path(persist_path) if persist_path else None
+        if self._persist_path:
+            self._load()
+
+    def _load(self) -> None:
+        from karvyloop.karvy.atoms import Proposal
+        p = self._persist_path
+        if not p or not p.exists():
+            return
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("[proposal] 待决卡持久化文件损坏,忽略(靠后续 register 重建):%s", p)
+            return
+        for item in (data.get("pending") or []):
+            try:
+                prop = Proposal.from_dict(item)
+            except Exception as e:
+                logger.debug("[proposal] 跳过坏待决卡:%s", e)
+                continue
+            if getattr(prop, "proposal_id", ""):
+                self._pending[prop.proposal_id] = prop
+
+    def _save(self) -> None:
+        p = self._persist_path
+        if not p:
+            return
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "version": 1,
+                "pending": [prop.to_dict() for prop in self._pending.values() if hasattr(prop, "to_dict")],
+            }
+            p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:  # 落盘失败不阻断内存操作
+            logger.warning("[proposal] 待决卡落盘失败(不阻断):%s", e)
 
     def register(self, proposal) -> str:
         """登记一条 Proposal,返回 proposal_id(幂等:同 id 覆盖)。"""
@@ -90,6 +133,7 @@ class PendingProposalRegistry:
         if not pid:
             raise ValueError("proposal 缺 proposal_id(应由 Proposal.__post_init__ 派生)")
         self._pending[pid] = proposal
+        self._save()
         return pid
 
     def get(self, proposal_id: str) -> Optional[object]:
@@ -97,7 +141,10 @@ class PendingProposalRegistry:
 
     def remove(self, proposal_id: str) -> Optional[object]:
         """移除并返回(ACCEPT 兑现后 / REJECT 丢弃)。"""
-        return self._pending.pop(proposal_id, None)
+        removed = self._pending.pop(proposal_id, None)
+        if removed is not None:
+            self._save()
+        return removed
 
     def pending(self) -> List[object]:
         return list(self._pending.values())
