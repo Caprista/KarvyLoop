@@ -33,6 +33,50 @@ _STOP_PUNCT = re.compile(r"[^\w\s]+")
 _STOP_WS = re.compile(r"\s+")
 
 
+# ---- improve.py 写回段 ↔ 重跑上下文(闭环的"读"半条腿)----
+
+def _guidance_headers() -> tuple[str, ...]:
+    """improve.py 写回 SKILL.md 的**指导段** header(单一真理来源:improve.py 的常量)。
+
+    这些段是"使用中沉淀的偏好/纠正/评语",**不是方法本身** —— 重跑组装时要单独带上
+    并标注"必须遵守",而不是混在 `## Steps` 里被当成"上次的打法"照抄。
+    """
+    from .improve import KIND_TO_HEADER, ROLE_CRITIQUE_HEADER, ROLE_LESSON_HEADER
+    return tuple(KIND_TO_HEADER.values()) + (ROLE_CRITIQUE_HEADER, ROLE_LESSON_HEADER)
+
+
+# 既非方法也非指导的段(审计痕,喂 LLM 是噪声):从重跑上下文里整段剥掉。
+_STRIP_HEADERS = ("## Changelog",)
+
+
+def split_body_guidance(body: str) -> tuple[str, str]:
+    """把 SKILL.md body 拆成 (方法, 指导)。
+
+    - 方法 = `## Goal` / `## Steps` 等原始正文(减去指导段与 Changelog);
+    - 指导 = improve.py 写回的 `## Add/Remove/Modify/Preferences/Corrections/
+      Role critique/Lessons` 段(含 header,便于 LLM 看清类别)。
+    段边界与 improve._insert_into_section 同约定:以 "## " 行为界。
+    """
+    headers = _guidance_headers()
+    method: list[str] = []
+    guidance: list[str] = []
+    mode = "method"
+    for line in (body or "").splitlines():
+        if line.startswith("## "):
+            s = line.strip()
+            if s in headers:
+                mode = "guidance"
+            elif s in _STRIP_HEADERS:
+                mode = "strip"
+            else:
+                mode = "method"
+        if mode == "method":
+            method.append(line)
+        elif mode == "guidance":
+            guidance.append(line)
+    return "\n".join(method).strip(), "\n".join(guidance).strip()
+
+
 def _tokenize(text: str) -> set[str]:
     s = (text or "").lower()
     s = _STOP_DIGITS.sub(" ", s)
@@ -91,6 +135,36 @@ class RecallHit:
     sig: str = ""  # 命中 sig(SkillIndex 命中时填;兜底路径无 sig 也允许空)
     # #2 §13:'dynamic'(默认)=命中重跑不回放;'stable'=可回放缓存结果
     result_reuse: str = "dynamic"
+    # improve.py 写回的偏好/纠正/评语段(split_body_guidance 抽出;重跑组装必须带上并标注遵守)
+    guidance: str = ""
+
+
+def compose_rerun_context(hit: "RecallHit", intent: str) -> str:
+    """dynamic 命中后的**重跑上下文组装**(修订闭环的"读"半条腿)。
+
+    把 body 拆成方法 + 指导两块分别标注:方法段照做但重得结果;指导段
+    (improve.py 写回的偏好/纠正/role 评语/lessons)**必须遵守**,且与方法冲突时
+    以指导为准 —— 否则 `## Remove`("以后别 X")混在"上次证明可行的打法"里,
+    LLM 会把它当步骤照抄,写回等于白写。
+    """
+    method, guidance = split_body_guidance(hit.body if hit is not None else "")
+    if not method and not guidance:
+        method = ((hit.body if hit is not None else "") or "").strip()
+    parts: list[str] = []
+    if method:
+        parts.append(
+            "[已有方法 —— 上次解决同类任务证明可行的打法,照它的步骤做,"
+            "但**必须用当前输入重新得出结果,绝不照搬旧结论/旧数据**]\n"
+            f"{method}"
+        )
+    if guidance:
+        parts.append(
+            "[使用中沉淀的偏好/纠正/评语 —— 重跑时**必须遵守**;"
+            "与上面步骤冲突时,以这里为准]\n"
+            f"{guidance}"
+        )
+    parts.append(f"[当前任务]\n{intent}")
+    return "\n\n".join(parts)
 
 
 def load_bound_skills(
@@ -135,7 +209,8 @@ def load_bound_skills(
             continue
         out.append(RecallHit(name=nm, body=body, path=info["path"], score=1.0,
                              manifest=fm.raw or {}, sig=info.get("sig", ""),
-                             result_reuse=fm.result_reuse or "dynamic"))
+                             result_reuse=fm.result_reuse or "dynamic",
+                             guidance=split_body_guidance(body)[1]))
     return out
 
 
@@ -234,6 +309,7 @@ def recall(
                 manifest=c["raw"],
                 sig=c.get("sig", ""),
                 result_reuse=c.get("result_reuse", "dynamic"),
+                guidance=split_body_guidance(c["body"])[1],
             )
             best_key = key
 
@@ -248,4 +324,5 @@ def recall(
     return best
 
 
-__all__ = ["RecallHit", "recall", "load_bound_skills"]
+__all__ = ["RecallHit", "recall", "load_bound_skills",
+           "split_body_guidance", "compose_rerun_context"]

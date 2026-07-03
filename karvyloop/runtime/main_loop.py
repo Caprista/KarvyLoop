@@ -206,6 +206,10 @@ class MainLoop:
         self._atom_quality_judge = None
         # docs/40 §6 丙 跨-run 经验蒸馏裁判(更慢):同步 callable(对比材料)→ lesson_text;None=不蒸。
         self._lesson_judge = None
+        # Trace-conditioned 技能修订(crystallize.revision,慢侧):同步 callable(材料)→ 修订原文;
+        # None=不修(0 回归)。大改 H2A 卡出口 = proposal_sink(接 PendingProposalRegistry.register)。
+        self._revision_judge = None
+        self._revision_proposal_sink = None
 
     def set_atom_quality_judge(self, judge) -> None:
         """接线 atom 质量裁判(慢侧;§14.2)。judge: (intent, output_text) → (quality, critique)。"""
@@ -259,6 +263,31 @@ class MainLoop:
         except Exception:
             logger.warning("[lessons] 跨-run 蒸馏失败;维护继续", exc_info=True)
             return 0
+
+    def set_revision_judge(self, judge) -> None:
+        """接线技能修订裁判(慢侧)。judge: (材料:现方法+失败 Trace 摘要) → LLM 原文。"""
+        self._revision_judge = judge
+
+    def set_revision_proposal_sink(self, sink) -> None:
+        """接线大改 H2A 卡出口。sink: callable(Proposal)(通常 = PendingProposalRegistry.register)。"""
+        self._revision_proposal_sink = sink
+
+    def revision_review(self) -> dict:
+        """**慢侧**(daily_poll 节奏)技能修订一轮:客观信号差的技能(从 Trace 派生的满意度)→
+        LLM 修 Steps;小改自动落 + SKILL.md Changelog 审计,大改出 revise_skill H2A 卡。
+        无注入裁判 → {"revised":0,"proposed":0}(0 回归)。drive 热路径零改动(跑评分离)。"""
+        judge = self._revision_judge
+        if judge is None:
+            return {"revised": 0, "proposed": 0}
+        from karvyloop.crystallize import revise_underperforming
+        try:
+            return revise_underperforming(
+                self.trace, self.satisfaction, judge=judge,
+                skills_dir=self.skills_dir, skill_index=self.skill_index,
+                proposal_sink=self._revision_proposal_sink, clock=self._clock)
+        except Exception:
+            logger.warning("[revision] 技能修订失败;维护继续", exc_info=True)
+            return {"revised": 0, "proposed": 0}
 
     def set_trace_funnel(self, funnel: object) -> None:
         """接线漏斗原文层(entry 把 IntentAnalyst 共享的 TraceIndex 接进来,9.3c)。"""
@@ -384,11 +413,10 @@ class MainLoop:
         #        绝不照搬旧结论" → 既省 token 又不吐 stale。
         brain_intent = intent
         if guided_skill is not None and (guided_skill.body or "").strip():
-            brain_intent = (
-                "[已有方法 —— 上次解决同类任务证明可行的打法,照它的步骤做,"
-                "但**必须用当前输入重新得出结果,绝不照搬旧结论/旧数据**]\n"
-                f"{guided_skill.body.strip()}\n\n[当前任务]\n{intent}"
-            )
+            # 修订闭环"读"半条腿:方法段与 improve.py 写回的偏好/纠正段**分开标注**
+            # (纠正段必须遵守、冲突时优先),否则 `## Remove` 混在"上次的打法"里被照抄。
+            from karvyloop.crystallize import compose_rerun_context
+            brain_intent = compose_rerun_context(guided_skill, intent)
         self.stats.slow_brain_runs += 1
         if ctx is not None and _slow_brain_accepts_ctx(slow_brain):
             text, run = slow_brain(brain_intent, ctx=ctx)
@@ -428,6 +456,30 @@ class MainLoop:
         if fresh or guided_skill is not None:
             if guided_skill is not None:
                 result.sig = guided_skill.sig   # 归属到被复用的那个技能
+                # 修订闭环数据源:技能重跑的客观信号也必须进 Trace(此前这条早返回把
+                # eval_fact 漏掉了 → 技能重跑成败/满意度从不入账,Trace 驱动修订无米下锅)。
+                # sig 归属被复用的技能;埋在既有 eval_fact 写入路径上,评价器零改动即可消费。
+                if guided_skill.sig:
+                    try:
+                        from karvyloop.crystallize import EVAL_FACT_KIND
+                        self.trace.append(TraceEntry(
+                            task_id=result.task_id, kind=EVAL_FACT_KIND,
+                            payload={
+                                "sig": guided_skill.sig,
+                                "success": bool(run.success),
+                                "verified": bool(run.success and not ctx_dependent
+                                                 and run.tool_calls),
+                                "steps": len(run.tool_calls),
+                                "trace_ref": run.trace_ref,
+                                "skill_name": guided_skill.name,
+                                "skill_rerun": True,   # 标记:这是召回命中后的重跑(审计/修订可辨)
+                            },
+                            ts=now, source="main_loop",
+                        ))
+                        self._last_task_id = result.task_id
+                    except Exception:
+                        logger.warning("[atom_critic] 写技能重跑 eval_fact 失败(sig=%s);drive 继续",
+                                       guided_skill.sig[:8], exc_info=True)
             self._emit_funnel_event({
                 "kind": "intent", "intent": intent, "brain": "slow",
                 "success": run.success, "crystallized": False,

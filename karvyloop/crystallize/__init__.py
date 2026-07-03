@@ -60,7 +60,20 @@ from .lessons import (
     validate_lessons,
 )
 from .observe import observe
-from .recall import RecallHit, recall
+from .recall import RecallHit, compose_rerun_context, recall, split_body_guidance
+from .revision import (
+    CHANGELOG_HEADER,
+    KIND_REVISE_SKILL,
+    REVISION_KIND,
+    REVISION_SYSTEM,
+    apply_revision_proposal,
+    build_revision_proposal,
+    is_major_revision,
+    judge_revision,
+    needs_revision,
+    parse_revision,
+    revise_underperforming,
+)
 from .signature import compute_signature, same_signature
 from .skill_index import IndexEntry, SkillIndex
 from .store import USAGE_DEBOUNCE_SEC, InMemoryUsageStore, UsageStore
@@ -106,7 +119,11 @@ __all__ = [
     "MIN_RECENCY_FACTOR", "EVICT_SCORE", "STALE_DAYS",
     "HIGH_FREQ", "GENERALIZED_DISTINCT",
     # recall
-    "RecallHit", "recall",
+    "RecallHit", "recall", "split_body_guidance", "compose_rerun_context",
+    # revision (Trace-conditioned 技能修订:客观信号差 → LLM 修 Steps;小改自动落+Changelog,大改 H2A 卡)
+    "REVISION_KIND", "KIND_REVISE_SKILL", "REVISION_SYSTEM", "CHANGELOG_HEADER",
+    "parse_revision", "judge_revision", "needs_revision", "is_major_revision",
+    "revise_underperforming", "build_revision_proposal", "apply_revision_proposal",
     # skill_index (M1.5: sig↔name 双向索引)
     "SkillIndex", "IndexEntry",
     # auto_suggest (M1.5: 旁路建议)
