@@ -125,12 +125,25 @@ def test_unknown_proposal_id_returns_none():
 
 
 def test_missing_handler_no_sideeffect():
+    """闭环审计断③通用防御:ACCEPT 无 handler → 诚实回执 + **卡留在待决表**(不吞卡)。"""
     reg = PendingProposalRegistry()
     p = _mk(kind=KIND_RESOLVE_CONFLICT)
     reg.register(p)
     res = reg.decide(p.proposal_id, "ACCEPT", handlers={})  # 无 handler
     assert not res.ok and "no handler" in res.detail
-    assert reg.get(p.proposal_id) is None  # 仍离开(已处置)
+    assert "无法自动处置" in res.detail          # 回执明说,不是内部错误串
+    assert reg.get(p.proposal_id) is p           # 卡保留待决(此前被吞 = 断③)
+
+
+def test_missing_handler_reject_defer_unchanged():
+    """收紧只对 ACCEPT:REJECT 仍丢弃、DEFER 仍挂起(向后兼容)。"""
+    reg = PendingProposalRegistry()
+    p = _mk(kind="future_unknown_kind")
+    reg.register(p)
+    assert reg.decide(p.proposal_id, "DEFER", handlers={}).ok
+    assert reg.get(p.proposal_id) is p
+    assert reg.decide(p.proposal_id, "REJECT", handlers={}).ok
+    assert reg.get(p.proposal_id) is None
 
 
 # ---- AC8: handler 异常不外溢 ----

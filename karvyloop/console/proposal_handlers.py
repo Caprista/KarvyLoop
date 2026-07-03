@@ -7,8 +7,9 @@
   9.4 签名修复后可靠,不在此强行结晶绕过门槛)。
 - `route_to_role`(9.4-门2 执行-role 流):ACCEPT → 让目标业务 role 在其域 value.md 治理下
   执行需求(in-process drive;P1 走真 A2A envelope/inbox)。
-- `run_task` / `set_preference` / `resolve_conflict` 处置:兑现子系统未建 → 不注册,
-  registry 默认诚实"no handler"回执,不假装(docs/30 §5.1)。
+- `resolve_conflict`(闭环审计断③补):ACCEPT → 决议入台账+Trace(域内自动禁用未建,回执如实说)。
+- `set_preference`:兑现子系统未建 → 不注册;registry 对无 handler 的 ACCEPT 诚实回执
+  且**卡保留待决**,不假装(docs/30 §5.1 + 断③通用防御)。
 """
 from __future__ import annotations
 
@@ -16,11 +17,12 @@ import logging
 from functools import partial
 from typing import Any, Callable, Dict, Tuple
 
+from karvyloop.cognition.weekly_digest import KIND_WEEKLY_DIGEST
 from karvyloop.crystallize.revision import KIND_REVISE_SKILL, apply_revision_proposal
 from karvyloop.karvy.proposal_registry import (
     KIND_CONFIRM_DECISION_PREF, KIND_CONFIRM_RESULT, KIND_CRYSTALLIZE_SKILL,
     KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
-    KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
+    KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
     KIND_FS_ACCESS,
 )
 
@@ -528,6 +530,71 @@ def _merge_knowledge_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     return handler
 
 
+def _resolve_conflict_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """resolve_conflict ACCEPT 兑现(闭环审计断③:此前无 handler,ACCEPT 空转还吞卡)。
+
+    卡的语义(docs/31 SC-5):某全局技能疑似违反某业务域的治理规则(域入职时异步检出),
+    ACCEPT = 你确认"这个冲突要当回事"。诚实边界:域内自动禁用技能的执行机制(域颗粒度的
+    召回过滤)还没建 —— 运行时不拦是 Hardy 拍过的设计(SC-1),所以这里**不假装禁用**;
+    真实落地 = ①决议入台账落盘(~/.karvyloop/conflict_resolutions.json,跨重启可查)
+    ②落 Trace(kind=conflict_resolution,评价/周报数据源)③回执如实交代边界。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        import json as _json
+        import time as _time
+        from pathlib import Path as _P
+        st = getattr(app, "state", None)   # app=None(测试)也不炸,走默认路径
+        payload = getattr(proposal, "payload", None) or {}
+        skill = (payload.get("skill_name") or "").strip() or "?"
+        domain_id = (payload.get("domain_id") or "").strip() or "?"
+        rule = (payload.get("rule") or "").strip()
+        entry = {
+            "ts": _time.time(),
+            "proposal_id": getattr(proposal, "proposal_id", ""),
+            "role": payload.get("role", ""), "domain_id": domain_id,
+            "skill_name": skill, "skill_sig": payload.get("skill_sig", ""),
+            "rule_type": payload.get("rule_type", ""), "rule": rule,
+            "reason": payload.get("reason", ""), "decision": "ACCEPT",
+        }
+        # ① 决议台账(跨重启的处置记录;路径可注入供测试)
+        try:
+            ledger = getattr(st, "conflict_resolutions_path", None) \
+                or (_P.home() / ".karvyloop" / "conflict_resolutions.json")
+            ledger = _P(ledger)
+            ledger.parent.mkdir(parents=True, exist_ok=True)
+            existing = []
+            if ledger.exists():
+                try:
+                    existing = _json.loads(ledger.read_text(encoding="utf-8")) or []
+                except Exception:
+                    existing = []
+            existing.append(entry)
+            ledger.write_text(_json.dumps(existing, ensure_ascii=False, indent=2),
+                              encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"[resolve_conflict] 决议台账落盘失败: {e}")
+            return False, f"处置记录落盘失败:{e}"
+        # ② Trace 审计(所有评价的唯一数据源;无 trace 时不阻断,台账已落)
+        try:
+            trace = getattr(getattr(st, "main_loop", None), "trace", None)
+            if trace is not None:
+                from karvyloop.cognition.trace import TraceEntry
+                trace.append(TraceEntry(
+                    task_id=entry["proposal_id"], kind="conflict_resolution",
+                    payload=entry, agent=entry["role"], source="resolve_conflict"))
+        except Exception as e:
+            logger.warning(f"[resolve_conflict] 落 Trace 失败(台账已落,不阻断): {e}")
+        return True, (f"已记录处置:技能「{skill}」与域「{domain_id}」的规则冲突(决议入台账+运行记录)。"
+                      f"域内自动禁用还未接线 —— 在该域用到此技能时请自行留意,或直接删改该技能")
+    return handler
+
+
+def _weekly_digest_handler(proposal) -> Tuple[bool, str]:
+    """周报卡 ACCEPT = 收下归档(卡本身就是"已读即价值";此前无 handler → ACCEPT 回执是
+    内部错误串 no handler,前端 i18n 却承诺"接受=归档" —— 对齐承诺,一行知悉回执)。"""
+    return True, "已归档本周周报 —— 数字都来自你真实的运行记录"
+
+
 def _fs_access_handler(proposal: Any) -> Tuple[bool, str]:
     """KIND_FS_ACCESS 兑现:你 ACCEPT 了授权卡 → 授权台账落一条(能力总览可见、可撤)。
 
@@ -570,6 +637,8 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_CONFIRM_RESULT: _confirm_result_handler(app),
         KIND_MERGE_KNOWLEDGE: _merge_knowledge_handler(app),
         KIND_FS_ACCESS: _fs_access_handler,
+        KIND_RESOLVE_CONFLICT: _resolve_conflict_handler(app),   # 断③:处置决议真落地(台账+Trace)
+        KIND_WEEKLY_DIGEST: _weekly_digest_handler,              # ACCEPT=归档(对齐前端承诺)
     }
 
 

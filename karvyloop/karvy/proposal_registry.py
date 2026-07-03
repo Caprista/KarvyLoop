@@ -69,6 +69,10 @@ ALL_KINDS = (
 # Handler 协议:(proposal) -> (ok: bool, detail: str)。注入式,默认无副作用。
 ProposalHandler = Callable[[object], "tuple[bool, str]"]
 
+# ACCEPT 但无 handler 的诚实回执(断③):静态整句(前端 BACKEND_ZH_EN 表可整句译)。
+# 保留 "no handler" 英文标记 = 既有测试/日志 grep 的稳定锚。
+NO_HANDLER_KEEP_DETAIL = "此类卡当前无法自动处置(no handler),已保留在待决列表 — 等处置能力接上,或 REJECT 关闭它"
+
 
 @dataclasses.dataclass(frozen=True)
 class DispatchResult:
@@ -255,6 +259,14 @@ class PendingProposalRegistry:
             return DispatchResult(proposal_id, getattr(proposal, "kind", ""), True, "deferred")
 
         if decision == "ACCEPT":
+            kind = getattr(proposal, "kind", "")
+            # 闭环审计断③通用防御:没有兑现 handler 的 kind,ACCEPT 绝不"啥也不干还吃卡"——
+            # 卡**留在待决表**(等对应处置能力接上,或用户 REJECT 关闭),回执诚实说明。
+            # 只收紧 ACCEPT:REJECT(丢弃)/DEFER(挂起)语义不变;有 handler 但兑现失败
+            # 仍按原语义移除(已真处置过,失败信息在 detail 里)。
+            if (handlers or {}).get(kind) is None:
+                logger.info("[proposal] ACCEPT %s kind=%s 无 handler → 卡保留待决,不吞", proposal_id, kind)
+                return DispatchResult(proposal_id, kind, False, NO_HANDLER_KEEP_DETAIL)
             eff = apply_payload_edits(proposal, edits) if edits else proposal
             result = dispatch_accept(eff, handlers or {})
             self.remove(proposal_id)  # 兑现后离开待决议表
@@ -704,6 +716,7 @@ def proposal_for_infeasible_report(
 __all__ = [
     "PendingProposalRegistry",
     "AGING_THRESHOLD_S",
+    "NO_HANDLER_KEEP_DETAIL",
     "DispatchResult",
     "dispatch_accept",
     "apply_payload_edits",
