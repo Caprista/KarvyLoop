@@ -3,7 +3,7 @@
  * 拖拽落 localStorage(karvyloop_desk.v1)、⚖ notifyH2A 置顶+闪烁、resetLayout 清存档。
  * jsdom 无真布局(rect 全 0)→ clamp 走"无布局环境不 clamp"分支,坐标语义仍可断言。
  */
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -54,15 +54,56 @@ const HTML = `<!doctype html><body>
 </div>
 </body>`;
 
-const dom = new JSDOM(HTML, { url: "http://localhost/", pretendToBeVisual: true });
+// jsdom 无 canvas 2d 是已知环境事实(pixelpet 走"不画只跑状态机"分支),吞掉这条噪音
+const vc = new VirtualConsole();
+vc.on("jsdomError", (e) => {
+  if (!/Not implemented/.test(String(e && e.message))) console.error(e);
+});
+const dom = new JSDOM(HTML, { url: "http://localhost/", pretendToBeVisual: true, virtualConsole: vc });
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 globalThis.localStorage = dom.window.localStorage;
 globalThis.MutationObserver = dom.window.MutationObserver;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+globalThis.location = dom.window.location;
+
+// ---- P1.5 灵魂的环境 stub:契约形状 mock(/api/roles/presence 冻结形状)+ 只读 WS ----
+const NOW_S = Math.floor(Date.now() / 1000);
+let presenceOk = true;
+globalThis.fetch = async (url) => {
+  const u = String(url);
+  if (u.indexOf("/api/roles/presence") >= 0) {
+    if (!presenceOk) return { ok: false, status: 404, json: async () => ({}) };
+    return { ok: true, json: async () => ({ roles: [
+      { role_id: "karvy", display: "小卡", domain_id: "l0", status: "busy", running: 1,
+        last_activity_ts: NOW_S, last_task: { id: "t0", intent: "hold the desk" } },
+      { role_id: "researcher", display: "研究员", domain_id: "d1", status: "busy", running: 1,
+        last_activity_ts: NOW_S, last_task: { id: "t2", intent: "整理季度周报" } },
+      { role_id: "resty", display: "老王", domain_id: "d1", status: "idle", running: 0,
+        last_activity_ts: NOW_S - 7200, last_task: { id: "t3", intent: "老活" } },
+      { role_id: "idler", display: "新人", domain_id: "d1", status: "idle", running: 0,
+        last_activity_ts: null, last_task: null },
+    ] }) };
+  }
+  if (u.indexOf("/api/tasks") >= 0) {
+    return { ok: true, json: async () => ({ tasks: [
+      { id: "wf1", who: "⚙ 工作流", role: "group", status: "running", intent: "发布 v2" },
+    ] }) };
+  }
+  return { ok: false, status: 404, json: async () => ({}) };
+};
+class FakeWS {
+  constructor(url) { this.url = url; this.readyState = 1; FakeWS.instances.push(this); }
+  close() { this.readyState = 3; if (this.onclose) this.onclose(); }
+  send() { throw new Error("灵魂 WS 是只读的,不许 send"); }
+}
+FakeWS.instances = [];
+globalThis.WebSocket = FakeWS;
 
 const here = dirname(fileURLToPath(import.meta.url));
+// 先装真 i18n bundle(P1.5 工位 tip 要 {intent} 插值,别拿裸 key 断言)
+(0, eval)(readFileSync(resolve(here, "../../static/i18n.js"), "utf8"));
 const code = readFileSync(resolve(here, "../../static/desktop.js"), "utf8");
 (0, eval)(code);
 
@@ -116,10 +157,12 @@ document.getElementById("chat-open").dispatchEvent(new dom.window.Event("click",
 assert.ok(!document.getElementById("chat-modal").classList.contains("desk-min"), "点卡皮巴拉应恢复聊天窗");
 
 // ---- ⚖ notifyH2A:置顶 + note-alert 闪烁 + 卡皮巴拉冒泡 ----
+// P1.5:小卡先叼卡走过去(2s 兜底),**到位后**才闪 —— 有小演员就等它到
 const zBefore = parseInt(decide.style.zIndex, 10);
 KD.notifyH2A();
-assert.ok(decide.classList.contains("note-alert"), "新决策卡到达应给 ⚖ 便签加 note-alert");
 assert.ok(parseInt(decide.style.zIndex, 10) > zBefore, "notifyH2A 应把 ⚖ 便签置顶(z 递增)");
+if (document.getElementById("desk-carry-actor")) await new Promise((r) => setTimeout(r, 2150));
+assert.ok(decide.classList.contains("note-alert"), "新决策卡到达应给 ⚖ 便签加 note-alert");
 assert.ok(!document.getElementById("karvy-bubble").classList.contains("hidden"), "notifyH2A 应让卡皮巴拉冒泡");
 
 // ---- mgmt 窗:开(modal.ts 摘 hidden)→ ─ 最小化 → 观察者不许秒撤 → 重开恢复 ----
@@ -154,4 +197,108 @@ assert.equal(chatPanel.style.transform, "", "leave 后聊天窗 transform 未清
 assert.ok(!document.getElementById("chat-modal").classList.contains("desk-min"), "leave 后 desk-min 未清");
 assert.equal(decide.querySelector(".col-head").getAttribute("tabindex"), null, "leave 后 tabindex 未清");
 
+// ============================================================================
+// P1.5 灵魂(docs/53):工位区 / 像素小卡 / 叼卡 / 署名便签 / 工作证 —— 全走真实事件形状
+// ============================================================================
+const KD2 = dom.window.KarvyDesktop;
+assert.ok(KD2._soul && typeof KD2._soul.handle === "function", "KarvyDesktop._soul 测试接缝缺失");
+document.body.classList.add("desk-view");
+KD2.enter();
+await new Promise((r) => setTimeout(r, 30));   // 等 presence/tasks 两个 stub fetch 落地
+
+// ---- 工位区:小卡不占工位(常驻右下),无活动记录的角色不摆空工位 ----
+const bar = document.getElementById("desk-presence");
+assert.ok(bar && !bar.classList.contains("hidden"), "presence API 通着,工位栏应显示");
+assert.equal(KD2._soul.stationCount(), 2, "工位数应 =2(researcher busy + resty 有活动;karvy/idler 不占)");
+assert.equal(document.querySelectorAll(".desk-station").length, 2);
+const stR = document.querySelector('.desk-station[data-role-id="researcher"]');
+assert.ok(stR, "researcher 工位缺失");
+assert.ok(stR.classList.contains("is-busy"), "busy 角色工位灯应亮(is-busy)");
+assert.equal(stR.dataset.petState, "working", "busy → working 动画(真实状态驱动)");
+assert.ok((stR.getAttribute("data-tip") || "").indexOf("整理季度周报") >= 0, "hover 应出「正在:<intent>」");
+assert.ok(stR.querySelector("canvas.pixelpet-canvas"), "工位应有像素卡皮巴拉 canvas");
+assert.equal(stR.querySelector(".station-name").textContent, "研究员");
+const stZ = document.querySelector('.desk-station[data-role-id="resty"]');
+assert.equal(stZ.dataset.petState, "sleep", "2 小时没活动 → sleep(真实状态,不是 flavor)");
+assert.ok(!document.querySelector('.desk-station[data-role-id="karvy"]'), "小卡不该占工位(它常驻右下)");
+assert.ok(!document.querySelector('.desk-station[data-role-id="idler"]'), "零活动记录的角色不摆空工位");
+// 小卡像素替身住进 .karvy-fab
+assert.ok(document.querySelector("#chat-open #desk-karvy-pixel"), "小卡像素替身应住进右下 fab");
+
+// ---- 只读 WS:进场即连;role_presence 增量翻状态 ----
+assert.ok(FakeWS.instances.length >= 1, "desk 进场应自开一条只读 WS");
+const soulWs = FakeWS.instances[FakeWS.instances.length - 1];
+soulWs.onmessage({ data: JSON.stringify({ type: "role_presence", payload: {
+  role_id: "researcher", display: "研究员", domain_id: "d1", status: "idle", running: 0,
+  last_activity_ts: NOW_S, last_task: { id: "t2", intent: "整理季度周报" } } }) });
+assert.ok(!stR.classList.contains("is-busy"), "idle 增量应灭工位灯");
+assert.equal(stR.dataset.petState, "idle", "idle 增量 → idle 呼吸");
+
+// ---- 工作证摊桌(vignette ⑥ 最小版):进场种子 + task_step 打勾 ----
+const wc = document.querySelector('.desk-workcard[data-task-id="wf1"]');
+assert.ok(wc, "running 的 group 任务应在进场时摊开工作证");
+soulWs.onmessage({ data: JSON.stringify({ type: "task_step", payload: {
+  task_id: "wf1", step_id: "s1", display: "研究员", status: "done" } }) });
+const chip = wc.querySelector(".work-chip");
+assert.ok(chip && chip.classList.contains("done"), "步完成 → 名字牌打勾");
+assert.equal(chip.querySelector(".chip-mark").textContent, "✓");
+soulWs.onmessage({ data: JSON.stringify({ type: "task_step", payload: {
+  task_id: "wf1", step_id: "s2", display: "审稿人", status: "failed", error: "boom" } }) });
+assert.ok(wc.querySelectorAll(".work-chip.failed").length === 1, "步失败 → ✗ 名字牌");
+
+// ---- 署名便签(vignette ②):task_status done → 浮出;3 张上限旧的淡出 ----
+soulWs.onmessage({ data: JSON.stringify({ type: "task_status", payload: {
+  id: "wf1", who: "⚙ 工作流", role: "group", status: "done", intent: "发布 v2",
+  result: "v2 已发布,一切正常", finished: NOW_S } }) });
+let notes = document.querySelectorAll(".desk-signed-note");
+assert.equal(notes.length, 1, "done → 署名便签应浮出");
+assert.ok(notes[0].textContent.indexOf("⚙ 工作流") >= 0, "便签必须带署名(who)");
+assert.ok(notes[0].textContent.indexOf("v2 已发布") >= 0, "便签必须带结果摘要");
+assert.ok(wc.classList.contains("is-done"), "group 任务 done → 工作证转 is-done(随后收走)");
+for (let i = 0; i < 3; i++) {
+  soulWs.onmessage({ data: JSON.stringify({ type: "task_status", payload: {
+    id: "t" + (9 + i), who: "研究员", role: "researcher", status: "done",
+    intent: "活" + i, result: "结果" + i, finished: NOW_S } }) });
+}
+notes = document.querySelectorAll(".desk-signed-note:not(.is-fading)");
+assert.equal(notes.length, 3, "署名便签 3 张上限(旧的淡出)");
+
+// ---- 叼卡(vignette ③):notifyH2A → 小演员出现 → 到位后 ⚖ 闪 + 回窝 ----
+KD2.notifyH2A();
+const actor = document.getElementById("desk-carry-actor");
+assert.ok(actor, "h2a 到达应出现叼卡小演员(.desk-carry)");
+assert.ok(actor.querySelector("canvas"), "小演员应是像素 canvas");
+assert.ok(document.getElementById("desk-karvy-pixel").classList.contains("is-away"),
+  "叼卡途中常驻小卡应离席(is-away)");
+const decide2 = document.querySelector(".col-decide");
+assert.ok(!decide2.classList.contains("note-alert"), "便签闪应等小卡到位(jsdom 走 2s 兜底)");
+await new Promise((r) => setTimeout(r, 2150));   // jsdom 无 transitionend → 定时器兜底收尾
+assert.ok(!document.getElementById("desk-carry-actor"), "到位后小演员应撤掉");
+assert.ok(!document.getElementById("desk-karvy-pixel").classList.contains("is-away"), "小卡应回窝");
+assert.ok(decide2.classList.contains("note-alert"), "到位后 ⚖ 便签才闪(既有动画)");
+
+// ---- 拍板闭环:h2a_envelope → 小卡短暂开心帧(真实事件,不是随机卖萌)----
+soulWs.onmessage({ data: JSON.stringify({ type: "h2a_envelope", payload: { proposal_id: "p1" } }) });
+// (开心帧是 pixelpet 内部状态,持续 2.2s 自动回真实态;这里只验不炸、不阻塞)
+
+// ---- leave:灵魂层全清痕(老视图像素级不动的保险)----
+document.body.classList.remove("desk-view");
+KD2.leave();
+assert.ok(!document.getElementById("desk-karvy-pixel"), "leave 后像素替身应移除(PNG 回归)");
+assert.equal(document.querySelectorAll(".desk-station").length, 0, "leave 后工位应清空");
+assert.equal(document.querySelectorAll(".desk-signed-note").length, 0, "leave 后署名便签应清空");
+assert.equal(document.querySelectorAll(".desk-workcard").length, 0, "leave 后工作证应清空");
+assert.equal(soulWs.readyState, 3, "leave 后只读 WS 应关闭");
+
+// ---- presence API 不通(还没上线)→ 工位栏优雅隐藏,不空壳 ----
+presenceOk = false;
+document.body.classList.add("desk-view");
+KD2.enter();
+await new Promise((r) => setTimeout(r, 30));
+assert.ok(document.getElementById("desk-presence").classList.contains("hidden") ||
+  document.querySelectorAll(".desk-station").length === 0, "API 调不通应优雅隐藏工位栏");
+document.body.classList.remove("desk-view");
+KD2.leave();
+
 console.log("✓ desktop smoke OK — dock 12 入口同构 / enter定位+a11y / 拖拽落盘 / ✕最小化+卡皮巴拉恢复 / ⚖告警 / reset / leave清痕");
+console.log("✓ desk soul OK — 工位区(busy亮灯/idle呼吸/久静睡/无活动不摆) / 只读WS增量 / 工作证✓✗ / 署名便签3张cap / 叼卡→到位闪⚖→回窝 / leave全清 / API不通优雅隐藏");

@@ -305,13 +305,233 @@ body.desk-view #karvy-bubble {
 }
 
 /* ============================================================================
+   P1.5 灵魂(docs/53):像素工位区 / 像素小卡 / 署名便签 / 工作证摊桌
+   纪律:全部 body.desk-view 前缀(基座 display:none 例外,对老视图零影响);
+   状态类(is-busy/done/failed)只由真实事件驱动的 JS 加,CSS 不自作聪明。
+   ========================================================================= */
+.desk-presence { display: none; }
+body.desk-view .desk-presence {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  z-index: 209;              /* 与卡皮巴拉同层:内容(便签/窗口 220+)永远盖得住它 */
+  pointer-events: none;      /* 容器穿透,可点的只有工位/工作证本体 */
+}
+body.desk-view .desk-presence.hidden { display: none; }
+
+/* 像素画通用:nearest-neighbor 放大,保锐利 */
+body.desk-view .pixelpet-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* ---- 工位(原则二:干活亮灯,空闲呼吸,可旁观不打扰)---- */
+body.desk-view .desk-stations {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: auto;
+}
+body.desk-view .desk-station {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 8px 5px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: transform 120ms var(--ease-out);
+}
+body.desk-view .desk-station:hover { transform: translateY(-3px); }
+body.desk-view .desk-station:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+body.desk-view .desk-station .pixelpet-canvas { width: 72px; height: 54px; display: block; }
+body.desk-view .desk-station .station-name {
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  color: var(--text-dim);
+}
+/* 工位灯:busy = 真有任务在跑才亮(teal),不跑不亮 —— 没有一帧假戏 */
+body.desk-view .desk-station .station-light {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+body.desk-view .desk-station.is-busy { border-color: var(--teal-line); background: rgba(255, 255, 255, 0.85); }
+body.desk-view .desk-station.is-busy .station-light {
+  background: var(--teal);
+  box-shadow: 0 0 6px 1px var(--teal-soft), 0 0 0 3px var(--teal-soft);
+}
+body.desk-view .desk-station.is-busy .station-name { color: var(--teal-deep); font-weight: 600; }
+/* hover 气泡(复用 dock 的 data-tip 手法):正在:<intent> / 空闲 / 休息中 */
+body.desk-view .desk-station[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  background: var(--text-1);
+  color: #fff;
+  font-size: var(--fs-12);
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* ---- 小卡像素替身(右下常驻;PNG 在对话/看板视图原样保留)---- */
+#desk-karvy-pixel { display: none; }
+body.desk-view .karvy-fab img { display: none; }
+body.desk-view .karvy-fab #desk-karvy-pixel {
+  display: block;
+  width: 96px;
+  height: 72px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+body.desk-view .karvy-fab #desk-karvy-pixel.is-away { visibility: hidden; }  /* 起身叼卡去了 */
+
+/* ---- 叼卡走(vignette ③):固定层小演员,transform 位移 + sprite carry 帧 ---- */
+.desk-carry { display: none; }
+body.desk-view .desk-carry {
+  position: fixed;
+  display: block;
+  z-index: 9600;             /* 走在一切内容之上(它正在给你送东西) */
+  pointer-events: none;
+  will-change: transform;
+}
+body.desk-view .desk-carry canvas {
+  width: 80px;
+  height: 60px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+body.desk-view .desk-carry.is-walking { transition: transform 1.7s cubic-bezier(0.45, 0.08, 0.4, 1); }
+
+/* ---- 署名便签(vignette ②/原则一:桌上的东西是你的人放的)---- */
+.desk-signed-note { display: none; }
+body.desk-view .desk-signed-note {
+  position: absolute;
+  display: block;
+  width: 232px;
+  padding: 10px 12px 12px;
+  background: var(--note-yellow);
+  border: 1px solid var(--note-line);
+  border-radius: 8px;
+  box-shadow: 0 10px 22px rgba(142, 95, 60, 0.20);
+  transform: rotate(var(--note-tilt, 0deg));
+  cursor: pointer;
+  animation: desk-signed-in 320ms var(--ease-out);
+}
+body.desk-view .desk-signed-note.is-fading { opacity: 0; transition: opacity 420ms ease-out; }
+body.desk-view .desk-signed-note .signed-note-who {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-12);
+  font-weight: 700;
+  color: var(--accent-strong);
+  margin-bottom: 5px;
+}
+body.desk-view .desk-signed-note .signed-note-time {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+body.desk-view .desk-signed-note .signed-note-body {
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--text-1);
+  word-break: break-word;
+}
+body.desk-view .desk-signed-note[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 16px;
+  padding: 4px 9px;
+  border-radius: var(--r-sm);
+  background: var(--text-1);
+  color: #fff;
+  font-size: var(--fs-12);
+  pointer-events: none;
+}
+@keyframes desk-signed-in {
+  from { opacity: 0; transform: translateY(16px) rotate(var(--note-tilt, 0deg)); }
+  to { opacity: 1; transform: translateY(0) rotate(var(--note-tilt, 0deg)); }
+}
+
+/* ---- 工作证摊桌(vignette ⑥ 最小版):参与者名字牌 ✓/✗,真状态驱动 ---- */
+body.desk-view .desk-workcards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: auto;
+}
+body.desk-view .desk-workcards.hidden { display: none; }
+body.desk-view .desk-workcard {
+  padding: 6px 10px 7px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+body.desk-view .desk-workcard .workcard-title {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 4px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.desk-view .desk-workcard .workcard-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+body.desk-view .desk-workcard .work-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: var(--fs-12);
+  color: var(--text-dim);
+}
+body.desk-view .desk-workcard .work-chip.done { border-color: var(--teal-line); color: var(--teal-deep); }
+body.desk-view .desk-workcard .work-chip.failed { border-color: var(--rose-line); color: var(--rose-deep); }
+body.desk-view .desk-workcard.is-done { opacity: 0.65; }
+body.desk-view .desk-workcard.is-failed { border-color: var(--rose-line); box-shadow: 0 0 0 3px var(--rose-soft); }
+
+/* ============================================================================
    降级与动效对策
    ========================================================================= */
 /* ≤720px:桌面隐喻在手机上不存在 —— 切换器隐藏 🖥 选项(存量偏好由 app.js 降级 chat) */
 @media (max-width: 720px) {
   #view-opt-desk { display: none !important; }
 }
-/* prefers-reduced-motion:无位移动画;⚖ 提醒只变色不呼吸 */
+/* prefers-reduced-motion:无位移动画;⚖ 提醒只变色不呼吸;
+   灵魂层同罪同罚:便签不滑入、工位不浮动、叼卡不走(JS 侧也跳过,直接闪便签)、
+   sprite 帧轮换由 pixelpet 自身停(静止首帧)。 */
 @media (prefers-reduced-motion: reduce) {
   body.desk-view .desk-dock .dock-item,
   body.desk-view .desk-dock .dock-item:hover { transform: none; transition: none; }
@@ -320,4 +540,8 @@ body.desk-view #karvy-bubble {
     border-color: var(--rose);
     box-shadow: 0 0 0 4px var(--rose-soft), 0 10px 26px rgba(142, 95, 60, 0.16);
   }
+  body.desk-view .desk-signed-note { animation: none; }
+  body.desk-view .desk-station,
+  body.desk-view .desk-station:hover { transform: none; transition: none; }
+  body.desk-view .desk-carry.is-walking { transition: none; }
 }

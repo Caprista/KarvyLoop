@@ -13,7 +13,15 @@
  * 拖拽自写 pointer events(业界桌面隐喻常见做法:标题栏拖拽、点击聚焦置顶、
  * taskbar 指示),零新依赖;位置持久化 localStorage("karvyloop_desk.v1")。
  * 对外契约:window.KarvyDesktop = { enter, leave, notifyH2A, resetLayout }。
+ *
+ * P1.5 灵魂(docs/53):像素卡皮巴拉工位区 + 小卡壁炉化/叼卡 + 署名便签 + 工作证摊桌。
+ *   - 全部渲染只由真实事件驱动(task_status/task_step/role_presence/h2a_*),没有一帧假戏
+ *     (§0 红线);数据源 = GET /api/roles/presence(契约冻结,调不通则工位栏优雅隐藏)
+ *     + 本视图自开的一条**只读** WS(不动 app.js:desk 进场才连、离场即断、绝不发消息)。
+ *   - 像素形象来自 ./pixelpet(帧数据 + palette 换色 + 状态机)。
  */
+
+import * as PixelPet from "./pixelpet";
 
 interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
 
@@ -38,9 +46,9 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   };
   let _store: Store = { notes: {}, windows: {} };
 
-  function t(key: string): string {
+  function t(key: string, vars?: Record<string, unknown>): string {
     const i18n = (window as unknown as { KarvyI18n?: I18n }).KarvyI18n;
-    return i18n ? i18n.t(key) : key;
+    return i18n ? i18n.t(key, vars) : key;
   }
   function deskView(): boolean { return document.body.classList.contains("desk-view"); }
 
@@ -356,6 +364,434 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     applyPos(p, c.x, c.y);
   }
 
+  // ============================================================================
+  // P1.5 灵魂(docs/53):像素工位区 / 小卡壁炉化+叼卡 / 署名便签 / 工作证摊桌
+  // 红线:所有状态渲染只由真实事件驱动 —— busy=真有任务在跑,idle=真空闲,
+  // sleep=真的很久没活动;呼吸/眨眼是"在场"(pixelpet 内部),不是戏。
+  // ============================================================================
+
+  const SLEEP_AFTER_MS = 30 * 60 * 1000;   // 30 分钟无活动 → 趴下睡(真实状态,不是 flavor)
+  const NOTE_CAP = 3;                       // 桌上署名便签上限(旧的淡出)
+  const RESULT_CAP = 140;                   // 便签结果摘要截断
+
+  type PresenceRow = {
+    role_id: string; display: string; domain_id: string;
+    status: string; running: number;
+    last_activity_ts: number | null;
+    last_task: { id: string; intent: string } | null;
+  };
+
+  let _soulOn = false;
+  let _mascot: PixelPet.Pet | null = null;
+  let _mascotState = "idle";                // 小卡的"真实态"(carry/happy 是短插播,完了回这个)
+  let _mascotBusy = false;                  // carry/happy 播放中(播完恢复 _mascotState)
+  const _stations = new Map<string, { el: HTMLElement; pet: PixelPet.Pet }>();
+  const _signedNotes: HTMLElement[] = [];
+  const _workcards = new Map<string, { el: HTMLElement; chips: Map<string, HTMLElement> }>();
+  let _soulWs: WebSocket | null = null;
+  let _soulWsTimer = 0;
+  let _soulWsDelay = 2000;
+
+  function cockpitEl(): HTMLElement | null { return deskEl(); }
+
+  function reducedMotion(): boolean {
+    try {
+      return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    } catch { return false; }
+  }
+
+  // ---- DOM 骨架(幂等):工位栏(dock 上方左侧)+ 工作证条 + 小卡像素替身 ----
+  function ensureSoulDom(): void {
+    const desk = cockpitEl();
+    if (!desk) return;
+    if (!document.getElementById("desk-presence")) {
+      const bar = document.createElement("div");
+      bar.className = "desk-presence hidden";
+      bar.id = "desk-presence";
+      const cards = document.createElement("div");
+      cards.className = "desk-workcards hidden";
+      cards.id = "desk-workcards";
+      const stations = document.createElement("div");
+      stations.className = "desk-stations";
+      stations.id = "desk-stations";
+      bar.appendChild(cards);
+      bar.appendChild(stations);
+      desk.appendChild(bar);
+    }
+    // 小卡像素替身:住进右下 .karvy-fab(PNG 在对话/看板视图保留;desk 下 CSS 换成像素版)
+    const fab = document.getElementById("chat-open");
+    if (fab && !document.getElementById("desk-karvy-pixel")) {
+      const cv = document.createElement("canvas");
+      cv.id = "desk-karvy-pixel";
+      fab.appendChild(cv);
+    }
+  }
+
+  function ensureMascot(): void {
+    const cv = document.getElementById("desk-karvy-pixel") as HTMLCanvasElement | null;
+    if (!cv) return;
+    if (!_mascot) _mascot = PixelPet.createPet({ canvas: cv, accent: PixelPet.KARVY_ACCENT });
+  }
+
+  function setMascotReal(state: string): void {
+    _mascotState = state;
+    if (_mascot && !_mascotBusy) _mascot.setState(state);
+  }
+
+  // 拍板闭环(h2a_envelope 真实事件)→ 短暂开心帧(耳朵动),完了回真实态
+  function mascotHappy(): void {
+    if (!_mascot || _mascotBusy) return;
+    _mascotBusy = true;
+    _mascot.setState("happy");
+    setTimeout(() => {
+      _mascotBusy = false;
+      if (_mascot) _mascot.setState(_mascotState);
+    }, 2200);
+  }
+
+  // ---- 工位区:GET /api/roles/presence(契约冻结)+ WS role_presence 增量 ----
+  // API 没上线/调不通 → 工位栏优雅隐藏(别空壳);小卡行不占工位(它常驻右下,驱动替身状态)。
+  function stationVisible(row: PresenceRow): boolean {
+    return row.role_id !== "karvy" && (row.status === "busy" || !!row.last_activity_ts);
+  }
+
+  function petStateFor(row: PresenceRow): string {
+    if (row.status === "busy") return "working";
+    const ts = (row.last_activity_ts || 0) * 1000;
+    return ts && Date.now() - ts < SLEEP_AFTER_MS ? "idle" : "sleep";
+  }
+
+  function upsertStation(row: PresenceRow): void {
+    if (!row || !row.role_id) return;
+    if (row.role_id === "karvy") {           // 小卡的 presence 驱动右下替身(真实状态,不是戏)
+      setMascotReal(row.status === "busy" ? "working" : "idle");
+      return;
+    }
+    const wrap = document.getElementById("desk-stations");
+    const bar = document.getElementById("desk-presence");
+    if (!wrap || !bar) return;
+    if (!stationVisible(row)) {              // 没有活动记录的角色不摆空工位
+      const gone = _stations.get(row.role_id);
+      if (gone) { gone.pet.destroy(); gone.el.remove(); _stations.delete(row.role_id); }
+      if (!_stations.size) bar.classList.add("hidden");
+      return;
+    }
+    let st = _stations.get(row.role_id);
+    if (!st) {
+      const el = document.createElement("button");
+      el.className = "desk-station";
+      el.setAttribute("data-role-id", row.role_id);
+      const cv = document.createElement("canvas");
+      const light = document.createElement("span");
+      light.className = "station-light";
+      const name = document.createElement("span");
+      name.className = "station-name";
+      el.appendChild(cv);
+      el.appendChild(light);
+      el.appendChild(name);
+      wrap.appendChild(el);
+      const pet = PixelPet.createPet({ canvas: cv, accent: PixelPet.colorForRole(row.role_id) });
+      st = { el, pet };
+      _stations.set(row.role_id, st);
+      el.addEventListener("click", () => {
+        const lt = (el.dataset.taskId || "");
+        if (lt) jumpToTask(lt, el.dataset.taskIntent || "");
+        else restoreWin("chat");
+      });
+    }
+    const nameEl = st.el.querySelector(".station-name");
+    if (nameEl) nameEl.textContent = row.display || row.role_id;
+    st.el.setAttribute("aria-label", row.display || row.role_id);
+    const state = petStateFor(row);
+    st.pet.setState(state);
+    st.el.dataset.petState = state;                          // 可断言的真实状态(smoke/Playwright)
+    st.el.classList.toggle("is-busy", row.status === "busy");
+    st.el.dataset.taskId = (row.last_task && row.last_task.id) || "";
+    st.el.dataset.taskIntent = (row.last_task && row.last_task.intent) || "";
+    // hover 出"正在:<intent>"(busy);idle/sleep 老实说空闲/休息
+    const tip = row.status === "busy" && row.last_task
+      ? t("desk.presence_doing", { intent: row.last_task.intent })
+      : state === "sleep" ? t("desk.presence_rest") : t("desk.presence_idle");
+    st.el.setAttribute("data-tip", tip);
+    bar.classList.remove("hidden");
+  }
+
+  async function refreshPresence(): Promise<void> {
+    const bar = document.getElementById("desk-presence");
+    if (typeof fetch !== "function") { if (bar) bar.classList.add("hidden"); return; }
+    try {
+      const r = await fetch("/api/roles/presence");
+      if (!r.ok) throw new Error(String(r.status));
+      const data = await r.json();
+      const rows: PresenceRow[] = (data && data.roles) || [];
+      const seen = new Set<string>();
+      rows.forEach((row) => { seen.add(row.role_id); upsertStation(row); });
+      _stations.forEach((st, rid) => {       // 快照里没有的工位撤掉(角色删了)
+        if (!seen.has(rid)) { st.pet.destroy(); st.el.remove(); _stations.delete(rid); }
+      });
+      if (bar) bar.classList.toggle("hidden", !_stations.size && !_workcards.size);
+    } catch {
+      // API 没上线/挂了 → 优雅隐藏,不空壳、不报错刷屏;WS 增量到了会再开
+      if (bar && !_stations.size && !_workcards.size) bar.classList.add("hidden");
+    }
+  }
+
+  // ---- 跳去该任务:复用 task_board 的跳聊天逻辑(点看板同一张卡 = 同一条 openTaskDetail 路径)----
+  function jumpToTask(_taskId: string, intent: string): void {
+    const probe = (intent || "").slice(0, 64);
+    const cards = document.querySelectorAll<HTMLElement>("#busy-list .task-card, #task-board .task-card");
+    for (let i = 0; i < cards.length; i++) {
+      const it = cards[i].querySelector(".task-intent");
+      if (it && probe && (it.textContent || "").indexOf(probe) === 0) { cards[i].click(); return; }
+    }
+    // 看板里找不到(被 cap 挤掉了)→ 退而把 📥/🔄 便签置顶闪一下(fail-soft,不装作跳成功)
+    const note = document.querySelector<HTMLElement>(".cockpit-grid .col-intel");
+    if (note) {
+      if (note.classList.contains("col-collapsed")) note.classList.remove("col-collapsed");
+      focusEl(note);
+      note.classList.remove("note-alert");
+      void note.offsetWidth;
+      note.classList.add("note-alert");
+      setTimeout(() => note.classList.remove("note-alert"), 2600);
+    }
+  }
+
+  // ---- 署名便签(vignette ②):task_status done → 桌面浮出一张手写感小便签 ----
+  function spawnSignedNote(tk: { id?: string; who?: string; intent?: string; result?: string; finished?: number }): void {
+    const desk = cockpitEl();
+    if (!desk || !deskView()) return;
+    const note = document.createElement("div");
+    note.className = "desk-signed-note";
+    const tilt = (Math.random() * 4 - 2).toFixed(2);        // 手放上去的 ±2° 随机旋转
+    note.style.setProperty("--note-tilt", tilt + "deg");
+    const who = document.createElement("div");
+    who.className = "signed-note-who";
+    who.textContent = "✍ " + (tk.who || "?");
+    const when = document.createElement("span");
+    when.className = "signed-note-time";
+    try {
+      when.textContent = new Date((tk.finished || Date.now() / 1000) * 1000)
+        .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch { when.textContent = ""; }
+    who.appendChild(when);
+    const body = document.createElement("div");
+    body.className = "signed-note-body";
+    const text = (tk.result || tk.intent || "").trim();
+    body.textContent = text.length > RESULT_CAP ? text.slice(0, RESULT_CAP) + "…" : text;
+    note.appendChild(who);
+    note.appendChild(body);
+    note.setAttribute("data-tip", t("desk.note_open"));
+    note.addEventListener("click", () => jumpToTask(tk.id || "", tk.intent || ""));
+    // 落点:桌面中带(避开右侧便签列/右下小卡),按张数往下错落 + 少许随机
+    const d = desk.getBoundingClientRect();
+    const baseX = d.width > 0 ? Math.max(24, d.width * 0.32) : 120;
+    const baseY = d.height > 0 ? Math.max(24, d.height * 0.18) : 80;
+    note.style.left = Math.round(baseX + Math.random() * 40 + _signedNotes.length * 26) + "px";
+    note.style.top = Math.round(baseY + _signedNotes.length * 64 + Math.random() * 18) + "px";
+    note.style.zIndex = String(++_zTop);
+    desk.appendChild(note);
+    _signedNotes.push(note);
+    while (_signedNotes.length > NOTE_CAP) {                 // 3 张上限,最旧的淡出
+      const old = _signedNotes.shift();
+      if (old) { old.classList.add("is-fading"); setTimeout(() => old.remove(), 450); }
+    }
+  }
+
+  // ---- 工作证摊桌(vignette ⑥ 最小版):workflow/圆桌 running → 参与者名字牌 ⏳/✓ ----
+  function ensureWorkcard(tk: { id?: string; who?: string; intent?: string }): void {
+    const id = tk.id || "";
+    if (!id || _workcards.has(id)) return;
+    const box = document.getElementById("desk-workcards");
+    const bar = document.getElementById("desk-presence");
+    if (!box || !bar) return;
+    const el = document.createElement("div");
+    el.className = "desk-workcard";
+    el.setAttribute("data-task-id", id);
+    const title = document.createElement("div");
+    title.className = "workcard-title";
+    title.textContent = (tk.who || "⚙") + " · " + ((tk.intent || "").slice(0, 42) || t("desk.workcard_wip"));
+    const chips = document.createElement("div");
+    chips.className = "workcard-chips";
+    el.appendChild(title);
+    el.appendChild(chips);
+    el.addEventListener("click", () => jumpToTask(id, tk.intent || ""));
+    box.appendChild(el);
+    box.classList.remove("hidden");
+    bar.classList.remove("hidden");
+    _workcards.set(id, { el, chips: new Map() });
+  }
+
+  function workcardStep(st: { task_id?: string; display?: string; status?: string }): void {
+    const wc = _workcards.get(st.task_id || "");
+    if (!wc) return;                                         // 只跟画在桌上的群任务(最小版)
+    const key = st.display || "?";
+    let chip = wc.chips.get(key);
+    if (!chip) {
+      chip = document.createElement("span");
+      chip.className = "work-chip";
+      const mark = document.createElement("span");
+      mark.className = "chip-mark";
+      const nm = document.createElement("span");
+      nm.className = "chip-name";
+      nm.textContent = key;
+      chip.appendChild(mark);
+      chip.appendChild(nm);
+      wc.chips.set(key, chip);
+      wc.el.querySelector(".workcard-chips")!.appendChild(chip);
+    }
+    const failed = st.status === "failed";
+    chip.classList.toggle("failed", failed);
+    chip.classList.toggle("done", !failed);
+    const mk = chip.querySelector(".chip-mark");
+    if (mk) mk.textContent = failed ? "✗" : "✓";
+  }
+
+  function finishWorkcard(taskId: string, ok: boolean): void {
+    const wc = _workcards.get(taskId);
+    if (!wc) return;
+    wc.el.classList.add(ok ? "is-done" : "is-failed");
+    setTimeout(() => {
+      wc.el.remove();
+      _workcards.delete(taskId);
+      const box = document.getElementById("desk-workcards");
+      if (box && !_workcards.size) box.classList.add("hidden");
+      const bar = document.getElementById("desk-presence");
+      if (bar && !_stations.size && !_workcards.size) bar.classList.add("hidden");
+    }, ok ? 6000 : 9000);                                    // 全勾完/挂了停留一会儿再收
+  }
+
+  // ---- 灵魂事件消费(自开只读 WS 的 onmessage;也是 smoke/Playwright 的测试接缝)----
+  function soulHandle(msg: { type?: string; payload?: unknown }): void {
+    if (!msg || !deskView()) return;
+    const p = (msg.payload || {}) as Record<string, unknown>;
+    if (msg.type === "role_presence") {
+      upsertStation(p as unknown as PresenceRow);
+    } else if (msg.type === "task_status") {
+      const tk = p as { id?: string; status?: string; role?: string; who?: string; intent?: string; result?: string; finished?: number };
+      if (tk.status === "running" && tk.role === "group") ensureWorkcard(tk);
+      else if (tk.status === "done") { spawnSignedNote(tk); finishWorkcard(tk.id || "", true); }
+      else if (tk.status === "error") finishWorkcard(tk.id || "", false);
+    } else if (msg.type === "task_step") {
+      workcardStep(p as { task_id?: string; display?: string; status?: string });
+    } else if (msg.type === "h2a_envelope") {
+      mascotHappy();                                          // 拍板闭环 → 小卡短暂开心(真实事件)
+    }
+    // h2a_proposal 不在这处理:app.js 收到会调 notifyH2A(叼卡);双处理 = 播两遍
+  }
+
+  // 只读 WS:desk 进场才连、离场即断;绝不 send(所有写路径仍走 app.js 那条连接)
+  function soulConnect(): void {
+    if (typeof WebSocket !== "function") return;
+    if (_soulWs && (_soulWs.readyState === 0 || _soulWs.readyState === 1)) return;
+    try {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(proto + "//" + location.host + "/ws");
+      _soulWs = ws;
+      ws.onmessage = (ev: MessageEvent) => {
+        try { soulHandle(JSON.parse(String(ev.data))); } catch { /* 非 JSON 心跳等,忽略 */ }
+      };
+      ws.onopen = () => { _soulWsDelay = 2000; };
+      ws.onerror = () => { /* onclose 统一处理重连;这里只吞 error 事件 */ };
+      ws.onclose = () => {
+        _soulWs = null;
+        if (_soulOn) {                                        // 还在桌面 → 退避重连
+          _soulWsTimer = window.setTimeout(soulConnect, _soulWsDelay);
+          _soulWsDelay = Math.min(_soulWsDelay * 2, 30000);
+        }
+      };
+    } catch { _soulWs = null; }
+  }
+
+  // 进场种子:正在跑的 workflow/圆桌把工作证先摊上(步级勾随 WS 到)
+  async function seedWorkcards(): Promise<void> {
+    if (typeof fetch !== "function") return;
+    try {
+      const r = await fetch("/api/tasks");
+      if (!r.ok) return;
+      const data = await r.json();
+      ((data && data.tasks) || []).forEach((tk: { id?: string; who?: string; intent?: string; status?: string; role?: string }) => {
+        if (tk && tk.status === "running" && tk.role === "group") ensureWorkcard(tk);
+      });
+    } catch { /* 看板 API 不通 → 没有种子,不吵 */ }
+  }
+
+  function enterSoul(): void {
+    _soulOn = true;
+    ensureSoulDom();
+    ensureMascot();
+    void refreshPresence();
+    void seedWorkcards();
+    soulConnect();
+  }
+
+  function leaveSoul(): void {
+    _soulOn = false;
+    if (_soulWsTimer) { clearTimeout(_soulWsTimer); _soulWsTimer = 0; }
+    if (_soulWs) { try { _soulWs.close(); } catch { /* */ } _soulWs = null; }
+    if (_mascot) { _mascot.destroy(); _mascot = null; }
+    _mascotBusy = false;
+    _mascotState = "idle";
+    _stations.forEach((st) => { st.pet.destroy(); st.el.remove(); });
+    _stations.clear();
+    _workcards.forEach((wc) => wc.el.remove());
+    _workcards.clear();
+    _signedNotes.forEach((n) => n.remove());
+    _signedNotes.length = 0;
+    const cv = document.getElementById("desk-karvy-pixel");
+    if (cv) cv.remove();                                      // 老视图零痕迹:像素替身只住 desk
+    const bar = document.getElementById("desk-presence");
+    if (bar) bar.classList.add("hidden");
+    const box = document.getElementById("desk-workcards");
+    if (box) box.classList.add("hidden");
+    const actor = document.getElementById("desk-carry-actor");
+    if (actor) actor.remove();
+  }
+
+  // ---- 叼卡动画(vignette ③):h2a_proposal 到达 → 小卡叼白卡从右下走向 ⚖ 便签 ----
+  // 返回 true = 播了(到位后由调用方闪便签);false = 跳过(降级直接闪)。
+  let _carrying = false;
+  function playCarry(note: HTMLElement, onArrive: () => void): boolean {
+    if (_carrying || reducedMotion() || !_mascot) return false;
+    const fab = document.getElementById("chat-open");
+    const cv = document.getElementById("desk-karvy-pixel");
+    if (!fab || !cv) return false;
+    const from = fab.getBoundingClientRect();
+    const to = note.getBoundingClientRect();
+    _carrying = true;
+    _mascotBusy = true;
+    const actor = document.createElement("div");
+    actor.id = "desk-carry-actor";
+    actor.className = "desk-carry";
+    const acv = document.createElement("canvas");
+    actor.appendChild(acv);
+    const pet = PixelPet.createPet({ canvas: acv, accent: PixelPet.KARVY_ACCENT });
+    pet.setState("carry");
+    actor.style.left = Math.round(from.left) + "px";
+    actor.style.top = Math.round(from.top) + "px";
+    document.body.appendChild(actor);
+    cv.classList.add("is-away");                             // 常驻位的小卡"起身走了"
+    const dx = Math.round(to.left + Math.max(0, to.width / 2) - from.left);
+    const dy = Math.round(to.top + Math.max(0, to.height) - 40 - from.top);
+    const cleanup = () => {
+      pet.destroy();
+      actor.remove();
+      cv.classList.remove("is-away");
+      _carrying = false;
+      _mascotBusy = false;
+      if (_mascot) _mascot.setState(_mascotState);           // 回窝,回真实态
+      onArrive();                                            // 到位 → 便签闪(既有动画)
+    };
+    // 强制 reflow 后再上 transform,transition 才生效;jsdom 无真布局 → 定时器兜底
+    void actor.offsetWidth;
+    actor.classList.add("is-walking");
+    actor.style.transform = "translate3d(" + dx + "px," + dy + "px,0)";
+    let done = false;
+    const finish = () => { if (!done) { done = true; cleanup(); } };
+    actor.addEventListener("transitionend", finish);
+    setTimeout(finish, 2000);
+    return true;
+  }
+
   // ---- ⚖便签的"常驻可瞟"保险(docs/51 §4.2;docs/46 铁律的桌面版)----
   function notifyH2A(): void {
     if (!deskView()) return;
@@ -368,17 +804,21 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     focusEl(note);                                           // 置顶(便签与窗口同一 z 空间)
     const pos = clampPos(note, getPos(note).x, getPos(note).y);
     applyPos(note, pos.x, pos.y);                            // 永远保证在视口内
-    note.classList.remove("note-alert");
-    void note.offsetWidth;                                   // 重触发动画
-    note.classList.add("note-alert");
-    setTimeout(() => note.classList.remove("note-alert"), 2800);
-    const bubble = document.getElementById("karvy-bubble");  // 卡皮巴拉冒泡
-    if (bubble) {
-      const dots = bubble.querySelector(".karvy-bubble-dots");
-      if (dots) dots.textContent = "⚖";
-      bubble.classList.remove("hidden");
-      setTimeout(() => bubble.classList.add("hidden"), 6000);
-    }
+    const flash = () => {
+      note.classList.remove("note-alert");
+      void note.offsetWidth;                                 // 重触发动画
+      note.classList.add("note-alert");
+      setTimeout(() => note.classList.remove("note-alert"), 2800);
+      const bubble = document.getElementById("karvy-bubble");  // 卡皮巴拉冒泡
+      if (bubble) {
+        const dots = bubble.querySelector(".karvy-bubble-dots");
+        if (dots) dots.textContent = "⚖";
+        bubble.classList.remove("hidden");
+        setTimeout(() => bubble.classList.add("hidden"), 6000);
+      }
+    };
+    // P1.5:先叼卡走过去,到位再闪;播不了(reduced-motion/无替身)→ 直接闪(0 回归)
+    if (!playCarry(note, flash)) flash();
   }
 
   // ---- 默认摆位:办公桌式铺开(Hardy 2026-07-03:堆一列=墙角,不是桌子)----
@@ -466,10 +906,12 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     const cx = document.getElementById("chat-modal-close");
     if (cx) { cx.setAttribute("title", t("desk.min")); cx.setAttribute("aria-label", t("desk.min")); }
     updateDockIndicators();
+    enterSoul();   // P1.5 灵魂:工位区 + 像素小卡 + 只读 WS(desk 进场才活)
   }
 
   function leave(): void {
     _entered = false;
+    leaveSoul();   // P1.5 灵魂:断 WS、销毁像素形象、清便签/工作证(老视图零痕迹)
     // 清干净全部内联痕迹:两个老视图(对话/看板)像素级不动
     noteEls().forEach((col) => { col.style.transform = ""; col.style.zIndex = ""; col.classList.remove("note-alert", "desk-focused"); });
     const cp = chatPanel(); if (cp) { cp.style.transform = ""; cp.classList.remove("desk-focused"); }
@@ -578,7 +1020,11 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   injectMgmtMin();
   observeOverlays();
 
-  const KarvyDesktop = { enter, leave, notifyH2A, resetLayout };
+  const KarvyDesktop = {
+    enter, leave, notifyH2A, resetLayout,
+    // P1.5 测试接缝(smoke/Playwright 喂真实事件形状,不开真 socket;生产路径 = soulConnect 的 onmessage)
+    _soul: { handle: soulHandle, refreshPresence, stationCount: () => _stations.size },
+  };
   (window as unknown as { KarvyDesktop: typeof KarvyDesktop }).KarvyDesktop = KarvyDesktop;
 })();
 

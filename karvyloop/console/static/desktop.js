@@ -1,5 +1,297 @@
 (function() {
   "use strict";
+  const WIDTH = 32;
+  const HEIGHT = 24;
+  const BASE_COLORS = {
+    B: "#b98a5e",
+    S: "#9c6f47",
+    O: "#6b4a2f",
+    M: "#d7b58c",
+    D: "#3a2b1f",
+    W: "#fffdf5",
+    G: "#cfe8ff",
+    Z: "#8fa8c0"
+  };
+  function shade(hex, f) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+    if (!m) return "#777777";
+    const n = parseInt(m[1], 16);
+    const r = Math.max(0, Math.min(255, Math.round((n >> 16 & 255) * f)));
+    const g = Math.max(0, Math.min(255, Math.round((n >> 8 & 255) * f)));
+    const b = Math.max(0, Math.min(255, Math.round((n & 255) * f)));
+    return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1);
+  }
+  function buildPalette(accent) {
+    const p = {};
+    Object.keys(BASE_COLORS).forEach((k) => {
+      p[k] = BASE_COLORS[k];
+    });
+    p["A"] = /^#?[0-9a-f]{6}$/i.test(accent || "") ? accent[0] === "#" ? accent : "#" + accent : "#8fc7e8";
+    p["a"] = shade(p["A"], 0.72);
+    return p;
+  }
+  const KARVY_ACCENT = "#8fc7e8";
+  const ROLE_ACCENTS = [
+    "#e07a5f",
+    "#8e7cc3",
+    "#6a994e",
+    "#d4a373",
+    "#457b9d",
+    "#bc6c25",
+    "#c76b8e",
+    "#5f9ea0"
+  ];
+  function colorForRole(roleId) {
+    if (!roleId || roleId === "karvy") return KARVY_ACCENT;
+    let h = 0;
+    for (let i = 0; i < roleId.length; i++) h = (h << 5) - h + roleId.charCodeAt(i) | 0;
+    return ROLE_ACCENTS[Math.abs(h) % ROLE_ACCENTS.length];
+  }
+  const BASE = [
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    ".....OO....OO...................",
+    "....OSSO..OSSO..................",
+    "...OBBBBBBBBBBOO................",
+    "..OBBBBBBBBBBBBBOOOOOOOOO.......",
+    ".ODDMBBBBBBBBBBBBBBBBBBBBOOO....",
+    ".ODDMBBBBDDBBBBBBBBBBBBBBBBOO...",
+    ".OMMMBBBBBBBBBBBBBBBBBBBBBBBO...",
+    ".ODMMBBBBBBBBBBBBBBBBBBBBBBBO...",
+    ".OMMMBBBBBAAAAAABBBBBBBBBBBBO...",
+    "..OBBBBBBBaAAAAaBBBBBBBBBBBBO...",
+    "..OBBBBBBBBAAAaBBBBBBBBBBBBBO...",
+    "...OBBBBBBBAAaBBBBBBBBBBBBBO....",
+    "...OBBBBBBBAAaBBBBBBBBBBBBBO....",
+    "...OBBBBBBBaaBBSBBBBBBBBBBBO....",
+    "...OBSBBBBBBBBSSBBBBBBBBBSBO....",
+    "...OBSSBBBBBBSSSBBBBBBBBSSO.....",
+    "....OBBBBBBBBBBBBBBBBBBBBO......",
+    "......OBBO.........OBBO.........",
+    "......OBBO.........OBBO.........",
+    "................................"
+  ];
+  function norm(rows) {
+    const out = [];
+    for (let y = 0; y < HEIGHT; y++) {
+      let r = rows[y] || "";
+      if (r.length < WIDTH) r = r + ".".repeat(WIDTH - r.length);
+      out.push(r.slice(0, WIDTH));
+    }
+    return out;
+  }
+  function clone(rows) {
+    return rows.slice();
+  }
+  function put(rows, x, y, ch) {
+    if (x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) return;
+    rows[y] = rows[y].slice(0, x) + ch + rows[y].slice(x + 1);
+  }
+  function putRun(rows, x, y, run) {
+    for (let i = 0; i < run.length; i++) put(rows, x + i, y, run[i]);
+  }
+  function sag(rows, x0, x1, yMax) {
+    for (let y = yMax; y >= 1; y--) {
+      for (let x = x0; x <= x1; x++) {
+        const above = rows[y - 1][x];
+        put(rows, x, y, above);
+      }
+    }
+    for (let x = x0; x <= x1; x++) put(rows, x, 0, ".");
+  }
+  function buildFrames() {
+    const base = norm(BASE);
+    const idleB = clone(base);
+    sag(idleB, 15, 29, 20);
+    const blink = clone(base);
+    putRun(blink, 9, 9, "BB");
+    putRun(blink, 9, 10, "DD");
+    function laptop(rows, glowRows) {
+      const r = clone(rows);
+      for (let y = 13; y <= 19; y++) putRun(r, 0, y, "DDG");
+      glowRows.forEach((y) => put(r, 3, y, "G"));
+      putRun(r, 0, 20, "DDDDDDDD");
+      return r;
+    }
+    const workA = laptop(base, [14, 16, 18]);
+    putRun(workA, 5, 19, "OBO");
+    const workB = laptop(base, [15, 17]);
+    putRun(workB, 5, 18, "OBO");
+    const workC = laptop(base, [14, 15, 16, 17, 18]);
+    putRun(workC, 7, 19, "OBO");
+    function withCard(rows) {
+      const r = clone(rows);
+      putRun(r, 0, 10, "DDDDD");
+      for (let y = 11; y <= 15; y++) putRun(r, 0, y, "DWWWD");
+      putRun(r, 0, 16, "DDDDD");
+      return r;
+    }
+    const carryA = withCard(base);
+    const carryB = withCard(base);
+    putRun(carryB, 6, 21, "....");
+    putRun(carryB, 6, 22, "....");
+    putRun(carryB, 4, 21, "OBO");
+    putRun(carryB, 4, 22, "OBO");
+    putRun(carryB, 19, 21, "....");
+    putRun(carryB, 19, 22, "....");
+    putRun(carryB, 22, 21, "OBO");
+    putRun(carryB, 22, 22, "OBO");
+    const sleepBase = clone(blink);
+    sag(sleepBase, 2, 29, 20);
+    const sleepA = clone(sleepBase);
+    putRun(sleepA, 25, 2, "ZZZ");
+    put(sleepA, 26, 3, "Z");
+    putRun(sleepA, 25, 4, "ZZZ");
+    const sleepZ = clone(sleepBase);
+    putRun(sleepZ, 22, 5, "ZZ");
+    putRun(sleepZ, 22, 6, "ZZ");
+    const happyA = clone(base);
+    happyA[4] = "....OO......OO..................";
+    happyA[5] = "...OSSO....OSSO.................";
+    putRun(happyA, 2, 11, "DD");
+    const happyB = clone(base);
+    putRun(happyB, 2, 11, "DD");
+    return {
+      idle: [base, idleB],
+      blink: [blink],
+      working: [workA, workB, workC],
+      carry: [carryA, carryB],
+      sleep: [sleepA, sleepZ],
+      happy: [happyA, happyB]
+    };
+  }
+  const FRAMES = buildFrames();
+  const STATES = ["idle", "working", "carry", "sleep", "happy"];
+  function validateFrames() {
+    const errs = [];
+    const legal = new Set(Object.keys(BASE_COLORS).concat(["A", "a", "."]));
+    Object.keys(FRAMES).forEach((state) => {
+      FRAMES[state].forEach((frame, fi) => {
+        if (frame.length !== HEIGHT) errs.push(`${state}[${fi}]: ${frame.length} rows (want ${HEIGHT})`);
+        frame.forEach((row, y) => {
+          if (row.length !== WIDTH) errs.push(`${state}[${fi}] row${y}: ${row.length} cols (want ${WIDTH})`);
+          for (let x = 0; x < row.length; x++) {
+            if (!legal.has(row[x])) errs.push(`${state}[${fi}] (${x},${y}): bad char "${row[x]}"`);
+          }
+        });
+      });
+    });
+    return errs;
+  }
+  const TICK_MS = {
+    idle: 900,
+    working: 280,
+    carry: 300,
+    sleep: 1200,
+    happy: 260
+  };
+  const BLINK_MIN_GAP_MS = 4e3;
+  const BLINK_CHANCE = 0.3;
+  function drawFrame(ctx, frame, palette) {
+    ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    for (let y = 0; y < frame.length; y++) {
+      const row = frame[y];
+      for (let x = 0; x < row.length; x++) {
+        const ch = row[x];
+        if (ch === ".") continue;
+        ctx.fillStyle = palette[ch] || "#f0f";
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+  function createPet(opts) {
+    const canvas = opts.canvas;
+    canvas.width = WIDTH;
+    canvas.height = HEIGHT;
+    canvas.classList.add("pixelpet-canvas");
+    let ctx = null;
+    try {
+      ctx = canvas.getContext("2d");
+    } catch {
+      ctx = null;
+    }
+    if (ctx) ctx.imageSmoothingEnabled = false;
+    const palette = buildPalette(opts.accent || KARVY_ACCENT);
+    let state = "idle";
+    let frameIdx = 0;
+    let timer = null;
+    let lastBlink = 0;
+    let destroyed = false;
+    function reducedMotion() {
+      try {
+        return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      } catch {
+        return false;
+      }
+    }
+    function currentFrame() {
+      const frames = FRAMES[state];
+      return frames[frameIdx % frames.length];
+    }
+    function render(frame) {
+      if (ctx) drawFrame(ctx, frame || currentFrame(), palette);
+    }
+    function tick() {
+      frameIdx = (frameIdx + 1) % FRAMES[state].length;
+      if (state === "idle" && Date.now() - lastBlink > BLINK_MIN_GAP_MS && Math.random() < BLINK_CHANCE) {
+        lastBlink = Date.now();
+        render(FRAMES.blink[0]);
+        return;
+      }
+      render();
+    }
+    function schedule() {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+      if (reducedMotion()) {
+        render(FRAMES[state][0]);
+        return;
+      }
+      timer = setInterval(tick, TICK_MS[state]);
+    }
+    function setState(s) {
+      if (destroyed) return false;
+      if (STATES.indexOf(s) < 0) return false;
+      if (s === state) return true;
+      state = s;
+      frameIdx = 0;
+      render();
+      schedule();
+      return true;
+    }
+    render();
+    schedule();
+    return {
+      setState,
+      state: () => state,
+      render: () => render(),
+      destroy: () => {
+        destroyed = true;
+        if (timer !== null) {
+          clearInterval(timer);
+          timer = null;
+        }
+      }
+    };
+  }
+  const KarvyPixelPet = {
+    createPet,
+    validateFrames,
+    buildPalette,
+    colorForRole,
+    STATES,
+    FRAMES,
+    WIDTH,
+    HEIGHT,
+    KARVY_ACCENT
+  };
+  if (typeof window !== "undefined") {
+    window.KarvyPixelPet = KarvyPixelPet;
+  }
   (function() {
     const LS_KEY = "karvyloop_desk.v1";
     const BASE_Z = 220;
@@ -11,9 +303,9 @@
     let _wired = false;
     let _suppressClick = null;
     let _store = { notes: {}, windows: {} };
-    function t(key) {
+    function t(key, vars) {
       const i18n = window.KarvyI18n;
-      return i18n ? i18n.t(key) : key;
+      return i18n ? i18n.t(key, vars) : key;
     }
     function deskView() {
       return document.body.classList.contains("desk-view");
@@ -354,6 +646,433 @@
       const c = clampPos(p, x, y);
       applyPos(p, c.x, c.y);
     }
+    const SLEEP_AFTER_MS = 30 * 60 * 1e3;
+    const NOTE_CAP = 3;
+    const RESULT_CAP = 140;
+    let _soulOn = false;
+    let _mascot = null;
+    let _mascotState = "idle";
+    let _mascotBusy = false;
+    const _stations = /* @__PURE__ */ new Map();
+    const _signedNotes = [];
+    const _workcards = /* @__PURE__ */ new Map();
+    let _soulWs = null;
+    let _soulWsTimer = 0;
+    let _soulWsDelay = 2e3;
+    function cockpitEl() {
+      return deskEl();
+    }
+    function reducedMotion() {
+      try {
+        return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      } catch {
+        return false;
+      }
+    }
+    function ensureSoulDom() {
+      const desk = cockpitEl();
+      if (!desk) return;
+      if (!document.getElementById("desk-presence")) {
+        const bar = document.createElement("div");
+        bar.className = "desk-presence hidden";
+        bar.id = "desk-presence";
+        const cards = document.createElement("div");
+        cards.className = "desk-workcards hidden";
+        cards.id = "desk-workcards";
+        const stations = document.createElement("div");
+        stations.className = "desk-stations";
+        stations.id = "desk-stations";
+        bar.appendChild(cards);
+        bar.appendChild(stations);
+        desk.appendChild(bar);
+      }
+      const fab = document.getElementById("chat-open");
+      if (fab && !document.getElementById("desk-karvy-pixel")) {
+        const cv = document.createElement("canvas");
+        cv.id = "desk-karvy-pixel";
+        fab.appendChild(cv);
+      }
+    }
+    function ensureMascot() {
+      const cv = document.getElementById("desk-karvy-pixel");
+      if (!cv) return;
+      if (!_mascot) _mascot = createPet({ canvas: cv, accent: KARVY_ACCENT });
+    }
+    function setMascotReal(state) {
+      _mascotState = state;
+      if (_mascot && !_mascotBusy) _mascot.setState(state);
+    }
+    function mascotHappy() {
+      if (!_mascot || _mascotBusy) return;
+      _mascotBusy = true;
+      _mascot.setState("happy");
+      setTimeout(() => {
+        _mascotBusy = false;
+        if (_mascot) _mascot.setState(_mascotState);
+      }, 2200);
+    }
+    function stationVisible(row) {
+      return row.role_id !== "karvy" && (row.status === "busy" || !!row.last_activity_ts);
+    }
+    function petStateFor(row) {
+      if (row.status === "busy") return "working";
+      const ts = (row.last_activity_ts || 0) * 1e3;
+      return ts && Date.now() - ts < SLEEP_AFTER_MS ? "idle" : "sleep";
+    }
+    function upsertStation(row) {
+      if (!row || !row.role_id) return;
+      if (row.role_id === "karvy") {
+        setMascotReal(row.status === "busy" ? "working" : "idle");
+        return;
+      }
+      const wrap = document.getElementById("desk-stations");
+      const bar = document.getElementById("desk-presence");
+      if (!wrap || !bar) return;
+      if (!stationVisible(row)) {
+        const gone = _stations.get(row.role_id);
+        if (gone) {
+          gone.pet.destroy();
+          gone.el.remove();
+          _stations.delete(row.role_id);
+        }
+        if (!_stations.size) bar.classList.add("hidden");
+        return;
+      }
+      let st = _stations.get(row.role_id);
+      if (!st) {
+        const el = document.createElement("button");
+        el.className = "desk-station";
+        el.setAttribute("data-role-id", row.role_id);
+        const cv = document.createElement("canvas");
+        const light = document.createElement("span");
+        light.className = "station-light";
+        const name = document.createElement("span");
+        name.className = "station-name";
+        el.appendChild(cv);
+        el.appendChild(light);
+        el.appendChild(name);
+        wrap.appendChild(el);
+        const pet = createPet({ canvas: cv, accent: colorForRole(row.role_id) });
+        st = { el, pet };
+        _stations.set(row.role_id, st);
+        el.addEventListener("click", () => {
+          const lt = el.dataset.taskId || "";
+          if (lt) jumpToTask(lt, el.dataset.taskIntent || "");
+          else restoreWin("chat");
+        });
+      }
+      const nameEl = st.el.querySelector(".station-name");
+      if (nameEl) nameEl.textContent = row.display || row.role_id;
+      st.el.setAttribute("aria-label", row.display || row.role_id);
+      const state = petStateFor(row);
+      st.pet.setState(state);
+      st.el.dataset.petState = state;
+      st.el.classList.toggle("is-busy", row.status === "busy");
+      st.el.dataset.taskId = row.last_task && row.last_task.id || "";
+      st.el.dataset.taskIntent = row.last_task && row.last_task.intent || "";
+      const tip = row.status === "busy" && row.last_task ? t("desk.presence_doing", { intent: row.last_task.intent }) : state === "sleep" ? t("desk.presence_rest") : t("desk.presence_idle");
+      st.el.setAttribute("data-tip", tip);
+      bar.classList.remove("hidden");
+    }
+    async function refreshPresence() {
+      const bar = document.getElementById("desk-presence");
+      if (typeof fetch !== "function") {
+        if (bar) bar.classList.add("hidden");
+        return;
+      }
+      try {
+        const r = await fetch("/api/roles/presence");
+        if (!r.ok) throw new Error(String(r.status));
+        const data = await r.json();
+        const rows = data && data.roles || [];
+        const seen = /* @__PURE__ */ new Set();
+        rows.forEach((row) => {
+          seen.add(row.role_id);
+          upsertStation(row);
+        });
+        _stations.forEach((st, rid) => {
+          if (!seen.has(rid)) {
+            st.pet.destroy();
+            st.el.remove();
+            _stations.delete(rid);
+          }
+        });
+        if (bar) bar.classList.toggle("hidden", !_stations.size && !_workcards.size);
+      } catch {
+        if (bar && !_stations.size && !_workcards.size) bar.classList.add("hidden");
+      }
+    }
+    function jumpToTask(_taskId, intent) {
+      const probe = (intent || "").slice(0, 64);
+      const cards = document.querySelectorAll("#busy-list .task-card, #task-board .task-card");
+      for (let i = 0; i < cards.length; i++) {
+        const it = cards[i].querySelector(".task-intent");
+        if (it && probe && (it.textContent || "").indexOf(probe) === 0) {
+          cards[i].click();
+          return;
+        }
+      }
+      const note = document.querySelector(".cockpit-grid .col-intel");
+      if (note) {
+        if (note.classList.contains("col-collapsed")) note.classList.remove("col-collapsed");
+        focusEl(note);
+        note.classList.remove("note-alert");
+        void note.offsetWidth;
+        note.classList.add("note-alert");
+        setTimeout(() => note.classList.remove("note-alert"), 2600);
+      }
+    }
+    function spawnSignedNote(tk) {
+      const desk = cockpitEl();
+      if (!desk || !deskView()) return;
+      const note = document.createElement("div");
+      note.className = "desk-signed-note";
+      const tilt = (Math.random() * 4 - 2).toFixed(2);
+      note.style.setProperty("--note-tilt", tilt + "deg");
+      const who = document.createElement("div");
+      who.className = "signed-note-who";
+      who.textContent = "✍ " + (tk.who || "?");
+      const when = document.createElement("span");
+      when.className = "signed-note-time";
+      try {
+        when.textContent = new Date((tk.finished || Date.now() / 1e3) * 1e3).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } catch {
+        when.textContent = "";
+      }
+      who.appendChild(when);
+      const body = document.createElement("div");
+      body.className = "signed-note-body";
+      const text = (tk.result || tk.intent || "").trim();
+      body.textContent = text.length > RESULT_CAP ? text.slice(0, RESULT_CAP) + "…" : text;
+      note.appendChild(who);
+      note.appendChild(body);
+      note.setAttribute("data-tip", t("desk.note_open"));
+      note.addEventListener("click", () => jumpToTask(tk.id || "", tk.intent || ""));
+      const d = desk.getBoundingClientRect();
+      const baseX = d.width > 0 ? Math.max(24, d.width * 0.32) : 120;
+      const baseY = d.height > 0 ? Math.max(24, d.height * 0.18) : 80;
+      note.style.left = Math.round(baseX + Math.random() * 40 + _signedNotes.length * 26) + "px";
+      note.style.top = Math.round(baseY + _signedNotes.length * 64 + Math.random() * 18) + "px";
+      note.style.zIndex = String(++_zTop);
+      desk.appendChild(note);
+      _signedNotes.push(note);
+      while (_signedNotes.length > NOTE_CAP) {
+        const old = _signedNotes.shift();
+        if (old) {
+          old.classList.add("is-fading");
+          setTimeout(() => old.remove(), 450);
+        }
+      }
+    }
+    function ensureWorkcard(tk) {
+      const id = tk.id || "";
+      if (!id || _workcards.has(id)) return;
+      const box = document.getElementById("desk-workcards");
+      const bar = document.getElementById("desk-presence");
+      if (!box || !bar) return;
+      const el = document.createElement("div");
+      el.className = "desk-workcard";
+      el.setAttribute("data-task-id", id);
+      const title = document.createElement("div");
+      title.className = "workcard-title";
+      title.textContent = (tk.who || "⚙") + " · " + ((tk.intent || "").slice(0, 42) || t("desk.workcard_wip"));
+      const chips = document.createElement("div");
+      chips.className = "workcard-chips";
+      el.appendChild(title);
+      el.appendChild(chips);
+      el.addEventListener("click", () => jumpToTask(id, tk.intent || ""));
+      box.appendChild(el);
+      box.classList.remove("hidden");
+      bar.classList.remove("hidden");
+      _workcards.set(id, { el, chips: /* @__PURE__ */ new Map() });
+    }
+    function workcardStep(st) {
+      const wc = _workcards.get(st.task_id || "");
+      if (!wc) return;
+      const key = st.display || "?";
+      let chip = wc.chips.get(key);
+      if (!chip) {
+        chip = document.createElement("span");
+        chip.className = "work-chip";
+        const mark = document.createElement("span");
+        mark.className = "chip-mark";
+        const nm = document.createElement("span");
+        nm.className = "chip-name";
+        nm.textContent = key;
+        chip.appendChild(mark);
+        chip.appendChild(nm);
+        wc.chips.set(key, chip);
+        wc.el.querySelector(".workcard-chips").appendChild(chip);
+      }
+      const failed = st.status === "failed";
+      chip.classList.toggle("failed", failed);
+      chip.classList.toggle("done", !failed);
+      const mk = chip.querySelector(".chip-mark");
+      if (mk) mk.textContent = failed ? "✗" : "✓";
+    }
+    function finishWorkcard(taskId, ok) {
+      const wc = _workcards.get(taskId);
+      if (!wc) return;
+      wc.el.classList.add(ok ? "is-done" : "is-failed");
+      setTimeout(() => {
+        wc.el.remove();
+        _workcards.delete(taskId);
+        const box = document.getElementById("desk-workcards");
+        if (box && !_workcards.size) box.classList.add("hidden");
+        const bar = document.getElementById("desk-presence");
+        if (bar && !_stations.size && !_workcards.size) bar.classList.add("hidden");
+      }, ok ? 6e3 : 9e3);
+    }
+    function soulHandle(msg) {
+      if (!msg || !deskView()) return;
+      const p = msg.payload || {};
+      if (msg.type === "role_presence") {
+        upsertStation(p);
+      } else if (msg.type === "task_status") {
+        const tk = p;
+        if (tk.status === "running" && tk.role === "group") ensureWorkcard(tk);
+        else if (tk.status === "done") {
+          spawnSignedNote(tk);
+          finishWorkcard(tk.id || "", true);
+        } else if (tk.status === "error") finishWorkcard(tk.id || "", false);
+      } else if (msg.type === "task_step") {
+        workcardStep(p);
+      } else if (msg.type === "h2a_envelope") {
+        mascotHappy();
+      }
+    }
+    function soulConnect() {
+      if (typeof WebSocket !== "function") return;
+      if (_soulWs && (_soulWs.readyState === 0 || _soulWs.readyState === 1)) return;
+      try {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(proto + "//" + location.host + "/ws");
+        _soulWs = ws;
+        ws.onmessage = (ev) => {
+          try {
+            soulHandle(JSON.parse(String(ev.data)));
+          } catch {
+          }
+        };
+        ws.onopen = () => {
+          _soulWsDelay = 2e3;
+        };
+        ws.onerror = () => {
+        };
+        ws.onclose = () => {
+          _soulWs = null;
+          if (_soulOn) {
+            _soulWsTimer = window.setTimeout(soulConnect, _soulWsDelay);
+            _soulWsDelay = Math.min(_soulWsDelay * 2, 3e4);
+          }
+        };
+      } catch {
+        _soulWs = null;
+      }
+    }
+    async function seedWorkcards() {
+      if (typeof fetch !== "function") return;
+      try {
+        const r = await fetch("/api/tasks");
+        if (!r.ok) return;
+        const data = await r.json();
+        (data && data.tasks || []).forEach((tk) => {
+          if (tk && tk.status === "running" && tk.role === "group") ensureWorkcard(tk);
+        });
+      } catch {
+      }
+    }
+    function enterSoul() {
+      _soulOn = true;
+      ensureSoulDom();
+      ensureMascot();
+      void refreshPresence();
+      void seedWorkcards();
+      soulConnect();
+    }
+    function leaveSoul() {
+      _soulOn = false;
+      if (_soulWsTimer) {
+        clearTimeout(_soulWsTimer);
+        _soulWsTimer = 0;
+      }
+      if (_soulWs) {
+        try {
+          _soulWs.close();
+        } catch {
+        }
+        _soulWs = null;
+      }
+      if (_mascot) {
+        _mascot.destroy();
+        _mascot = null;
+      }
+      _mascotBusy = false;
+      _mascotState = "idle";
+      _stations.forEach((st) => {
+        st.pet.destroy();
+        st.el.remove();
+      });
+      _stations.clear();
+      _workcards.forEach((wc) => wc.el.remove());
+      _workcards.clear();
+      _signedNotes.forEach((n) => n.remove());
+      _signedNotes.length = 0;
+      const cv = document.getElementById("desk-karvy-pixel");
+      if (cv) cv.remove();
+      const bar = document.getElementById("desk-presence");
+      if (bar) bar.classList.add("hidden");
+      const box = document.getElementById("desk-workcards");
+      if (box) box.classList.add("hidden");
+      const actor = document.getElementById("desk-carry-actor");
+      if (actor) actor.remove();
+    }
+    let _carrying = false;
+    function playCarry(note, onArrive) {
+      if (_carrying || reducedMotion() || !_mascot) return false;
+      const fab = document.getElementById("chat-open");
+      const cv = document.getElementById("desk-karvy-pixel");
+      if (!fab || !cv) return false;
+      const from = fab.getBoundingClientRect();
+      const to = note.getBoundingClientRect();
+      _carrying = true;
+      _mascotBusy = true;
+      const actor = document.createElement("div");
+      actor.id = "desk-carry-actor";
+      actor.className = "desk-carry";
+      const acv = document.createElement("canvas");
+      actor.appendChild(acv);
+      const pet = createPet({ canvas: acv, accent: KARVY_ACCENT });
+      pet.setState("carry");
+      actor.style.left = Math.round(from.left) + "px";
+      actor.style.top = Math.round(from.top) + "px";
+      document.body.appendChild(actor);
+      cv.classList.add("is-away");
+      const dx = Math.round(to.left + Math.max(0, to.width / 2) - from.left);
+      const dy = Math.round(to.top + Math.max(0, to.height) - 40 - from.top);
+      const cleanup = () => {
+        pet.destroy();
+        actor.remove();
+        cv.classList.remove("is-away");
+        _carrying = false;
+        _mascotBusy = false;
+        if (_mascot) _mascot.setState(_mascotState);
+        onArrive();
+      };
+      void actor.offsetWidth;
+      actor.classList.add("is-walking");
+      actor.style.transform = "translate3d(" + dx + "px," + dy + "px,0)";
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          cleanup();
+        }
+      };
+      actor.addEventListener("transitionend", finish);
+      setTimeout(finish, 2e3);
+      return true;
+    }
     function notifyH2A() {
       if (!deskView()) return;
       const note = document.querySelector(".cockpit-grid .col-decide");
@@ -368,17 +1087,20 @@
       focusEl(note);
       const pos = clampPos(note, getPos(note).x, getPos(note).y);
       applyPos(note, pos.x, pos.y);
-      note.classList.remove("note-alert");
-      void note.offsetWidth;
-      note.classList.add("note-alert");
-      setTimeout(() => note.classList.remove("note-alert"), 2800);
-      const bubble = document.getElementById("karvy-bubble");
-      if (bubble) {
-        const dots = bubble.querySelector(".karvy-bubble-dots");
-        if (dots) dots.textContent = "⚖";
-        bubble.classList.remove("hidden");
-        setTimeout(() => bubble.classList.add("hidden"), 6e3);
-      }
+      const flash = () => {
+        note.classList.remove("note-alert");
+        void note.offsetWidth;
+        note.classList.add("note-alert");
+        setTimeout(() => note.classList.remove("note-alert"), 2800);
+        const bubble = document.getElementById("karvy-bubble");
+        if (bubble) {
+          const dots = bubble.querySelector(".karvy-bubble-dots");
+          if (dots) dots.textContent = "⚖";
+          bubble.classList.remove("hidden");
+          setTimeout(() => bubble.classList.add("hidden"), 6e3);
+        }
+      };
+      if (!playCarry(note, flash)) flash();
     }
     const KARVY_ZONE = { w: 220, h: 200 };
     function computeNoteDefault(col, idx, colBottoms) {
@@ -466,9 +1188,11 @@
         cx.setAttribute("aria-label", t("desk.min"));
       }
       updateDockIndicators();
+      enterSoul();
     }
     function leave() {
       _entered = false;
+      leaveSoul();
       noteEls().forEach((col) => {
         col.style.transform = "";
         col.style.zIndex = "";
@@ -603,7 +1327,14 @@
     renderDock();
     injectMgmtMin();
     observeOverlays();
-    const KarvyDesktop = { enter, leave, notifyH2A, resetLayout };
+    const KarvyDesktop = {
+      enter,
+      leave,
+      notifyH2A,
+      resetLayout,
+      // P1.5 测试接缝(smoke/Playwright 喂真实事件形状,不开真 socket;生产路径 = soulConnect 的 onmessage)
+      _soul: { handle: soulHandle, refreshPresence, stationCount: () => _stations.size }
+    };
     window.KarvyDesktop = KarvyDesktop;
   })();
 })();
