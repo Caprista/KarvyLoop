@@ -110,7 +110,8 @@ class OpenAICompletionsAdapter:
     api = "openai-completions"
 
     def build_request(self, messages, tools, model: ModelDefinition,
-                      provider: ProviderConfig, system: Optional[SystemPrompt]) -> dict:
+                      provider: ProviderConfig, system: Optional[SystemPrompt],
+                      extra_body: Optional[dict] = None) -> dict:
         body: dict = {
             "model": model.id.split("/", 1)[-1],
             "messages": messages_to_openai(messages, system),
@@ -119,12 +120,16 @@ class OpenAICompletionsAdapter:
             body["max_tokens"] = model.max_tokens
         if tools:
             body["tools"] = tools_to_openai(tools)
+        if extra_body:
+            # 推理强度等按配置注入的顶层参数(gateway/reasoning.py 产;如 reasoning_effort)
+            body.update(extra_body)
         return body
 
-    async def complete(self, messages, tools, model, provider, *, system=None) -> AsyncIterator[Event]:
+    async def complete(self, messages, tools, model, provider, *, system=None,
+                       extra_body: Optional[dict] = None) -> AsyncIterator[Event]:
         import httpx  # 延迟导入(测试走 mock 不需要)
 
-        body = self.build_request(messages, tools, model, provider, system)
+        body = self.build_request(messages, tools, model, provider, system, extra_body)
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}   # 流末带 usage
         key = provider.api_key or ""

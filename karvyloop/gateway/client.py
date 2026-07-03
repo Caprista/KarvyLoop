@@ -6,6 +6,7 @@ embed（embedding 槽位）。adapters 可注入（测试用 mock，不触网）
 
 from __future__ import annotations
 
+import logging
 from typing import AsyncIterator, Optional
 
 from .cost import CostMeter
@@ -13,8 +14,11 @@ from .events import Event, Usage
 from .providers import default_adapters
 from .providers.base import ProviderAdapter, UnsupportedApiError
 from .registry import ModelRegistry
+from .reasoning import reasoning_params
 from .resolve import ResolveScope, resolve_model
 from .system import SystemPrompt
+
+logger = logging.getLogger(__name__)
 
 
 class ContextCeilingError(Exception):
@@ -77,11 +81,19 @@ class GatewayClient:
         return resolve_model(scope, self.reg)
 
     async def complete(self, messages: list[dict], tools: list[dict],
-                       model_ref: str, *, system: Optional[SystemPrompt] = None
+                       model_ref: str, *, system: Optional[SystemPrompt] = None,
+                       reasoning: Optional[str] = None
                        ) -> AsyncIterator[Event]:
+        """reasoning(碎碎念⑩,推理强度):fast|balanced|deep;None = 继承全局
+        (config `agents.defaults.reasoning`,没配 = 不注入,零回归)。传 "" = 本次显式关。
+        档位怎么落参见 gateway/reasoning.py(配置驱动 + api 方言内置映射;
+        不支持的模型/方言优雅忽略 + debug 日志,绝不发坏请求)。"""
         m = self.reg.get(model_ref)
         prov = self.reg.provider_of(model_ref)
         adapter = self._adapter(m.api)
+        # 推理强度落参(只改请求体;Usage/记账路径一字不动 —— 咽喉纪律)
+        level = reasoning if reasoning is not None else getattr(self.reg, "default_reasoning", "")
+        extra_body = reasoning_params(level, m) if level else {}
         # 确定性超限地板(唯一咽喉):任何直连 LLM 调用(含跳过 govern() 的 4 处治理缺口 ——
         # 导入拆解/模糊调度/ops/圆桌 goal)在这里兜底。组装后上下文超模型硬窗口 → fail-loud 拒发,
         # 不把注定 4xx / 被静默截断的请求打出去。这是"安全是地基"在上下文维度的兜底:
@@ -97,7 +109,18 @@ class GatewayClient:
                     f"上下文超模型「{m.id}」硬窗口:约 {used} tok > {cw - reserve}(窗口 {cw} − 预留 {reserve})"
                     f"——请先 govern()/compact 再调,网关拒发注定失败的请求。"
                 )
-        async for ev in adapter.complete(messages, tools, m, prov, system=system):
+        if extra_body:
+            try:
+                stream = adapter.complete(messages, tools, m, prov, system=system,
+                                          extra_body=extra_body)
+            except TypeError:
+                # adapter 不认 extra_body(自定义/旧 adapter)→ 优雅忽略档位,请求照发
+                logger.debug("adapter %s 不支持 extra_body,推理档位 %r 忽略",
+                             type(adapter).__name__, level)
+                stream = adapter.complete(messages, tools, m, prov, system=system)
+        else:
+            stream = adapter.complete(messages, tools, m, prov, system=system)
+        async for ev in stream:
             self.cost.account(ev, m)        # 成本计量（密钥不经手 Event）
             # token 账本:gateway.complete 是**所有直连 LLM 调用**的唯一咽喉(导入拆解/模糊调度/
             # ops/圆桌goal…)—— 这些不走 forge,原来全漏记(实测导入 68 次真调用账本记 0、

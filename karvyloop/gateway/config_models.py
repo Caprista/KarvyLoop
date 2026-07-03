@@ -23,6 +23,8 @@ VALID_APIS = (
     "google-generative-ai", "ollama", "bedrock-converse",
 )
 VALID_ROLES = ("chat", "embedding")
+# 推理强度档(碎碎念⑩;与 gateway/reasoning.py REASONING_LEVELS 同源语义)
+VALID_REASONING = ("fast", "balanced", "deep")
 
 
 def _default_path() -> Path:
@@ -66,6 +68,10 @@ def _default_embedding(cfg: dict) -> str:
     return (cfg.get("embedding") or {}).get("model", "") or ""
 
 
+def _default_reasoning(cfg: dict) -> str:
+    return ((cfg.get("agents") or {}).get("defaults") or {}).get("reasoning", "") or ""
+
+
 def list_models(cfg_path=None) -> dict:
     """全局模型清单(密钥遮罩)+ 默认标记 + provider 列表。"""
     cfg = _load(cfg_path)
@@ -80,6 +86,7 @@ def list_models(cfg_path=None) -> dict:
                 "api": m.get("api", ""), "role": m.get("role", "chat"),
                 "context_window": m.get("context_window"), "max_tokens": m.get("max_tokens"),
                 "reasoning": bool(m.get("reasoning", False)),
+                "reasoning_styles": dict(m.get("reasoning_styles") or {}),
                 "base_url": p.get("base_url", ""),
                 "auth_header": p.get("auth_header", "x-api-key"),
                 "messages_path": p.get("messages_path", ""),
@@ -89,6 +96,8 @@ def list_models(cfg_path=None) -> dict:
                 "is_default_embedding": mid == de,
             })
     return {"models": out, "default_chat": dc, "default_embedding": de,
+            "default_reasoning": _default_reasoning(cfg),
+            "valid_reasoning": list(VALID_REASONING),
             "providers": list(provs.keys()), "valid_apis": list(VALID_APIS)}
 
 
@@ -137,6 +146,14 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
         "max_tokens": int(spec.get("max_tokens") or 8192),
         "reasoning": bool(spec.get("reasoning", False)),
     }
+    # 推理强度落参表(可选,碎碎念⑩):{档: {原样注入请求体的参数}}。只收合法档位、值须是 dict;
+    # 空/不合法 → 不写(缺省走 gateway/reasoning.py 内置映射)。
+    rs = spec.get("reasoning_styles")
+    if isinstance(rs, dict):
+        clean_rs = {k: dict(v) for k, v in rs.items()
+                    if k in VALID_REASONING and isinstance(v, dict)}
+        if clean_rs:
+            md["reasoning_styles"] = clean_rs
     # id 全局唯一:先从所有 provider 删同 id(支持改 provider),再加到目标 provider
     for pp in provs.values():
         pp["models"] = [x for x in (pp.get("models") or []) if x.get("id") != mid]
@@ -179,4 +196,23 @@ def set_default(role: str, mid: str, cfg_path=None) -> tuple[bool, str]:
     return True, ""
 
 
-__all__ = ["list_models", "upsert_model", "delete_model", "set_default", "VALID_APIS"]
+def set_default_reasoning(level: str, cfg_path=None) -> tuple[bool, str]:
+    """设全局推理强度档 `agents.defaults.reasoning`(碎碎念⑩)。空串 = 删掉(不设档,零注入)。
+
+    UI 接线待办:models 面板加"推理强度"三档切换调这里(本件后端先落语义,不动前端)。
+    """
+    lvl = str(level or "").strip()
+    if lvl and lvl not in VALID_REASONING:
+        return False, f"reasoning 须是 {VALID_REASONING} 之一(或空 = 不设)"
+    cfg = _load(cfg_path)
+    defaults = cfg.setdefault("agents", {}).setdefault("defaults", {})
+    if lvl:
+        defaults["reasoning"] = lvl
+    else:
+        defaults.pop("reasoning", None)
+    _save(cfg, cfg_path)
+    return True, ""
+
+
+__all__ = ["list_models", "upsert_model", "delete_model", "set_default",
+           "set_default_reasoning", "VALID_APIS", "VALID_REASONING"]

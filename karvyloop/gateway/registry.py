@@ -33,11 +33,15 @@ def _expand_env(v):
 class ModelRegistry:
     def __init__(self, providers: dict[str, ProviderConfig],
                  models: dict[str, ModelDefinition],
-                 default_chat: str, default_embedding: str):
+                 default_chat: str, default_embedding: str,
+                 default_reasoning: str = ""):
         self.providers = providers
         self.models = models
         self.default_chat = default_chat
         self.default_embedding = default_embedding
+        # 全局推理强度档(agents.defaults.reasoning,碎碎念⑩):fast|balanced|deep;
+        # 空 = 不注入(零回归)。gateway.complete 未传 reasoning 时继承这里。
+        self.default_reasoning = default_reasoning or ""
 
     @classmethod
     def from_config(cls, cfg: dict) -> "ModelRegistry":
@@ -62,9 +66,11 @@ class ModelRegistry:
         # 此前 cfg["embedding"] 硬取 → KeyError → 重启后 gateway 仍构造失败 → 永远到不了首次对话,
         # 且 readiness 连带永远 must_setup=强制引导死循环)。项目匹配/召回不上向量(既定决策),
         # embed() 无生产调用者 —— 没配就留空,真调 embed 时 fail-closed(UnknownModelError)。
+        defaults = (cfg.get("agents") or {}).get("defaults") or {}
         reg = cls(providers, models,
                   default_chat=cfg["agents"]["defaults"]["model"],
-                  default_embedding=((cfg.get("embedding") or {}).get("model", "") or ""))
+                  default_embedding=((cfg.get("embedding") or {}).get("model", "") or ""),
+                  default_reasoning=str(defaults.get("reasoning", "") or ""))
         reg._validate()
         return reg
 
@@ -78,6 +84,13 @@ class ModelRegistry:
             raise ValueError(f"agents.defaults.model '{self.default_chat}' 不在 models 注册表里")
         if self.default_embedding and self.default_embedding not in self.models:
             raise ValueError(f"embedding.model '{self.default_embedding}' 不在 models 注册表里")
+        if self.default_reasoning:
+            from .reasoning import REASONING_LEVELS
+            if self.default_reasoning not in REASONING_LEVELS:
+                # 配置手误 fail-loud(no silent drift):写错档位比静默当没配更可怕
+                raise ValueError(
+                    f"agents.defaults.reasoning '{self.default_reasoning}' 无效,"
+                    f"须是 {REASONING_LEVELS} 之一(或删掉该行 = 不设推理档)")
 
     def get(self, model_ref: str) -> ModelDefinition:
         if model_ref not in self.models:

@@ -25,11 +25,13 @@ class MockAdapter:
         self.last_request: dict | None = None      # 测试可检查传入
 
     async def complete(self, messages, tools, model: ModelDefinition,
-                       provider: ProviderConfig, *, system: Optional[SystemPrompt] = None
+                       provider: ProviderConfig, *, system: Optional[SystemPrompt] = None,
+                       extra_body: Optional[dict] = None
                        ) -> AsyncIterator[Event]:
         self.last_request = {
             "messages": messages, "tools": tools, "model": model.id,
             "system_blocks": system.to_blocks() if system else None,
+            "extra_body": extra_body,   # 推理档位等注入参数(测试可断言)
         }
         for ev in self.script:
             yield ev

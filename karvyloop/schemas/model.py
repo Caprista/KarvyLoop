@@ -41,6 +41,11 @@ class ModelDefinition(Schema):
     api: ModelApi
     role: ModelRole = "chat"
     reasoning: bool = False
+    # 推理强度落参表(配置驱动,gateway/reasoning.py):档位(fast|balanced|deep)→ 原样 merge 进
+    # 请求体的参数 dict。例 anthropic-messages: {deep: {thinking: {type: enabled, budget_tokens: 4096}}};
+    # openai-completions: {deep: {reasoning_effort: high}}。缺省 {} = 用 api 方言内置映射
+    # (仅 reasoning: true 的模型);内置也不会 → 忽略档位(debug 日志,不加参、不发坏请求)。
+    reasoning_styles: dict = Field(default_factory=dict)
     input_modalities: list[InputModality] = Field(default_factory=lambda: ["text"])
     context_window: int
     max_tokens: int

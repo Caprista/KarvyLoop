@@ -48,7 +48,8 @@ class AnthropicAdapter:
     api = "anthropic-messages"
 
     def build_request(self, messages, tools, model: ModelDefinition,
-                      provider: ProviderConfig, system: Optional[SystemPrompt]) -> dict:
+                      provider: ProviderConfig, system: Optional[SystemPrompt],
+                      extra_body: Optional[dict] = None) -> dict:
         body: dict = {
             "model": model.id.split("/", 1)[-1],
             "max_tokens": model.max_tokens,
@@ -58,13 +59,18 @@ class AnthropicAdapter:
             body["tools"] = tools
         if system is not None:
             body["system"] = system.to_blocks()     # HR-9：静态前缀带 cache_control
+        if extra_body:
+            # 推理强度等按配置注入的顶层参数(gateway/reasoning.py 产;如 thinking.budget_tokens)。
+            # 放最后 merge:配置说了算,但只该带 model/max_tokens/messages 之外的增量键。
+            body.update(extra_body)
         return body
 
-    async def complete(self, messages, tools, model, provider, *, system=None
+    async def complete(self, messages, tools, model, provider, *, system=None,
+                       extra_body: Optional[dict] = None
                        ) -> AsyncIterator[Event]:
         import httpx  # 延迟导入
 
-        body = self.build_request(messages, tools, model, provider, system)
+        body = self.build_request(messages, tools, model, provider, system, extra_body)
         body["stream"] = True
         # auth_header 决定鉴权方式:
         #   - x-api-key(默认):原生 Anthropic 习惯
@@ -162,6 +168,10 @@ class AnthropicAdapter:
                 yield ThinkingDelta(text=d.get("thinking", ""))
             elif d.get("type") == "input_json_delta" and cur_tool:
                 cur_tool["json"] += d.get("partial_json", "")
+            elif d.get("type") == "signature_delta":
+                # thinking 开启(推理 deep/balanced 档)后的标准协议事件:thinking 块的签名,
+                # 无业务内容 —— 静默(真调取证时它曾被当"未知 delta"刷 stderr)
+                pass
             else:
                 # 未知 delta 类型:打 stderr 供诊断(关闭: KARVYLOOP_ADAPTER_QUIET=1)
                 if not os.environ.get("KARVYLOOP_ADAPTER_QUIET"):
