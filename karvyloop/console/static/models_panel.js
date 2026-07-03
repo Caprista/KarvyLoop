@@ -66,8 +66,74 @@ var KarvyModelsPanelBundle = (function(exports) {
       }
       body.appendChild(list);
     }
+    _renderReasoningConfig(body, data || {});
     body.appendChild(_modelForm({}, t("models.add_title")));
     await _renderSearchConfig(body);
+    _renderVoiceConfig(body);
+  }
+  function _renderReasoningConfig(body, data) {
+    body.appendChild(el("div", { class: "mgmt-section-title", text: t("reasoning.title") }));
+    const wrap = el("div", { class: "mgmt-form reasoning-wrap" });
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("reasoning.hint") }));
+    const levels = data.valid_reasoning && data.valid_reasoning.length ? data.valid_reasoning : ["fast", "balanced", "deep"];
+    let cur = data.default_reasoning || "";
+    const msg = _formMsg();
+    const seg = el("div", { class: "reasoning-seg" });
+    const _paint = () => {
+      Array.from(seg.children).forEach((b) => b.classList.toggle("active", b.dataset.level === cur));
+    };
+    for (const lv of levels) {
+      const btn = el(
+        "button",
+        { class: "reasoning-opt", "data-level": lv },
+        el("span", { class: "reasoning-name", text: t("reasoning." + lv) }),
+        el("span", { class: "reasoning-desc", text: t("reasoning." + lv + "_desc") })
+      );
+      btn.addEventListener("click", async () => {
+        const next = cur === lv ? "" : lv;
+        const r = await _postJSON("/api/model/reasoning", { level: next });
+        if (r.ok && r.data && r.data.ok) {
+          cur = next;
+          _paint();
+          _setMsg(msg, true, next ? t("reasoning.saved", { level: t("reasoning." + next) }) : t("reasoning.cleared"));
+        } else {
+          _setMsg(msg, false, t("mgmt.failed", { err: r.data && r.data.reason || r.status }));
+        }
+      });
+      seg.appendChild(btn);
+    }
+    _paint();
+    wrap.appendChild(seg);
+    wrap.appendChild(msg);
+    body.appendChild(wrap);
+  }
+  function _renderVoiceConfig(body) {
+    const w = window;
+    if (!(w.SpeechRecognition || w.webkitSpeechRecognition)) return;
+    body.appendChild(el("div", { class: "mgmt-section-title", text: t("voice.settings_title") }));
+    const wrap = el("div", { class: "mgmt-form" });
+    let on = false;
+    try {
+      on = localStorage.getItem("karvyloop_voice_wake") === "1";
+    } catch {
+    }
+    const btn = el("button", {
+      class: "voice-wake-toggle" + (on ? " active" : ""),
+      text: on ? t("voice.wake_on") : t("voice.wake_off")
+    });
+    btn.addEventListener("click", () => {
+      on = !on;
+      try {
+        localStorage.setItem("karvyloop_voice_wake", on ? "1" : "0");
+      } catch {
+      }
+      btn.textContent = on ? t("voice.wake_on") : t("voice.wake_off");
+      btn.classList.toggle("active", on);
+      if (w.KarvyVoice) w.KarvyVoice.applyWakeSetting();
+    });
+    wrap.appendChild(btn);
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("voice.wake_hint") }));
+    body.appendChild(wrap);
   }
   async function _renderSearchConfig(body) {
     const data = await _getJSON("/api/search/config");

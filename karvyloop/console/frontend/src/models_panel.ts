@@ -69,10 +69,77 @@ async function renderModelsPanel(): Promise<void> {
     }
     body.appendChild(list);
   }
+  // 全局推理强度三档(Hardy ⑩ 可见面;当前档从 /api/model/config 顺势带出)
+  _renderReasoningConfig(body, data || {});
   // 新增表单
   body.appendChild(_modelForm({}, t("models.add_title")));
   // 联网搜索配置(产品内配,默认 keyless,不必手改 yaml)
   await _renderSearchConfig(body);
+  // 语音唤醒实验开关(纯前端 localStorage;识别逻辑在 app.js KarvyVoice)
+  _renderVoiceConfig(body);
+}
+
+// 推理强度三档(fast/balanced/deep):点选即保存(POST /api/model/reasoning → config.yaml)。
+function _renderReasoningConfig(body: HTMLElement, data: any): void {
+  body.appendChild(el("div", { class: "mgmt-section-title", text: t("reasoning.title") }));
+  const wrap = el("div", { class: "mgmt-form reasoning-wrap" });
+  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("reasoning.hint") }));
+  const levels: string[] = (data.valid_reasoning && data.valid_reasoning.length)
+    ? data.valid_reasoning : ["fast", "balanced", "deep"];
+  let cur: string = data.default_reasoning || "";
+  const msg = _formMsg();
+  const seg = el("div", { class: "reasoning-seg" });
+  const _paint = () => {
+    Array.from(seg.children).forEach((b) =>
+      (b as HTMLElement).classList.toggle("active", (b as HTMLElement).dataset.level === cur));
+  };
+  for (const lv of levels) {
+    const btn = el("button", { class: "reasoning-opt", "data-level": lv },
+      el("span", { class: "reasoning-name", text: t("reasoning." + lv) }),
+      el("span", { class: "reasoning-desc", text: t("reasoning." + lv + "_desc") }));
+    btn.addEventListener("click", async () => {
+      const next = cur === lv ? "" : lv;   // 再点当前档 = 清除(不设档,走模型缺省)
+      const r = await _postJSON("/api/model/reasoning", { level: next });
+      if (r.ok && r.data && r.data.ok) {
+        cur = next; _paint();
+        _setMsg(msg, true, next ? t("reasoning.saved", { level: t("reasoning." + next) })
+                                : t("reasoning.cleared"));
+      } else {
+        _setMsg(msg, false, t("mgmt.failed", { err: (r.data && r.data.reason) || r.status }));
+      }
+    });
+    seg.appendChild(btn);
+  }
+  _paint();
+  wrap.appendChild(seg);
+  wrap.appendChild(msg);
+  body.appendChild(wrap);
+}
+
+// 语音:免按键唤醒(实验特性,默认关)。开关只写 localStorage,监听/识别在 app.js(KarvyVoice);
+// 浏览器限制:Web Speech API 需 https 或 localhost + 麦克风授权;不支持的浏览器整节隐藏。
+function _renderVoiceConfig(body: HTMLElement): void {
+  const w = window as unknown as {
+    SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown;
+    KarvyVoice?: { applyWakeSetting: () => void };
+  };
+  if (!(w.SpeechRecognition || w.webkitSpeechRecognition)) return;   // 能力探测:不支持就不露
+  body.appendChild(el("div", { class: "mgmt-section-title", text: t("voice.settings_title") }));
+  const wrap = el("div", { class: "mgmt-form" });
+  let on = false;
+  try { on = localStorage.getItem("karvyloop_voice_wake") === "1"; } catch { /* 无 localStorage */ }
+  const btn = el("button", { class: "voice-wake-toggle" + (on ? " active" : ""),
+    text: on ? t("voice.wake_on") : t("voice.wake_off") });
+  btn.addEventListener("click", () => {
+    on = !on;
+    try { localStorage.setItem("karvyloop_voice_wake", on ? "1" : "0"); } catch { /* 忽略 */ }
+    btn.textContent = on ? t("voice.wake_on") : t("voice.wake_off");
+    btn.classList.toggle("active", on);
+    if (w.KarvyVoice) w.KarvyVoice.applyWakeSetting();   // 立即生效,不用刷新
+  });
+  wrap.appendChild(btn);
+  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("voice.wake_hint") }));
+  body.appendChild(wrap);
 }
 
 // 搜索 provider 设置:默认开箱即用(keyless DuckDuckGo);可选填 Brave/Tavily key 升级。

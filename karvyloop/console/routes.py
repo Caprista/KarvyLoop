@@ -4161,6 +4161,28 @@ def api_model_set_default(req: ModelDefaultRequest, request: Request) -> dict[st
     return {"ok": True, "reloaded": reloaded, "reload_note": rmsg}
 
 
+class ModelReasoningRequest(BaseModel):
+    level: str = Field(default="", max_length=16)   # fast | balanced | deep | ""(空=清除档位)
+
+
+@router.post("/model/reasoning")
+def api_model_set_reasoning(req: ModelReasoningRequest, request: Request) -> dict[str, Any]:
+    """设全局推理强度档(Hardy ⑩ 的可见面)。写 `agents.defaults.reasoning` + 热加载注册表。
+
+    当前档由 GET /model/config 顺势带出(list_models 已含 default_reasoning/valid_reasoning),
+    不另开只读端点。空 level = 清除档位(零注入,走各模型缺省)。
+    """
+    cfgp = _model_cfg_path(request.app)
+    if not cfgp:
+        return {"ok": False, "reason": "未接 config(--no-llm?)"}
+    from karvyloop.gateway.config_models import set_default_reasoning
+    ok, reason = set_default_reasoning(req.level, cfgp)
+    if not ok:
+        return {"ok": False, "reason": reason}
+    reloaded, rmsg = _reload_gateway_registry(request.app)
+    return {"ok": True, "reloaded": reloaded, "reload_note": rmsg}
+
+
 @router.get("/decision_card")
 def api_decision_card(request: Request, proposal_id: str = "") -> dict[str, Any]:
     """把一条待决提案翻成决策卡(接地于验证门,无则老实 unverifiable)。决策 loop 界面。"""

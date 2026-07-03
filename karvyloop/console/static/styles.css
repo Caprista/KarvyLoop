@@ -165,6 +165,28 @@ html, body {
 .tok-table th { color: var(--text-dim); font-weight: 600; font-size: 11px; }
 .tok-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .tok-table .tok-strong { font-weight: 700; color: var(--accent); }
+/* Hardy ⑥ 分时段:今天/7天/30天切换 + 纯 CSS 柱状 + 功能排行条(不引图表库) */
+.tok-range-tabs { display: flex; gap: 6px; margin: 4px 0 8px; }
+.tok-range-tab {
+  padding: 4px 12px; font-size: 12px; border: 1px solid var(--border); border-radius: 999px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.tok-range-tab:hover { border-color: var(--accent); color: var(--text); }
+.tok-range-tab.active { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-deep); font-weight: 600; }
+.tok-chart {
+  display: flex; align-items: flex-end; gap: 3px; height: 120px; margin: 10px 0 4px;
+  padding: 4px 2px 0; border-bottom: 1px solid var(--border); overflow-x: auto;
+}
+.tok-chart-col { flex: 1 1 0; min-width: 14px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+.tok-chart-bar { width: 70%; min-height: 2px; background: var(--accent); border-radius: 3px 3px 0 0; opacity: 0.85; }
+.tok-chart-col:hover .tok-chart-bar { opacity: 1; }
+.tok-chart-lbl { font-size: 9px; color: var(--text-dim); margin-top: 3px; white-space: nowrap; }
+.tok-rank { display: flex; flex-direction: column; gap: 4px; }
+.tok-rank-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.tok-rank-name { flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.tok-rank-track { flex: 1 1 auto; height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; }
+.tok-rank-bar { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.tok-rank-val { flex: 0 0 52px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim); }
 /* 拍板卡:决策依据 + 跳转(#6.1)*/
 .h2a-basis {
   font-size: 12px; color: var(--text); line-height: 1.5; margin: 6px 0;
@@ -410,6 +432,9 @@ html, body {
   transition: background var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
 }
 .chat-tool-btn:hover { background: var(--accent-soft); color: var(--accent-deep); }
+/* 语音输入 v1:🎤 录音中红点呼吸(诚实状态:在听就让你看见) */
+.chat-tool-btn.recording { background: rgba(220, 76, 60, 0.14); color: #C0392B; animation: voice-pulse 1.2s ease-in-out infinite; }
+@keyframes voice-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(220, 76, 60, 0.35); } 50% { box-shadow: 0 0 0 6px rgba(220, 76, 60, 0); } }
 .chat-tool-btn.rt-btn { color: var(--accent-deep); }
 .chat-tool-btn.rt-btn:hover { background: var(--accent-soft); }
 /* 图标按钮:正方形、emoji 居中,不带文字(说明走 hover 气泡)*/
@@ -1440,6 +1465,26 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
   background: var(--accent); color: #fff; border: none; border-radius: 9px; cursor: pointer;
 }
 .mgmt-form .mgmt-submit:hover { background: var(--accent); }
+/* Hardy ⑩ 可见面:全局推理强度三档(fast/balanced/deep,点选即保存) */
+.reasoning-seg { display: flex; gap: 8px; }
+.reasoning-opt {
+  flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 10px 8px; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 10px; cursor: pointer;
+}
+.reasoning-opt:hover { border-color: var(--accent); }
+.reasoning-opt.active { background: var(--accent-soft); border-color: var(--accent-line); box-shadow: 0 0 0 2px var(--accent-soft); }
+.reasoning-name { font-size: 14px; font-weight: 700; color: var(--text); }
+.reasoning-opt.active .reasoning-name { color: var(--accent-deep); }
+.reasoning-desc { font-size: 11px; color: var(--text-dim); }
+/* 语音唤醒实验开关(models 面板「语音(实验)」节) */
+.voice-wake-toggle {
+  align-self: flex-start; padding: 8px 16px; font-size: 13px; font-weight: 600;
+  background: var(--surface); color: var(--text-dim);
+  border: 1px solid var(--border-strong); border-radius: 999px; cursor: pointer;
+}
+.voice-wake-toggle:hover { border-color: var(--accent); color: var(--text); }
+.voice-wake-toggle.active { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-deep); }
 .mgmt-inline-link {
   background: none; border: none; color: var(--accent-strong); cursor: pointer;
   font-size: 12px; padding: 0; text-decoration: underline;

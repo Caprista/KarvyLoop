@@ -56,7 +56,99 @@ function _tokTable(rows: any[], keyCol: string): HTMLElement {
   return tbl;
 }
 
-// ch4 #4:点钱包 → token 统计弹窗(总量 + 各模型分别用了多少 + 各功能花在哪)
+// ---- Hardy ⑥ 可见面:分时段查询("笼统的查询等于没有查询")----
+// 今天(hour 粒度)/ 7 天 / 30 天(day 粒度)→ GET /api/tokens/query,
+// series 画纯 CSS div 柱(不引图表库),by_source 画排行条(烧得多在前)。
+type TokRange = "today" | "7d" | "30d";
+let _curRange: TokRange = "7d";
+
+function _rangeWindow(range: TokRange): { start: number; end: number; gran: "hour" | "day" } {
+  const now = new Date();
+  const end = now.getTime() / 1000;
+  if (range === "today") {
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+    return { start: midnight, end, gran: "hour" };   // 当日零点起,整点桶
+  }
+  return { start: end - (range === "7d" ? 7 : 30) * 86400, end, gran: "day" };
+}
+
+// 柱下短标:hour → "HH:00",day → "M-D"(完整 label 进 title 悬浮)
+function _shortLabel(label: string, gran: "hour" | "day"): string {
+  const s = String(label || "");
+  if (gran === "hour") {
+    const m = s.match(/(\d{2}):00$/);
+    return m ? m[1] + ":00" : s;
+  }
+  const m = s.match(/^\d{4}-(\d{2})-(\d{2})$/);
+  return m ? String(Number(m[1])) + "-" + String(Number(m[2])) : s;
+}
+
+async function _renderRangeBody(host: HTMLElement, range: TokRange): Promise<void> {
+  host.innerHTML = "";
+  host.appendChild(el("div", { class: "muted", text: t("tokens.loading") }));
+  const w = _rangeWindow(range);
+  const data = await _getJSON(
+    "/api/tokens/query?start_ts=" + w.start + "&end_ts=" + w.end + "&granularity=" + w.gran);
+  host.innerHTML = "";
+  if (!data) { host.appendChild(el("div", { class: "muted", text: t("tokens.none") })); return; }
+  const tot = data.totals || {};
+  host.appendChild(el("div", { class: "tok-sub", text: t("tokens.window_totals", {
+    total: _fmtTok(tot.total || 0), in: _fmtTok(tot.input || 0),
+    out: _fmtTok(tot.output || 0), calls: tot.calls || 0 }) }));
+  const series = (data.series || []) as any[];
+  if (!series.length) {
+    host.appendChild(el("div", { class: "muted", text: t("tokens.range_empty") }));
+  } else {
+    const max = series.reduce((m, b) => Math.max(m, b.total || 0), 1);
+    const chart = el("div", { class: "tok-chart" });
+    for (const b of series) {
+      const pct = Math.max(2, Math.round(((b.total || 0) / max) * 100));
+      chart.appendChild(el("div", { class: "tok-chart-col",
+        title: (b.label || "") + " · " + _fmtTok(b.total || 0) + " tok · " + (b.calls || 0) + "×" },
+        el("div", { class: "tok-chart-bar", style: "height:" + pct + "%" }),
+        el("div", { class: "tok-chart-lbl", text: _shortLabel(b.label, w.gran) })));
+    }
+    host.appendChild(chart);
+  }
+  // by_source 排行条(该时段谁烧的,烧得多在前 —— 后端已降序)
+  const rows = (data.by_source || []) as any[];
+  if (rows.length) {
+    host.appendChild(el("h3", { class: "tok-h", text: t("tokens.by_source") }));
+    const maxSrc = rows.reduce((m, r) => Math.max(m, r.total || 0), 1);
+    const rank = el("div", { class: "tok-rank" });
+    for (const r of rows) {
+      const pct = Math.max(1, Math.round(((r.total || 0) / maxSrc) * 100));
+      rank.appendChild(el("div", { class: "tok-rank-row" },
+        el("span", { class: "tok-rank-name", text: String(r.source || "?") }),
+        el("span", { class: "tok-rank-track" },
+          el("span", { class: "tok-rank-bar", style: "width:" + pct + "%" })),
+        el("span", { class: "tok-rank-val", text: _fmtTok(r.total || 0) })));
+    }
+    host.appendChild(rank);
+  }
+}
+
+function _renderRangeSection(body: HTMLElement): void {
+  body.appendChild(el("h3", { class: "tok-h", text: t("tokens.range_title") }));
+  const tabs = el("div", { class: "tok-range-tabs" });
+  const host = el("div", { class: "tok-range-body" });
+  const ranges: Array<[TokRange, string]> = [
+    ["today", t("tokens.range_today")], ["7d", t("tokens.range_7d")], ["30d", t("tokens.range_30d")]];
+  const _redraw = () => {
+    Array.from(tabs.children).forEach((b, i) =>
+      (b as HTMLElement).classList.toggle("active", ranges[i][0] === _curRange));
+    void _renderRangeBody(host, _curRange);
+  };
+  for (const [key, label] of ranges) {
+    tabs.appendChild(el("button", { class: "tok-range-tab", text: label,
+      onclick: () => { _curRange = key; _redraw(); } }));
+  }
+  body.appendChild(tabs);
+  body.appendChild(host);
+  _redraw();
+}
+
+// ch4 #4:点钱包 → token 统计弹窗(总量 + 分时段柱状 + 各模型分别用了多少 + 各功能花在哪)
 async function open(): Promise<void> {
   openMgmtModal(t("tokens.title"));
   const body = mgmtBody(); if (!body) return;
@@ -77,6 +169,8 @@ async function open(): Promise<void> {
       t("tokens.cache", { r: _fmtTok(tot.cache_read || 0), w: _fmtTok(tot.cache_write || 0) }) }));
   }
   body.appendChild(sum);
+  // 分时段(Hardy ⑥):今天(hour)/ 7 天 / 30 天(day)切换 + CSS 柱状 + 时段内功能排行
+  _renderRangeSection(body);
   // 各模型用了多少(Hardy:要看不同模型分别用了多少量)
   body.appendChild(el("h3", { class: "tok-h", text: t("tokens.by_model") }));
   body.appendChild(_tokTable(data.by_model || [], "model"));

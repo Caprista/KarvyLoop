@@ -140,6 +140,8 @@
                   <!-- 频道内操作:图标按钮(hover 出气泡说明),不再堆文字 -->
                   <div class="chat-toolbar">
                     <button type="button" id="chat-attach-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.attach.title" data-i18n-title="btn.attach.title">📎</button>
+                    <!-- 语音输入 v1:默认隐藏,主逻辑脚本做能力探测(Web Speech API)支持才亮;识别只填输入框,Enter 才发 -->
+                    <button type="button" id="chat-voice-btn" class="chat-tool-btn icon-btn hidden" data-i18n-tip="voice.btn.title" data-i18n-title="voice.btn.title">🎤</button>
                     <button type="button" id="conv-new-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.conv_new.title" data-i18n-title="btn.conv_new.title">🆕</button>
                     <select id="conv-history" class="chat-hist chat-tool-sel" data-i18n-title="sel.history.title">
                       <option value="">🕘</option>

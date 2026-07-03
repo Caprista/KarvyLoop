@@ -2030,9 +2030,11 @@
       KarvyRender.renderEvents(body, entry.events);
       line.appendChild(body);
     } else if (window.KarvyRender) {
-      KarvyRender.appendMarkdown(line, entry.text || "");
+      // 后端静态整句(如共创模式的递口/退出/定稿句)过 BACKEND_ZH_EN:en 界面整句/前缀译,
+      // zh 界面与不匹配的正常回复 = 原样(tB 恒等),零回归
+      KarvyRender.appendMarkdown(line, tB(entry.text || ""));
     } else {
-      line.appendChild(document.createTextNode(entry.text || ""));
+      line.appendChild(document.createTextNode(tB(entry.text || "")));
     }
     log.appendChild(line);
   }
@@ -2058,9 +2060,12 @@
     }
     const line = el("div", { class: "chat-line " + role },
       el("span", { class: "role", text: _roleLabel(role) }));
-    // 9.4:正文走 markdown + 消毒(KarvyRender);缺库回退裸文本
-    if (window.KarvyRender) KarvyRender.appendMarkdown(line, text || "");
-    else line.appendChild(document.createTextNode(text || ""));
+    // 9.4:正文走 markdown + 消毒(KarvyRender);缺库回退裸文本。
+    // agent 正文过 tB:后端静态整句(共创等)在 en 界面查 BACKEND_ZH_EN 整句/前缀译;
+    // 用户自己的话绝不动(只译 agent 侧)。
+    const _txt = role === "agent" ? tB(text || "") : (text || "");
+    if (window.KarvyRender) KarvyRender.appendMarkdown(line, _txt);
+    else line.appendChild(document.createTextNode(_txt));
     log.appendChild(line);
     if (follow) log.scrollTop = log.scrollHeight;
   }
@@ -2907,6 +2912,135 @@
   }
   function _startPlaceholderRotation() { setInterval(_rotatePlaceholder, 8000); }
 
+  // ============ 语音输入 v1(Hardy ⑪)============
+  // 浏览器 Web Speech API(Chrome/Edge = webkitSpeechRecognition)。零后端改动。纪律:
+  // - 识别结果只填输入框,**绝不自动发送** —— 你按 Enter/发送才发(人拍板);
+  // - 不支持的浏览器按钮保持隐藏(能力探测);识别错误诚实提示,不装聋;
+  // - 浏览器限制:需 https 或 localhost(安全上下文)+ 麦克风授权;本地 console(127.0.0.1)天然满足。
+  //   Chrome 的转写引擎走浏览器自带云服务 —— 那是浏览器行为,语音不经 KarvyLoop 后端。
+  function _SRCls() { return window.SpeechRecognition || window.webkitSpeechRecognition; }
+  function _voiceLang() { return T.getLang() === "zh" ? "zh-CN" : "en-US"; }
+
+  let _dictRec = null;      // 听写会话(非 null = 正在听)
+  let _dictNode = null;     // 输入框里承接转写的文本节点(interim 原位刷新,不碰 @chip)
+  let _wakeRec = null;      // 唤醒监听会话(实验开关开着才活)
+
+  function _voiceBtn() { return document.getElementById("chat-voice-btn"); }
+  function _voiceSetRecording(on) {
+    const b = _voiceBtn();
+    if (!b) return;
+    b.classList.toggle("recording", !!on);
+    b.title = t(on ? "voice.stop.title" : "voice.btn.title");
+  }
+  // 识别错误 → 人话(诚实提示,系统淡条,不冒充小卡说话)
+  function _voiceErrText(code) {
+    if (code === "not-allowed" || code === "service-not-allowed") return t("voice.err_mic");
+    if (code === "no-speech") return t("voice.err_nospeech");
+    if (code === "network") return t("voice.err_network");
+    return t("voice.err", { err: code || "?" });
+  }
+
+  // 听写:interim 实时填输入框(独立文本节点原位刷新,保住已敲文字和 @chip),final 落定。
+  function _dictStart() {
+    const SR = _SRCls();
+    const ce = _ceInput();
+    if (!SR || !ce || _dictRec) return;
+    const rec = new SR();
+    rec.lang = _voiceLang();
+    rec.interimResults = true;
+    rec.continuous = false;      // 一段话一次;说完自然收(要继续再按一次)
+    let finalText = "";
+    _dictNode = document.createTextNode("");
+    ce.appendChild(_dictNode);
+    rec.onresult = (ev) => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i];
+        if (r.isFinal) finalText += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      if (_dictNode) _dictNode.textContent = finalText + interim;
+      _ceUpdateEmpty();
+    };
+    rec.onerror = (ev) => {
+      // aborted = 我们自己 stop 的,不值当喊
+      if (ev.error !== "aborted") pushChatLine("system", "🎤 " + _voiceErrText(ev.error));
+    };
+    rec.onend = () => {
+      _dictRec = null;
+      _dictNode = null;
+      _voiceSetRecording(false);
+      _ceUpdateEmpty();
+      if (ce) ce.focus();        // 光标回输入框:落定文本你随手改,按 Enter 才发(人拍板)
+      _wakeApply();              // 唤醒开着 → 听写结束回去继续守唤醒词
+    };
+    _dictRec = rec;
+    _voiceSetRecording(true);
+    _wakeStop();                 // 同一麦克风:听写期间挂起唤醒监听,结束再恢复
+    try { rec.start(); } catch (e) { _dictRec = null; _voiceSetRecording(false); }
+  }
+  function _dictStop() {
+    if (_dictRec) { try { _dictRec.stop(); } catch (e) {} }
+  }
+
+  // —— 免按键唤醒(实验特性,默认关;开关在「模型(全局)」面板,localStorage)——
+  // 唤醒词命中判定抽成独立函数:未来外设(AI 眼镜/耳机等)接入时,外设侧的转写流走**同一入口**
+  // (把 transcript 喂给 _wakeHit,命中即进入听写模式),不必重写浏览器这一套。
+  function _wakeHit(transcript) {
+    const s = String(transcript || "").toLowerCase();
+    return s.indexOf("小卡") !== -1 || s.indexOf("karvy") !== -1;
+  }
+  function _wakeEnabled() {
+    try { return localStorage.getItem("karvyloop_voice_wake") === "1"; } catch (e) { return false; }
+  }
+  function _wakeStop() {
+    if (_wakeRec) { const r = _wakeRec; _wakeRec = null; try { r.stop(); } catch (e) {} }
+  }
+  function _wakeStart() {
+    const SR = _SRCls();
+    if (!SR || _wakeRec || _dictRec || !_wakeEnabled()) return;
+    const rec = new SR();
+    rec.lang = _voiceLang();
+    rec.interimResults = false;
+    rec.continuous = true;       // 持续监听唤醒词(浏览器会周期性掐会话,onend 里重拉)
+    rec.onresult = (ev) => {
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal && _wakeHit(ev.results[i][0].transcript)) {
+          _wakeStop();
+          _talkToKarvy();        // 命中「小卡/Karvy」→ 切到小卡私聊 + 进听写模式
+          setTimeout(_dictStart, 150);
+          return;
+        }
+      }
+    };
+    rec.onerror = (ev) => {
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+        _wakeRec = null;         // 没麦克风授权:诚实提示一次,不无限重试骚扰
+        pushChatLine("system", "🎤 " + t("voice.err_mic"));
+      }
+    };
+    rec.onend = () => {
+      if (_wakeRec === rec) {    // 不是我们主动停的(浏览器掐了)→ 开关还开着就重拉
+        _wakeRec = null;
+        if (_wakeEnabled() && !_dictRec) setTimeout(_wakeStart, 400);
+      }
+    };
+    _wakeRec = rec;
+    try { rec.start(); } catch (e) { _wakeRec = null; }
+  }
+  function _wakeApply() { if (_wakeEnabled()) _wakeStart(); else _wakeStop(); }
+
+  function setupVoiceInput() {
+    const btn = _voiceBtn();
+    if (!btn || !_SRCls()) return;         // 能力探测:不支持 → 按钮保持隐藏
+    btn.classList.remove("hidden");
+    btn.title = t("voice.btn.title");
+    btn.addEventListener("click", () => { if (_dictRec) _dictStop(); else _dictStart(); });
+    _wakeApply();                          // 实验开关开着 → 开始守唤醒词
+    // 设置面板(models_panel)切开关后立即生效的回调口;外设接入也从这里走 wakeHit
+    window.KarvyVoice = { applyWakeSetting: _wakeApply, wakeHit: _wakeHit };
+  }
+
   // ============ Boot ============
 
   function boot() {
@@ -2914,6 +3048,7 @@
     T.applyStatic();
     T.mountSwitcher(document.getElementById("lang-switcher"));
     setupChatForm();
+    setupVoiceInput();  // 语音输入 v1:🎤 听写 + 免按键唤醒(实验开关)
     setupChatModal();   // step5:对话弹窗
     // docs/46 S1:视图初始化(默认对话视图,记住上次选择)+ 切换钮 + 移动端聊天入口 + rail 折叠
     let _viewPref = "chat";
