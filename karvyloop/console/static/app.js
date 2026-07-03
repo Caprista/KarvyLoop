@@ -673,6 +673,8 @@
     const built = _buildProposalCard(payload);
     _placeCard(list, built.proposalId, built.card);   // 多卡不覆盖:同 id 替换、新 id 追加
     _renderProposalInChat(payload, built.proposalId); // S3:决策卡双面出 —— 同时冒进聊天流
+    // 桌面视图(docs/51 §4.2):⚖便签置顶 + 闪烁 + 卡皮巴拉冒泡(fail-loud,推回决策舱)
+    if (window.KarvyDesktop) window.KarvyDesktop.notifyH2A();
     updatePulse();   // step5:拍板数变了 → 刷脉搏
   }
 
@@ -2482,21 +2484,27 @@
     document.body.classList.remove("chat-open");
   }
 
-  // ============ 对话⇄看板 视图切换(docs/46 §4.2):body.board-view 一行 class 换挡 ============
+  // ============ 对话⇄看板⇄桌面 视图切换(docs/46 §4.2 + docs/51):body class 一行换挡 ============
   function _applyView(mode) {
     const board = mode === "board";
+    const desk = mode === "desk" && !_isMobile();   // docs/51 §3.1:≤720px 桌面隐喻不存在 → 降级 chat
     document.body.classList.toggle("board-view", board);
+    document.body.classList.toggle("desk-view", desk);
+    // 桌面壳(desktop.js)的进出:enter 摆便签/窗口/dock,leave 清干净内联痕迹(老视图像素级不动)
+    if (window.KarvyDesktop) { if (desk) window.KarvyDesktop.enter(); else window.KarvyDesktop.leave(); }
     const m = document.getElementById("chat-modal");
     if (m) {
-      if (_chatDocked()) m.classList.remove("hidden");   // 常驻:永远可见
+      if (_chatDocked()) m.classList.remove("hidden");   // 常驻:永远可见(桌面视图=可拖窗,也常驻)
       else m.classList.add("hidden");                    // 弹层态:起始收起(FAB/入口再弹)
     }
     document.body.classList.remove("chat-open");   // 切视图 = 回到干净弹层态
-    // switch 两态明示(Hardy:别让用户猜):active 落在**当前**视图上
+    // switch 三态明示(Hardy:别让用户猜):active 落在**当前**视图上
     const optChat = document.getElementById("view-opt-chat");
     const optBoard = document.getElementById("view-opt-board");
-    if (optChat) optChat.classList.toggle("active", !board);
+    const optDesk = document.getElementById("view-opt-desk");
+    if (optChat) optChat.classList.toggle("active", !board && !desk);
     if (optBoard) optBoard.classList.toggle("active", board);
+    if (optDesk) optDesk.classList.toggle("active", desk);
     _updateDockYield();
   }
   function _setView(mode) {
@@ -2544,6 +2552,7 @@
       if (dotTimer) { clearInterval(dotTimer); dotTimer = null; }
     };
     const show = () => {
+      if (!document.body.classList.contains("desk-view")) return;   // 只在桌面视图冒泡(挂卡皮巴拉头上)
       const modal = document.getElementById("chat-modal");
       const overlayOpen = modal && !modal.classList.contains("hidden") && !_chatDocked();
       const typing = document.activeElement === document.getElementById("chat-input");
@@ -3055,27 +3064,34 @@
     // docs/46 S1:视图初始化(默认对话视图,记住上次选择)+ 切换钮 + 移动端聊天入口 + rail 折叠
     let _viewPref = "chat";
     try { _viewPref = localStorage.getItem("karvyloop_view") || "chat"; } catch (e) {}
-    _applyView(_viewPref === "board" ? "board" : "chat");
+    _applyView(_viewPref === "board" ? "board" : _viewPref === "desk" ? "desk" : "chat");
     const optChat = document.getElementById("view-opt-chat");
     const optBoard = document.getElementById("view-opt-board");
+    const optDesk = document.getElementById("view-opt-desk");
     if (optChat) optChat.addEventListener("click", () => _setView("chat"));
     if (optBoard) optBoard.addEventListener("click", () => _setView("board"));
+    if (optDesk) optDesk.addEventListener("click", () => _setView("desk"));
     const viewBtn = document.getElementById("view-toggle");   // 兼容留存的隐藏钮(老测试/脚本)
     if (viewBtn) viewBtn.addEventListener("click", () =>
       _setView(document.body.classList.contains("board-view") ? "chat" : "board"));
     const mobileChat = document.getElementById("mobile-chat-open");
     if (mobileChat) mobileChat.addEventListener("click", openChatModal);
     _setupRailCollapse();
-    // 跨过 720px 断点(旋转/拖窗):重放当前视图,保证聊天 docked/弹层形态一致
+    // 跨过 720px 断点(旋转/拖窗):按偏好重放当前视图,保证聊天 docked/弹层形态一致
+    // (桌面偏好保留:窄屏降级 chat,回到宽屏自动还原 desk —— docs/51 §3.1)
     if (window.matchMedia) {
       const mq = window.matchMedia("(max-width: 720px)");
-      const onMq = () => _applyView(document.body.classList.contains("board-view") ? "board" : "chat");
+      const onMq = () => {
+        let v = "chat";
+        try { v = localStorage.getItem("karvyloop_view") || "chat"; } catch (e) {}
+        _applyView(v === "board" ? "board" : v === "desk" ? "desk" : "chat");
+      };
       if (mq.addEventListener) mq.addEventListener("change", onMq);
       else if (mq.addListener) mq.addListener(onMq);
     }
-    // 副驾按钮撤下(Hardy 2026-07-03):顶栏冒泡随之停用;卡皮巴拉常驻感交给
-    // 右下 dock 与桌面隐喻演进(docs/51)。函数保留,桌面版把泡挂回 dock 时复用。
-    void _startKarvyIdleBubble;
+    // 副驾按钮撤下(Hardy 2026-07-03)后,冒泡只在桌面视图活着:CSS 把 #karvy-bubble
+    // 重定位到右下卡皮巴拉头上(docs/51),show() 里有 desk-view 守卫,其它视图静默。
+    _startKarvyIdleBubble();
     connectWS();
     startPolling();
     // 9.0e:绑"看建议"按钮

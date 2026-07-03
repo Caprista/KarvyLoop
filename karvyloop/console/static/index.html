@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/vendor/highlight-github.min.css" />
   <link rel="stylesheet" href="/static/vendor/drawflow.min.css" />   <!-- 工作流拖拽画布(Drawflow,MIT) -->
+  <link rel="stylesheet" href="/static/desktop.css" />   <!-- 桌面视图(docs/51):须在 styles.css 之后,desk 规则压过对话视图规则 -->
 </head>
 <body>
   <!-- 9.4c 暖色品牌系重构:左导航(管理面)/ 中对话+IP 主视觉 / 右上下文。
@@ -43,6 +44,7 @@
         <div class="view-switch" id="view-switch" role="tablist">
           <button class="view-switch-opt active" id="view-opt-chat" data-i18n="view.chat">💬 对话</button>
           <button class="view-switch-opt" id="view-opt-board" data-i18n="view.board">⊞ 看板</button>
+          <button class="view-switch-opt" id="view-opt-desk" data-i18n="view.desk" data-i18n-title="view.desk.title">🖥 桌面</button>
         </div>
         <button class="view-toggle hidden" id="view-toggle" aria-hidden="true">⊞</button>
         <!-- docs/46 S4:重看新手引导(首启 tour 可跳过,这里随时唤回) -->
@@ -234,6 +236,10 @@
         <img src="/static/assets/karvy-capybara.png" alt="Karvy" />
       </button>
     </div>
+
+    <!-- 桌面视图 dock(docs/51):左段 = 左导航 12 入口同构复用(desktop.js 渲染,
+         setupMgmtPanels 同一批绑定命中);右段 = 窗口指示 + ↺重置布局。非桌面视图 display:none -->
+    <div class="desk-dock" id="desk-dock" role="toolbar" data-i18n-title="desk.dock"></div>
   </div>
 
   <!-- 渲染层:markdown-it + DOMPurify 现已打包进 render.js(Vite/TS,源在 console/frontend/);
@@ -256,6 +262,8 @@
   <script src="/static/tokens_panel.js"></script>
   <script src="/static/render.js"></script>
   <script src="/static/i18n.js"></script>
+  <!-- 桌面视图(docs/51):须在 app.js 之前 —— dock 按钮要先于 setupMgmtPanels 存在(同一批绑定) -->
+  <script src="/static/desktop.js"></script>
   <!-- Drawflow 画布脚本(~70KB)不在此常驻:点「编辑画布」时由 app.js 按需注入(_ensureWorkflowCanvas) -->
   <script src="/static/app.js"></script>
 </body>

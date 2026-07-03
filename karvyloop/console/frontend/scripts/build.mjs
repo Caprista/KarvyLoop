@@ -28,6 +28,7 @@ const MODULES = [
   { entry: "src/tokens_panel.ts", name: "KarvyTokensBundle", file: "tokens_panel.js" },
   { entry: "src/render.ts", name: "KarvyRenderBundle", file: "render.js" },
   { entry: "src/i18n.ts", name: "KarvyI18nBundle", file: "i18n.js" },
+  { entry: "src/desktop.ts", name: "KarvyDesktopBundle", file: "desktop.js" },
   { entry: "src/workflow_canvas.ts", name: "KarvyWorkflowCanvasBundle", file: "workflow_canvas.js" },
 ];
 

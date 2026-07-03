@@ -1,0 +1,321 @@
+/* desktop.css — 桌面视图(第三视图,docs/51 P1)。
+ * 纪律:全部规则以 body.desk-view 前缀隔离(仅 :root token / .desk-dock 底座 /
+ * .desk-min-btn 底座 / ≤720px 隐藏切换项 例外,且均对老视图零影响)。
+ * 本文件在 styles.css 之后引入:desk 需要压过「对话视图」的 body:not(.board-view) 规则
+ * (同特异性,后来者赢),styles.css 本体一行不动 → 对话/看板两视图像素级不变。 */
+
+:root {
+  /* ==== desktop shell tokens(docs/51 §2.1)==== */
+  --desk-bg: #efe6d8;                              /* 桌面底:比 --bg 深半档的暖沙色 */
+  --note-yellow: #fbf0c9;                          /* 便签底(⚖ 用主题奶咖底以示地位) */
+  --note-line: #e6d391;
+  --win-shadow: 0 18px 50px rgba(142, 95, 60, 0.22);  /* 聚焦窗口阴影,比 --shadow-lg 重一档 */
+  --dock-bg: rgba(255, 255, 255, 0.82);            /* dock 毛玻璃底 */
+}
+
+/* ============================================================================
+   桌面画布:侧栏收进 dock,.cockpit 变成 desk(便签/窗口的定位与 clamp 基准)
+   ========================================================================= */
+body.desk-view .app {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "topbar"
+    "chat";
+}
+body.desk-view .sidebar { display: none; }
+body.desk-view .cockpit {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  padding: 0;
+  background: var(--desk-bg);
+}
+
+/* ============================================================================
+   四象限 → 桌面便签:同一批 DOM(id 不动),grid 壳退位,列变绝对定位便签
+   ========================================================================= */
+body.desk-view .cockpit-grid { display: contents; }
+body.desk-view .cockpit-col {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin: 0;
+  width: 304px;
+  max-height: 330px;
+  overflow: hidden;          /* 压过对话视图 rail 的 overflow:visible;正文滚动交给 .col-scroll */
+  background: var(--note-yellow);
+  border-color: var(--note-line);
+  box-shadow: 0 10px 26px rgba(142, 95, 60, 0.16);
+}
+/* 轻微随机旋转(按列定死不闪,拟物但克制);和 JS 的 translate3d 合成一条 transform */
+body.desk-view .col-busy    { --desk-tilt: -0.9deg; }
+body.desk-view .col-intel   { --desk-tilt: 0.7deg; }
+body.desk-view .col-predict { --desk-tilt: -0.5deg; }
+/* ⚖ 用主题奶咖底以示地位(决策卡是主角) */
+body.desk-view .col-decide {
+  background: var(--accent-light);
+  border-color: var(--accent-line);
+}
+/* 顶部一条"胶带"伪元素(便签在画布上贴着的感觉) */
+body.desk-view .cockpit-col::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 66px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(42, 33, 24, 0.05);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  pointer-events: none;
+}
+/* 便签头 = 拖柄(点头仍是折叠,拖 4px 死区区分);touch-action 只上拖柄不污染正文滚动 */
+body.desk-view .cockpit-col .col-head {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+body.desk-view .cockpit-col .col-head.dragging { cursor: grabbing; }
+body.desk-view .cockpit-col .col-head:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+/* 便签正文:桌面下限高内滚(压过对话视图 rail 的 overflow 可见规则) */
+body.desk-view .cockpit-col .col-scroll { overflow-y: auto; }
+/* 聚焦的便签/窗口:accent 边框(点击互相置顶的可视反馈) */
+body.desk-view .cockpit-col.desk-focused { border-color: var(--accent-line); }
+
+/* ⚖ 新决策卡到达:边框玫红呼吸 2 次(fail-loud 推回决策舱,docs/51 §4.2) */
+body.desk-view .cockpit-col.note-alert {
+  animation: desk-note-alert 1.2s ease-in-out 2;
+}
+@keyframes desk-note-alert {
+  0%, 100% { border-color: var(--accent-line); box-shadow: 0 10px 26px rgba(142, 95, 60, 0.16); }
+  50% { border-color: var(--rose); box-shadow: 0 0 0 4px var(--rose-soft), 0 10px 30px rgba(216, 82, 124, 0.30); }
+}
+
+/* ============================================================================
+   聊天 = 特殊窗:overlay 退成透明穿透层,.chat-panel 变可拖窗(✕ = 最小化)
+   ========================================================================= */
+body.desk-view #chat-modal.chat-host {
+  position: absolute;
+  inset: 0;
+  z-index: auto;             /* 真实 z 由 JS 聚焦置顶赋值 */
+  padding: 0;
+  background: transparent;
+  pointer-events: none;      /* 穿透:点桌面/便签不被 overlay 挡 */
+  display: block !important; /* 压过对话视图的 display:flex !important(同为 !important,后来者赢) */
+}
+body.desk-view .chat-host .chat-panel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: min(720px, 62%);
+  height: min(640px, 78%);
+  max-width: none;
+  max-height: none;
+  pointer-events: auto;
+  animation: none;           /* chat-pop 的 transform 动画会打架,桌面下禁 */
+  box-shadow: var(--win-shadow);
+}
+body.desk-view .chat-host .chat-panel-head {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+body.desk-view .chat-host .chat-panel-head.dragging { cursor: grabbing; }
+body.desk-view .chat-host .chat-panel-head:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+/* 桌面下 ✕ 回归可见(语义=最小化,desktop.js 拦截);对话视图里它是 display:none */
+body.desk-view .chat-host #chat-modal-close { display: inline-block; }
+/* 最小化:收进 dock(压过 display:flex !important) */
+body.desk-view #chat-modal.desk-min { display: none !important; }
+
+/* ============================================================================
+   mgmt 模态 → 可拖单例窗:overlay 透明穿透、点外不关(pointer-events 天然拦掉
+   overlay-click-close),.modal 绝对定位 + 标题栏拖柄 + ─ 最小化进 dock
+   ========================================================================= */
+body.desk-view #mgmt-modal {
+  background: transparent;
+  pointer-events: none;
+  padding: 0;
+  display: block;            /* 脱离 flex 居中 → 绝对坐标系(左上原点) */
+}
+body.desk-view #mgmt-modal .modal {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: auto;
+  width: min(680px, calc(100vw - 48px));
+  max-height: 80vh;
+  box-shadow: var(--win-shadow);
+}
+body.desk-view #mgmt-modal .modal-head {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+body.desk-view #mgmt-modal .modal-head.dragging { cursor: grabbing; }
+body.desk-view #mgmt-modal .modal-head:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+body.desk-view #mgmt-modal.desk-min { display: none !important; }
+
+/* mgmt 标题栏 ─ 最小化按钮(desktop.js 注入):只在桌面视图显示 */
+.desk-min-btn { display: none; }
+body.desk-view .desk-min-btn {
+  display: inline-block;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+body.desk-view .desk-min-btn:hover { background: var(--surface-2); color: var(--text); }
+
+/* ============================================================================
+   dock(底部,兼任务栏):左段 12 入口(同构 nav-item)┊ 右段 窗口指示 + ↺
+   ========================================================================= */
+.desk-dock { display: none; }
+body.desk-view .desk-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 56px;
+  padding: 0 10px;
+  background: var(--dock-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-md);
+  z-index: 9500;             /* 永远浮在窗口/便签之上(桌面 z 递增 220+,封顶远低于此) */
+}
+/* dock 图标:压过 .nav-item 的侧栏样式(3 类特异性稳赢) */
+body.desk-view .desk-dock .dock-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-1);
+  position: relative;
+  transition: transform 120ms var(--ease-out), background var(--dur) var(--ease-out);
+}
+body.desk-view .desk-dock .dock-item:hover {
+  transform: scale(1.15);    /* macOS 式放大 */
+  background: var(--accent-soft);
+}
+body.desk-view .desk-dock .dock-item:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+/* hover 气泡(data-tip 由 i18n applyStatic 写入,同 icon-btn 机制、独立选择器) */
+body.desk-view .desk-dock [data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  background: var(--text-1);
+  color: #fff;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  z-index: 2;
+}
+/* active 面板的图标带下标点 */
+body.desk-view .desk-dock .dock-item.dock-active::before {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-deep);
+}
+body.desk-view .desk-dock .dock-sep {
+  width: 1px;
+  height: 30px;
+  margin: 0 6px;
+  background: var(--border-strong);
+}
+body.desk-view .desk-dock .dock-wins {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* 窗口指示:开着 = 下标点;最小化 = 半透明;mgmt 关着 = 不占位 */
+body.desk-view .desk-dock .dock-win.is-open::before {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+body.desk-view .desk-dock .dock-win.is-min { opacity: 0.55; }
+body.desk-view .desk-dock .dock-win.is-off { display: none; }
+
+/* ============================================================================
+   卡皮巴拉右下常驻:模态开着也不让位(对话视图的 dock-yield/隐藏规则桌面下全撤),
+   冒泡动效(#karvy-bubble)从顶栏锚点搬回它头上(CSS 重定位,DOM 不动)
+   ========================================================================= */
+body.desk-view .modal-overlay:not(.hidden) ~ .karvy-dock { display: flex; }
+body.desk-view .karvy-dock { z-index: 9400; }
+body.desk-view .karvy-dock.dock-yield { opacity: 1; pointer-events: auto; }
+body.desk-view .karvy-dock .karvy-dock-label { display: none; }
+body.desk-view #karvy-bubble {
+  position: fixed;
+  right: 44px;
+  bottom: 132px;
+  top: auto;
+  left: auto;
+  z-index: 9600;
+}
+
+/* ============================================================================
+   降级与动效对策
+   ========================================================================= */
+/* ≤720px:桌面隐喻在手机上不存在 —— 切换器隐藏 🖥 选项(存量偏好由 app.js 降级 chat) */
+@media (max-width: 720px) {
+  #view-opt-desk { display: none !important; }
+}
+/* prefers-reduced-motion:无位移动画;⚖ 提醒只变色不呼吸 */
+@media (prefers-reduced-motion: reduce) {
+  body.desk-view .desk-dock .dock-item,
+  body.desk-view .desk-dock .dock-item:hover { transform: none; transition: none; }
+  body.desk-view .cockpit-col.note-alert {
+    animation: none;
+    border-color: var(--rose);
+    box-shadow: 0 0 0 4px var(--rose-soft), 0 10px 26px rgba(142, 95, 60, 0.16);
+  }
+}
