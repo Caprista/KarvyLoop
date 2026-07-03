@@ -397,6 +397,55 @@ async def weekly_digest_tick(*, trace: Any, token_ledger: Any = None,
             "quiet": bool(digest.get("quiet")), "reason": ""}
 
 
+# ---------------------------------------------------------------- 桌面纪念物(P1.5 灵魂缺口③,轻读口)
+
+def memento_from_digest(digest: dict) -> dict:
+    """digest → 桌面纪念物(GET /api/desk/memento 的契约形状,冻结):
+    {"week_label","tasks_done","skills_new","decisions","tokens_total"}。纯投影,零计算零 LLM。"""
+    w = digest.get("window") or {}
+    t = digest.get("tasks") or {}
+    sk = digest.get("skills") or {}
+    dec = digest.get("decisions") or {}
+    tok = digest.get("tokens") or {}
+
+    def _i(v) -> int:
+        try:
+            return int(v or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    return {
+        "week_label": f"{w.get('start_label', '')} → {w.get('end_label', '')}",
+        "tasks_done": _i(t.get("succeeded")),
+        "skills_new": _i(sk.get("crystallized_count")),
+        "decisions": _i(dec.get("total")),
+        "tokens_total": _i(tok.get("total")),
+    }
+
+
+def load_memento(*, registry: Any = None, state_path: Optional[Path] = None) -> Optional[dict]:
+    """有 digest 水位就读现成的(别重算重的):水位文件记着上次发的周报卡 id,卡还挂在
+    registry 里 → 直接从卡 payload 的结构化 digest 投影纪念物。
+
+    读不到(没发过卡 / 卡已被拍掉 / registry 未接)→ None,调用方自行决定要不要
+    确定性重建一份(build_weekly_digest 零 LLM)。纯只读,不动水位不动卡。"""
+    if registry is None:
+        return None
+    state = _load_state(state_path)
+    pid = (state.get("last_proposal_id") or "").strip()
+    if not pid:
+        return None
+    try:
+        card = registry.get(pid)
+    except Exception:
+        return None
+    payload = getattr(card, "payload", None) or {}
+    digest = payload.get("digest") if isinstance(payload, dict) else None
+    if not isinstance(digest, dict):
+        return None
+    return memento_from_digest(digest)
+
+
 # ---------------------------------------------------------------- 接线(主线做,本模块不碰 app.py)
 # console/entry.py 挂周期任务处(daily_poll 同侧)加:
 #   from karvyloop.cognition.weekly_digest import weekly_digest_tick
@@ -412,4 +461,5 @@ __all__ = [
     "KIND_WEEKLY_DIGEST", "WINDOW_DAYS",
     "build_weekly_digest", "render_digest_markdown",
     "build_weekly_digest_proposal", "weekly_digest_tick",
+    "memento_from_digest", "load_memento",
 ]

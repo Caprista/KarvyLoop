@@ -234,6 +234,7 @@ def build_skill_md(
     arguments: Optional[list[dict]] = None,
     result_reuse: str = "dynamic",
     verified: Optional[bool] = None,
+    created_ts: Optional[float] = None,
 ) -> str:
     """构造 SKILL.md 文本。
 
@@ -243,6 +244,8 @@ def build_skill_md(
     - verified(docs/44 断⑭):结晶时有无**独立验据**(checker verdict 回流,非执行器自报)。
       False 也照样结晶 —— 只是诚实标 `verified: false`,recall 排序吃这个标;None=不写(兼容
       非结晶路径的手工调用,行为同旧)。
+    - created_ts(P1.5 灵魂缺口③"周五纪念物"):结晶落盘时刻,写成 `crystallized_ts:`(Unix ts)。
+      **加性**:None=不写(老技能/手工调用无此行 → API 如实返 null,不伪造出生记录)。
     """
     args = arguments or []
     fm_lines = [
@@ -257,6 +260,8 @@ def build_skill_md(
     fm_lines.append(f"result_reuse: {result_reuse or 'dynamic'}")   # #2 §13:dynamic=命中重跑/stable=可回放
     if verified is not None:
         fm_lines.append(f"verified: {'true' if verified else 'false'}")
+    if created_ts is not None:
+        fm_lines.append(f"crystallized_ts: {float(created_ts):.3f}")
     if args:
         fm_lines.append("arguments:")
         for a in args:
@@ -318,6 +323,29 @@ def mark_skill_verified(skill_md_path: Path) -> bool:
     except OSError:
         return False
     return True
+
+
+_FRONT_CRYSTALLIZED_TS = re.compile(r"^crystallized_ts:\s*([0-9][0-9.]*)\s*$", re.MULTILINE)
+
+
+def read_crystallized_ts(skill_md_text: str) -> Optional[float]:
+    """从 SKILL.md 文本读结晶时刻(P1.5 缺口③;/api/skills 暴露用)。
+
+    只在第一对 `--- ... ---` frontmatter 块里找(防正文同形行误读,同 mark_skill_verified
+    的纪律);无此行(老技能)/ 坏值 → None(诚实空,不伪造出生记录)。
+    """
+    text = skill_md_text or ""
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    head = text[: end + 4] if end >= 0 else text
+    m = _FRONT_CRYSTALLIZED_TS.search(head)
+    if m is None:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
 
 
 def write_skill_md(skill_dir: Path, skill_md_text: str) -> Path:
@@ -382,6 +410,9 @@ def crystallize(
     # duck-type 防御:老的/第三方 VerifyStore 没这方法 → None(frontmatter 不写,行为同旧)。
     _has_ind = getattr(verify, "has_independent", None)
     verified_flag: Optional[bool] = bool(_has_ind(sig)) if callable(_has_ind) else None
+    # P1.5 缺口③:结晶落盘时刻(wall clock,同 Skill.created_at 口径)——frontmatter 与
+    # 内存态用**同一个**戳,不各 time.time() 各的。
+    created = time.time()
     skill_md = build_skill_md(
         name=name,
         description=description,
@@ -394,6 +425,7 @@ def crystallize(
         arguments=arguments,
         result_reuse=result_reuse,
         verified=verified_flag,
+        created_ts=created,
     )
     path = write_skill_md(skills_dir / name, skill_md)
     stats = store.get(sig) or UsageStats()
@@ -413,8 +445,8 @@ def crystallize(
         usage=stats,
         verify_proof=verify_proof,
         scope=skill_scope,
-        created_at=time.time(),
-        evolved_at=time.time(),
+        created_at=created,
+        evolved_at=created,
     )
 
 
@@ -428,4 +460,5 @@ __all__ = [
     "usage_score", "success_rate",
     # 结晶
     "build_skill_md", "write_skill_md", "crystallize", "mark_skill_verified",
+    "read_crystallized_ts",
 ]

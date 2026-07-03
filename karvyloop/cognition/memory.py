@@ -28,6 +28,21 @@ class MultipleExternalProvidersError(ValueError):
     """同时配多个外部 provider → 拒绝(参照业界单外部限制)。"""
 
 
+def belief_recency_ts(b: Belief) -> float:
+    """Belief 的"沉淀时刻":provenance.ts 优先(写入时刻),缺/坏则退 freshness_ts。
+    只读辅助(recent 排序 + API 展示共用一个口径,不各算各的)。"""
+    ts = (b.provenance or {}).get("ts")
+    try:
+        if ts is not None:
+            return float(ts)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return float(b.freshness_ts or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 @dataclass
 class Context:
     """prefetch_all 的产物:围栏后的字符串 + 命中 Belief(供上层用)。"""
@@ -298,6 +313,31 @@ class MemoryManager:
         ranked = spreading_activation_recall(beliefs, query, top_k=max(0, limit))
         return fence(ranked)
 
+    def recent(self, *, limit: int = 20, scope: Optional[str] = None,
+               domain: str = "") -> list[Belief]:
+        """只读查询(P1.5 灵魂缺口②"它记得你且你看得见"):最近沉淀的 Belief,
+        按 provenance.ts(缺则 freshness_ts)降序,封顶 limit 条。零副作用、不落盘。
+
+        - `scope`:"personal"/"domain" 只看一层;None/其他 → 两层都看(去重 by id(b),
+          index 双 key 会把同一对象返回两次 —— 同 _persist 的坑)。
+        - `domain`:给了 → 只看 provenance.applies.domain == domain 的域专属认知;
+          空 → 不按域过滤(通用 + 各域都列,这是管理面视角,非跨域召回)。
+        """
+        scopes = (scope,) if scope in ("personal", "domain") else ("personal", "domain")
+        out, seen = [], set()
+        for sc in scopes:
+            for b in self._index.all(sc):
+                if id(b) in seen:
+                    continue
+                seen.add(id(b))
+                if domain:
+                    bd = (b.provenance.get("applies") or {}).get("domain", "") if b.provenance else ""
+                    if bd != domain:
+                        continue
+                out.append(b)
+        out.sort(key=belief_recency_ts, reverse=True)
+        return out[:max(0, int(limit))]
+
     async def consolidate_all(self) -> None:
         for p in self.providers:
             if not p.is_available():
@@ -310,4 +350,5 @@ class MemoryManager:
 
 __all__ = [
     "MemoryManager", "Context", "MultipleExternalProvidersError",
+    "belief_recency_ts",
 ]

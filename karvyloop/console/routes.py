@@ -1443,6 +1443,7 @@ def api_domain_restore(req: DomainRestoreRequest, request: Request) -> dict[str,
 def api_skills(request: Request) -> dict[str, Any]:
     """列已结晶技能库(L0)——楔子的家。name/触发/描述/用量/是否归档 + SKILL.md 正文(封顶)。"""
     import pathlib as _pl
+    from karvyloop.crystallize.crystallize import read_crystallized_ts as _read_cts
     ml = getattr(request.app.state, "main_loop", None)
     idx = getattr(ml, "skill_index", None) if ml is not None else None
     store = getattr(ml, "store", None) if ml is not None else None
@@ -1479,6 +1480,8 @@ def api_skills(request: Request) -> dict[str, Any]:
             "scripts": scripts,   # 携带的脚本(可在沙箱里试跑;P0-c)
             "net_granted": _skill_net_granted(request.app, e.name),  # 用户是否已授网(P1)
             "status": _skill_status(body),   # 待沉淀 / 待验证 / 已沉淀(btw-1)
+            # P1.5 缺口③:结晶时刻(frontmatter `crystallized_ts:`;老技能无标 → null,加性不伪造)
+            "crystallized_ts": _read_cts(body),
             "body": body,
         })
     out.sort(key=lambda s: (s["archived"], -s["recall_count"], -s["usage_count"]))
@@ -1542,6 +1545,34 @@ def api_skill_lifecycle(request: Request) -> dict[str, Any]:
     # 最近有动静的技能在前(时间线视图默认关注活跃技能)
     skills.sort(key=lambda s: -(s["events"][-1]["ts"] if s["events"] else 0.0))
     return {"skills": skills}
+
+
+@router.get("/desk/memento")
+def api_desk_memento(request: Request) -> dict[str, Any]:
+    """周五纪念物(P1.5 灵魂缺口③,轻读口)。契约形状冻结:
+    {"week_label","tasks_done","skills_new","decisions","tokens_total"}。
+
+    有 digest 水位(周报卡还挂着)→ 直接读现成结构化 digest,不重算;
+    读不到 → build_weekly_digest 确定性重建一次(零 LLM,纯 Trace/账本投影)。纯只读。
+    """
+    from karvyloop.cognition.weekly_digest import (
+        build_weekly_digest, load_memento, memento_from_digest,
+    )
+    app = request.app
+    reg = getattr(app.state, "proposal_registry", None)
+    m = load_memento(registry=reg)
+    if m is not None:
+        return {**m, "source": "digest"}
+    ml = getattr(app.state, "main_loop", None)
+    trace = getattr(ml, "trace", None) if ml is not None else None
+    if trace is None:
+        trace = getattr(app.state, "trace", None)   # 无 main_loop 时的备选源(同 weekly tick)
+    import time as _time
+    digest = build_weekly_digest(
+        trace, getattr(app.state, "token_ledger", None),
+        getattr(app.state, "taste_predictions", None), reg, _time.time(),
+        decision_log=getattr(app.state, "decision_log", None))
+    return {**memento_from_digest(digest), "source": "computed"}
 
 
 @router.get("/coding/capability")
@@ -2263,6 +2294,35 @@ def api_memory_list(request: Request) -> dict[str, Any]:
          "freshness_ts": b.freshness_ts}
         for b in mem.index.all("personal") if not is_decision_pref(b)
     ]}
+
+
+@router.get("/memory/recent")
+def api_memory_recent(request: Request, limit: int = 20, scope: str = "",
+                      domain: str = "") -> dict[str, Any]:
+    """最近沉淀(P1.5 灵魂缺口②:"它记得你且你看得见"小卡)。契约形状冻结:
+    {"items":[{"id","content","ts","source","domain"}]},按沉淀时刻(provenance.ts,
+    缺则 freshness_ts)降序;content 不带全文,超 300 字截断。纯只读。
+
+    `scope=personal|domain`(空 = 两层都看);`domain=` 给了只看该域的域专属认知。
+    """
+    mem = getattr(request.app.state, "memory", None)
+    if mem is None:
+        return {"items": []}   # --no-llm / 未接线:诚实空,不猜
+    from karvyloop.cognition.memory import belief_recency_ts
+    lim = max(1, min(int(limit or 20), 100))
+    sc = scope if scope in ("personal", "domain") else None
+    items = []
+    for b in mem.recent(limit=lim, scope=sc, domain=(domain or "").strip()):
+        prov = b.provenance or {}
+        content = b.content or ""
+        items.append({
+            "id": str(prov.get("id", "") or ""),
+            "content": content[:300],
+            "ts": belief_recency_ts(b),
+            "source": str(prov.get("source", "") or ""),
+            "domain": str((prov.get("applies") or {}).get("domain", "") or ""),
+        })
+    return {"items": items}
 
 
 # ---- Bug2:知识库**异步和解/合并**(整理近重复;H2A suggest+apply,离摄入热路径,无向量)----
@@ -3334,6 +3394,26 @@ def api_roles(request: Request) -> dict[str, Any]:
     if reg is None:
         return {"roles": []}
     return {"roles": [_role_to_dict(v) for v in reg.list_all()]}
+
+
+@router.get("/roles/presence")
+def api_roles_presence(request: Request) -> dict[str, Any]:
+    """工位区聚合快照(P1.5 灵魂缺口①,纯只读)。契约形状冻结(前端并行开发):
+    {"roles":[{"role_id","display","domain_id","status":"busy|idle","running",
+    "last_activity_ts","last_task":{"id","intent"}|null}]}。
+
+    角色库全角色 + 小卡(l0,role_id="karvy")各一行(没任务 = idle,工位常驻在场);
+    running/最近活动从 task registry 折叠(与 WS `role_presence` 增量同一套纯函数,一个口径)。
+    """
+    from karvyloop.console.task_events import roles_for_presence
+    from karvyloop.console.tasks import aggregate_presence
+    app = request.app
+    task_reg = getattr(app.state, "task_registry", None)
+    try:
+        tasks = task_reg.list() if task_reg is not None else []
+    except Exception:
+        tasks = []
+    return {"roles": aggregate_presence(roles_for_presence(app), tasks)}
 
 
 @router.post("/role/create")

@@ -19,6 +19,7 @@ WS_TYPE_TASK_STATUS = "task_status"
 WS_TYPE_TASK_STEP = "task_step"
 WS_TYPE_SYSTEM_ERROR = "system_error"
 WS_TYPE_DRIVE_EVENT = "drive_event"   # P4 逐字流式:drive 进行中的增量 render 事件
+WS_TYPE_ROLE_PRESENCE = "role_presence"   # P1.5 工位区:任务 start/done/error 顺势推该角色单行 presence
 
 
 async def _broadcast(app: Any, message: dict) -> int:
@@ -64,6 +65,71 @@ async def broadcast_drive_event(app: Any, ev: dict) -> int:
     return await _broadcast(app, {"type": WS_TYPE_DRIVE_EVENT, "payload": ev})
 
 
+async def broadcast_role_presence(app: Any, row: dict) -> int:
+    """P1.5 工位区:某角色的单行 presence(契约形状见 tasks.presence_row)→ push。
+
+    折叠进既有 task_status 广播点(make_task_change_sink),不新开轮询:任务
+    start/done/error 时该角色的 busy/idle 已经变了,顺势推一行,前端工位区免刷新。
+    """
+    return await _broadcast(app, {"type": WS_TYPE_ROLE_PRESENCE, "payload": row})
+
+
+def roles_for_presence(app: Any) -> list:
+    """工位区的"角色花名册"快照:[{"role_id","display","domain_id"}],小卡(l0)恒在第一行。
+
+    display = RoleView.display_name()(花名(职务));domain_id = 该角色所属域(active 域
+    member_query 解析,首个命中;不在任何域 → "")。全部只读,取不到就少一截,不猜不崩。
+    """
+    from karvyloop.console.tasks import KARVY_ROLE_ID
+    rows: list = [{"role_id": KARVY_ROLE_ID, "display": "小卡", "domain_id": "l0"}]
+    rid_domain: dict = {}
+    dom_reg = getattr(app.state, "domain_registry", None)
+    if dom_reg is not None:
+        try:
+            for d in dom_reg.list_active():
+                for m in dom_reg.resolve_members(d.id):
+                    if getattr(m, "role", "") == "user":
+                        continue
+                    rid = getattr(m, "agent_id", "") or getattr(m, "role", "")
+                    if rid and rid not in rid_domain:
+                        rid_domain[rid] = d.id
+        except Exception as e:
+            logger.debug(f"[task_events] presence 域成员解析失败(domain_id 留空): {e}")
+    role_reg = getattr(app.state, "role_registry", None)
+    if role_reg is not None:
+        try:
+            for v in role_reg.list_all():
+                rows.append({
+                    "role_id": v.id,
+                    "display": v.display_name() if hasattr(v, "display_name") else v.id,
+                    "domain_id": rid_domain.get(v.id, ""),
+                })
+        except Exception as e:
+            logger.debug(f"[task_events] presence 角色库读取失败(只剩小卡行): {e}")
+    return rows
+
+
+def presence_row_for_task(app: Any, task: dict) -> Any:
+    """任务 dict → 它归属角色的**单行** presence(WS 推送用);归不了属(group/未知)→ None。
+
+    聚合走 tasks.aggregate_presence 同一套纯函数 —— API 快照与 WS 增量永远一个口径。
+    """
+    from karvyloop.console.tasks import aggregate_presence, match_task_role
+    roles = roles_for_presence(app)
+    role_ids = {r["role_id"] for r in roles}
+    display_to_rid = {r["display"]: r["role_id"] for r in roles if r.get("display")}
+    rid = match_task_role(task, role_ids, display_to_rid)
+    if rid is None:
+        return None
+    task_reg = getattr(app.state, "task_registry", None)
+    try:
+        tasks = task_reg.list() if task_reg is not None else [task]
+    except Exception:
+        tasks = [task]
+    rows = aggregate_presence([r for r in roles if r["role_id"] == rid], tasks)
+    return rows[0] if rows else None
+
+
 def _schedule(coro_factory: Callable[[], Coroutine]) -> None:
     """在当前事件循环上排一个广播协程;无 loop(同步上下文)→ 静默跳过。
 
@@ -102,6 +168,16 @@ def make_task_change_sink(app: Any, trace: Any) -> Callable[[dict], None]:
     """
     def _sink(task: dict) -> None:
         schedule_task_broadcast(app, task)
+        # P1.5 工位区:同一接缝顺势推该角色单行 presence(不新开轮询;推不出不拖任务流)。
+        # 只在 start/done/error 推(契约口径)—— 中途 step/blocked 不改 busy/idle,不白推。
+        try:
+            _is_start = (task.get("last_event") or {}).get("kind") == "start"
+            if task.get("status") in ("done", "error") or _is_start:
+                row = presence_row_for_task(app, task)
+                if row is not None:
+                    _schedule(lambda: broadcast_role_presence(app, row))
+        except Exception as e:
+            logger.debug(f"[task_events] role_presence 推送失败(工位区少一次增量,不致命): {e}")
         try:
             if trace is not None and task.get("status") in ("done", "error"):
                 from karvyloop.cognition.trace import TraceEntry
@@ -124,6 +200,8 @@ def make_task_change_sink(app: Any, trace: Any) -> Callable[[dict], None]:
 
 __all__ = [
     "WS_TYPE_TASK_STATUS", "WS_TYPE_TASK_STEP", "WS_TYPE_SYSTEM_ERROR",
+    "WS_TYPE_ROLE_PRESENCE",
     "broadcast_task_status", "broadcast_task_step", "broadcast_system_error",
+    "broadcast_role_presence", "roles_for_presence", "presence_row_for_task",
     "schedule_task_broadcast", "schedule_system_error", "make_task_change_sink",
 ]

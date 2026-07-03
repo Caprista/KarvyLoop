@@ -24,6 +24,7 @@ from .crystallize import (
     crystallize,
     mark_skill_verified,
     maybe_promote,
+    read_crystallized_ts,
     success_rate,
     usage_score,
     write_skill_md,
@@ -115,7 +116,7 @@ __all__ = [
     "SELF_REPORT_NOTE", "INDEPENDENT_NOTE",
     # crystallize
     "DecisionKind", "PromoteDecision", "maybe_promote", "crystallize",
-    "build_skill_md", "write_skill_md", "mark_skill_verified",
+    "build_skill_md", "write_skill_md", "mark_skill_verified", "read_crystallized_ts",
     "usage_score", "success_rate",
     "PROMOTE_SCORE", "MIN_SUCCESS_RATE", "HALFLIFE_DAYS",
     "MIN_RECENCY_FACTOR", "EVICT_SCORE", "STALE_DAYS",

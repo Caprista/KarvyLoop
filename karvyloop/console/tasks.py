@@ -218,4 +218,87 @@ class TaskRegistry:
                 pass  # 落盘失败不阻塞主流程(活动记录,丢一次不致命)
 
 
-__all__ = ["TaskRegistry", "TaskRecord", "TaskStore"]
+# ---- 工位区聚合(P1.5 灵魂后端口①:纯聚合,零 IO / 零 app 依赖)----
+# 契约(前端并行开发,形状冻结):单行 presence =
+#   {"role_id","display","domain_id","status":"busy|idle","running",
+#    "last_activity_ts","last_task":{"id","intent"}|null}
+# 数据源全部现成(TaskRegistry.list() 的任务 dict);不造平行状态机。
+
+KARVY_ROLE_ID = "karvy"          # 小卡(l0)在工位区也算一行
+_INTENT_CAP = 80                 # last_task.intent 截断(契约:80 字)
+
+
+def _task_activity_ts(t: dict) -> float:
+    """一个任务的"最近活动"时刻:终态时刻 > 最新事件 > 启动时刻。坏值当 0(不猜)。"""
+    for v in (t.get("finished"), (t.get("last_event") or {}).get("ts"), t.get("started")):
+        try:
+            if v is not None:
+                return float(v)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def match_task_role(task: dict, role_ids: set, display_to_rid: dict) -> Optional[str]:
+    """任务 → 角色归属(确定性,不猜)。
+
+    - role 字段是注册角色 id → 直接归属;
+    - who 是某角色 display_name(@ 命中路径写的是花名)→ 反查归属;
+    - l0 且无 role → 小卡(KARVY_ROLE_ID);
+    - role=="group"(圆桌/工作流,多角色协作)/ 归不了属 → None(诚实跳过,不硬塞)。
+    """
+    role = task.get("role") or ""
+    if role == "group":
+        return None
+    if role and role in role_ids:
+        return role
+    who = task.get("who") or ""
+    if who in display_to_rid:
+        return display_to_rid[who]
+    if (task.get("domain_id") or "l0") == "l0" and not role:
+        return KARVY_ROLE_ID
+    return None
+
+
+def presence_row(role_id: str, display: str, domain_id: str, tasks: list) -> dict:
+    """单角色 presence 行(契约形状,冻结)。tasks = 已归属该角色的任务 dict 列表。"""
+    running = sum(1 for t in tasks if t.get("status") == "running")
+    last = max(tasks, key=_task_activity_ts) if tasks else None
+    ts = _task_activity_ts(last) if last is not None else None
+    return {
+        "role_id": role_id,
+        "display": display,
+        "domain_id": domain_id,
+        "status": "busy" if running else "idle",
+        "running": running,
+        "last_activity_ts": (ts if ts else None),
+        "last_task": ({"id": last.get("id", ""),
+                       "intent": (last.get("intent") or "")[:_INTENT_CAP]}
+                      if last is not None else None),
+    }
+
+
+def aggregate_presence(roles: list, tasks: list) -> list:
+    """全角色 presence 聚合(GET /api/roles/presence 的核心,纯函数)。
+
+    roles = [{"role_id","display","domain_id"}](调用方负责含小卡行);
+    tasks = TaskRegistry.list()(newest-first 的任务 dict)。
+    每个角色都出一行(没任务 = idle,工位常驻在场);任务按 match_task_role 归属。
+    """
+    role_ids = {r.get("role_id", "") for r in roles if r.get("role_id")}
+    display_to_rid = {r["display"]: r["role_id"] for r in roles
+                      if r.get("display") and r.get("role_id")}
+    buckets: dict[str, list] = {rid: [] for rid in role_ids}
+    for t in tasks:
+        if not isinstance(t, dict):
+            continue
+        rid = match_task_role(t, role_ids, display_to_rid)
+        if rid is not None and rid in buckets:
+            buckets[rid].append(t)
+    return [presence_row(r.get("role_id", ""), r.get("display", ""),
+                         r.get("domain_id", ""), buckets.get(r.get("role_id", ""), []))
+            for r in roles if r.get("role_id")]
+
+
+__all__ = ["TaskRegistry", "TaskRecord", "TaskStore",
+           "KARVY_ROLE_ID", "match_task_role", "presence_row", "aggregate_presence"]
