@@ -267,6 +267,58 @@ class TokenLedger:
             for r in rows
         ]
 
+    def window_series(self, *, start_ts: Optional[float] = None,
+                      end_ts: Optional[float] = None,
+                      granularity: str = "day", limit: int = 1000) -> list[dict]:
+        """时间窗内按粒度聚合的时间序列(分时段查询/前端画柱状)。**只读**,oldest-first。
+
+        granularity:
+        - "day"  → 按 `day` 列(本地日历日)分组。**不能**用 `ts/86400` 整除桶 —— 那是 UTC 日界,
+          在 UTC+8 会把"一天"切在早上 8 点(时区 bug);day 列写入时就是本地日,天然正确。
+        - "hour" → 3600 秒桶(整小时对齐,整小时偏移时区都正确;与 buckets() 同口径)。
+        其它值按 "day" 处理(调用方 route 已先夹断,这里兜底)。
+        """
+        w, p = self._window_where(start_ts, end_ts)
+        lim = max(1, int(limit))
+        if granularity == "hour":
+            interval = 3600
+            with self._lock:
+                rows = self._conn.execute(
+                    f"SELECT CAST(ts / {interval} AS INTEGER) * {interval} AS bucket, "
+                    f"COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
+                    f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                    f"FROM token_usage {w} GROUP BY bucket ORDER BY bucket ASC LIMIT ?",
+                    (*p, lim),
+                ).fetchall()
+            return [
+                {"bucket_start": int(r[0]),
+                 "label": time.strftime("%Y-%m-%d %H:00", time.localtime(int(r[0]))),
+                 "input": int(r[1]), "output": int(r[2]),
+                 "cache_read": int(r[3]), "cache_write": int(r[4]),
+                 "total": int(r[1]) + int(r[2]), "calls": int(r[5])}
+                for r in rows
+            ]
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT day, MIN(ts), COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"FROM token_usage {w} GROUP BY day ORDER BY day ASC LIMIT ?",
+                (*p, lim),
+            ).fetchall()
+        out = []
+        for r in rows:
+            try:  # bucket_start = 该本地日零点(前端画轴用);解析失败退首条 ts(不崩)
+                bstart = int(time.mktime(time.strptime(str(r[0]), "%Y-%m-%d")))
+            except (ValueError, OverflowError):
+                bstart = int(r[1])
+            out.append({
+                "bucket_start": bstart, "label": str(r[0]),
+                "input": int(r[2]), "output": int(r[3]),
+                "cache_read": int(r[4]), "cache_write": int(r[5]),
+                "total": int(r[2]) + int(r[3]), "calls": int(r[6]),
+            })
+        return out
+
     @staticmethod
     def _window_where(start_ts: Optional[float], end_ts: Optional[float]) -> tuple[str, tuple]:
         conds, params = [], []

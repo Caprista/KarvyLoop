@@ -1147,6 +1147,36 @@ def api_token_buckets(request: Request, interval: int = 3600,
     return {"interval": iv, "buckets": led.buckets(interval_sec=iv, since=since, limit=lim)}
 
 
+@router.get("/tokens/query")
+def api_tokens_query(request: Request, start_ts: float | None = None,
+                     end_ts: float | None = None,
+                     granularity: str = "day") -> dict[str, Any]:
+    """分时段 token 查询(Hardy ⑥:"笼统的查询等于没有查询")。**纯只读**,记账路径不碰。
+
+    参数:start_ts/end_ts(epoch 秒,闭区间;缺省=最近 7 天)、granularity=hour|day(缺省 day)。
+    返回:窗口回显 + totals(窗口总量)+ by_source(功能排行,烧得多在前)+
+    series(按粒度时间序列,oldest-first,给前端画柱状;day 按本地日历日,hour 按整点桶)。
+    """
+    import time as _time
+    gran = granularity if granularity in ("hour", "day") else "day"
+    end = float(end_ts) if end_ts is not None else _time.time()
+    start = float(start_ts) if start_ts is not None else end - 7 * 86400.0
+    if start > end:                       # 传反了 → 调和,不 4xx(查询是只读,宽进)
+        start, end = end, start
+    base: dict[str, Any] = {"start_ts": start, "end_ts": end, "granularity": gran}
+    led = getattr(request.app.state, "token_ledger", None)
+    if led is None:                       # 无账本 → 优雅空(与 /tokens 同口径)
+        return {**base, "totals": {"input": 0, "output": 0, "cache_read": 0,
+                                   "cache_write": 0, "total": 0, "calls": 0},
+                "by_source": [], "series": []}
+    return {
+        **base,
+        "totals": led.window_totals(start_ts=start, end_ts=end),
+        "by_source": led.window_by_source(start_ts=start, end_ts=end),
+        "series": led.window_series(start_ts=start, end_ts=end, granularity=gran),
+    }
+
+
 # ---- /api/domain/create (9.2c:建业务域 — 让 picker 真有业务域可选) ----
 
 class DomainCreateRequest(BaseModel):
