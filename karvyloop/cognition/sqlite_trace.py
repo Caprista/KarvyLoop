@@ -129,20 +129,26 @@ class SqliteTraceStore(TraceStore):
             self._conn.commit()
             return f"{entry.task_id}:{seq}"
 
-    def query(self, task_id: str, *, kind: Optional[str] = None) -> list[TraceEntry]:
+    def query(self, task_id: str, *, kind: Optional[str] = None,
+              start_ts: Optional[float] = None,
+              end_ts: Optional[float] = None) -> list[TraceEntry]:
+        """同 InMemory 版语义:可选 kind + 可选时间窗(闭区间 `start_ts <= ts <= end_ts`;
+        None = 不限,向后兼容 —— 旧调用 `query(tid, kind=...)` 行为一字不变)。"""
+        sql = ("SELECT task_id, seq, kind, payload_json, ts, agent, source "
+               "FROM trace_entries WHERE task_id = ?")
+        params: list = [task_id]
+        if kind is not None:
+            sql += " AND kind = ?"
+            params.append(kind)
+        if start_ts is not None:
+            sql += " AND ts >= ?"
+            params.append(start_ts)
+        if end_ts is not None:
+            sql += " AND ts <= ?"
+            params.append(end_ts)
+        sql += " ORDER BY seq ASC"
         with self._lock:
-            if kind is None:
-                rows = self._conn.execute(
-                    "SELECT task_id, seq, kind, payload_json, ts, agent, source "
-                    "FROM trace_entries WHERE task_id = ? ORDER BY seq ASC",
-                    (task_id,),
-                ).fetchall()
-            else:
-                rows = self._conn.execute(
-                    "SELECT task_id, seq, kind, payload_json, ts, agent, source "
-                    "FROM trace_entries WHERE task_id = ? AND kind = ? ORDER BY seq ASC",
-                    (task_id, kind),
-                ).fetchall()
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
     def query_atom_runs(self, task_id: str) -> list[AtomRun]:

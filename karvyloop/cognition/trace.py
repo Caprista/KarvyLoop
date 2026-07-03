@@ -54,12 +54,24 @@ class TraceStore:
             self._by_task.setdefault(entry.task_id, []).append(entry)
             return f"{entry.task_id}:{seq}"
 
-    def query(self, task_id: str, *, kind: Optional[str] = None) -> list[TraceEntry]:
+    def query(self, task_id: str, *, kind: Optional[str] = None,
+              start_ts: Optional[float] = None,
+              end_ts: Optional[float] = None) -> list[TraceEntry]:
+        """按 task_id(+可选 kind +可选时间窗)查。
+
+        时间窗(周报卡等时段汇总用):`start_ts <= e.ts <= end_ts`(闭区间,
+        与 DecisionLog.query 同口径);None = 不限(默认,向后兼容 —— 不带窗的
+        旧调用行为一字不变)。keyword-only,不影响既有 `query(tid, kind=...)` 调用。
+        """
         with self._lock:
             entries = list(self._by_task.get(task_id, []))
-            if kind is not None:
-                entries = [e for e in entries if e.kind == kind]
-            return entries
+        if kind is not None:
+            entries = [e for e in entries if e.kind == kind]
+        if start_ts is not None:
+            entries = [e for e in entries if e.ts >= start_ts]
+        if end_ts is not None:
+            entries = [e for e in entries if e.ts <= end_ts]
+        return entries
 
     def query_atom_runs(self, task_id: str) -> list[AtomRun]:
         """给 crystallize.observe 用的投影:取所有 atom_run 事件 → AtomRun。"""

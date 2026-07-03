@@ -232,6 +232,52 @@ class TokenLedger:
         return {"n": len(totals), "mean": int(sum(totals) / len(totals)),
                 "min": min(totals), "max": max(totals)}
 
+    # ---- 只读窗口查询(周报卡等时段汇总;不动记账逻辑)----
+
+    def window_totals(self, *, start_ts: Optional[float] = None,
+                      end_ts: Optional[float] = None) -> dict:
+        """时间窗内总量(闭区间 `start_ts <= ts <= end_ts`;None=不限)。**只读**。"""
+        w, p = self._window_where(start_ts, end_ts)
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"FROM token_usage {w}", p,
+            ).fetchone()
+        inp, out, cr, cw, n = row
+        return {
+            "input": int(inp), "output": int(out),
+            "cache_read": int(cr), "cache_write": int(cw),
+            "total": int(inp) + int(out), "calls": int(n),
+        }
+
+    def window_by_source(self, *, start_ts: Optional[float] = None,
+                         end_ts: Optional[float] = None) -> list[dict]:
+        """时间窗内按 source 聚合("这周谁烧的"),烧得多在前。**只读**。"""
+        w, p = self._window_where(start_ts, end_ts)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT source, COALESCE(SUM(input),0), COALESCE(SUM(output),0), COUNT(*) "
+                f"FROM token_usage {w} GROUP BY source "
+                f"ORDER BY SUM(input)+SUM(output) DESC", p,
+            ).fetchall()
+        return [
+            {"source": r[0], "input": int(r[1]), "output": int(r[2]),
+             "total": int(r[1]) + int(r[2]), "calls": int(r[3])}
+            for r in rows
+        ]
+
+    @staticmethod
+    def _window_where(start_ts: Optional[float], end_ts: Optional[float]) -> tuple[str, tuple]:
+        conds, params = [], []
+        if start_ts is not None:
+            conds.append("ts >= ?")
+            params.append(start_ts)
+        if end_ts is not None:
+            conds.append("ts <= ?")
+            params.append(end_ts)
+        return (("WHERE " + " AND ".join(conds)) if conds else ""), tuple(params)
+
     def recent(self, *, limit: int = 50) -> list[dict]:
         """最近 N 条原始调用(时间线:何时、哪个 source/model、烧多少)—— 定位某次尖峰是谁。"""
         with self._lock:
