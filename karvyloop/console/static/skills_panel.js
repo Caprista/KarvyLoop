@@ -395,6 +395,81 @@ var KarvySkillsPanelBundle = (function(exports) {
       ));
     }
     b.appendChild(list);
+    b.appendChild(_mcpPresetsSection());
+  }
+  function _mcpPresetsSection() {
+    const wrap = el("div", { class: "mgmt-buysugar" });
+    wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("mcpp.title") }));
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.hint") }));
+    const list = el("div", { class: "mgmt-list" });
+    wrap.appendChild(list);
+    (async () => {
+      const data = await _getJSON("/api/mcp/presets");
+      const presets = data && data.presets || [];
+      if (!presets.length) {
+        list.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") }));
+        return;
+      }
+      for (const p of presets) list.appendChild(_mcpPresetRow(p));
+    })();
+    return wrap;
+  }
+  function _mcpPresetRow(p) {
+    const msg = el("div", { class: "mgmt-hint" });
+    const inputs = [];
+    const paramRow = el("div", { class: "mgmt-row" });
+    for (const prm of p.params || []) {
+      const ph = prm.secret ? p.secret_hint || prm.key : prm.default_resolved ? t("mcpp.param_default_ph", { key: prm.key, def: prm.default_resolved }) : prm.key;
+      const input = el("input", { type: prm.secret ? "password" : "text", placeholder: ph });
+      input.style.flex = "1";
+      inputs.push({ key: prm.key, input });
+      paramRow.appendChild(input);
+    }
+    const btn = el("button", {
+      class: "dpref-confirm",
+      text: p.configured ? t("mcpp.update") : t("mcpp.connect"),
+      onclick: async () => {
+        const params = {};
+        for (const rec of inputs) {
+          const v = rec.input.value.trim();
+          if (v) params[rec.key] = v;
+        }
+        btn.disabled = true;
+        btn.textContent = t("mcpp.applying");
+        const r = await _postJSON("/api/mcp/preset/apply", { preset_id: p.id, params });
+        if (r.ok && r.data && r.data.ok) {
+          btn.textContent = t("mcpp.connected");
+          msg.textContent = t("mcpp.restart_note");
+        } else {
+          btn.disabled = false;
+          btn.textContent = p.configured ? t("mcpp.update") : t("mcpp.connect");
+          msg.textContent = t("mgmt.failed", { err: r.data && (r.data.reason || r.data.detail) || r.status });
+        }
+      }
+    });
+    const badges = [el("span", { text: "🔌 " + p.name })];
+    if (p.configured) {
+      badges.push(" ");
+      badges.push(el("span", { class: "dpref-badge confirmed", text: t("mcpp.connected") }));
+    }
+    if (p.needs_secret) {
+      badges.push(" ");
+      badges.push(el("span", { class: "dpref-badge provisional", text: "🔑 " + t("mcpp.needs_secret") }));
+    }
+    return el(
+      "div",
+      { class: "mgmt-card" },
+      el(
+        "div",
+        { class: "mc-main" },
+        el("div", { class: "mc-name" }, ...badges),
+        el("div", { class: "mc-meta", text: p.description || "" }),
+        p.risk_note ? el("div", { class: "mc-meta", text: "⚠ " + p.risk_note }) : null,
+        inputs.length ? paramRow : null,
+        el("div", { class: "dpref-actions" }, btn),
+        msg
+      )
+    );
   }
   function _renderCapabilityOverviewCard(body) {
     const actions = el("div", { class: "dpref-actions" });

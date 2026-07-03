@@ -273,6 +273,66 @@ function _openCodingDetail(cap: any): void {
         el("div", { class: "mc-meta", text: (tl.description || "").slice(0, 200) }))));
   }
   b.appendChild(list);
+  // #42 优化:渠道预设 —— 一键接入知名 MCP server(拧开就有水)
+  b.appendChild(_mcpPresetsSection());
+}
+
+// #42 优化:MCP 渠道预设区 —— 知名 server(文件/抓网页/GitHub/记忆/时间/SQLite)一键写进
+// config.yaml。诚实:server 只在 console 启动时连接(无热加载)→ 接入后明示"要重启"。
+function _mcpPresetsSection(): HTMLElement {
+  const wrap = el("div", { class: "mgmt-buysugar" });
+  wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("mcpp.title") }));
+  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.hint") }));
+  const list = el("div", { class: "mgmt-list" });
+  wrap.appendChild(list);
+  (async () => {
+    const data = await _getJSON("/api/mcp/presets");
+    const presets = (data && data.presets) || [];
+    if (!presets.length) { list.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") })); return; }
+    for (const p of presets) list.appendChild(_mcpPresetRow(p));
+  })();
+  return wrap;
+}
+
+function _mcpPresetRow(p: any): HTMLElement {
+  const msg = el("div", { class: "mgmt-hint" });
+  // 参数输入(有才显):folder 之类明文;token 之类走 password,值只发一次、绝不回显
+  const inputs: Array<{ key: string; input: HTMLInputElement }> = [];
+  const paramRow = el("div", { class: "mgmt-row" });
+  for (const prm of p.params || []) {
+    const ph = prm.secret ? (p.secret_hint || prm.key)
+      : (prm.default_resolved ? t("mcpp.param_default_ph", { key: prm.key, def: prm.default_resolved }) : prm.key);
+    const input = el("input", { type: prm.secret ? "password" : "text", placeholder: ph }) as HTMLInputElement;
+    input.style.flex = "1";
+    inputs.push({ key: prm.key, input });
+    paramRow.appendChild(input);
+  }
+  const btn = el("button", { class: "dpref-confirm", text: p.configured ? t("mcpp.update") : t("mcpp.connect"),
+    onclick: async () => {
+      const params: Record<string, string> = {};
+      for (const rec of inputs) { const v = rec.input.value.trim(); if (v) params[rec.key] = v; }
+      (btn as HTMLButtonElement).disabled = true; btn.textContent = t("mcpp.applying");
+      const r = await _postJSON("/api/mcp/preset/apply", { preset_id: p.id, params: params });
+      if (r.ok && r.data && r.data.ok) {
+        btn.textContent = t("mcpp.connected");
+        msg.textContent = t("mcpp.restart_note");   // 诚实:启动时才连,要重启才装上
+      } else {
+        (btn as HTMLButtonElement).disabled = false;
+        btn.textContent = p.configured ? t("mcpp.update") : t("mcpp.connect");
+        msg.textContent = t("mgmt.failed", { err: (r.data && (r.data.reason || r.data.detail)) || r.status });
+      }
+    } });
+  const badges: (HTMLElement | string | null)[] = [el("span", { text: "🔌 " + p.name })];
+  if (p.configured) { badges.push(" "); badges.push(el("span", { class: "dpref-badge confirmed", text: t("mcpp.connected") })); }
+  if (p.needs_secret) { badges.push(" "); badges.push(el("span", { class: "dpref-badge provisional", text: "🔑 " + t("mcpp.needs_secret") })); }
+  return el("div", { class: "mgmt-card" },
+    el("div", { class: "mc-main" },
+      el("div", { class: "mc-name" }, ...badges),
+      el("div", { class: "mc-meta", text: p.description || "" }),
+      p.risk_note ? el("div", { class: "mc-meta", text: "⚠ " + p.risk_note }) : null,
+      inputs.length ? paramRow : null,
+      el("div", { class: "dpref-actions" }, btn),
+      msg));
 }
 
 // P3-d:能力合一清单 —— 此前工具能力(capability 决策链)和技能授予(grants/锁)两套账,

@@ -1567,6 +1567,45 @@ async def api_coding_config(request: Request) -> dict[str, Any]:
     return {"ok": True, **pub}
 
 
+# ---- #42 优化:MCP 渠道预设(拧开就有水)—— 一键把知名 MCP server 写进 config.yaml ----
+
+class McpPresetApplyRequest(BaseModel):
+    preset_id: str = Field(..., min_length=1, max_length=64)
+    params: dict[str, str] = Field(default_factory=dict)   # 如 {folder}/{token};绝不回显
+
+
+@router.get("/mcp/presets")
+def api_mcp_presets(request: Request) -> dict[str, Any]:
+    """渠道预设目录 + 哪些已在 config.yaml 配好(只比对名字,**绝不回显 env/密钥**)。
+    诚实:MCP server 只在 console 启动时连(app.py lifespan),无热加载 → requires_restart。"""
+    from karvyloop.console.mcp_presets import configured_names, list_presets
+    cfgp = getattr(request.app.state, "config_path", "") or ""
+    ws = None
+    try:
+        from karvyloop.config_workspace import resolve_workspace
+        ws = resolve_workspace(cfgp or None, ensure=False)
+    except Exception:
+        pass
+    names = configured_names(cfgp)
+    return {"presets": [{**p, "configured": p["id"] in names} for p in list_presets(ws)],
+            "requires_restart": True}
+
+
+@router.post("/mcp/preset/apply")
+def api_mcp_preset_apply(req: McpPresetApplyRequest, request: Request) -> dict[str, Any]:
+    """把一个预设 upsert 进 config.yaml 的 mcp.servers。密钥只落 config.yaml(它本来就是
+    密钥之家,仓外);响应**绝不回显 params/token**。工具只在启动时连接(无热加载)→
+    如实返回 requires_restart=True,不假装已生效。"""
+    from karvyloop.console.mcp_presets import apply_preset
+    cfgp = getattr(request.app.state, "config_path", "") or ""
+    if not cfgp:
+        return {"ok": False, "reason": "未接 config(--no-llm?)"}
+    ok, reason = apply_preset(req.preset_id, dict(req.params or {}), cfgp)
+    if not ok:
+        return {"ok": False, "reason": reason}
+    return {"ok": True, "requires_restart": True, "preset_id": req.preset_id}
+
+
 def _skill_status(body: str) -> str:
     """技能生命周期状态(btw-1,Hardy 定义):
       - crystallized(已沉淀):过了我方结晶门(有 verify_proof)或外部技能成功跑通一次(verified_at)。

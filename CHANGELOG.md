@@ -33,6 +33,11 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   reason without a translation fails the suite).
 
 ### Added
+- **One-click MCP channel presets** — the Coding capability card now has a "Connect a channel" section:
+  pick a well-known MCP server (filesystem scoped to a folder — defaults to the workspace, web fetch,
+  GitHub, memory, time, SQLite), fill in a folder/token where needed, and it's written into
+  `config.yaml`'s `mcp.servers` (secrets stay in config.yaml, never echoed back). The UI states honestly
+  that MCP servers connect at startup, so a restart is required to load the new tools.
 - **The decision flow is now phone-friendly** — open the LAN token link (`karvyloop url`) on your phone
   and approve/reject/edit decision cards comfortably: on small screens the cockpit stacks into a single
   column with the decision column first, ACCEPT/DEFER/REJECT become thumb-sized full-width targets, the
