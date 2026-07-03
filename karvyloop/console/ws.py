@@ -9,6 +9,8 @@ WS 协议:
       / `system_error`(后台 fire-and-forget 失败)—— 见 console/task_events.py
     + P4 逐字流式:`drive_event`(drive 进行中的增量 render 事件 text_delta/tool_call,worker 线程经
       run_coroutine_threadsafe 桥回 loop 推;终态 `drive_done` 清草稿渲染权威版)
+    + ⑤c 环境感知召回:`ambient_recall`(intent 到达时并行算,相关技能/知识主动浮出;
+      纯本地重叠打分零 LLM,fire-and-forget 不挡 drive;低分/冷却中静默不推)
   - client send `intent` / `h2a_decision` / `propose`(9.0d:触发 IntentAnalyst boot)/ `ping`
 
 9.0d:`h2a_proposal` 此前只在协议注释里,从未真 emit;本拍接 ProposalPump 真路径
@@ -105,6 +107,11 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     if not intent:
         await websocket.send_json({"type": "error", "payload": "empty intent"})
         return
+
+    # ⑤c 环境感知召回:相关技能/知识主动浮出(工作台"料")。fire-and-forget:
+    # 纯本地重叠打分(零 LLM,毫秒级),结果走 WS 广播,不 await 在 drive 前面挡路。
+    _schedule_ambient_recall(app, intent)
+
     main_loop: Optional[MainLoop] = app.state.main_loop
     runtime_kwargs: dict = app.state.runtime_kwargs or {}
     workbench_app = app.state.workbench_app
@@ -270,6 +277,60 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     _payload = drive_outcome_to_dict(outcome)
     _payload["speaker"] = _turn_speaker   # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
     await websocket.send_json({"type": "drive_done", "payload": _payload})
+
+
+# ---- ⑤c 环境感知召回(ambient recall):工作台"料"的主动浮出 ----
+
+WS_TYPE_AMBIENT_RECALL = "ambient_recall"
+
+
+def _ambient_cooldown(app):
+    """冷却表懒挂在 app.state(进程级,跨连接共享 —— 同一 intent 换个标签页也不重复推)。"""
+    from karvyloop.karvy.ambient import AmbientCooldown
+    cd = getattr(app.state, "ambient_cooldown", None)
+    if cd is None:
+        cd = AmbientCooldown()
+        app.state.ambient_cooldown = cd
+    return cd
+
+
+def _schedule_ambient_recall(app, intent: str) -> None:
+    """fire-and-forget 触发(镜像 task_events._schedule 模式):无 loop → 静默跳过。"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_broadcast_ambient_recall(app, intent))
+
+
+async def _broadcast_ambient_recall(app, intent: str) -> None:
+    """算命中 → 广播 `ambient_recall` 给所有 WS client(复用 task_events 的
+    ws_clients 广播/剔死连接模式)。零 LLM(ambient_recall 纯词面重叠);任何失败
+    只 debug log,绝不冒泡到 drive 路径。"""
+    try:
+        from karvyloop.karvy.ambient import ambient_recall
+
+        from .routes import _recall_domain, scope_for_peer
+        ml = getattr(app.state, "main_loop", None)
+        mgr = getattr(app.state, "conversation_manager", None)
+        hits = ambient_recall(
+            intent,
+            skill_index=getattr(ml, "skill_index", None),
+            skills_dir=getattr(ml, "skills_dir", None),
+            memory=getattr(app.state, "memory", None),
+            skill_scope=scope_for_peer(mgr),      # 场作用域:私聊=user 技能,业务域=domain 技能
+            domain=_recall_domain(mgr),           # §2.6:域私有认知只在本域浮出
+            cooldown=_ambient_cooldown(app),
+        )
+        if not hits:
+            return   # 宁静默勿噪音:低分/冷却中/无候选都不推
+        from .task_events import _broadcast
+        await _broadcast(app, {
+            "type": WS_TYPE_AMBIENT_RECALL,
+            "payload": {"hits": [h.to_dict() for h in hits], "for_intent": intent},
+        })
+    except Exception as e:
+        logger.debug(f"[ws] ambient_recall 失败(静默,不影响 drive): {e}")
 
 
 async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> None:
