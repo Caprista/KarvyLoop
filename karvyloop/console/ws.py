@@ -122,6 +122,41 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         except Exception:
             pass
 
+    # 9.1d:取当前对话上下文喂 drive(CV-8 上下文依赖门 + 慢脑消解多轮)
+    # 9.2b:业务域线注入 value.md(CV-14)
+    mgr = getattr(app.state, "conversation_manager", None)
+
+    # 共创模式(docs/47 ④ 会话粘性):当前对话已在共创态 → 整轮进状态机,**不再依赖
+    # 逐轮关键词命中**(修"第二轮换说法就掉线"脆点);"就这样吧/退出"由状态机清态。
+    # 未激活 / 状态机让路(换话题)→ None → 走正常 drive(0 回归)。
+    # 放在 main_loop 检查**之前**:状态机不依赖 main_loop(无 LLM 也有确定性兜底)。
+    try:
+        from karvyloop.karvy.cocreation import cocreation_take_turn
+        _coc_reply = await cocreation_take_turn(
+            app, mgr, intent,
+            gateway=runtime_kwargs.get("gateway"),
+            model_ref=runtime_kwargs.get("model_ref", ""))
+    except Exception:
+        logger.warning("[ws] cocreation 轮处理失败,降级正常 drive", exc_info=True)
+        _coc_reply = None
+    if _coc_reply is not None:
+        if workbench_app is not None:
+            try:
+                workbench_app.push_chat_log_line("agent", _coc_reply)
+            except Exception:
+                pass
+        # 共创轮必 record_turn(早返回不记 = ctx 串台,2026-06-25 世界杯 bug 病根)
+        if mgr is not None:
+            try:
+                mgr.record_turn(intent, _coc_reply, brain="slow")
+            except Exception:
+                pass
+        await websocket.send_json({"type": "drive_done", "payload": {
+            "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
+            "crystallized": False, "skill_name": "", "routed": False,
+            "cocreation": True, "text": _coc_reply}})
+        return
+
     if main_loop is None:
         outcome = _stub_no_main_loop(intent)
         await websocket.send_json({
@@ -130,9 +165,6 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         })
         return
 
-    # 9.1d:取当前对话上下文喂 drive(CV-8 上下文依赖门 + 慢脑消解多轮)
-    # 9.2b:业务域线注入 value.md(CV-14)
-    mgr = getattr(app.state, "conversation_manager", None)
     ctx = mgr.context_view() if mgr is not None else None
     governance = mgr.governance_text() if mgr is not None else ""
     _domain_gov = governance   # 域治理块(value.md+deontic);persona 已编入时在下方去重
@@ -240,6 +272,21 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
             "payload": {"intent": intent, "error": str(e), "brain": "SLOW", "text": ""},
         })
         return
+
+    # 共创递口(docs/47 §3.1):建 agent 意图命中(L0 关键词 / L1 LLM build 分类)→
+    # 本轮回复末尾主动递"一起共创"的口,并挂 OFFERED 会话态(下一轮应答不再依赖关键词)。
+    # 递口零副作用(只写会话态);失败静默 = 旧行为。
+    if not outcome.error:
+        try:
+            from karvyloop.karvy.cocreation import maybe_offer_cocreation
+            _offer = await maybe_offer_cocreation(
+                app, mgr, intent,
+                gateway=runtime_kwargs.get("gateway"),
+                model_ref=runtime_kwargs.get("model_ref", ""))
+            if _offer:
+                outcome.text = ((outcome.text or "").rstrip() + "\n\n" + _offer).strip()
+        except Exception:
+            logger.debug("[ws] 共创递口失败(静默)", exc_info=True)
 
     # fs_grants:这轮 drive 里碰壁的工作区外路径 → 升授权卡(去重;敏感路径永不出卡)
     try:
