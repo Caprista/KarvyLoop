@@ -176,7 +176,9 @@ async def _http_get(url: str) -> tuple[bool, str]:
 class WebFetchTool:
     name = "web_fetch"
     description = ("Fetch a web page (or text/JSON URL) over HTTPS and return its readable "
-                  "text content. Use to read a specific page found via web_search or given by the user.")
+                  "text content. Use to read a specific page found via web_search or given by the user — "
+                  "especially to verify time-sensitive facts (news, prices, versions, docs) at the source "
+                  "instead of answering from possibly-stale memory.")
     parameters = {
         "type": "object",
         "properties": {
@@ -235,9 +237,15 @@ def _parse_ddg(html_text: str, limit: int) -> list[dict]:
 
 class WebSearchTool:
     name = "web_search"
-    description = ("Search the web (keyless) and return top results as title · url · snippet. "
-                  "Use this FIRST when the question needs facts outside your own knowledge, then "
-                  "web_fetch the most relevant result to read it. Never invent results.")
+    description = ("Search the web and return top results as title · url · snippet. "
+                  "You MUST use this for anything time-sensitive or likely to have changed since your "
+                  "training data: current events / news, prices, exchange rates, stocks, weather, sports "
+                  "scores, latest software versions or releases, and any question about 'today', 'now', "
+                  "'latest' or the current year — your memory of these is stale. Also use it FIRST whenever "
+                  "the question needs facts outside your own knowledge, then web_fetch the most relevant "
+                  "result to read it. Do NOT use it for local files, the user's own workspace, or stable "
+                  "knowledge (concepts, history, how-to). Never invent results; if search fails, say so "
+                  "honestly instead of answering from memory.")
     parameters = {
         "type": "object",
         "properties": {

@@ -225,7 +225,14 @@ async def generate_and_run(
             # 解析失败 → microcompact 仍可跑(不调模型),autocompact 因 summarize=None 跳过
             summarize = None
 
-    async for ev in atom_run(atom, {"intent": intent}, token,
+    # 时效标注(atoms/freshness):任务文本含时效信号(今天/最新/现价/实时…)→ 追加一行
+    # 【时效提示】(有 web 工具=必须 web_search 查证;没有=如实说查不到,绝不编)。
+    # 放在 forge 这个咽喉:直接聊天/委派/圆桌的慢脑都过这里,一处全覆盖;无信号=原样(0 回归)。
+    from karvyloop.atoms.freshness import annotate_task as _annotate_freshness
+    _has_web = ("web_search" in tools) or ("web_fetch" in tools)
+    run_intent = _annotate_freshness(intent, has_web=_has_web)
+
+    async for ev in atom_run(atom, {"intent": run_intent}, token,
                               gateway=gateway, tools=tools,
                               max_turns=max_turns, system=sys_prompt,
                               gov_config=gov_config, gov_state=gov_state,

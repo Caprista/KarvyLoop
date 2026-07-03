@@ -149,10 +149,15 @@ def build_coding_prompt(cwd: str, *, extra_static: Optional[list[str]] = None) -
       2. 哨兵
       3. 动态段 = cwd / git / 指令文件(去重 + 截断)
     """
+    # 时效纪律(atoms/freshness):实时信息必须 web_search 查证,绝不凭训练记忆报数。
+    # 惰性导入防潜在环(atoms 包不 import coding,当前无环;进函数体只为最小暴露面)。
+    from karvyloop.atoms.freshness import FRESHNESS_DISCIPLINE
+
     static = [
         "你是 KarvyLoop 的 coding 原子。任务:按用户意图用工具集改代码并验证。",
-        "工具集:read_file / write_file / edit_file / run_command。",
+        "工具集:read_file / write_file / edit_file / run_command / web_search / web_fetch。",
         "纪律:先读后写(HR-4);危险命令前主动 ask;输出结构化(CodingResult)。",
+        FRESHNESS_DISCIPLINE,
     ]
     if extra_static:
         static.extend(extra_static)
