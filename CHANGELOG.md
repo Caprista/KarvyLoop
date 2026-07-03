@@ -33,6 +33,11 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   reason without a translation fails the suite).
 
 ### Added
+- **The decision flow is now phone-friendly** — open the LAN token link (`karvyloop url`) on your phone
+  and approve/reject/edit decision cards comfortably: on small screens the cockpit stacks into a single
+  column with the decision column first, ACCEPT/DEFER/REJECT become thumb-sized full-width targets, the
+  edit-then-accept textarea no longer triggers focus-zoom, and chat opens as a full-screen sheet. Purely
+  additive CSS (one media query) — the desktop layout is untouched by construction.
 - **Out-of-workspace access, governed**: roles are confined to the workspace by default; when one needs
   a path outside it, the denial surfaces as a decision card ("grant this folder?") — approve once and
   the grants ledger opens exactly that path (tool boundary + capability chain + sandbox mounts all honor

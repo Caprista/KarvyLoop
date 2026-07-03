@@ -1731,3 +1731,103 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .task-trace-kind { opacity: .55; font-family: monospace; margin-right: 6px; }
 .task-trace-tool { font-family: monospace; opacity: .85; word-break: break-all; }
 .task-trace-gist { opacity: .7; margin-top: 2px; white-space: pre-wrap; word-break: break-all; }
+
+/* ============================================================================
+   📱 Phone-friendly decision surface (LAN token link → open on your phone).
+   ADDITIVE ONLY: everything lives inside this media query — zero desktop
+   regression by construction. Priorities on a small screen:
+   ① the decision column (h2a cards) reachable without horizontal scroll,
+   ② ACCEPT/DEFER/REJECT are real touch targets (≥44px),
+   ③ chat usable full-screen, ④ nav stacked below the cockpit (steer first,
+   manage second). DOM order is already decision-first (.col-decide is the
+   first cockpit column), so no `order` hacks are needed for the main column;
+   we only demote the sidebar below the cockpit.
+   ========================================================================= */
+@media (max-width: 720px) {
+  /* No sideways scroll, ever: the page scrolls vertically as one column. */
+  html, body { overflow-x: hidden; }
+
+  /* App shell: desktop 2×2 grid (sidebar | main) → single vertical flow.
+     flex + order lets us put the cockpit (decision surface) ABOVE the
+     management nav without touching the DOM. */
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;   /* mobile URL-bar-safe viewport */
+  }
+  .topbar  { order: 0; }
+  .cockpit { order: 1; }
+  .sidebar { order: 2; }
+  .learn-drawer, .context-drawer { order: 3; }
+
+  /* Topbar: fixed 56px row is too cramped once it wraps — let it flow. */
+  .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px; }
+  .pulse-chip { max-width: 100%; flex: 1 1 100%; order: 5; }  /* pulse drops to its own line */
+  .topbar-stats { display: none; }        /* drive/brain counters are desk telemetry, not phone steering */
+
+  /* Cockpit: 2×2 quadrant grid → one column, decision column first (DOM order).
+     Columns take their natural height and the page scrolls — no nested
+     scrollbars fighting the finger. */
+  .cockpit { overflow: visible; }
+  .cockpit-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    gap: 10px;
+    padding: 10px;
+  }
+  .cockpit-col { min-height: 0; }
+  .col-decide { order: -1; }              /* belt & braces: decisions always on top */
+  .col-scroll { overflow-y: visible; }
+  /* Secondary quadrants stay reachable but capped so decisions dominate. */
+  .col-intel .col-scroll, .col-predict .col-scroll, .col-busy .col-scroll {
+    max-height: 40vh; overflow-y: auto;
+  }
+
+  /* Decision cards: thumb-sized ACCEPT/DEFER/REJECT (full-width row, each
+     button flex:1 from the base rule), and a reason/edit area you can
+     actually type in (16px stops iOS focus-zoom). */
+  .h2a-buttons button, .h2a-proposal button {
+    min-height: 44px;
+    font-size: 15px;
+    padding: 10px 8px;
+  }
+  .h2a-buttons, .h2a-proposal .actions { flex-wrap: wrap; }
+  .h2a-reason { min-height: 44px; font-size: 16px; padding: 10px 12px; }
+  .h2a-edit-area { min-height: 96px; font-size: 16px; }
+  .h2a-edit-toggle { display: inline-block; min-height: 40px; padding: 10px 4px; font-size: 14px; }
+  .h2a-jump { min-height: 40px; padding: 9px 14px; }
+
+  /* Left nav → touch grid below the cockpit (manage entries still reachable). */
+  .sidebar { border-right: none; border-top: 1px solid var(--border); padding: 12px; }
+  .nav-group { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .nav-group-title { grid-column: 1 / -1; }
+  .nav-item { min-height: 44px; }
+  .nav-spacer { display: none; }
+
+  /* Chat: floating desk widget → full-screen sheet; peers become a
+     horizontal strip on top so the log + input keep the screen. */
+  .modal-overlay.chat-overlay { padding: 0; }
+  .chat-panel { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; }
+  .chat-panel-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .chat-panel-side {
+    flex-direction: row; align-items: center; gap: 6px;
+    border-right: none; border-bottom: 1px solid var(--border);
+    overflow-x: auto; overflow-y: hidden; padding: 8px 10px;
+  }
+  .chat-panel-side .chat-side-label { display: none; }
+  .peer-list { flex-direction: row; gap: 4px; }
+  .peer-row { flex: 0 0 auto; min-height: 40px; }
+  .peer-row .peer-x { opacity: .65; }     /* no hover on touch — keep delete visible */
+  .peer-sec { margin: 0 4px; white-space: nowrap; }
+  .chat-input-ce { font-size: 16px; }     /* stop iOS focus-zoom */
+  .chat-toolbar .chat-tool-btn, .chat-toolbar .chat-send-btn { min-height: 40px; }
+
+  /* Management modals fill the phone instead of floating mid-air. */
+  .modal { width: 96vw; max-width: 96vw; max-height: 92vh; max-height: 92dvh; }
+
+  /* Update banner: already flex-wrap at the base rule; give wrapped lines room. */
+  .update-banner { row-gap: 4px; }
+  .update-banner .update-x { min-height: 36px; min-width: 36px; }
+}
