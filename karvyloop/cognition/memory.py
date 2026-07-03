@@ -9,10 +9,13 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from karvyloop.schemas import Belief
 
@@ -47,19 +50,22 @@ class MemoryManager:
         self._lock = threading.Lock()
         # loop step4b 地基:可选落盘(重启不丢)。store=BeliefStore;启动加载,write 后持久。
         self._store = store
+        # fail-loud(闭环审计断⑥):最近一次落盘失败的原因(成功清 None)——
+        # 上层(routes/doctor/调用方)能感知"记忆没存上",不再静默丢。
+        self.persist_error: Optional[str] = None
         if store is not None:
             for belief, pinned in store.load_all():
                 self._index.put(belief, pinned=pinned)
 
-    def _persist(self) -> None:
-        """把当前 index 全量写盘(write/archive 后调)。无 store 则 noop。
+    def _persist(self) -> bool:
+        """把当前 index 全量写盘(write/archive 后调)。无 store 则 noop(True)。
 
         去重 by id(b):MemoryIndex.put 把同一 belief 存在两个 key 下(provenance['id'] 与
         content),index.all 会返回**同一对象两次** → 不去重会落盘 2N 条、召回也重复
         (独立 checker 抓到的 CRITICAL 地雷:今天 ingest 不带 id 故潜伏,带 id 立刻发作)。
         """
         if self._store is None:
-            return
+            return True
         seen: set[int] = set()
         items = []
         for sc in ("personal", "domain"):
@@ -70,14 +76,20 @@ class MemoryManager:
                 items.append((b, self._index.is_pinned(b)))
         try:
             self._store.save_all(items)
-        except Exception:
-            pass  # 落盘失败不阻塞主流程(内存态仍在)
+            self.persist_error = None
+            return True
+        except Exception as e:
+            # 落盘失败不阻塞主流程(内存态仍在),但**重启即丢** —— 必须响(断⑥):
+            # logger.error + persist_error 供上层感知(write/archive 也把结果返给调用方)。
+            self.persist_error = f"{type(e).__name__}: {e}"
+            logger.error(f"[memory] Belief 落盘失败(内存态仍在,**重启会丢这批记忆**): {e}")
+            return False
 
-    def archive(self, belief: Belief) -> None:
+    def archive(self, belief: Belief) -> bool:
         """归档(从 index 移除)+ 落盘。distill 的 MEMORY_ARCHIVE 走这里,否则归档不持久
-        → 重启复活(独立 checker 抓到的 MEDIUM:持久化契约洞)。"""
+        → 重启复活(独立 checker 抓到的 MEDIUM:持久化契约洞)。返回落盘是否成功(断⑥)。"""
         self._index.remove(belief)
-        self._persist()
+        return self._persist()
 
     def purge_domain(self, domain: str) -> int:
         """§2.6 ⑤:删/归档业务域时,清掉**该域的私有认知层**(applies.domain==domain 的 Belief)。
@@ -235,8 +247,11 @@ class MemoryManager:
             except Exception:
                 continue
 
-    def write(self, belief: Belief, *, pinned: bool = False) -> None:
-        """写一条 Belief(HR-7:provenance 必带;freshness_ts 必填)。"""
+    def write(self, belief: Belief, *, pinned: bool = False) -> bool:
+        """写一条 Belief(HR-7:provenance 必带;freshness_ts 必填)。
+
+        返回**落盘**是否成功(断⑥ fail-loud):False = 内存态已写入但没持久化(重启会丢),
+        调用方可凭返回值/`persist_error` 上冒;校验失败仍抛 ValueError(契约不变)。"""
         if not belief.provenance:
             raise ValueError("Belief.provenance 必填(HR-7)")
         # 用 is None 而非 falsy:0.0 是合法的 epoch 时刻(否则 now=0.0 → 静默吞写,
@@ -249,7 +264,7 @@ class MemoryManager:
         # _persist 不自锁 → 这里持锁安全(不重入)。
         with self._lock:
             self._index.put(belief, pinned=pinned)
-            self._persist()
+            return self._persist()
 
     def recall_block(self, query: str, *, scope: str = "personal", limit: int = 8,
                      domain: str = "") -> str:

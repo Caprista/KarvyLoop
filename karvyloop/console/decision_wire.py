@@ -66,24 +66,31 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
 
     edits(#42 优化①):「改了再批」的字段修改是**最富的偏好信号**(你不只认/拒,还亲手示范
     了"该是什么样")→ 把 原文→改文 的对照折进样本 reason,偏好结晶的 LLM 能直接读出你的标准。
+
+    fail-loud(闭环审计断④):此前整函数一个大 `except: pass` —— 任一段炸,这次拍板的
+    **全部学习信号静默蒸发**(正打在决策接口结晶的进料口)。改为**逐段 try**:每段失败
+    logger.warning(带 proposal_id + 哪一段),且**不连坐**后面的段(决策流仍绝不被打断)。
     """
+    import time as _time
+    # 段1:读回提案(summary/kind/payload —— 后面各段的原料;失败降级为用 id 当 context)
+    ctx = ""
+    kind = ""
+    orig_payload: dict = {}
     try:
-        import time as _time
-        ctx = ""
-        kind = ""
-        orig_payload: dict = {}
         reg = getattr(app.state, "proposal_registry", None)
         if reg is not None:
-            try:
-                p = reg.get(proposal_id)
-                ctx = getattr(p, "summary", "") or ""
-                kind = getattr(p, "kind", "") or ""
-                orig_payload = dict(getattr(p, "payload", {}) or {})
-            except Exception:
-                pass
-        if kind == "confirm_decision_pref":
-            return   # 确认"决策偏好"本身不是工作决策(否则确认偏好又生样本)
-        eff_reason = reason
+            p = reg.get(proposal_id)
+            ctx = getattr(p, "summary", "") or ""
+            kind = getattr(p, "kind", "") or ""
+            orig_payload = dict(getattr(p, "payload", {}) or {})
+    except Exception as e:
+        logger.warning(f"[decision_wire] 读回提案失败(proposal_id={proposal_id},"
+                       f"样本 context 降级为 id): {e}")
+    if kind == "confirm_decision_pref":
+        return   # 确认"决策偏好"本身不是工作决策(否则确认偏好又生样本)
+    # 段2:折「改了再批」对照进 reason(最富偏好信号;失败退回原 reason)
+    eff_reason = reason
+    try:
         if edits:
             pairs = []
             for k, v in edits.items():
@@ -95,27 +102,43 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
             if pairs:
                 eff_reason = (f"[用户改了再批] {'; '.join(pairs[:3])}"
                               + (f" || {reason}" if reason else ""))
-        # 口味命中率对账:拍板了 → 押过的注开奖(纯查表零 LLM;没押过=不计入,诚实)
+    except Exception as e:
+        eff_reason = reason
+        logger.warning(f"[decision_wire] 折 edits 对照失败(proposal_id={proposal_id},"
+                       f"改批信号丢了这条): {e}")
+    # 段3:口味命中率对账(押过的注开奖;没押过=不计入,诚实)
+    try:
         tstore = getattr(app.state, "taste_predictions", None)
         if tstore is not None:
-            try:
-                tstore.resolve(proposal_id, decision)
-            except Exception:
-                pass
+            tstore.resolve(proposal_id, decision)
+    except Exception as e:
+        logger.warning(f"[decision_wire] 口味对账失败(proposal_id={proposal_id},"
+                       f"这次开奖丢了): {e}")
+    # 段4:样本入结晶缓冲 + 调度结晶(楔子的进料口 —— 丢了必须可见)
+    try:
         observe_decision(app, DecisionSample(
             decision=decision, context=(ctx or proposal_id),
             reason=eff_reason, scope="personal",
             domain=domain or "", role=role or "", ts=_time.time()))
         schedule_decision_crystallize(app)
+    except Exception as e:
+        logger.warning(f"[decision_wire] 决策样本入缓冲/结晶调度失败(proposal_id={proposal_id},"
+                       f"**这次拍板的偏好学习信号丢了**): {e}")
+    # 段5:stats 复利指标
+    try:
         stats = getattr(app.state, "decision_stats", None)
         if stats is not None:
             stats.record(decision)
+    except Exception as e:
+        logger.warning(f"[decision_wire] decision_stats 记录失败(proposal_id={proposal_id}): {e}")
+    # 段6:decision_log 回看流水
+    try:
         log = getattr(app.state, "decision_log", None)
         if log is not None:
             log.record(decision=decision, summary=ctx, proposal_id=proposal_id,
                        reason=eff_reason, kind=kind, domain=domain or "", role=role or "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[decision_wire] decision_log 记录失败(proposal_id={proposal_id}): {e}")
 
 
 def _existing_pref_list(mem: Any) -> list:

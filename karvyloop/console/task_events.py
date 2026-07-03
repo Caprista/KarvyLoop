@@ -113,8 +113,12 @@ def make_task_change_sink(app: Any, trace: Any) -> Callable[[dict], None]:
                              "result": (task.get("result") or "")[:280],
                              "domain": task.get("domain_id", ""), "role": task.get("role", "")},
                     agent=task.get("who", ""), source="task_registry"))
-        except Exception:
-            pass   # 评价记账失败绝不拖垮任务流(评是慢侧的事)
+        except Exception as e:
+            # fail-loud(闭环审计断⑤):落 Trace 失败绝不拖垮任务流(评是慢侧的事),
+            # 但必须可见 —— 否则评价飞轮对任务级成败**静默失明**(两本账病根)。
+            logger.warning(f"[task_events] 任务终态落 Trace 失败"
+                           f"(task_id={task.get('id', '?')},status={task.get('status', '?')},"
+                           f"评价飞轮看不见这条): {e}")
     return _sink
 
 

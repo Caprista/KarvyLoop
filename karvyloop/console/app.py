@@ -48,6 +48,53 @@ _QUALITY_BACKLOG_TRIGGER = 20   # 待质量评积压 ≥ 此 → 提前评
 BOOT_POLL_DELAY_S = 30.0
 
 
+async def _supervised_bg(app: Any, name: str, coro_factory: Any, *,
+                         max_crashes: int = 3, base_backoff_s: float = 1.0,
+                         steady_run_s: float = 60.0) -> None:
+    """后台长生协程的 supervisor(闭环审计断⑦:此前三个 create_task 无 done-callback,
+    初始化段一炸 = 协程静默死,调度器/daily/邮件通道死了用户以为还在跑)。
+
+    - 协程异常退出(非 CancelledError)→ logger.error + WS system_error 上冒 + **重启**;
+    - 重启带指数退避(base × 2^n);跑满 `steady_run_s` 再崩算"新的一连串"(计数重置);
+    - **连续**崩满 `max_crashes` 次 → 停止重启并大声说(需人工介入,不无限空转);
+    - 正常 return(= 内部 cancel-break 收尾)→ 不重启;CancelledError 原样上抛(关停路径)。
+    """
+    import asyncio
+    crashes = 0
+    loop = asyncio.get_running_loop()
+    while True:
+        started = loop.time()
+        try:
+            await coro_factory()
+            return   # 正常收尾(cancel-break)→ 不重启
+        except asyncio.CancelledError:
+            raise    # 关停路径:不吞、不重启
+        except Exception as e:
+            ran = loop.time() - started
+            crashes = 1 if ran >= steady_run_s else crashes + 1
+            logger.error(
+                f"[karvyloop console] 后台协程 {name} 意外退出"
+                f"(第 {crashes}/{max_crashes} 次,已运行 {ran:.1f}s): {e}", exc_info=True)
+            try:
+                from karvyloop.console.task_events import schedule_system_error
+                schedule_system_error(app, f"bg:{name}", str(e))
+            except Exception:
+                pass
+            if crashes >= max_crashes:
+                logger.error(
+                    f"[karvyloop console] 后台协程 {name} 连续崩 {crashes} 次 —— **停止重启**,"
+                    f"该后台能力已停摆,请查日志修复后重启 console")
+                try:
+                    from karvyloop.console.task_events import schedule_system_error
+                    schedule_system_error(
+                        app, f"bg:{name}",
+                        f"后台协程 {name} 连续崩 {crashes} 次,已停止重启(重启 console 前该能力停摆)")
+                except Exception:
+                    pass
+                return
+            await asyncio.sleep(base_backoff_s * (2 ** (crashes - 1)))
+
+
 def _review_decision(*, now: float, next_daily: float, backlog: int,
                      trigger: int = _QUALITY_BACKLOG_TRIGGER) -> str:
     """这个 tick 该干啥(纯函数,可测):
@@ -200,7 +247,8 @@ def build_console_app(
                             schedule_system_error(app, "daily_poll", str(e))
                         except Exception:
                             pass
-            daily_task = asyncio.create_task(_daily_loop())
+            # 断⑦:supervisor 包一层 —— 初始化段炸了也会 log+上冒+带退避重启,不再静默死
+            daily_task = asyncio.create_task(_supervised_bg(app, "daily_poll", _daily_loop))
             app.state.daily_task = daily_task
             logger.info(f"[karvyloop console] 小卡 daily 调度已起(间隔 {interval}s)")
 
@@ -223,7 +271,8 @@ def build_console_app(
                     break
                 except Exception as e:
                     logger.warning(f"[karvyloop console] 定时调度 tick 异常(下轮再试): {e}")
-        app.state.scheduler_task = asyncio.create_task(_scheduler_loop())
+        app.state.scheduler_task = asyncio.create_task(
+            _supervised_bg(app, "scheduler", _scheduler_loop))   # 断⑦ supervisor
         logger.info("[karvyloop console] 定时任务调度器已起(30s tick)")
 
         # 邮件决策通道心跳(docs/43 ⑤a):digest 自带 min_interval 节流,60s 拍无妨;
@@ -238,7 +287,8 @@ def build_console_app(
                     break
                 except Exception as e:
                     logger.warning(f"[karvyloop console] 邮件通道 tick 异常(下轮再试): {e}")
-        app.state.email_channel_task = asyncio.create_task(_email_channel_loop())
+        app.state.email_channel_task = asyncio.create_task(
+            _supervised_bg(app, "email_channel", _email_channel_loop))   # 断⑦ supervisor
 
         # predict 启动兜底:延迟一次 boot_poll(修"第一条建议要等 24h"→ 页签体感永远空)。
         # pump 在(有 LLM)→ 真习惯分析;pump 沉默/未接 → proactive_from_state 确定性兜底
