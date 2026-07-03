@@ -96,17 +96,54 @@ def _make_summarizer(gateway: GatewayClient, model_ref: str):
     return _summarize
 
 
-def _merge_extra_tools(tools: dict, extra_tools: Optional[dict]) -> None:
+class _RegistryToolAgentAdapter:
+    """registry.build_tool 产的 Tool(`call(inp, token, sandbox)` 的 dataclass)→ agent 执行器的
+    CodingTool 形状(`async __call__(inp)` + `parameters` + `is_concurrency_safe(inp)`)。
+
+    **为什么必须有这层**(真模型验证抓到的缝):执行器 `_run_one` 调 `await tool(inp)`、
+    `_tools_to_schemas` 读 `t.parameters` —— registry Tool 两个都不满足 → 模型每次调用
+    都吃 `TypeError('Tool' object is not callable)` 的 is_error(工具"看得见、调不动")。
+    create_atom / instantiate_domain_template 等 build_tool 工具挂进 extra_tools 都要过这层。
+    token/sandbox 在挂载时绑定(同内置 coding 工具的构造期绑定语义)。
+    """
+
+    def __init__(self, tool, token, sandbox):
+        self.name = tool.name
+        self.description = getattr(tool, "description", "") or tool.name
+        self.parameters = getattr(tool, "input_schema", None) or {"type": "object", "properties": {}}
+        self._tool = tool
+        self._token = token
+        self._sandbox = sandbox
+
+    def is_concurrency_safe(self, inp: dict) -> bool:
+        try:
+            return bool(self._tool.is_concurrency_safe(inp))
+        except Exception:
+            return False   # fail-closed:判不出当不可并发
+
+    async def __call__(self, inp: dict):
+        # 返回值(dict/str)由执行器 _serialize_results_for_model 统一 JSON 化回灌
+        return await self._tool.call(inp or {}, self._token, self._sandbox)
+
+
+def _merge_extra_tools(tools: dict, extra_tools: Optional[dict], *,
+                       token=None, sandbox=None) -> None:
     """把额外工具(如 MCP)并入 agent 工具集,并做**搜索源偏好**:
 
     若注入了"复用你 LLM key 的 web 搜索"(MCP 的 *web_search,如 mcp_minimax_web_search),
     就让内置的 keyless DuckDuckGo `web_search` **让位**(pop 掉)——否则 agent 面对两个搜索工具
     可能挑到更差的那个,白瞎了你配的复用-key 搜索。`web_fetch` 是通用读网页,不受影响保留。
     (外部 Brave/Tavily key 的情形不在这处理:那是 web.py 内 WebSearchTool 自己择优,仍是单一 web_search。)
+
+    另:registry build_tool 产的 Tool(不可调用、接口是 `.call(inp, token, sandbox)`)在这里
+    统一包成 CodingTool 形状(_RegistryToolAgentAdapter)—— 已满足协议的(MCP/内置)原样并入。
     """
     if not extra_tools:
         return
-    tools.update(extra_tools)   # 键已带 mcp_ 前缀,不与内置撞名
+    for k, t in extra_tools.items():
+        if not callable(t) and callable(getattr(t, "call", None)):
+            t = _RegistryToolAgentAdapter(t, token, sandbox)   # registry Tool → CodingTool 形状
+        tools[k] = t   # 键已带 mcp_ 前缀,不与内置撞名
     if any(str(k).endswith("web_search") for k in extra_tools):
         tools.pop("web_search", None)   # 复用-key 搜索在场 → keyless DDG 让位
 
@@ -141,7 +178,8 @@ async def generate_and_run(
     file_state = FileState()
     tools = make_coding_tools(sandbox, file_state, workspace_root, token=token,
                               read_only=read_only)
-    _merge_extra_tools(tools, extra_tools)   # A:并入 MCP 等外部工具 + 搜索源偏好(复用 key 的搜索优先)
+    # A:并入 MCP 等外部工具 + 搜索源偏好(复用 key 的搜索优先);registry Tool 在此绑 token/sandbox
+    _merge_extra_tools(tools, extra_tools, token=token, sandbox=sandbox)
     # 9.4e 方案 A:有人格 prompt 就用人格(对话优先,要动手才用工具);
     # 没有(如 `karvyloop run` 编码路径)→ 默认 coding 提示(0 回归)。
     sys_prompt = system_prompt if system_prompt is not None else build_coding_prompt(workspace_root)

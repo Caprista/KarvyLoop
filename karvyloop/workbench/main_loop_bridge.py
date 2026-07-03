@@ -57,6 +57,8 @@ async def drive_in_tui(
     atom_registry: Any = None,   # §15.5:给了 → 直接聊天也挂 create_atom(role 无 atom 可用时自造);None=不挂(0 回归)
     role_registry: Any = None,   # §15.5:自造 atom 归属/沉淀进 role composition
     self_create_role: str = "",  # §15.5:自造归属的 role id(空=进公共池 provisional)
+    domain_registry: Any = None,  # 自我认知落地:给了+小卡人格+建 agent 意图 → 挂 instantiate_domain_template;None=不挂(0 回归)
+    domain_store: Any = None,     # 同上:开出的域持久化(None=只进内存,同 /domain/create 语义)
 ) -> DriveOutcome:
     """在 TUI asyncio loop 里跑 MainLoop.drive。
 
@@ -69,6 +71,25 @@ async def drive_in_tui(
     # §15.5:本次 drive 自造的 atom id(create_atom 工具往里 append)。直接聊天路径也挂 create_atom
     # (Hardy:角色标配)→ 失败则撤掉孤儿 atom;成功留 provisional,由异步 consolidation 裁留(跑评分离)。
     _minted: list = []
+
+    # 小卡自我认知落地:小卡人格 + 建 agent 意图命中 + 有 domain_registry →
+    # 把 instantiate_domain_template 并进工具集(与 MCP 工具同走 extra_tools;
+    # capability 护栏照走,policy 表 WORKSPACE_WRITE 下限)。业务角色 persona 无
+    # karvy_self 标记 → 不挂(建域是小卡的编排职责)。任一条件不满足 = 旧行为(0 回归)。
+    if domain_registry is not None and getattr(persona, "karvy_self", False):
+        try:
+            from karvyloop.karvy.self_knowledge import (
+                make_instantiate_template_tool, wants_build_guidance,
+            )
+            if wants_build_guidance(intent):
+                _tool = make_instantiate_template_tool(
+                    domain_registry=domain_registry, role_registry=role_registry,
+                    domain_store=domain_store)
+                mcp_tools = dict(mcp_tools) if isinstance(mcp_tools, dict) else {}
+                mcp_tools[_tool.name] = _tool
+        except Exception:
+            logger.warning("[drive] 挂 instantiate_domain_template 失败(降级=只指导不落地)",
+                           exc_info=True)
 
     def _run_drive() -> DriveOutcome:
         try:

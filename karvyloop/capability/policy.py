@@ -49,6 +49,10 @@ DEFAULT_TOOL_REQUIREMENTS: dict[str, Mode] = {
     # 同 run_command/write_file 的写语义)→ WORKSPACE_WRITE 下限:maker/forge 放行、只读 checker 拦;
     # 安全靠下游(provisional + 合并闸 + 沉淀需认可)兜,不在这里一票 FULL 拒掉(否则 role 想造也造不了)。
     "create_atom": Mode.WORKSPACE_WRITE,
+    # instantiate_domain_template(karvy/self_knowledge.py):小卡指导建 agent 后替用户一键
+    # 开模板域。写的是域/角色注册表(用户已在对话里拍板选定模板)→ 同 create_atom 的
+    # WORKSPACE_WRITE 语义;只读 checker 仍拦。
+    "instantiate_domain_template": Mode.WORKSPACE_WRITE,
     "git_commit": Mode.WORKSPACE_WRITE,
     "network": Mode.FULL,
     "process_spawn": Mode.FULL,

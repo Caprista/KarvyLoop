@@ -113,12 +113,31 @@ def _workspace_block(cwd: str) -> str:
     )
 
 
-def build_karvy_persona_prompt(cwd: str = "/") -> CodingPrompt:
-    """小卡(私聊 / l0 个人·系统场)的人格 system prompt。"""
-    return CodingPrompt(
+def build_karvy_persona_prompt(cwd: str = "/", *, intent: str = "") -> CodingPrompt:
+    """小卡(私聊 / l0 个人·系统场)的人格 system prompt。
+
+    `intent`:给了就过一遍建 agent 意图门(karvy.self_knowledge)——命中才把
+    "架构 101 + 建 agent 方法论"注入动态段(按需注入,不常驻,省 token);
+    没给 / 没命中 = 旧行为(0 回归)。
+    """
+    dynamic = [_workspace_block(cwd)]
+    if intent:
+        try:
+            from karvyloop.karvy.self_knowledge import (
+                self_knowledge_block, wants_build_guidance,
+            )
+            if wants_build_guidance(intent):
+                dynamic.append(self_knowledge_block())
+        except Exception:
+            pass  # 自我认知注入失败不拖垮对话(退化=旧行为)
+    cp = CodingPrompt(
         static=list(KARVY_PERSONA) + _CODING_DISCIPLINE,
-        dynamic_blocks=[_workspace_block(cwd)],
+        dynamic_blocks=dynamic,
     )
+    # 标记"这是小卡本卡"(drive_in_tui 据此决定要不要挂 instantiate_domain_template 工具;
+    # 业务角色 persona 无此标记 → 不挂,建域是小卡的编排职责不下放)。
+    cp.karvy_self = True
+    return cp
 
 
 def build_role_persona_prompt(

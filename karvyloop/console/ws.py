@@ -223,6 +223,9 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                                      atom_registry=getattr(app.state, "atom_registry", None),
                                      role_registry=getattr(app.state, "role_registry", None),
                                      self_create_role=self_create_role_id(mgr),
+                                     # 小卡自我认知落地:建 agent 意图 → 挂 instantiate_domain_template
+                                     domain_registry=getattr(app.state, "domain_registry", None),
+                                     domain_store=getattr(app.state, "domain_store", None),
                                      **runtime_kwargs)
     except Exception as e:
         await websocket.send_json({

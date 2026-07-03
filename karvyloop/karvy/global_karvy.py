@@ -44,7 +44,8 @@ class GlobalKarvy:
         mgr = self._mgr
         ctx = mgr.context_view() if mgr is not None else None
         ws = self._rk.get("workspace_root", "/")
-        persona = build_karvy_persona_prompt(cwd=ws)   # ← 这就是"全局 Karvy",不是裸 forge
+        # intent 透传:建 agent 类意图 → 注入系统自我认知(语音/TUI 同样能指导建 agent)
+        persona = build_karvy_persona_prompt(cwd=ws, intent=intent)   # ← 这就是"全局 Karvy",不是裸 forge
         # Step 0(a):语音/TUI 也要认你的标准 —— 接了 governance_fn 就装配(prealign+知识召回),不再认知失明。
         governance = ""
         if self._governance_fn is not None:

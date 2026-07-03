@@ -224,7 +224,8 @@ def _persona_for_current_peer(app, mgr, workspace_root: str, *, intent: str = ""
                     pass
             return build_group_coordinator_prompt(gname, members, cwd=workspace_root)
         if is_karvy_peer(domain_id):
-            return build_karvy_persona_prompt(cwd=workspace_root)
+            # intent 透传:建 agent 类意图命中 → 注入小卡的系统自我认知(架构 101 + 方法论)
+            return build_karvy_persona_prompt(cwd=workspace_root, intent=intent)
 
         dom_reg = getattr(app.state, "domain_registry", None)
         role_reg = getattr(app.state, "role_registry", None)
@@ -833,6 +834,9 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
                                          atom_registry=getattr(request.app.state, "atom_registry", None),
                                          role_registry=getattr(request.app.state, "role_registry", None),
                                          self_create_role=self_create_role_id(mgr),
+                                         # 小卡自我认知落地:建 agent 意图 → 挂 instantiate_domain_template
+                                         domain_registry=getattr(request.app.state, "domain_registry", None),
+                                         domain_store=getattr(request.app.state, "domain_store", None),
                                          **eff_rk)
     except Exception as e:
         logger.exception(f"api_intent drive 异常: {e}")
