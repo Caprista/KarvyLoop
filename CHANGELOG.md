@@ -11,6 +11,15 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Planned
+- **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
+  near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the
+  hot path, no vectors. (Today the same tidy-up runs as an explicit H2A "consolidate" action.)
+
+## [2026.7.3] — 2026-07-03
+
+**The trust release.** One theme: prove it, don't claim it — the taste hit-rate score, measured cost before you spend, evidence drill-downs, governed out-of-workspace access with a hard floor for secrets, upgrades that verify themselves and roll back, and Windows joining as a supported (degraded) platform.
+
 ### Security
 - **Same-origin gate** on the console: cross-origin browser requests are rejected on both HTTP and the
   WebSocket handshake (closes cross-site WebSocket hijacking and file-endpoint CSRF; non-browser clients
@@ -33,6 +42,14 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   reason without a translation fails the suite).
 
 ### Added
+- **Taste hit-rate — "more you", proven**: before you decide a card, the system quietly predicts your
+  call from your crystallized preferences; after you decide, it settles the bet. The decision-prefs
+  panel now shows "it predicts your calls N% of the time (last 20; previous period M%)". Honesty
+  built in: only bets placed *before* your decision count, failed predictions aren't counted, and
+  below 10 samples it says "still learning you" instead of a fake percentage.
+- **Cost before you spend**: execution-type decision cards (delegate / rerun / roundtable) show what
+  recent similar tasks actually cost ("~12.4k tokens each, range 8k–18k, last 10") — measured from
+  per-task token attribution, never guessed; hidden until there are at least 3 real samples.
 - **One-click MCP channel presets** — the Coding capability card now has a "Connect a channel" section:
   pick a well-known MCP server (filesystem scoped to a folder — defaults to the workspace, web fetch,
   GitHub, memory, time, SQLite), fill in a folder/token where needed, and it's written into
@@ -98,11 +115,6 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   `onboarding`, `l0`, `bus`, ~2.6k lines): superseded by the current design (verify gate + evaluators,
   per-role paradigm compiler, H2A decision cards, `a2a/` transport) or parked concepts whose designs
   live in the design docs. No live code imported them; recoverable from git history.
-
-### Planned
-- **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
-  near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the
-  hot path, no vectors. (Today the same tidy-up runs as an explicit H2A "consolidate" action.)
 
 ## [2026.7.1] — 2026-07-01
 

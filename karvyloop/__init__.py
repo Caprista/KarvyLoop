@@ -5,4 +5,4 @@
 
 # 单一版本源(pyproject.toml dynamic 从这里读;cli/console/update 也引这里)。
 # 改版本只改这一行;发布流程见 RELEASING.md,变更记录见 CHANGELOG.md。
-__version__ = "2026.7.1"
+__version__ = "2026.7.3"
