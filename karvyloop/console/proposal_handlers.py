@@ -618,9 +618,11 @@ def _fs_access_handler(proposal: Any) -> Tuple[bool, str]:
 def _silence_grant_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     """KIND_SILENCE_GRANT 兑现(「挣来的静音」,docs/49 机制2 / docs/50 决定1)。
 
-    ACCEPT = 授权该桶(kind+可选 domain)静音处理 → 落 ~/.karvyloop/silence_grants.json
-    (可撤销;押错一次自动吊销)。高危 kind 双保险:出卡前 HIGH_RISK_KINDS 滤过一次,
-    store.grant 再拒一次(硬地板 —— 卡被伪造也授不出权)。
+    ACCEPT = 授权该桶(kind+可选 domain)静音处理 30 天(payload.renew=True 即续期,
+    同一 handler:重新 grant 就是刷新 granted_at/expires_at)→ 落
+    ~/.karvyloop/silence_grants.json(可撤销;押错一次自动吊销;到期回逐张问人)。
+    高危 kind / 不可逆语义双保险:出卡前滤过一次,store.grant 再拒一次(硬地板 ——
+    卡被伪造也授不出权)。
     """
     def handler(proposal) -> Tuple[bool, str]:
         from karvyloop.karvy.silence import (
@@ -638,11 +640,13 @@ def _silence_grant_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
             n = hits = 0
         g = get_store(app).grant(kind, domain, n=n, hits=hits)
         if g is None:
-            return False, f"高危类型「{kind}」不允许静音授权(硬地板,不该出这张卡)"
+            return False, f"高危/不可逆类型「{kind}」不允许静音授权(硬地板,不该出这张卡)"
         scope = f"(域「{domain}」)" if domain else ""
-        return True, (f"已授权:「{kind}」{scope}这类卡以后我按你的口味先办 —— 只办我押你会 "
-                      f"ACCEPT 且把握 ≥{int(SILENCE_MIN_CONFIDENCE * 100)}% 的,每次完整留痕、"
-                      f"月度对账;我押错一次立即自动收回,你随时可撤")
+        verb = "已续期" if payload.get("renew") else "已授权"
+        return True, (f"{verb}:「{kind}」{scope}这类卡 30 天内我按你的口味先办 —— 只办我押"
+                      f"你会 ACCEPT 且把握 ≥{int(SILENCE_MIN_CONFIDENCE * 100)}% 的;不定期"
+                      f"抽一部分照常问你对答案;每次完整留痕、满 30 天要你亲手续期;"
+                      f"我押错一次立即自动收回,你随时可撤")
     return handler
 
 
