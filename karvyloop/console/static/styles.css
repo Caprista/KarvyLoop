@@ -1914,3 +1914,93 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
   font-size: var(--fs-12); font-weight: 600; cursor: pointer; font-style: normal;
 }
 .busy-guide-btn:hover { border-color: var(--accent); }
+
+/* ============================================================================
+   docs/46 S1 — 聊天升主位:「对话视图」(默认)+「看板视图」(body.board-view)
+   对话视图(桌面):chat-panel 出狱常驻中央,四象限压成右侧 ~350px rail 竖排
+   (⚖拍板永远第一 → 🔄谁在忙 → 📥料 → 🔮预判,CSS order,DOM 不动)。
+   看板视图:一行 body class 切换回今天的 2×2 全屏四象限 + 聊天弹层 + FAB。
+   移动端(≤720px):保持单列流(脉搏→拍板→聊天入口大按钮→其余),聊天仍全屏弹层。
+   注意:本段必须留在 720px 媒体查询**之后**(test_mobile_responsive 锁了
+   ".col-decide 的 order 不得出现在移动块之前";本段桌面规则全部包在 min-width:721px 里)。
+   ========================================================================= */
+
+/* 顶栏 对话⇄看板 切换钮(label 由 JS 按当前视图写 t("view.*")) */
+.view-toggle {
+  padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  background: var(--surface); color: var(--text-2);
+  border: 1px solid var(--border-strong); font-size: var(--fs-12); font-weight: 600;
+  white-space: nowrap;
+}
+.view-toggle:hover { border-color: var(--accent); color: var(--accent-deep); }
+
+/* 移动端聊天入口大按钮:桌面永不显示(聊天常驻/看板走 FAB) */
+.mobile-chat-entry { display: none; }
+
+/* 卡皮巴拉让位动效(料区有内容时自动让位,S1;仅对话视图 JS 加 .dock-yield) */
+.karvy-dock { transition: opacity var(--dur) var(--ease-out); }
+
+@media (min-width: 721px) {
+  /* —— 对话视图(默认):中央聊天 + 右栏 rail —— */
+  body:not(.board-view) .cockpit {
+    flex-direction: row; gap: 12px; padding: 14px;
+  }
+  /* chat-host 出狱:压掉 .modal-overlay 的 fixed 遮罩,变成 in-flow 主位;
+     display flex 带 !important 胜过 .hidden(常驻聊天不可被藏)。 */
+  body:not(.board-view) #chat-modal.chat-host {
+    position: static; inset: auto; z-index: auto; padding: 0;
+    background: transparent;
+    display: flex !important;
+    flex: 1 1 auto; min-width: 0; min-height: 0;
+    align-items: stretch; justify-content: stretch;
+  }
+  body:not(.board-view) .chat-host .chat-panel {
+    width: 100%; height: 100%; max-width: none; max-height: none;
+    animation: none;
+  }
+  /* 常驻聊天没有"关闭"一说 */
+  body:not(.board-view) .chat-host #chat-modal-close { display: none; }
+
+  /* —— 右栏 rail:四象限竖排,拍板永远第一 —— */
+  body:not(.board-view) .cockpit-grid {
+    display: flex; flex-direction: column;
+    flex: 0 0 350px; width: 350px;
+    padding: 0; gap: 10px;
+    overflow-y: auto; min-height: 0;
+  }
+  body:not(.board-view) .cockpit-grid .col-decide  { order: 0; }
+  body:not(.board-view) .cockpit-grid .col-busy    { order: 1; }
+  body:not(.board-view) .cockpit-grid .col-intel   { order: 2; }
+  body:not(.board-view) .cockpit-grid .col-predict { order: 3; }
+  /* rail 格:自然高度(空态自动收薄),整栏一根滚动条 */
+  body:not(.board-view) .cockpit-col { flex: 0 0 auto; overflow: visible; }
+  body:not(.board-view) .cockpit-col .col-scroll { overflow-y: visible; }
+  /* rail 格可折叠(点列头,JS 记 localStorage) */
+  body:not(.board-view) .cockpit-col .col-head { cursor: pointer; user-select: none; }
+  body:not(.board-view) .cockpit-col.col-collapsed .col-scroll { display: none; }
+  body:not(.board-view) .cockpit-col.col-collapsed { padding-bottom: var(--sp-2); }
+  body:not(.board-view) .cockpit-col.col-collapsed .col-head { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+
+  /* —— 桌面 FAB 退役(对话视图):卡皮巴拉留任吉祥物(点击=聚焦聊天),
+        料区有内容时自动让位(JS 加 .dock-yield) —— */
+  body:not(.board-view) .karvy-dock .karvy-dock-label { display: none; }
+  body:not(.board-view) .karvy-dock.dock-yield { opacity: 0; pointer-events: none; }
+
+  /* —— 看板视图:就是今天的界面(chat-host 走原 modal-overlay 规则)。
+        聊天弹层开着时收起 FAB(原兄弟选择器因 DOM 移动失效,改 body class 由 JS 维护) —— */
+  body.board-view.chat-open .karvy-dock { display: none; }
+}
+
+@media (max-width: 720px) {
+  /* 移动端没有"视图切换"概念(单列流即看板流) */
+  .view-toggle { display: none; }
+  /* 顺序:脉搏(顶栏)→ ⚖拍板(order:-1 已有)→ 聊天入口大按钮(DOM 紧随拍板)→ 其余 */
+  .mobile-chat-entry {
+    display: block; width: 100%; min-height: 48px;
+    font-size: 15px; font-weight: 700; cursor: pointer;
+    color: #fff; background: var(--accent); border: none; border-radius: var(--r-md);
+    box-shadow: 0 2px 8px var(--accent-soft);
+  }
+  /* 移动端聊天弹层开着时收起 FAB(同看板视图,body class 由 JS 维护) */
+  body.chat-open .karvy-dock { display: none; }
+}

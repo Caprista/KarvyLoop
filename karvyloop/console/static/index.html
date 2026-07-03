@@ -39,6 +39,8 @@
         <span class="role" data-i18n="app.karvy_role">你的副驾</span>
       </div>
       <div class="top-actions">
+        <!-- docs/46 S1:对话⇄看板 一键切换(body.board-view class 换挡;偏好记 localStorage) -->
+        <button class="view-toggle" id="view-toggle">⊞</button>
         <span class="lang-switcher" id="lang-switcher"></span>
       </div>
     </header>
@@ -86,10 +88,70 @@
       <div class="nav-spacer"></div>
     </nav>
 
-    <!-- 中央:决策者的指挥台(书 ch4)。工作台 = 态势 + 要我拍的板 + 成本;
-         工作在 KarvyChat 里发生。按决策者要的业务类型组织,每条一键连 Chat。-->
+    <!-- 中央:决策者的指挥台(docs/46 裁决:对话+驾驶舱同屏)。
+         默认「对话视图」= 聊天常驻中央 + 四象限压成右侧 rail;
+         body.board-view = 完整 2×2 看板视图(今天的界面,一键切换)。-->
     <main class="cockpit">
-      <!-- 四象限:拍板 / 流进来的料 ; 预判 / 谁在忙(脉搏/统计/成本已上移到顶栏仪表盘条)-->
+      <!-- 全局聊天(chat-panel 出狱,docs/46 S1):对话视图下常驻中央;
+           看板视图 / 移动端(≤720px)下保持原 modal-overlay 弹层行为。
+           所有功能性 id(chat-log/chat-form/peer-list/roundtable-bar/…)原样保留。 -->
+      <div class="modal-overlay chat-overlay chat-host hidden" id="chat-modal">
+        <div class="chat-panel">
+          <div class="chat-panel-head">
+            <img class="chat-panel-avatar" src="/static/assets/karvy-capybara.png" alt="Karvy" />
+            <span class="modal-title" id="chat-title" data-i18n="chat.title">💬 你 & 小卡</span>
+            <span class="chat-head-spacer"></span>
+            <button class="modal-close" id="chat-modal-close" aria-label="close">✕</button>
+          </div>
+          <div class="chat-panel-body">
+            <!-- 左:纯聊天列表(可聊对象一行行展开,点谁跟谁聊)。
+                 由 refreshPeers() 渲染 → switchPeer();群场(大群/业务域)分隔在下。 -->
+            <aside class="chat-panel-side">
+              <div class="chat-side-label up" data-i18n="chat.peers">Conversations</div>
+              <div id="peer-list" class="peer-list"></div>
+            </aside>
+            <!-- 右:正文(对话流 + 圆桌阶段条 + 输入 + 频道内操作栏) -->
+            <main class="chat-panel-main">
+              <div class="chat-log" id="chat-log"></div>
+              <!-- ch4 圆桌阶段0:对齐目标中 → 你拍板【开始讨论】 -->
+              <div class="roundtable-bar hidden" id="roundtable-bar"></div>
+              <!-- ch4 #1:群里 @ 角色 —— 行内高亮 @花名(可多个、整体删),输 @ 弹角色选择器 -->
+              <div class="chat-input-wrap">
+                <div class="mention-pop hidden" id="mention-pop"></div>
+                <form class="chat-input" id="chat-form">
+                  <div
+                    id="chat-input"
+                    class="chat-input-ce is-empty"
+                    contenteditable="true"
+                    role="textbox"
+                    aria-multiline="false"
+                    data-i18n-ph="input.placeholder"
+                  ></div>
+                  <!-- 多模态附件:图(发图问)/ 文本·Markdown(发文档问)缩略预览,可单删 -->
+                  <div class="chat-attachments hidden" id="chat-attachments"></div>
+                  <input type="file" id="chat-attach-input" class="hidden" multiple
+                         accept="image/*,.md,.markdown,.txt,.json,.csv,.log,.py,.js,.ts,.html,.css,.yaml,.yml,.xml" />
+                  <!-- WeChat 式频道内操作栏:附件 + 新对话/历史(每个频道内的功能) + 圆桌(仅群场:
+                       业务域 / karvy world 才有,_toggleRoundtableBtn 控显隐) + 发送 -->
+                  <!-- 频道内操作:图标按钮(hover 出气泡说明),不再堆文字 -->
+                  <div class="chat-toolbar">
+                    <button type="button" id="chat-attach-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.attach.title" data-i18n-title="btn.attach.title">📎</button>
+                    <button type="button" id="conv-new-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.conv_new.title" data-i18n-title="btn.conv_new.title">🆕</button>
+                    <select id="conv-history" class="chat-hist chat-tool-sel" data-i18n-title="sel.history.title">
+                      <option value="">🕘</option>
+                    </select>
+                    <button type="button" id="roundtable-btn" class="chat-tool-btn icon-btn rt-btn hidden" data-i18n-tip="rt.open.title" data-i18n-title="rt.open.title">🎡</button>
+                    <span class="chat-toolbar-spacer"></span>
+                    <button type="submit" id="chat-send" class="chat-send-btn" data-i18n="btn.send">Send</button>
+                  </div>
+                </form>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+
+      <!-- 四象限:对话视图=右侧 rail 竖排(⚖永远第一→🔄→📥→🔮);看板视图=2×2 全屏 -->
       <div class="cockpit-grid">
         <section class="cockpit-col col-decide">
           <h2 class="col-head"><span data-i18n="cockpit.decide">⚖ 要我拍什么板</span>
@@ -100,6 +162,9 @@
             <div id="recent-decisions"><div class="empty-state" data-i18n="empty.recent_decisions">—</div></div>
           </div>
         </section>
+        <!-- 移动端顺序(docs/46 §4.3):脉搏(顶栏)→ ⚖拍板 → 聊天入口大按钮 → 其余象限。
+             桌面端 display:none(聊天已常驻/看板视图走 FAB)。 -->
+        <button class="mobile-chat-entry" id="mobile-chat-open" data-i18n="chat.open">💬 跟小卡说…</button>
         <section class="cockpit-col col-intel">
           <h2 class="col-head" data-i18n="cockpit.intel">📥 流进来的料</h2>
           <div class="col-scroll">
@@ -139,63 +204,6 @@
       <div id="last-drive"></div>
       <div id="broadcast-list"></div>
     </aside>
-
-    <!-- 全局聊天:从右下角小卡升起的对话面板。左=对话/场切换,右=正文,统一入口。 -->
-    <div class="modal-overlay chat-overlay hidden" id="chat-modal">
-      <div class="chat-panel">
-        <div class="chat-panel-head">
-          <img class="chat-panel-avatar" src="/static/assets/karvy-capybara.png" alt="Karvy" />
-          <span class="modal-title" id="chat-title" data-i18n="chat.title">💬 你 & 小卡</span>
-          <span class="chat-head-spacer"></span>
-          <button class="modal-close" id="chat-modal-close" aria-label="close">✕</button>
-        </div>
-        <div class="chat-panel-body">
-          <!-- 左:纯聊天列表(可聊对象一行行展开,点谁跟谁聊)。
-               由 refreshPeers() 渲染 → switchPeer();群场(大群/业务域)分隔在下。 -->
-          <aside class="chat-panel-side">
-            <div class="chat-side-label up" data-i18n="chat.peers">Conversations</div>
-            <div id="peer-list" class="peer-list"></div>
-          </aside>
-          <!-- 右:正文(对话流 + 圆桌阶段条 + 输入 + 频道内操作栏) -->
-          <main class="chat-panel-main">
-            <div class="chat-log" id="chat-log"></div>
-            <!-- ch4 圆桌阶段0:对齐目标中 → 你拍板【开始讨论】 -->
-            <div class="roundtable-bar hidden" id="roundtable-bar"></div>
-            <!-- ch4 #1:群里 @ 角色 —— 行内高亮 @花名(可多个、整体删),输 @ 弹角色选择器 -->
-            <div class="chat-input-wrap">
-              <div class="mention-pop hidden" id="mention-pop"></div>
-              <form class="chat-input" id="chat-form">
-                <div
-                  id="chat-input"
-                  class="chat-input-ce is-empty"
-                  contenteditable="true"
-                  role="textbox"
-                  aria-multiline="false"
-                  data-i18n-ph="input.placeholder"
-                ></div>
-                <!-- 多模态附件:图(发图问)/ 文本·Markdown(发文档问)缩略预览,可单删 -->
-                <div class="chat-attachments hidden" id="chat-attachments"></div>
-                <input type="file" id="chat-attach-input" class="hidden" multiple
-                       accept="image/*,.md,.markdown,.txt,.json,.csv,.log,.py,.js,.ts,.html,.css,.yaml,.yml,.xml" />
-                <!-- WeChat 式频道内操作栏:附件 + 新对话/历史(每个频道内的功能) + 圆桌(仅群场:
-                     业务域 / karvy world 才有,_toggleRoundtableBtn 控显隐) + 发送 -->
-                <!-- 频道内操作:图标按钮(hover 出气泡说明),不再堆文字 -->
-                <div class="chat-toolbar">
-                  <button type="button" id="chat-attach-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.attach.title" data-i18n-title="btn.attach.title">📎</button>
-                  <button type="button" id="conv-new-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.conv_new.title" data-i18n-title="btn.conv_new.title">🆕</button>
-                  <select id="conv-history" class="chat-hist chat-tool-sel" data-i18n-title="sel.history.title">
-                    <option value="">🕘</option>
-                  </select>
-                  <button type="button" id="roundtable-btn" class="chat-tool-btn icon-btn rt-btn hidden" data-i18n-tip="rt.open.title" data-i18n-title="rt.open.title">🎡</button>
-                  <span class="chat-toolbar-spacer"></span>
-                  <button type="submit" id="chat-send" class="chat-send-btn" data-i18n="btn.send">Send</button>
-                </div>
-              </form>
-            </div>
-          </main>
-        </div>
-      </div>
-    </div>
 
     <!-- 9.5 #3:管理面模态(原子库 / 角色库 / 业务域)— 点左导航打开 -->
     <div class="modal-overlay hidden" id="mgmt-modal">

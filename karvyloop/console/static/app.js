@@ -2123,6 +2123,7 @@
       } else running.forEach((tk) => busy.appendChild(_taskCard(tk)));
     }
     updatePulse();
+    _updateDockYield();   // S1:料区有内容 → 卡皮巴拉自动让位
   }
   // 💰 token 成本表已迁 TS(源 frontend/src/tokens_panel.ts:顶栏 meter + 点开弹窗/各模型/各功能)
   // → window.KarvyTokens.pollMeter()(轮询刷 meter)/ window.KarvyTokens.open()(💰 点开)。
@@ -2167,8 +2168,9 @@
     if (!box) return;
     const hits = (payload && payload.hits) || [];
     box.innerHTML = "";
-    if (!hits.length) { box.classList.add("hidden"); return; }
+    if (!hits.length) { box.classList.add("hidden"); _updateDockYield(); return; }
     box.classList.remove("hidden");
+    _updateDockYield();   // S1:料浮出 → 卡皮巴拉自动让位
     const head = el("div", { class: "ambient-head" },
       el("span", { class: "ambient-title", text: t("ambient.title") }));
     if (payload.for_intent) {
@@ -2393,17 +2395,75 @@
     _busyEl = null;
   }
 
-  // ============ 对话弹窗(step5:显眼按钮 → 大对话窗,够大聊透)============
+  // ============ 聊天双形态(docs/46 S1):对话视图=常驻中央(docked);看板视图/移动端=弹层 ============
+  function _isMobile() {
+    return !!(window.matchMedia && window.matchMedia("(max-width: 720px)").matches);
+  }
+  // 聊天是否"常驻中央"(docked):桌面 + 对话视图。此时 open 退化为聚焦输入框、close 无操作。
+  function _chatDocked() {
+    return !_isMobile() && !document.body.classList.contains("board-view");
+  }
   function openChatModal() {
     const m = document.getElementById("chat-modal");
     if (!m) return;
     m.classList.remove("hidden");
+    if (!_chatDocked()) document.body.classList.add("chat-open");   // 弹层态:FAB 让位(CSS)
     const input = document.getElementById("chat-input");
     if (input) setTimeout(() => input.focus(), 30);
   }
   function closeChatModal() {
+    if (_chatDocked()) return;   // 常驻聊天没有"关闭"一说
     const m = document.getElementById("chat-modal");
     if (m) m.classList.add("hidden");
+    document.body.classList.remove("chat-open");
+  }
+
+  // ============ 对话⇄看板 视图切换(docs/46 §4.2):body.board-view 一行 class 换挡 ============
+  function _applyView(mode) {
+    const board = mode === "board";
+    document.body.classList.toggle("board-view", board);
+    const m = document.getElementById("chat-modal");
+    if (m) {
+      if (_chatDocked()) m.classList.remove("hidden");   // 常驻:永远可见
+      else m.classList.add("hidden");                    // 弹层态:起始收起(FAB/入口再弹)
+    }
+    document.body.classList.remove("chat-open");   // 切视图 = 回到干净弹层态
+    const btn = document.getElementById("view-toggle");
+    if (btn) {   // 按钮显示"要切去的视图"
+      btn.textContent = board ? t("view.chat") : t("view.board");
+      btn.title = board ? t("view.chat.title") : t("view.board.title");
+    }
+    _updateDockYield();
+  }
+  function _setView(mode) {
+    try { localStorage.setItem("karvyloop_view", mode); } catch (e) {}
+    _applyView(mode);
+  }
+
+  // 卡皮巴拉让位(S1):对话视图下,料区(📥)有内容时右下吉祥物自动让位,不压 rail。
+  function _updateDockYield() {
+    const dock = document.querySelector(".karvy-dock");
+    if (!dock) return;
+    const ambient = document.getElementById("ambient-recall");
+    const hasIntel = _countCards("task-board", "empty-state") > 0 ||
+      !!(ambient && !ambient.classList.contains("hidden"));
+    dock.classList.toggle("dock-yield", _chatDocked() && hasIntel);
+  }
+
+  // rail 格折叠(对话视图):点列头收/展,记 localStorage;列头上的按钮(🔮/⟳)不触发折叠。
+  function _setupRailCollapse() {
+    document.querySelectorAll(".cockpit-grid .cockpit-col").forEach((col) => {
+      const cls = Array.from(col.classList).find((c) => c.indexOf("col-") === 0) || "col";
+      const key = "karvy.rail." + cls;
+      try { if (localStorage.getItem(key) === "1") col.classList.add("col-collapsed"); } catch (e) {}
+      const head = col.querySelector(".col-head");
+      if (!head) return;
+      head.addEventListener("click", (e) => {
+        if (e.target && e.target.closest && e.target.closest(".col-act")) return;   // 🔮/⟳ 照常
+        const on = col.classList.toggle("col-collapsed");
+        try { localStorage.setItem(key, on ? "1" : "0"); } catch (e2) {}
+      });
+    });
   }
   // 右下角卡皮巴拉:每隔一阵冒个省略号泡(· → ······ 循环),让人知道它能点(沟通是核心)。
   // 佛系人设:不说生硬话术,只发省略号动效。聊天开着 / 鼠标在它上面时不弹。
@@ -2694,6 +2754,23 @@
     T.mountSwitcher(document.getElementById("lang-switcher"));
     setupChatForm();
     setupChatModal();   // step5:对话弹窗
+    // docs/46 S1:视图初始化(默认对话视图,记住上次选择)+ 切换钮 + 移动端聊天入口 + rail 折叠
+    let _viewPref = "chat";
+    try { _viewPref = localStorage.getItem("karvyloop_view") || "chat"; } catch (e) {}
+    _applyView(_viewPref === "board" ? "board" : "chat");
+    const viewBtn = document.getElementById("view-toggle");
+    if (viewBtn) viewBtn.addEventListener("click", () =>
+      _setView(document.body.classList.contains("board-view") ? "chat" : "board"));
+    const mobileChat = document.getElementById("mobile-chat-open");
+    if (mobileChat) mobileChat.addEventListener("click", openChatModal);
+    _setupRailCollapse();
+    // 跨过 720px 断点(旋转/拖窗):重放当前视图,保证聊天 docked/弹层形态一致
+    if (window.matchMedia) {
+      const mq = window.matchMedia("(max-width: 720px)");
+      const onMq = () => _applyView(document.body.classList.contains("board-view") ? "board" : "chat");
+      if (mq.addEventListener) mq.addEventListener("change", onMq);
+      else if (mq.addListener) mq.addListener(onMq);
+    }
     _startKarvyIdleBubble();   // 右下角卡皮巴拉定时冒省略号泡,提示可点
     connectWS();
     startPolling();
