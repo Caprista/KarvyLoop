@@ -38,11 +38,17 @@ class BeliefStore:
             if not isinstance(rec, dict):
                 continue
             try:
+                inv = rec.get("invalid_at", None)
                 b = Belief(
                     content=rec["content"],
                     provenance=rec["provenance"],
                     freshness_ts=float(rec["freshness_ts"]),
                     scope=rec["scope"],
+                    # 时效/使用信号(缺省兼容旧文件:老快照没这些键 → 默认有效/零使用)
+                    invalid_at=(float(inv) if inv is not None else None),
+                    invalid_reason=str(rec.get("invalid_reason", "") or ""),
+                    last_recalled_ts=float(rec.get("last_recalled_ts", 0.0) or 0.0),
+                    recall_count=int(rec.get("recall_count", 0) or 0),
                 )
                 out.append((b, bool(rec.get("pinned", False))))
             except Exception:
@@ -59,6 +65,11 @@ class BeliefStore:
                     "freshness_ts": b.freshness_ts,
                     "scope": b.scope,
                     "pinned": bool(pinned),
+                    # 时效/使用信号(失效不删可审计 + 召回使用统计)
+                    "invalid_at": b.invalid_at,
+                    "invalid_reason": b.invalid_reason,
+                    "last_recalled_ts": b.last_recalled_ts,
+                    "recall_count": b.recall_count,
                 }
                 for b, pinned in items
             ],

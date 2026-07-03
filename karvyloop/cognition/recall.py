@@ -55,9 +55,12 @@ class MemoryIndex:
 
     def put(self, belief: Belief, *, pinned: bool = False) -> None:
         with self._lock:
-            self._by_id[belief.provenance.get("id", belief.content)] = belief
-            # Belief 没有 id 字段(只有 content/provenance/freshness_ts/scope)
-            # 用 content hash 当 key 太脆;直接以 content 为 key(v1 接受)
+            # **单 key 收敛(潜伏 bug 面拆除)**:旧实现同时按 provenance["id"] 和 content 两个
+            # key 存**同一对象** → all() 返回重复,催生 6 处手工 id(b) 去重;更毒的是 remove()
+            # 只 pop content key —— 一旦哪个 producer 开始带 id,归档的 Belief 会借 id key 还魂
+            # (重启复活/落盘 2N)。全仓核实:没有任何 producer 写 provenance["id"]、没有任何
+            # caller 按 id get(distill/测试都按 content 取)→ 收敛为 content 单 key 是安全的。
+            # (既有的 id(b) 去重循环保留 —— 对单 key 是无害的保险带。)
             self._by_id[belief.content] = belief
             if pinned:
                 self._pinned.add(belief.content)
@@ -82,16 +85,20 @@ class MemoryIndex:
 
 def recall(query: str, index: MemoryIndex, *,
            scope: str = "personal",
-           limit: int = 10) -> list[RecallHit]:
+           limit: int = 10,
+           include_invalid: bool = False) -> list[RecallHit]:
     """agentic 召回:case-insensitive 子串匹配(query 词集 ∈ belief.content)。
 
     排序:score (命中词数) desc,freshness_ts desc。
+    失效过滤:`invalid_at` 已置的默认不返回(与 recall_block 同规则;失效不删,审计面另查)。
     """
     q_tokens = _tokenize(query)
     if not q_tokens:
         return []
     hits: list[RecallHit] = []
     for b in index.all(scope):
+        if not include_invalid and getattr(b, "invalid_at", None) is not None:
+            continue
         c_tokens = _tokenize(b.content)
         c_set = set(c_tokens)
         score = sum(1 for t in q_tokens if t in c_set)

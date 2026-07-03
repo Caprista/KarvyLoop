@@ -9,12 +9,32 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Optional
 
 from karvyloop.cognition.ingest import IngestResult, ingest_material, parse_facts
 
 DISTILL_BATCH = 4  # 每积累 N 轮未蒸馏 → 蒸一次(批量省 token)
+
+# 质量门①(防自反馈投毒):蒸馏材料里剔除 <memory-context> 围栏召回块及其提示行——
+# 轮文本若带着"已召回的旧记忆",蒸馏会把旧记忆**再抽成新条**写回库(复述循环:
+# 一条知识每蒸一轮就自我复制一次,库越长越毛)。配对块连内容一起剥;孤立标签/提示行单剥。
+_RECALL_PAIR_RE = re.compile(
+    r"<[\s/]*memory[\s-]*context[\s/]*>.*?</[\s]*memory[\s-]*context[\s/]*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_RECALL_TAG_RE = re.compile(r"</?[\s/]*memory[\s-]*context[\s/]*>", re.IGNORECASE)
+_RECALL_HINT_RE = re.compile(r"（以上是召回的记忆背景[^\n]*非新用户输入）?")
+
+
+def strip_recall_echo(text: str) -> str:
+    """剔除文本里的召回围栏块(整块含内容)+ 孤立标签 + 提示行。蒸馏材料预处理用。"""
+    s = text or ""
+    s = _RECALL_PAIR_RE.sub("", s)
+    s = _RECALL_TAG_RE.sub("", s)
+    s = _RECALL_HINT_RE.sub("", s)
+    return s
 
 # §11 P1b 显式陈述源:piggyback —— **同一次** LLM 调用既抽"关于你的事实/偏好"(进记忆),
 # 又抽"你怎么决策"的决策偏好(进决策结晶)。不加 token 成本(守用得起),且把两者分桶——
@@ -35,11 +55,11 @@ DISTILL_COMBINED_SYSTEM = (
 
 
 def format_turns(turns: list) -> str:
-    """把若干对话轮拼成一段材料喂给摄入编译器。"""
+    """把若干对话轮拼成一段材料喂给摄入编译器。召回围栏块先剥(防已召回记忆被再抽成新条)。"""
     parts: list[str] = []
     for t in turns:
-        u = getattr(t, "user_intent", "") or ""
-        a = getattr(t, "agent_response", "") or ""
+        u = strip_recall_echo(getattr(t, "user_intent", "") or "")
+        a = strip_recall_echo(getattr(t, "agent_response", "") or "")
         if u.strip():
             parts.append(f"用户: {u.strip()}")
         if a.strip():
@@ -61,13 +81,17 @@ async def distill_turns(
     agent_id: str = "user",
     now: Optional[float] = None,
 ) -> IngestResult:
-    """把一批对话轮编译成"关于用户"的 Belief(source=conversation)。复用 4b-1 摄入编译器。"""
+    """把一批对话轮编译成"关于用户"的 Belief(source=conversation)。复用 4b-1 摄入编译器。
+
+    质量门②:auto 蒸(无人审直接写库)一律标 `provisional`——provenance_rank 封顶蒸馏档,
+    supersede 时掀不翻人明说的;由 daily 复审/下次冲突判定处理,不与人审沉淀同权。"""
     material = format_turns(turns)
     if not material.strip():
         return IngestResult(written=0, raw="(无可蒸馏内容)")
     return await ingest_material(
         material, gateway=gateway, mem=mem, model_ref=model_ref,
         agent_id=agent_id, scope="personal", source="conversation", now=now,
+        provisional=True,
     )
 
 
@@ -133,18 +157,26 @@ async def distill_turns_with_decisions(
         if not content:
             continue
         try:
-            mem.write(Belief(
+            b = Belief(
                 content=content,
                 provenance={"source": "conversation", "agent": agent_id, "ts": now,
-                            "trace_ref": "", "kind": f.get("kind", "fact")},
-                freshness_ts=now, scope="personal"))
-            written.append(content)
+                            "trace_ref": "", "kind": f.get("kind", "fact"),
+                            "provisional": True},   # 质量门②:auto 蒸 = 低置信,不与人审同权
+                freshness_ts=now, scope="personal")
+            mem.write(b)
+            written.append(b)
         except Exception:
             pass
+    if written:
+        # 写入路径 supersede(与 ingest_material 同一咽喉;失败内部自吞,原库不动)
+        from karvyloop.cognition.conflict import run_supersede_pass
+        await run_supersede_pass(written, mem=mem, gateway=gateway,
+                                 model_ref=model_ref, now=now)
     return IngestResult(written=len(written), raw=f"facts={len(facts)} decisions={len(decisions)}"), decisions
 
 
 __all__ = [
     "DISTILL_BATCH", "DISTILL_COMBINED_SYSTEM", "format_turns", "should_distill",
     "distill_turns", "parse_combined", "distill_turns_with_decisions",
+    "strip_recall_echo",
 ]

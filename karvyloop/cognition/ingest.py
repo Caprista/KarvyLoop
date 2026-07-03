@@ -175,8 +175,13 @@ async def ingest_material(
     source_ref: str = "",              # 来源指纹(URL/材料 hash):同一资料重喂时 supersede 用
     now: Optional[float] = None,
     system: str = INGEST_SYSTEM,       # 抽取口径:默认关于用户;KNOWLEDGE_SYSTEM=通用知识
+    provisional: bool = False,         # auto 蒸(无人审)标 True:低置信,不与人审沉淀同权
 ) -> IngestResult:
-    """摄入一段材料 → 编译成结构化 Belief → 写进长期记忆(provenance/freshness/去重在 write 里)。"""
+    """摄入一段材料 → 编译成结构化 Belief → 写进长期记忆(provenance/freshness/去重在 write 里)。
+
+    写入后跑一轮 **supersede 冲突消解**(cognition.conflict.run_supersede_pass):新知识与库里
+    相似旧条矛盾/更新时,给输的一方打 `invalid_at`(失效不删);没有相似旧条则零 LLM 直接过。
+    """
     if now is None:
         now = time.time()
     material = (material or "").strip()
@@ -190,21 +195,24 @@ async def ingest_material(
         if not content:
             reasons.append("empty content")
             continue
-        belief = Belief(
-            content=content,
-            provenance={"source": source, "agent": agent_id, "ts": now,
-                        "trace_ref": trace_ref, "kind": f.get("kind", "fact"),
-                        "title": (f.get("title") or "").strip(),   # 短标题:图谱节点/列表可读
-                        "source_ref": (source_ref or "").strip()},  # 来源指纹:同资料重喂 supersede
-            freshness_ts=now,
-            scope=scope,
-        )
+        prov = {"source": source, "agent": agent_id, "ts": now,
+                "trace_ref": trace_ref, "kind": f.get("kind", "fact"),
+                "title": (f.get("title") or "").strip(),   # 短标题:图谱节点/列表可读
+                "source_ref": (source_ref or "").strip()}  # 来源指纹:同资料重喂 supersede
+        if provisional:
+            prov["provisional"] = True   # 质量门:auto 蒸的降权(provenance_rank 封顶蒸馏档)
+        belief = Belief(content=content, provenance=prov, freshness_ts=now, scope=scope)
         try:
             mem.write(belief)
             written.append(belief)
         except Exception as e:
             # 不静默吞:记下原因(否则 100% 跳过无从诊断,独立 checker 抓到的 MEDIUM)
             reasons.append(f"write failed: {type(e).__name__}: {e}")
+    if written:
+        # 写入路径 supersede(核心接线):失败自吞(run_supersede_pass 内部宁空勿毒,原库不动)
+        from karvyloop.cognition.conflict import run_supersede_pass
+        await run_supersede_pass(written, mem=mem, gateway=gateway,
+                                 model_ref=model_ref, now=now)
     return IngestResult(written=len(written), beliefs=written,
                         skipped=len(reasons), skip_reasons=reasons,
                         raw=f"compiled {len(facts)} fact(s)")

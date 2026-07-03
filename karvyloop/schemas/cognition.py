@@ -26,9 +26,21 @@ class Pursuit(Schema):
 
 
 class Belief(Schema):
-    """一条记忆（BDI 的 Belief）。带 provenance/freshness，是 Belief 不是真理（#4 §7）。"""
+    """一条记忆（BDI 的 Belief）。带 provenance/freshness，是 Belief 不是真理（#4 §7）。
+
+    时效与使用信号（记忆冲突消解接线）：
+    - `invalid_at`：**失效不删**——被更新/矛盾的旧知识打失效标记（时间戳），仍留库可审计、
+      可翻案；召回默认过滤（"用户吃素"半年后变"吃肉"，旧条不再被召回但历史在）。
+    - `invalid_reason`：为什么失效（supersede 判定 / 人工归档），审计可读。
+    - `last_recalled_ts` / `recall_count`：使用信号（哪条被召回过、多久没用），召回时轻量刷、
+      不进热路径算分；daily 慢侧据此出"疑似过时，归档？"建议。
+    """
 
     content: str
     provenance: dict  # {"source","agent","ts","trace_ref"}
     freshness_ts: float
     scope: Literal["personal", "domain"]
+    invalid_at: Optional[float] = None
+    invalid_reason: str = ""
+    last_recalled_ts: float = 0.0
+    recall_count: int = 0

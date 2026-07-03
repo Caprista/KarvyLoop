@@ -68,6 +68,9 @@ class MemoryManager:
         # fail-loud(闭环审计断⑥):最近一次落盘失败的原因(成功清 None)——
         # 上层(routes/doctor/调用方)能感知"记忆没存上",不再静默丢。
         self.persist_error: Optional[str] = None
+        # 使用信号脏标(recall_block 轻量刷 last_recalled_ts/recall_count 后置位;
+        # 不在召回热路径落盘 —— 靠下一次 write 的全量 _persist 顺带带上,或 flush_usage 批量刷)。
+        self._usage_dirty: bool = False
         if store is not None:
             for belief, pinned in store.load_all():
                 self._index.put(belief, pinned=pinned)
@@ -99,6 +102,31 @@ class MemoryManager:
             self.persist_error = f"{type(e).__name__}: {e}"
             logger.error(f"[memory] Belief 落盘失败(内存态仍在,**重启会丢这批记忆**): {e}")
             return False
+
+    def invalidate(self, belief: Belief, *, reason: str = "", now: Optional[float] = None) -> bool:
+        """**失效不删**(Graphiti 式):给一条 Belief 打 `invalid_at` 标记 + 落盘。
+
+        条目**留在库里**(recent/审计面还查得到、可翻案),但召回(recall_block/recall/
+        prefetch_all)默认过滤。supersede 消解与"过时归档"H2A 卡的兑现都走这里——
+        物理删除只保留给 purge/remove_by_content 等既有显式路径。返回落盘是否成功(断⑥)。
+        """
+        if now is None:
+            now = time.time()
+        with self._lock:
+            belief.invalid_at = float(now)
+            belief.invalid_reason = (reason or "").strip()[:300]
+            return self._persist()
+
+    def flush_usage(self) -> bool:
+        """把召回使用信号(last_recalled_ts/recall_count)批量落盘(daily 慢侧调;
+        热路径 recall_block 只改内存置脏标,绝不在每次召回写盘)。无脏 → noop True。"""
+        if not self._usage_dirty:
+            return True
+        with self._lock:
+            ok = self._persist()
+            if ok:
+                self._usage_dirty = False
+            return ok
 
     def archive(self, belief: Belief) -> bool:
         """归档(从 index 移除)+ 落盘。distill 的 MEMORY_ARCHIVE 走这里,否则归档不持久
@@ -229,8 +257,14 @@ class MemoryManager:
             return False
 
     async def prefetch_all(self, query: str, *, scope: str = "personal",
-                           limit: int = 10) -> Context:
-        """轮前召回:所有可用 provider 召回 → 合并 → 围栏。"""
+                           limit: int = 10, include_invalid: bool = False) -> Context:
+        """轮前召回:所有可用 provider 召回 → 合并 → 围栏。
+
+        **诚实状态(死代码处置说明)**:生产 drive 路径今天走同步 `recall_block`;本方法是
+        MemoryProvider 协议(单外部 provider 限制)的**集成缝**——外部 provider(letta/mem0 类)
+        接入时的召回汇合点,且有端到端测试锁。**留**而不删;失效过滤与 recall_block 同规则
+        (默认排除 invalid_at 已置的),两条路不漂移。
+        """
         beliefs: list[Belief] = []
         for p in self.providers:
             if not p.is_available():
@@ -241,6 +275,8 @@ class MemoryManager:
                 # 任一 provider 失败不阻塞其他(spec 没写;保守 fail-soft)
                 continue
             beliefs.extend(got)
+        if not include_invalid:
+            beliefs = [b for b in beliefs if getattr(b, "invalid_at", None) is None]
         # 同一论断多条 → 消解去重(简单按 content 去重,保留 freshness 最大的)
         dedup: dict[str, Belief] = {}
         for b in beliefs:
@@ -282,7 +318,7 @@ class MemoryManager:
             return self._persist()
 
     def recall_block(self, query: str, *, scope: str = "personal", limit: int = 8,
-                     domain: str = "") -> str:
+                     domain: str = "", include_invalid: bool = False) -> str:
         """**同步**召回(只读 index)→ 围栏块,供 drive 前注入上下文(token 纪律:封顶 limit 条)。
 
         简化打分:query 词与 belief.content 的字符重叠命中加分,平手按 freshness 新的优先。
@@ -291,12 +327,18 @@ class MemoryManager:
         **§2.6 认知两层(域隔离)**:带 `provenance.applies.domain` 的 = 域专属(私有)认知,
         **只在它自己的域召回**(A 域机密不漏到 B);无 applies.domain 的 = 通用/共享层,处处可召。
         `domain=""`(私聊/l0)→ 只召共享层;`domain=D` → 召共享层 + D 的私有层(继承+覆盖)。
+
+        **失效过滤(冲突消解接线)**:`invalid_at` 已置的 Belief(被 supersede/归档失效)
+        默认**不召回**——过时记忆不再顶掉新事实;`include_invalid=True` 才带上(审计/翻案面)。
+        命中条顺带轻量刷使用信号(last_recalled_ts/recall_count,只改内存置脏标,不写盘)。
         """
         # 去重 by id(b):index.all 因双 key 可能返回同一对象两次(同 _persist 的坑)
         beliefs, _seen = [], set()
         for b in self._index.all(scope):
             if id(b) in _seen:
                 continue
+            if not include_invalid and b.invalid_at is not None:
+                continue   # 失效不删:留库可审计,但默认不进召回
             bd = (b.provenance.get("applies") or {}).get("domain", "") if b.provenance else ""
             if bd and bd != domain:
                 continue   # 域私有认知:只在本域召回(跨域不漏)
@@ -311,6 +353,14 @@ class MemoryManager:
         from karvyloop.cognition.spread import spreading_activation_recall
 
         ranked = spreading_activation_recall(beliefs, query, top_k=max(0, limit))
+        # 使用信号:命中即刷(fire-and-forget,内存置脏;落盘搭下次 write / flush_usage 的车,
+        # 绝不在 drive 热路径写盘/算分 —— last_recalled_ts 不参与排序)。
+        if ranked:
+            now = time.time()
+            for b in ranked:
+                b.last_recalled_ts = now
+                b.recall_count += 1
+            self._usage_dirty = True
         return fence(ranked)
 
     def recent(self, *, limit: int = 20, scope: Optional[str] = None,
