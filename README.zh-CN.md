@@ -290,6 +290,8 @@ npm run verify   # 类型检查 + 构建 → ../static + 运行时 smoke(jsdom)
 
 > **访问与鉴权。** 默认 console 只绑 `localhost`(仅本机)。本机(loopback)请求免密;一旦你绑到局域网(`--host 0.0.0.0`)好从别的设备访问,**非本机地址必须带 token** —— token 每次启动新生成,在这台机器上跑 `karvyloop url` 获取带 token 的链接。(局域网**不是**信任边界 —— 否则公司/家里同网段任何人都能访问。)放到公网仍需你自己在前面加 TLS + 反向代理鉴权。
 >
+> **出门在外怎么访问?(远程访问。)** token 链接只在你的局域网内有效 —— KarvyLoop 刻意不开任何公网端口。本地优先阵营的标准做法是私有加密组网,如 [Tailscale](https://tailscale.com)(基于 WireGuard,个人免费):电脑和手机各装一次、登录同一账号,之后把 `karvyloop url` 链接里的 IP 换成主机的 Tailscale IP(仍需 `--host 0.0.0.0` + token),走到哪都能开。流量在**你自己的设备之间**端到端加密 —— 没有第三方服务器碰你的数据、不用配路由器端口转发、实例仍然只活在你自己的机器上。替代方案:纯 WireGuard(自建)或 Cloudflare Tunnel(需要域名)。**不建议**:在路由器上直接转发 8766 端口 —— console 的 token 鉴权不是为独自面对公网设计的。
+>
 > **`karvyloop` 命令找不到?** `pip install` 会把 `karvyloop` 命令装进你那个 Python 的 `bin`/`Scripts` 目录 —— 系统 Python 通常已在 `PATH` 上,但**若你装进了没激活的 venv、或 `pip install --user` 而 `~/.local/bin` 不在 `PATH`(不少发行版如此),就找不到**。两个办法:**(a)** 用**装它时那个 Python** 跑 `python -m karvyloop url`,不依赖 `PATH`,永远可用;**(b)** 想要干净的全局 `karvyloop` 命令,用 **pipx**:`pipx install karvyloop && pipx ensurepath`(pipx 隔离安装并把它加进 `PATH`)。pip 自己从不改你的 shell `PATH`。
 
 ## 贡献
