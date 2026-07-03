@@ -47,6 +47,10 @@ _QUALITY_BACKLOG_TRIGGER = 20   # 待质量评积压 ≥ 此 → 提前评
 # 测试可用 app.state.boot_poll_delay_s 覆盖(0=立即);负数 = 关闭。
 BOOT_POLL_DELAY_S = 30.0
 
+# 慢侧维护 loop 的默认间隔(闭环审计 WEAK⑨):pump 没接线时维护也要跑,自带 24h 兜底时钟
+# (数值与 pump 的 daily_poll 间隔一致 → 搬家前后节奏等价)。
+_MAINTENANCE_INTERVAL_S = 24 * 60 * 60
+
 
 async def _supervised_bg(app: Any, name: str, coro_factory: Any, *,
                          max_crashes: int = 3, base_backoff_s: float = 1.0,
@@ -108,6 +112,37 @@ def _review_decision(*, now: float, next_daily: float, backlog: int,
     return "idle"
 
 
+def _resolve_maintenance_interval(explicit: Any, pump_interval: Any) -> float:
+    """慢侧维护 loop 的间隔(纯函数,可测;闭环审计 WEAK⑨ 去单点寄生):
+    - 显式 `app.state.maintenance_interval_s`:>0 用它;<=0 = 显式关闭(返 0)。
+    - 否则跟 pump 的 daily 间隔(搬家前维护和 pump 共用一个时钟 → 行为等价)。
+    - pump 没接线(None / 非正)→ 默认 24h —— pump 挂了/没配 LLM,维护不再陪葬。"""
+    if explicit is not None:
+        try:
+            v = float(explicit)
+        except (TypeError, ValueError):
+            return float(_MAINTENANCE_INTERVAL_S)
+        return v if v > 0 else 0.0
+    try:
+        if pump_interval is not None and float(pump_interval) > 0:
+            return float(pump_interval)
+    except (TypeError, ValueError):
+        pass
+    return float(_MAINTENANCE_INTERVAL_S)
+
+
+def _maintenance_item_failed(app: Any, item: str, e: Exception) -> None:
+    """慢侧维护**单项**失败:响一声(log + WS system_error 上冒),**不连坐**其他维护项
+    (§0.7 fail-loud;下轮 daily 再试)。"""
+    logger.warning(
+        f"[karvyloop console] 慢侧维护项 {item} 异常(其余维护项照跑,下轮再试): {e}")
+    try:
+        from karvyloop.console.task_events import schedule_system_error
+        schedule_system_error(app, f"maintenance:{item}", str(e))
+    except Exception:
+        pass
+
+
 def build_console_app(
     *,
     workbench: WorkbenchObserver,
@@ -144,15 +179,63 @@ def build_console_app(
 
         # 9.0e:小卡每天后台看一次行为(daily poll → 有强建议推 h2a_proposal)。
         # 仅当 entry 接线了 pump + 设了正间隔才起;默认不开(0.1.0 §少脚手架)。
+        # 闭环审计 WEAK⑨:这条 loop 现在**只剩** pump 的预判建议 —— 它才真依赖 pump;
+        # 质量评/经验/修订/周报/巡检/知识整理已拆去下面的维护 loop,pump 挂了不再陪葬。
         daily_task = None
         pump = getattr(app.state, "proposal_pump", None)
         interval = getattr(app.state, "proposal_daily_interval_s", None)
         if pump is not None and interval and interval > 0:
             async def _daily_loop() -> None:
+                while True:
+                    try:
+                        # 时钟语义与拆分前等价:原实现按 600s 子 tick 数到 next_daily 才 fire,
+                        # 对 pump.daily 而言等效于"每 interval 醒一次";子 tick 只服务质量评积压,
+                        # 已随质量评搬去维护 loop。这里整段沉睡 → 没到点零工作(idle=0 契约)。
+                        await asyncio.sleep(interval)
+                        proposal, sent = await pump.daily()
+                        if proposal is not None:
+                            logger.info(
+                                f"[karvyloop console] 小卡 daily 建议 → 推 {sent} client(s): "
+                                f"{proposal.summary[:40]}"
+                            )
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        # 慢脑异常不打断 loop(下个周期再来)
+                        logger.warning(f"[karvyloop console] daily poll 异常(下轮再试): {e}")
+                        # §0.7 fail-loud:后台 daily 失败不再静默,主动 push 给 UI
+                        try:
+                            from karvyloop.console.task_events import schedule_system_error
+                            schedule_system_error(app, "daily_poll", str(e))
+                        except Exception:
+                            pass
+            # 断⑦:supervisor 包一层 —— 初始化段炸了也会 log+上冒+带退避重启,不再静默死
+            daily_task = asyncio.create_task(_supervised_bg(app, "daily_poll", _daily_loop))
+            app.state.daily_task = daily_task
+            logger.info(f"[karvyloop console] 小卡 daily 调度已起(间隔 {interval}s)")
+
+        # 慢侧维护 loop(闭环审计 WEAK⑨ 去单点寄生):质量评(积压提前评 + daily)/跨-run 经验/
+        # 技能修订/周报卡/临时原子巡检/知识整理/技能标签回填 —— 这些从不依赖 pump
+        # (周报纯确定性、质量评走 main_loop 自己注入的裁判),所以搬出上面那条 pump loop:
+        # pump 构造失败 / --no-llm 没建 pump,慢侧维护照跑,不再整条无声死。
+        # 时钟:pump 接了 → 跟 pump 同 interval(搬家前后节奏等价);没接 → 默认 24h;
+        # 显式 app.state.maintenance_interval_s 可覆盖(<=0=关)。各项内部自己判空 + 兜异常,
+        # 单项缺料(没接 main_loop / 没 Trace / 没注入裁判)= debug 跳过,不连坐其他项。
+        maintenance_task = None
+        m_interval = _resolve_maintenance_interval(
+            getattr(app.state, "maintenance_interval_s", None), interval)
+        if m_interval > 0:
+            if getattr(app.state, "no_llm", False):
+                # 启动时说一次,别让用户以为慢侧全死了(LLM 项各自静默 0 回归)
+                logger.info(
+                    "[karvyloop console] --no-llm:慢侧 LLM 维护(质量评/修订/经验蒸馏/知识聚类)停用,"
+                    "确定性维护(周报/知识 watermark/临时原子巡检)照跑")
+
+            async def _maintenance_loop() -> None:
                 import time as _t
-                tick = min(interval, _ACTIVE_TICK_S)
+                tick = min(m_interval, _ACTIVE_TICK_S)
                 trigger = getattr(app.state, "quality_backlog_trigger", _QUALITY_BACKLOG_TRIGGER)
-                next_daily = _t.monotonic() + interval
+                next_daily = _t.monotonic() + m_interval
                 while True:
                     try:
                         await asyncio.sleep(tick)
@@ -171,86 +254,112 @@ def build_console_app(
                         # 质量评:daily 与 backlog 两条路都补(纠偏召回排序)。线程里跑(LLM 可能慢),
                         # 不阻塞事件循环;离 drive 热路径(跑评分离)。单轮仍 QUALITY_JUDGE_LIMIT 封顶。
                         if _ml is not None and hasattr(_ml, "quality_review"):
-                            judged = await asyncio.to_thread(_ml.quality_review)
-                            if judged:
-                                tag = "积压触发,不等 24h" if action == "backlog" else "daily"
-                                logger.info(f"[karvyloop console] 慢侧 atom 质量评 {judged} 条({tag})")
+                            try:
+                                judged = await asyncio.to_thread(_ml.quality_review)
+                                if judged:
+                                    tag = "积压触发,不等 24h" if action == "backlog" else "daily"
+                                    logger.info(f"[karvyloop console] 慢侧 atom 质量评 {judged} 条({tag})")
+                            except Exception as ie:
+                                _maintenance_item_failed(app, "quality_review", ie)
+                        else:
+                            logger.debug("[karvyloop console] 维护项 quality_review 跳过(main_loop 未接)")
                         if action == "backlog":
                             continue   # 只提前补质量评,不跑整套 daily(daily 时钟不重置)
-                        # action == "daily":整套慢侧维护
-                        next_daily = _t.monotonic() + interval
-                        proposal, sent = await pump.daily()
-                        if proposal is not None:
-                            logger.info(
-                                f"[karvyloop console] 小卡 daily 建议 → 推 {sent} client(s): "
-                                f"{proposal.summary[:40]}"
-                            )
+                        # action == "daily":整套慢侧维护(每项各自兜异常,不连坐)
+                        next_daily = _t.monotonic() + m_interval
                         # docs/40 §6 丙:更慢一档,跨-run 经验蒸馏(质量评之后,材料更全)。
                         if _ml is not None and hasattr(_ml, "lessons_review"):
-                            learned = await asyncio.to_thread(_ml.lessons_review)
-                            if learned:
-                                logger.info(f"[karvyloop console] 跨-run 蒸出经验 {learned} 条")
+                            try:
+                                learned = await asyncio.to_thread(_ml.lessons_review)
+                                if learned:
+                                    logger.info(f"[karvyloop console] 跨-run 蒸出经验 {learned} 条")
+                            except Exception as ie:
+                                _maintenance_item_failed(app, "lessons_review", ie)
+                        else:
+                            logger.debug("[karvyloop console] 维护项 lessons_review 跳过(main_loop 未接)")
                         # Trace-conditioned 技能修订(crystallize.revision,同 lessons_review 节奏):
                         # 客观信号差的技能 → LLM 修 Steps;小改自动落 + Changelog,大改出 revise_skill 卡。
                         if _ml is not None and hasattr(_ml, "revision_review"):
-                            rres = await asyncio.to_thread(_ml.revision_review)
-                            if rres.get("revised") or rres.get("proposed"):
-                                logger.info(f"[karvyloop console] 技能修订:小改自动落 {rres.get('revised', 0)} 个、"
-                                            f"大改出卡 {rres.get('proposed', 0)} 张")
+                            try:
+                                rres = await asyncio.to_thread(_ml.revision_review)
+                                if rres.get("revised") or rres.get("proposed"):
+                                    logger.info(f"[karvyloop console] 技能修订:小改自动落 {rres.get('revised', 0)} 个、"
+                                                f"大改出卡 {rres.get('proposed', 0)} 张")
+                            except Exception as ie:
+                                _maintenance_item_failed(app, "revision_review", ie)
+                        else:
+                            logger.debug("[karvyloop console] 维护项 revision_review 跳过(main_loop 未接)")
                         # 周报卡(cognition.weekly_digest):7 天一发,幂等防重(水位落盘);
                         # 数字全部从 Trace/tokens.db/决策流水确定性汇总,零 LLM。发卡后推前端。
-                        _wtrace = getattr(_ml, "trace", None) if _ml is not None else None
-                        if _wtrace is not None:
-                            from karvyloop.cognition.weekly_digest import weekly_digest_tick
-                            wres = await weekly_digest_tick(
-                                trace=_wtrace,
-                                token_ledger=getattr(app.state, "token_ledger", None),
-                                taste_store=getattr(app.state, "taste_predictions", None),
-                                registry=getattr(app.state, "proposal_registry", None),
-                                decision_log=getattr(app.state, "decision_log", None))
-                            if wres.get("ran"):
-                                _wreg = getattr(app.state, "proposal_registry", None)
-                                _wcard = (_wreg.get(wres.get("proposal_id", ""))
-                                          if _wreg is not None else None)
-                                if _wcard is not None:
-                                    from karvyloop.console.proposals import broadcast_proposal
-                                    sent = await broadcast_proposal(app, _wcard)
-                                    logger.info(f"[karvyloop console] 周报卡已发(推 {sent} client(s))")
+                        try:
+                            _wtrace = getattr(_ml, "trace", None) if _ml is not None else None
+                            if _wtrace is None:
+                                _wtrace = getattr(app.state, "trace", None)   # 无 main_loop 时的备选源
+                            if _wtrace is not None:
+                                from karvyloop.cognition.weekly_digest import weekly_digest_tick
+                                wres = await weekly_digest_tick(
+                                    trace=_wtrace,
+                                    token_ledger=getattr(app.state, "token_ledger", None),
+                                    taste_store=getattr(app.state, "taste_predictions", None),
+                                    registry=getattr(app.state, "proposal_registry", None),
+                                    decision_log=getattr(app.state, "decision_log", None))
+                                if wres.get("ran"):
+                                    _wreg = getattr(app.state, "proposal_registry", None)
+                                    _wcard = (_wreg.get(wres.get("proposal_id", ""))
+                                              if _wreg is not None else None)
+                                    if _wcard is not None:
+                                        from karvyloop.console.proposals import broadcast_proposal
+                                        sent = await broadcast_proposal(app, _wcard)
+                                        logger.info(f"[karvyloop console] 周报卡已发(推 {sent} client(s))")
+                            else:
+                                logger.debug("[karvyloop console] 维护项 weekly_digest 跳过(无 Trace 源)")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "weekly_digest", ie)
                         # docs/02 §15.5:临时原子生命周期 —— 被角色复用的转正,孤儿撤回(护城河自清洁)。
-                        _areg = getattr(app.state, "atom_registry", None)
-                        _rreg = getattr(app.state, "role_registry", None)
-                        if _areg is not None and _rreg is not None:
-                            from karvyloop.atoms.provisional import review_provisional
-                            res = await asyncio.to_thread(review_provisional, _areg, _rreg)
-                            if res["confirmed"] or res["reverted"]:
-                                logger.info(f"[karvyloop console] 临时原子巡检:转正 {len(res['confirmed'])} 个、"
-                                            f"撤回孤儿 {len(res['reverted'])} 个")
+                        try:
+                            _areg = getattr(app.state, "atom_registry", None)
+                            _rreg = getattr(app.state, "role_registry", None)
+                            if _areg is not None and _rreg is not None:
+                                from karvyloop.atoms.provisional import review_provisional
+                                res = await asyncio.to_thread(review_provisional, _areg, _rreg)
+                                if res["confirmed"] or res["reverted"]:
+                                    logger.info(f"[karvyloop console] 临时原子巡检:转正 {len(res['confirmed'])} 个、"
+                                                f"撤回孤儿 {len(res['reverted'])} 个")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "provisional_review", ie)
                         # 知识库自动整理(Bug2 后台版):库变了才跑一次 LLM 聚类,近重复升 H2A 建议卡
                         # (ACCEPT 才合并,绝不自动)。watermark + 冷却防唠叨,离热路径。
-                        from karvyloop.console.knowledge_tick import knowledge_consolidate_tick
-                        kres = await knowledge_consolidate_tick(app)
-                        if kres.get("suggested"):
-                            logger.info(f"[karvyloop console] 知识整理:升 {kres['suggested']} 张合并建议卡")
+                        try:
+                            from karvyloop.console.knowledge_tick import knowledge_consolidate_tick
+                            kres = await knowledge_consolidate_tick(app)
+                            if kres.get("suggested"):
+                                logger.info(f"[karvyloop console] 知识整理:升 {kres['suggested']} 张合并建议卡")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "knowledge_tick", ie)
                         # P3-c:技能语义标签回填(没标签的自家技能补一次;watermark=有标签即跳过)
-                        from karvyloop.console.skill_tags_tick import skill_tags_tick
-                        tres = await skill_tags_tick(app)
-                        if tres.get("tagged"):
-                            logger.info(f"[karvyloop console] 技能语义标签:补 {tres['tagged']} 个")
+                        try:
+                            from karvyloop.console.skill_tags_tick import skill_tags_tick
+                            tres = await skill_tags_tick(app)
+                            if tres.get("tagged"):
+                                logger.info(f"[karvyloop console] 技能语义标签:补 {tres['tagged']} 个")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "skill_tags_tick", ie)
                     except asyncio.CancelledError:
                         break
                     except Exception as e:
-                        # 慢脑异常不打断 loop(下个周期再来)
-                        logger.warning(f"[karvyloop console] daily poll 异常(下轮再试): {e}")
-                        # §0.7 fail-loud:后台 daily 失败不再静默,主动 push 给 UI
+                        # tick 级兜底(单项已各自兜;这里接住积压计数/决策等骨架异常),下轮再来
+                        logger.warning(f"[karvyloop console] 慢侧维护 tick 异常(下轮再试): {e}")
                         try:
                             from karvyloop.console.task_events import schedule_system_error
-                            schedule_system_error(app, "daily_poll", str(e))
+                            schedule_system_error(app, "maintenance", str(e))
                         except Exception:
                             pass
-            # 断⑦:supervisor 包一层 —— 初始化段炸了也会 log+上冒+带退避重启,不再静默死
-            daily_task = asyncio.create_task(_supervised_bg(app, "daily_poll", _daily_loop))
-            app.state.daily_task = daily_task
-            logger.info(f"[karvyloop console] 小卡 daily 调度已起(间隔 {interval}s)")
+            # 断⑦:supervisor 包一层 —— 崩了 log+上冒+带退避重启,不静默死
+            maintenance_task = asyncio.create_task(
+                _supervised_bg(app, "maintenance", _maintenance_loop))
+            app.state.maintenance_task = maintenance_task
+            logger.info(
+                f"[karvyloop console] 慢侧维护 loop 已起(间隔 {m_interval:g}s,不依赖 pump)")
 
         # 定时任务调度器:每 30s tick 一次,跑窗口内到点的任务(只有 Karvy 起的;角色没调度工具)。
         async def _scheduler_loop() -> None:
@@ -365,9 +474,11 @@ def build_console_app(
             except Exception:
                 pass
 
-        # 关闭:取消 daily task + boot poll + 定时调度器 + 清 ws clients + 关 pump 资源(trace/habit sqlite)
+        # 关闭:取消 daily task + 维护 loop + boot poll + 定时调度器 + 清 ws clients + 关 pump 资源(trace/habit sqlite)
         if daily_task is not None:
             daily_task.cancel()
+        if maintenance_task is not None:
+            maintenance_task.cancel()
         if boot_poll_task is not None:
             boot_poll_task.cancel()
         _sched_task = getattr(app.state, "scheduler_task", None)

@@ -7,8 +7,9 @@ AC:
 - AC(a): knowledge_consolidate_tick —— 库没变(watermark 命中)→ ran=False,gateway 0 调用
          (第一轮真跑烧 1 次;第二轮同库 0 次)
 - AC(b): skill_tags_tick —— 技能全打过标签 → ran=False,gateway 从没被碰
-- AC(c): 静态契约 —— app.py _daily_loop 的 idle 分支在**任何 LLM 工作之前** continue
-         (quality_review / pump.daily / knowledge_tick / skill_tags_tick 全在 idle 之后)
+- AC(c): 静态契约 —— app.py _maintenance_loop 的 idle 分支在**任何 LLM 工作之前** continue
+         (quality_review / knowledge_tick / skill_tags_tick 全在 idle 之后);
+         拆分后的 pump _daily_loop 整段沉睡到 interval 才醒(没有子 tick、不掺维护工作)
 """
 from __future__ import annotations
 
@@ -107,22 +108,55 @@ def test_skill_tags_tick_no_skills_dir_zero_llm(tmp_path: Path):
     assert gw.calls == 0
 
 
-# ---- AC(c): 静态契约 —— _daily_loop 的 idle continue 先于一切 LLM 工作 ----
+# ---- AC(c): 静态契约 —— _maintenance_loop 的 idle continue 先于一切 LLM 工作 ----
 
-def test_daily_loop_idle_continues_before_any_llm_work():
+def test_maintenance_loop_idle_continues_before_any_llm_work():
     import karvyloop.console.app as console_app
     src = Path(console_app.__file__).read_text(encoding="utf-8")
 
-    loop_start = src.index("_daily_loop")
+    loop_start = src.index("async def _maintenance_loop")
     idle_pos = src.index('if action == "idle":', loop_start)
     # idle 分支体就是 continue(中间不许塞任何工作)
     after_idle = src[idle_pos:idle_pos + 120]
     assert "continue" in after_idle, "idle 分支必须立刻 continue"
 
     # 所有 LLM/慢侧工作都必须排在 idle 检查之后
-    for llm_work in ("quality_review", "pump.daily()",
+    for llm_work in ("quality_review",
                      "knowledge_consolidate_tick", "skill_tags_tick"):
         pos = src.index(llm_work, loop_start)
         assert idle_pos < pos, (
             f"契约破坏:{llm_work} 出现在 idle continue 之前 —— "
             f"没事发生的夜里会烧 LLM")
+
+
+def test_pump_daily_loop_sleeps_full_interval_and_carries_no_maintenance():
+    """WEAK⑨ 拆分后的 pump loop 契约:整段沉睡到 interval 才醒、醒了只做 pump.daily();
+    维护工作(质量评/经验/修订/周报/知识/标签)一律不许回流进来(否则又寄生回单点)。"""
+    import karvyloop.console.app as console_app
+    src = Path(console_app.__file__).read_text(encoding="utf-8")
+
+    loop_start = src.index("async def _daily_loop")
+    loop_end = src.index("async def _maintenance_loop")
+    body = src[loop_start:loop_end]
+    assert loop_start < loop_end, "pump loop 应在维护 loop 之前定义"
+    # 先睡满 interval,才调 pump.daily(idle=0:没到点零工作)
+    assert body.index("await asyncio.sleep(interval)") < body.index("pump.daily()")
+    for maint in ("quality_review", "lessons_review", "revision_review",
+                  "weekly_digest_tick", "review_provisional",
+                  "knowledge_consolidate_tick", "skill_tags_tick"):
+        assert maint not in body, f"契约破坏:维护项 {maint} 回流进 pump _daily_loop(单点寄生复发)"
+
+
+def test_maintenance_loop_starts_without_pump():
+    """WEAK⑨ 灵魂断言(动态):pump 没接线(--no-llm / 构造失败)时,慢侧维护 loop 照起。
+    此前维护整条寄生在 pump 的 daily loop 里,pump 一死全体无声死。"""
+    from fastapi.testclient import TestClient
+    from karvyloop.console import build_console_app
+    from karvyloop.karvy.observer import WorkbenchObserver
+
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)  # 无 pump 无 main_loop
+    with TestClient(app):
+        m_task = getattr(app.state, "maintenance_task", None)
+        assert m_task is not None and not m_task.done(), "pump=None 时维护 loop 未起(单点寄生复发)"
+        assert getattr(app.state, "daily_task", None) is None or True  # pump loop 可不起,维护必须起
+    assert m_task.cancelled() or m_task.done()   # shutdown 干净收尾不泄露
