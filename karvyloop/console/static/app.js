@@ -2876,12 +2876,14 @@
       if (mgmt && !mgmt.classList.contains("hidden")) return;
     }
     _ensureDriverJs().then(() => {
+      // "看过"标记在**弹出即写**:driver.js 的 onDestroyed 要等入场动画提交后才回调,
+      // 弹出 0.4s 内按 ESC 会静默不触发 → 标记不落、每次访问重弹(真浏览器烟测抓到的竞态)。
+      // 顶栏 💡 随时可重看,所以提前写零代价。
+      try { localStorage.setItem(_TOUR_DONE_KEY, "1"); } catch (e) {}
       const drv = window.driver.js.driver({
         showProgress: true,
         progressText: "{{current}} / {{total}}",
         nextBtnText: t("tour.next"), prevBtnText: t("tour.prev"), doneBtnText: t("tour.done"),
-        // 跳过/走完都算"看过":不再自动打扰(顶栏 💡 随时重看)
-        onDestroyed: () => { try { localStorage.setItem(_TOUR_DONE_KEY, "1"); } catch (e) {} },
         steps: _tourSteps(),
       });
       drv.drive();
