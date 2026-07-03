@@ -69,9 +69,17 @@ def test_skill_run_no_llm():
     assert r["ok"] is False
 
 
-def test_skill_run_sandbox_unavailable_on_windows(tmp_path):
-    """非 Linux:沙箱不可用 → 明确拒绝,绝不无隔离跑(fail-closed)。"""
+def test_skill_run_sandbox_unavailable_refuses(tmp_path, monkeypatch):
+    """沙箱不可用(available()=False:degraded/stub)→ 控制台技能试跑门明确拒绝,
+    绝不无隔离跑(fail-closed)。强制 Windows degraded 分支确定性验(Linux CI 也跑)。
+
+    注:Tier 3 RestrictedToken 可用时,控制台会真在沙箱里跑第三方脚本(那是 v1 的进步);
+    此测试专锁"无真隔离时门口拒绝"这条 fail-closed 边界。
+    """
+    import sys
     from karvyloop.runtime.main_loop import MainLoop
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("KARVYLOOP_SANDBOX", "degraded")   # 强制 available()=False 的 Tier 4
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
     ml = MainLoop(skills_dir=tmp_path / "skills")
     d = ml.skills_dir / "demo"; (d / "scripts").mkdir(parents=True)
@@ -79,10 +87,7 @@ def test_skill_run_sandbox_unavailable_on_windows(tmp_path):
     (d / "scripts" / "a.py").write_text("print(1)\n", encoding="utf-8")
     app.state.main_loop = ml
     r = TestClient(app).post("/api/skill/run", json={"name": "demo", "script": "scripts/a.py"}).json()
-    # Windows host:StubSandbox.available()=False → 拒绝(不是 NotImplemented 崩)
-    import sys
-    if not sys.platform.startswith("linux"):
-        assert r["ok"] is False and "沙箱" in r["reason"]
+    assert r["ok"] is False and "沙箱" in r["reason"]
 
 
 def test_skill_grant_net_endpoint(tmp_path):

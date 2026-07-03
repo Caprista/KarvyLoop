@@ -49,9 +49,9 @@ In one line: they optimize a single call or a single orchestration; KarvyLoop op
 |----|--------|
 | **Linux** | ✅ First-class — full security sandbox (bubblewrap). |
 | **macOS** | ✅ Supported — built-in Seatbelt sandbox (`sandbox-exec`), same fail-closed contract as Linux; newer, so rougher. |
-| **Windows** | ✅ Supported (degraded) — runs fully; third-party skill scripts disabled (no sandbox yet); Linux/macOS get the full sandbox. |
+| **Windows** | ✅ Supported — a restricted-token sandbox (write isolation via `WRITE_RESTRICTED` token + per-directory ACL whitelist, resource limits via a Job Object) runs skill scripts when it's available; where it isn't (locked-down policy / AV interference), it falls back to a degraded mode that keeps first-party workspace read/write/exec working and fail-closes third-party skill scripts. Honest limits: no admin-free network gate on Windows yet, so a skill that needs network **fail-closes** here (run it on Linux/macOS); read isolation is relaxed (as on macOS); it defends against mistakes and ordinary untrusted scripts, not a determined escape. |
 
-KarvyLoop is a cross-platform user-space runtime (pure Python; it doesn't ride on the Linux kernel). The only platform-specific piece is the sandbox: **Linux uses bubblewrap, macOS uses the built-in `sandbox-exec`** — same write-isolation + network-gate behavior (macOS adversarially verified on Apple Silicon / macOS 26).
+KarvyLoop is a cross-platform user-space runtime (pure Python; it doesn't ride on the Linux kernel). The only platform-specific piece is the sandbox: **Linux uses bubblewrap, macOS uses the built-in `sandbox-exec`, Windows uses a restricted-token + Job Object sandbox** — same default-deny-write + network-gate contract (Linux/macOS network gate is full; Windows fail-closes network rather than pretend). macOS adversarially verified on Apple Silicon / macOS 26; Windows write isolation + resource limits adversarially verified on Win11 Home.
 
 > ⚠️ **Early and under active development.** KarvyLoop is pre-1.0 and moving fast. Many features aren't fully tested yet and rough edges are expected — we're opening it up early to sharpen it together. **Bug reports are gold.** 🙏
 
@@ -59,7 +59,7 @@ KarvyLoop is a cross-platform user-space runtime (pure Python; it doesn't ride o
 
 ## Quickstart
 
-**Requirements**: Python 3.11+. Sandboxed skill execution needs Linux + `bubblewrap` or macOS (built-in `sandbox-exec`); everything else is cross-platform — Windows runs in degraded mode (third-party skill scripts disabled, all else works).
+**Requirements**: Python 3.11+. Sandboxed skill execution uses Linux + `bubblewrap`, macOS (built-in `sandbox-exec`), or Windows (built-in restricted-token + Job Object sandbox — no extra dependency); everything else is cross-platform. On Windows, skills that need network fail-close (no admin-free network gate yet); where the restricted-token sandbox can't initialize, it degrades to first-party-only with third-party skill scripts disabled.
 
 ```bash
 # 1) Install — puts `karvyloop` on your PATH, isolated (safe on PEP 668 / "externally managed" distros)

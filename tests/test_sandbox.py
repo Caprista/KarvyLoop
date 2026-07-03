@@ -174,16 +174,20 @@ def test_has_net():
 
 
 # ============ 跨平台：PAL selector ============
-def test_selector_returns_stub_on_windows(monkeypatch):
-    """真的模拟 Windows 平台 → selector 选 StubSandbox（不查 bwrap）。
+def test_selector_on_win32_is_restricted_or_degraded(monkeypatch):
+    """模拟 win32 → selector 走探测降级链:Tier 3 RestrictedToken(可用则)否则 Tier 4
+    DegradedWindowsSandbox。**不**是 StubSandbox(Windows 从 v1 起是一等降级平台,
+    第一方 workspace 读写不再被全拒;第三方脚本仍 fail-closed)。
 
-    用 monkeypatch.setattr(sys, "platform", ...) 强制 sys.platform 走 win32 分支;
-    这样在 Linux 上跑也真验逻辑,而不是被 bwrap 路径截胡。
+    强制 degraded 分支(env)以便在 Linux CI 上也能确定性验逻辑,不依赖真 restricted 可用。
     """
+    from karvyloop.platform.win.degraded import DegradedWindowsSandbox
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("KARVYLOOP_SANDBOX", "degraded")
     sb = sel()
-    assert isinstance(sb, StubSandbox)
-    assert sb.available() is False
+    assert isinstance(sb, DegradedWindowsSandbox)
+    # win32 分支绝不返回全拒的 StubSandbox
+    assert not isinstance(sb, StubSandbox)
 
 
 def test_selector_override_wins():
