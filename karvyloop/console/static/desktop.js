@@ -982,12 +982,111 @@
       } catch {
       }
     }
+    const RECENT_KNOWLEDGE_CAP = 3;
+    const RECENT_CONTENT_CAP = 120;
+    async function refreshRecentKnowledge() {
+      const desk = cockpitEl();
+      if (!desk || typeof fetch !== "function") return;
+      let items = [];
+      try {
+        const r = await fetch("/api/memory/recent?limit=" + RECENT_KNOWLEDGE_CAP);
+        if (!r.ok) throw new Error(String(r.status));
+        const data = await r.json();
+        items = (data && data.items || []).slice(0, RECENT_KNOWLEDGE_CAP);
+      } catch {
+        items = [];
+      }
+      let box = document.getElementById("desk-recent-knowledge");
+      if (!items.length) {
+        if (box) box.remove();
+        return;
+      }
+      if (!box) {
+        box = document.createElement("div");
+        box.className = "desk-recent-knowledge";
+        box.id = "desk-recent-knowledge";
+        desk.appendChild(box);
+      }
+      box.textContent = "";
+      const head = document.createElement("div");
+      head.className = "desk-recent-head";
+      head.textContent = "🧠 " + t("desk.recent_knowledge");
+      box.appendChild(head);
+      items.forEach((it) => {
+        const card = document.createElement("button");
+        card.className = "desk-recent-item";
+        const text = (it.content || "").trim();
+        card.textContent = text.length > RECENT_CONTENT_CAP ? text.slice(0, RECENT_CONTENT_CAP) + "…" : text;
+        card.setAttribute("data-tip", t("desk.recent_open"));
+        card.addEventListener("click", () => openMemoryPanel());
+        box.appendChild(card);
+      });
+    }
+    async function refreshMemento() {
+      const desk = cockpitEl();
+      if (!desk || typeof fetch !== "function") return;
+      let m = null;
+      try {
+        const r = await fetch("/api/desk/memento");
+        if (!r.ok) throw new Error(String(r.status));
+        m = await r.json();
+      } catch {
+        m = null;
+      }
+      const num = (k) => {
+        const v = m ? m[k] : 0;
+        return typeof v === "number" && isFinite(v) ? v : 0;
+      };
+      const tasks = num("tasks_done"), skills = num("skills_new"), decisions = num("decisions"), tokens = num("tokens_total");
+      let tile = document.getElementById("desk-memento");
+      if (!m || tasks + skills + decisions <= 0) {
+        if (tile) tile.remove();
+        return;
+      }
+      if (!tile) {
+        tile = document.createElement("div");
+        tile.className = "desk-memento";
+        tile.id = "desk-memento";
+        desk.appendChild(tile);
+      }
+      tile.textContent = "";
+      const wk = m.week_label && String(m.week_label) || "";
+      const head = document.createElement("div");
+      head.className = "desk-memento-head";
+      head.textContent = "🏅 " + t("desk.memento_title") + (wk ? " · " + wk : "");
+      tile.appendChild(head);
+      const stats = document.createElement("div");
+      stats.className = "desk-memento-stats";
+      const chip = (icon, n, key) => {
+        if (n <= 0) return;
+        const c = document.createElement("span");
+        c.className = "desk-memento-chip";
+        c.textContent = icon + " " + t(key, { n });
+        stats.appendChild(c);
+      };
+      chip("✅", tasks, "desk.memento_tasks");
+      chip("🧬", skills, "desk.memento_skills");
+      chip("⚖", decisions, "desk.memento_decisions");
+      if (tokens > 0) {
+        const c = document.createElement("span");
+        c.className = "desk-memento-chip desk-memento-tokens";
+        c.textContent = "🔢 " + t("desk.memento_tokens", { n: tokens > 1e3 ? (tokens / 1e3).toFixed(1) + "k" : String(tokens) });
+        stats.appendChild(c);
+      }
+      tile.appendChild(stats);
+    }
+    function openMemoryPanel() {
+      const nav = document.querySelector('.sidebar .nav-item[data-panel="memory"]') || document.querySelector('.dock-item[data-panel="memory"]');
+      if (nav) nav.click();
+    }
     function enterSoul() {
       _soulOn = true;
       ensureSoulDom();
       ensureMascot();
       void refreshPresence();
       void seedWorkcards();
+      void refreshRecentKnowledge();
+      void refreshMemento();
       soulConnect();
     }
     function leaveSoul() {
@@ -1020,6 +1119,10 @@
       _signedNotes.length = 0;
       const cv = document.getElementById("desk-karvy-pixel");
       if (cv) cv.remove();
+      const rk = document.getElementById("desk-recent-knowledge");
+      if (rk) rk.remove();
+      const mem = document.getElementById("desk-memento");
+      if (mem) mem.remove();
       const bar = document.getElementById("desk-presence");
       if (bar) bar.classList.add("hidden");
       const box = document.getElementById("desk-workcards");
@@ -1333,7 +1436,13 @@
       notifyH2A,
       resetLayout,
       // P1.5 测试接缝(smoke/Playwright 喂真实事件形状,不开真 socket;生产路径 = soulConnect 的 onmessage)
-      _soul: { handle: soulHandle, refreshPresence, stationCount: () => _stations.size }
+      _soul: {
+        handle: soulHandle,
+        refreshPresence,
+        refreshRecentKnowledge,
+        refreshMemento,
+        stationCount: () => _stations.size
+      }
     };
     window.KarvyDesktop = KarvyDesktop;
   })();

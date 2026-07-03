@@ -428,6 +428,29 @@ async function _openCapabilityOverview(): Promise<void> {
     } }));
   addWrap.appendChild(addMsg);
   b.appendChild(addWrap);
+  // 挣来的静音:已授权静音处理的类别(桶)—— 可见可撤(docs/49 机制2)。撤销 → 该类卡恢复逐张问你。
+  b.appendChild(el("div", { class: "mgmt-section-title", text: t("capov.silence_title") }));
+  b.appendChild(el("div", { class: "mgmt-hint", text: t("capov.silence_hint") }));
+  const sgl = el("div", { class: "mgmt-list" });
+  const sgrants = ov.silence_grants || [];
+  if (!sgrants.length) sgl.appendChild(el("div", { class: "mgmt-empty", text: t("capov.silence_empty") }));
+  for (const sg of sgrants) {
+    const actions = el("div", { class: "dpref-actions" });
+    actions.appendChild(el("button", { class: "dpref-edit", text: t("capov.silence_revoke"),
+      onclick: async () => {
+        const r = await _postJSON("/api/silence/revoke", { bucket: sg.bucket });
+        if (r.ok && r.data && r.data.ok) _openCapabilityOverview();
+      } }));
+    const domTxt = (sg.domain || "").trim();
+    sgl.appendChild(el("div", { class: "mgmt-card" },
+      el("div", { class: "mc-main" },
+        el("div", { class: "mc-name" }, el("span", { text: "🔕 " + (sg.kind || "?") }),
+          domTxt ? " " : null,
+          domTxt ? el("span", { class: "dpref-badge provisional", text: t("capov.grant_role", { role: domTxt }) }) : null),
+        el("div", { class: "mc-meta", text: t("capov.silence_meta") })),
+      actions));
+  }
+  b.appendChild(sgl);
 }
 
 // 技能详情 + 沙箱试跑(P0-c:让第三方脚本在笼子里跑给你看)

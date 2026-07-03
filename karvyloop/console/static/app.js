@@ -178,6 +178,9 @@
     } else if (msg.type === "ambient_recall") {
       // ⑤c 环境感知召回:相关技能/知识主动浮出到工作台"料"区(新 intent 的料替换旧料)
       renderAmbientRecall(msg.payload);
+    } else if (msg.type === "silence_notice") {
+      // 挣来的静音(docs/49):已授权桶的卡被小卡按你的口味静音处理了 → 轻通知(不打断,可回看)。
+      onSilenceNotice(msg.payload);
     } else if (msg.type === "error") {
       console.warn("[server] error", msg.payload);
     }
@@ -206,6 +209,38 @@
     if (st.status === "failed") {
       pushChatLine("system", t("task.step_failed", { who: st.display || "?", err: st.error || "" }));
     }
+  }
+  // 挣来的静音轻通知:小卡已按你的口味替你处理了一张已授权桶的卡。**轻**——一条系统提示,
+  // 不弹卡、不打断;附一个「翻案」入口(最强负信号:推翻这次静音 → 连坐吊销整桶授权)。
+  function onSilenceNotice(p) {
+    if (!p) return;
+    const log = document.getElementById("chat-log");
+    if (!log) return;
+    const follow = isNearBottom(log);
+    const kind = tB(p.kind || "") || (p.kind || "?");
+    const dom = (p.domain || "").trim();
+    const key = p.ok === false ? "silence.notice_failed" : "silence.notice";
+    const notice = el("div", { class: "chat-notice silence-notice" });
+    notice.appendChild(document.createTextNode(t(key, {
+      kind: kind, domain: dom ? t("silence.in_domain", { domain: dom }) : "",
+      detail: tB(p.detail || "") })));
+    // 翻案:仅对成功静音处理的卡给(失败的没执行,无需翻);带 proposal_id 才可翻。
+    const pid = p.proposal_id || "";
+    if (p.ok !== false && pid) {
+      const btn = el("button", { class: "silence-overturn", text: t("silence.overturn"),
+        onClick: async () => {
+          if (!window.confirm(t("silence.overturn_confirm"))) return;
+          btn.disabled = true;
+          try {
+            const r = await _postJSON("/api/silence/overturn", { proposal_id: pid });
+            btn.textContent = (r.ok && r.data && r.data.ok) ? t("silence.overturned") : t("silence.overturn_gone");
+          } catch (e) { btn.textContent = t("silence.overturn_gone"); }
+        } });
+      notice.appendChild(document.createTextNode(" "));
+      notice.appendChild(btn);
+    }
+    log.appendChild(notice);
+    if (follow) log.scrollTop = log.scrollHeight;
   }
   function onSystemError(p) {
     if (!p) return;
@@ -659,6 +694,30 @@
       box.appendChild(bodyEl);
       box.appendChild(el("div", { class: "digest-hint", text: t("digest.accept_hint") }));
       card.appendChild(box);
+    } else if (payload.kind === "inbox_decision" || payload.kind === "inbox_reply") {
+      // 收件箱管道卡(inbox_pipe):需拍板 / 需回复。全文永不进卡 —— 只有发件人/主题/摘要。
+      // reply 的 draft 走上面的「改了再批」textarea(_EDITABLE_FIELD),这里只画只读元信息。
+      const isReply = payload.kind === "inbox_reply";
+      const box = el("div", { class: "inbox-card" });
+      box.appendChild(el("div", { class: "inbox-title",
+        text: (isReply ? "✉️ " : "📧 ") + t(isReply ? "inbox.reply_title" : "inbox.decision_title") }));
+      if (p.from) box.appendChild(el("div", { class: "inbox-meta" },
+        el("span", { class: "inbox-label", text: t("inbox.from") }), el("span", { text: p.from })));
+      if (p.subject) box.appendChild(el("div", { class: "inbox-meta" },
+        el("span", { class: "inbox-label", text: t("inbox.subject") }), el("span", { text: p.subject })));
+      if (p.snippet) box.appendChild(el("div", { class: "inbox-snippet", text: p.snippet }));
+      if (p.suggested_action) box.appendChild(el("div", { class: "inbox-action" },
+        el("span", { class: "inbox-label", text: t("inbox.suggested") }), el("span", { text: p.suggested_action })));
+      if (isReply) {
+        // 草稿默认摊开可读(改则走 textarea);ACCEPT=存台账+显示,系统绝不代发
+        if (p.draft) box.appendChild(el("div", { class: "inbox-draft" },
+          el("div", { class: "inbox-label", text: t("inbox.draft_label") }),
+          el("pre", { class: "inbox-draft-body", text: String(p.draft) })));
+        box.appendChild(el("div", { class: "inbox-hint", text: t("inbox.reply_hint") }));
+      } else {
+        box.appendChild(el("div", { class: "inbox-hint", text: t("inbox.decision_hint") }));
+      }
+      card.appendChild(box);
     }
   }
 
@@ -727,7 +786,8 @@
     // 再批 —— 修改本身是楔子最富的偏好信号(原文→改文的对照会进偏好结晶)。
     const _EDITABLE_FIELD = { route_to_role: "requirement", merge_knowledge: "merged_content",
                               merge_atoms: "merged_purpose", run_task: "intent",
-                              revise_skill: "new_steps" };   // 技能修订卡:改了再批 new_steps
+                              revise_skill: "new_steps",     // 技能修订卡:改了再批 new_steps
+                              inbox_reply: "draft" };        // 收件箱回复卡:改了再批 draft(代拟草稿)
     const _editField = _EDITABLE_FIELD[payload.kind];
     const _editSrc = _editField && payload.payload && typeof payload.payload[_editField] === "string"
       ? payload.payload[_editField] : "";

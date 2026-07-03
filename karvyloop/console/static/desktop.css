@@ -522,6 +522,84 @@ body.desk-view .desk-workcard .work-chip.failed { border-color: var(--rose-line)
 body.desk-view .desk-workcard.is-done { opacity: 0.65; }
 body.desk-view .desk-workcard.is-failed { border-color: var(--rose-line); box-shadow: 0 0 0 3px var(--rose-soft); }
 
+/* ---- vignette ④:最近沉淀的知识(桌左下角浮现,只读小卡)---- */
+.desk-recent-knowledge { display: none; }
+body.desk-view .desk-recent-knowledge {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  left: 18px;
+  bottom: 84px;
+  width: 240px;
+  max-width: 30vw;
+  z-index: 210;
+  pointer-events: auto;
+  animation: desk-signed-in 320ms var(--ease-out);
+}
+body.desk-view .desk-recent-knowledge .desk-recent-head {
+  font-size: var(--fs-12);
+  font-weight: 700;
+  color: var(--accent-strong);
+  letter-spacing: 0.02em;
+}
+body.desk-view .desk-recent-knowledge .desk-recent-item {
+  text-align: left;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-12);
+  line-height: 1.45;
+  color: var(--text-1);
+  cursor: pointer;
+  word-break: break-word;
+}
+body.desk-view .desk-recent-knowledge .desk-recent-item:hover { border-color: var(--accent); }
+
+/* ---- vignette ⑤:本周纪念物瓷砖(桌上一枚小奖章,周报数字)---- */
+.desk-memento { display: none; }
+body.desk-view .desk-memento {
+  position: absolute;
+  display: block;
+  left: 50%;
+  top: 22px;
+  transform: translateX(-50%);
+  padding: 8px 14px 10px;
+  background: linear-gradient(160deg, var(--note-yellow, #fff6da), rgba(255, 255, 255, 0.92));
+  border: 1px solid var(--note-line, var(--border));
+  border-radius: 12px;
+  box-shadow: 0 10px 22px rgba(142, 95, 60, 0.18);
+  z-index: 211;
+  pointer-events: auto;
+  animation: desk-signed-in 360ms var(--ease-out);
+}
+body.desk-view .desk-memento .desk-memento-head {
+  font-size: var(--fs-12);
+  font-weight: 700;
+  color: var(--accent-strong);
+  text-align: center;
+  margin-bottom: 5px;
+}
+body.desk-view .desk-memento .desk-memento-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+body.desk-view .desk-memento .desk-memento-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: var(--fs-12);
+  color: var(--text-1);
+}
+
 /* ============================================================================
    降级与动效对策
    ========================================================================= */
@@ -541,6 +619,8 @@ body.desk-view .desk-workcard.is-failed { border-color: var(--rose-line); box-sh
     box-shadow: 0 0 0 4px var(--rose-soft), 0 10px 26px rgba(142, 95, 60, 0.16);
   }
   body.desk-view .desk-signed-note { animation: none; }
+  body.desk-view .desk-recent-knowledge,
+  body.desk-view .desk-memento { animation: none; }
   body.desk-view .desk-station,
   body.desk-view .desk-station:hover { transform: none; transition: none; }
   body.desk-view .desk-carry.is-walking { transition: none; }

@@ -615,6 +615,41 @@ var KarvySkillsPanelBundle = (function(exports) {
     }));
     addWrap.appendChild(addMsg);
     b.appendChild(addWrap);
+    b.appendChild(el("div", { class: "mgmt-section-title", text: t("capov.silence_title") }));
+    b.appendChild(el("div", { class: "mgmt-hint", text: t("capov.silence_hint") }));
+    const sgl = el("div", { class: "mgmt-list" });
+    const sgrants = ov.silence_grants || [];
+    if (!sgrants.length) sgl.appendChild(el("div", { class: "mgmt-empty", text: t("capov.silence_empty") }));
+    for (const sg of sgrants) {
+      const actions = el("div", { class: "dpref-actions" });
+      actions.appendChild(el("button", {
+        class: "dpref-edit",
+        text: t("capov.silence_revoke"),
+        onclick: async () => {
+          const r = await _postJSON("/api/silence/revoke", { bucket: sg.bucket });
+          if (r.ok && r.data && r.data.ok) _openCapabilityOverview();
+        }
+      }));
+      const domTxt = (sg.domain || "").trim();
+      sgl.appendChild(el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el(
+            "div",
+            { class: "mc-name" },
+            el("span", { text: "🔕 " + (sg.kind || "?") }),
+            domTxt ? " " : null,
+            domTxt ? el("span", { class: "dpref-badge provisional", text: t("capov.grant_role", { role: domTxt }) }) : null
+          ),
+          el("div", { class: "mc-meta", text: t("capov.silence_meta") })
+        ),
+        actions
+      ));
+    }
+    b.appendChild(sgl);
   }
   function _openSkillDetail(s) {
     openMgmtModal(s.name);

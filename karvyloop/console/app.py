@@ -399,6 +399,50 @@ def build_console_app(
         app.state.email_channel_task = asyncio.create_task(
             _supervised_bg(app, "email_channel", _email_channel_loop))   # 断⑦ supervisor
 
+        # 收件箱→决策卡管道心跳(docs/49 ⑲-①,inbox_pipe):出站 IMAP 轮询 UNSEEN → 分诊 →
+        # 需拍板/需回复出 H2A 卡(纯通知归档)。**只进不出**:模块结构上发不了信。
+        # 未配置(channels.inbox 缺 → build 返 None)→ tick 空转零开销。gateway 从 runtime_kwargs
+        # 取(复用主 loop 已接好的,models.* 单一真理源);None = 全当纯通知不出卡不烧 token。
+        # 接线全在本模块(inbox_pipe.inbox_pipe_tick 明确"接线由主线做");handler 已在
+        # build_proposal_handlers 注册(entry 起 console 时),这里只挂 poll 循环。
+        app.state.inbox_pipe = None
+        try:
+            from karvyloop.channels.inbox_pipe import build_inbox_pipe
+            _ipreg = getattr(app.state, "proposal_registry", None)
+            if _ipreg is not None:
+                _iprk = getattr(app.state, "runtime_kwargs", None) or {}
+                app.state.inbox_pipe = build_inbox_pipe(
+                    registry=_ipreg,
+                    config_path=getattr(app.state, "config_path", "") or None,
+                    gateway=_iprk.get("gateway"),
+                    model_ref=_iprk.get("model_ref", "") or "")
+                if app.state.inbox_pipe is not None:
+                    logger.info("[karvyloop console] 收件箱决策管道已接线(IMAP 轮询→分诊→出卡)")
+        except Exception as e:
+            app.state.inbox_pipe = None
+            logger.warning(f"[karvyloop console] 收件箱管道接线失败(不影响启动): {e}")
+
+        async def _inbox_pipe_loop() -> None:
+            from karvyloop.channels.inbox_pipe import inbox_pipe_tick
+            # 轮询间隔:配了 pipe → 用其 cfg.poll_interval_s;没配 → 300s 空转(pipe=None 零开销)。
+            _pipe = getattr(app.state, "inbox_pipe", None)
+            _interval = 300.0
+            try:
+                if _pipe is not None:
+                    _interval = float(getattr(_pipe._cfg, "poll_interval_s", 300) or 300)
+            except Exception:
+                _interval = 300.0
+            while True:
+                try:
+                    await asyncio.sleep(max(30.0, _interval))
+                    await inbox_pipe_tick(getattr(app.state, "inbox_pipe", None))
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"[karvyloop console] 收件箱管道 tick 异常(下轮再试): {e}")
+        app.state.inbox_pipe_task = asyncio.create_task(
+            _supervised_bg(app, "inbox_pipe", _inbox_pipe_loop))   # 断⑦ supervisor
+
         # predict 启动兜底:延迟一次 boot_poll(修"第一条建议要等 24h"→ 页签体感永远空)。
         # pump 在(有 LLM)→ 真习惯分析;pump 沉默/未接 → proactive_from_state 确定性兜底
         # (任务看板有失败任务 → 提议重试)。没 WS client 也照样进 proposal_registry 待决表,
@@ -487,6 +531,9 @@ def build_console_app(
         _email_task = getattr(app.state, "email_channel_task", None)
         if _email_task is not None:
             _email_task.cancel()
+        _inbox_task = getattr(app.state, "inbox_pipe_task", None)
+        if _inbox_task is not None:
+            _inbox_task.cancel()
         app.state.ws_clients.clear()
         close_fn = getattr(app.state, "proposal_close", None)
         if callable(close_fn):

@@ -669,6 +669,10 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
     # cocreate_finalize(共创定稿卡):ACCEPT → 真建域+角色(模板 instantiate / 自建 finalize)
     from karvyloop.karvy.cocreation import KIND_COCREATE_FINALIZE, make_cocreate_finalize_handler
     from karvyloop.karvy.silence import KIND_SILENCE_GRANT, KIND_SILENCE_REVOKED
+    # inbox_pipe(收件箱→决策卡管道):inbox_decision(需拍板,记台账)/ inbox_reply(代拟草稿,存台账+
+    # 显示,不代发)。handler 结构上只写本地台账,零外部副作用(未经确认绝不外发是硬规矩)。
+    from karvyloop.channels.inbox_pipe import make_inbox_handlers
+    _inbox = make_inbox_handlers()
     return {
         KIND_COCREATE_FINALIZE: make_cocreate_finalize_handler(app),
         KIND_REVISE_SKILL: partial(apply_revision_proposal, trace=getattr(_ml, "trace", None)),
@@ -687,6 +691,7 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_WEEKLY_DIGEST: _weekly_digest_handler,              # ACCEPT=归档(对齐前端承诺)
         KIND_SILENCE_GRANT: _silence_grant_handler(app),         # 挣来的静音:授权落台账(可撤)
         KIND_SILENCE_REVOKED: _silence_revoked_handler,          # 吊销告知:纯知悉
+        **_inbox,                                                # 收件箱管道:记台账/存草稿(只进不出)
     }
 
 

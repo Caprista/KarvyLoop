@@ -1930,6 +1930,22 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .digest-pre { white-space: pre-wrap; font-size: var(--fs-12); margin: 0; }
 .digest-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
 
+/* —— 收件箱管道卡:inbox_decision(需拍板)/ inbox_reply(代拟草稿)。全文永不进卡 —— */
+.inbox-card { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--surface-2, #faf7f0); }
+.inbox-title { font-size: var(--fs-13); font-weight: 700; margin-bottom: 5px; }
+.inbox-meta { font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.inbox-label { font-weight: 700; color: var(--text-3); }
+.inbox-snippet { font-size: var(--fs-12); line-height: 1.5; color: var(--text-1); margin: 5px 0; padding: 5px 8px; background: var(--bg); border-radius: 6px; border: 1px dashed var(--border); word-break: break-word; }
+.inbox-action { font-size: var(--fs-12); color: var(--text-1); margin-top: 3px; }
+.inbox-draft { margin-top: 6px; }
+.inbox-draft-body { white-space: pre-wrap; font-size: var(--fs-12); line-height: 1.5; margin: 3px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); max-height: 200px; overflow-y: auto; }
+.inbox-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
+
+/* —— 挣来的静音轻通知里的「翻案」入口(最强负信号,连坐吊销整桶授权)—— */
+.silence-overturn { margin-left: 6px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--rose-line, var(--border)); background: transparent; color: var(--rose-deep, #a5493f); font-size: 11px; cursor: pointer; }
+.silence-overturn:hover { background: var(--rose-soft, #fbe9e5); }
+.silence-overturn:disabled { opacity: 0.6; cursor: default; }
+
 /* —— 技能「生命线」竖向时间线(结晶透明化:promote/revise/rerun 都有 why)—— */
 .life-btn { white-space: nowrap; }
 .life-timeline { margin: 8px 0; border-left: 2px solid var(--accent-line, var(--border)); padding-left: 14px; }

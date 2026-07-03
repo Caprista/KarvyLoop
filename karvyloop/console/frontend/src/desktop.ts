@@ -715,12 +715,114 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     } catch { /* 看板 API 不通 → 没有种子,不吵 */ }
   }
 
+  // ---- vignette ④:最近沉淀的知识 → 桌角浮现只读小卡("它记得你且你看得见")----
+  // 数据源 = GET /api/memory/recent(契约冻结);调不通/空 → 优雅隐藏,不空壳。纯只读,点=跳知识库。
+  const RECENT_KNOWLEDGE_CAP = 3;         // 桌角最多浮 3 条(旧的不堆)
+  const RECENT_CONTENT_CAP = 120;         // 每条摘要截断
+  async function refreshRecentKnowledge(): Promise<void> {
+    const desk = cockpitEl();
+    if (!desk || typeof fetch !== "function") return;
+    let items: Array<{ id?: string; content?: string; source?: string; domain?: string }> = [];
+    try {
+      const r = await fetch("/api/memory/recent?limit=" + RECENT_KNOWLEDGE_CAP);
+      if (!r.ok) throw new Error(String(r.status));
+      const data = await r.json();
+      items = ((data && data.items) || []).slice(0, RECENT_KNOWLEDGE_CAP);
+    } catch { items = []; }        // API 没上线/挂了 → 优雅隐藏
+    let box = document.getElementById("desk-recent-knowledge");
+    if (!items.length) { if (box) box.remove(); return; }
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "desk-recent-knowledge";
+      box.id = "desk-recent-knowledge";
+      desk.appendChild(box);
+    }
+    box.textContent = "";
+    const head = document.createElement("div");
+    head.className = "desk-recent-head";
+    head.textContent = "🧠 " + t("desk.recent_knowledge");
+    box.appendChild(head);
+    items.forEach((it) => {
+      const card = document.createElement("button");
+      card.className = "desk-recent-item";
+      const text = (it.content || "").trim();
+      card.textContent = text.length > RECENT_CONTENT_CAP ? text.slice(0, RECENT_CONTENT_CAP) + "…" : text;
+      card.setAttribute("data-tip", t("desk.recent_open"));
+      card.addEventListener("click", () => openMemoryPanel());
+      box.appendChild(card);
+    });
+  }
+
+  // ---- vignette ⑤:周五纪念物 → 一枚"本周纪念物"小瓷砖(周报数字:跑了 N 个任务/结晶 M 个技能)----
+  // 数据源 = GET /api/desk/memento(契约冻结,零 LLM 从 Trace/账本投影)。全 0 → 不出砖(没成绩不装)。
+  async function refreshMemento(): Promise<void> {
+    const desk = cockpitEl();
+    if (!desk || typeof fetch !== "function") return;
+    let m: Record<string, unknown> | null = null;
+    try {
+      const r = await fetch("/api/desk/memento");
+      if (!r.ok) throw new Error(String(r.status));
+      m = await r.json();
+    } catch { m = null; }
+    const num = (k: string): number => {
+      const v = m ? (m as Record<string, unknown>)[k] : 0;
+      return typeof v === "number" && isFinite(v) ? v : 0;
+    };
+    const tasks = num("tasks_done"), skills = num("skills_new"),
+      decisions = num("decisions"), tokens = num("tokens_total");
+    let tile = document.getElementById("desk-memento");
+    if (!m || (tasks + skills + decisions <= 0)) {   // 本周没动静 → 不出纪念物(没成绩不装)
+      if (tile) tile.remove();
+      return;
+    }
+    if (!tile) {
+      tile = document.createElement("div");
+      tile.className = "desk-memento";
+      tile.id = "desk-memento";
+      desk.appendChild(tile);
+    }
+    tile.textContent = "";
+    const wk = (m.week_label && String(m.week_label)) || "";
+    const head = document.createElement("div");
+    head.className = "desk-memento-head";
+    head.textContent = "🏅 " + t("desk.memento_title") + (wk ? " · " + wk : "");
+    tile.appendChild(head);
+    const stats = document.createElement("div");
+    stats.className = "desk-memento-stats";
+    const chip = (icon: string, n: number, key: string): void => {
+      if (n <= 0) return;
+      const c = document.createElement("span");
+      c.className = "desk-memento-chip";
+      c.textContent = icon + " " + t(key, { n: n });
+      stats.appendChild(c);
+    };
+    chip("✅", tasks, "desk.memento_tasks");
+    chip("🧬", skills, "desk.memento_skills");
+    chip("⚖", decisions, "desk.memento_decisions");
+    if (tokens > 0) {
+      const c = document.createElement("span");
+      c.className = "desk-memento-chip desk-memento-tokens";
+      c.textContent = "🔢 " + t("desk.memento_tokens", { n: tokens > 1000 ? (tokens / 1000).toFixed(1) + "k" : String(tokens) });
+      stats.appendChild(c);
+    }
+    tile.appendChild(stats);
+  }
+
+  // 跳知识库:点桌角知识小卡 = 打开 Knowledge 管理面板(同一条 setupMgmtPanels 打开路径)。
+  function openMemoryPanel(): void {
+    const nav = document.querySelector<HTMLButtonElement>('.sidebar .nav-item[data-panel="memory"]')
+      || document.querySelector<HTMLButtonElement>('.dock-item[data-panel="memory"]');
+    if (nav) nav.click();
+  }
+
   function enterSoul(): void {
     _soulOn = true;
     ensureSoulDom();
     ensureMascot();
     void refreshPresence();
     void seedWorkcards();
+    void refreshRecentKnowledge();   // vignette ④:桌角最近沉淀的知识
+    void refreshMemento();           // vignette ⑤:本周纪念物瓷砖
     soulConnect();
   }
 
@@ -739,6 +841,10 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     _signedNotes.length = 0;
     const cv = document.getElementById("desk-karvy-pixel");
     if (cv) cv.remove();                                      // 老视图零痕迹:像素替身只住 desk
+    const rk = document.getElementById("desk-recent-knowledge");
+    if (rk) rk.remove();                                      // vignette ④:桌角知识小卡随离场清
+    const mem = document.getElementById("desk-memento");
+    if (mem) mem.remove();                                    // vignette ⑤:纪念物瓷砖随离场清
     const bar = document.getElementById("desk-presence");
     if (bar) bar.classList.add("hidden");
     const box = document.getElementById("desk-workcards");
@@ -1023,7 +1129,8 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   const KarvyDesktop = {
     enter, leave, notifyH2A, resetLayout,
     // P1.5 测试接缝(smoke/Playwright 喂真实事件形状,不开真 socket;生产路径 = soulConnect 的 onmessage)
-    _soul: { handle: soulHandle, refreshPresence, stationCount: () => _stations.size },
+    _soul: { handle: soulHandle, refreshPresence, refreshRecentKnowledge, refreshMemento,
+             stationCount: () => _stations.size },
   };
   (window as unknown as { KarvyDesktop: typeof KarvyDesktop }).KarvyDesktop = KarvyDesktop;
 })();

@@ -1655,8 +1655,24 @@ def api_capability_overview(request: Request) -> dict[str, Any]:
                 entry["lock"] = "unknown"
         skills_out.append(entry)
     st = getattr(request.app.state, "fs_grants", None)
+    # 挣来的静音:已授权静音处理的类别(桶)—— 能力总览可见可撤(docs/49 机制2)。
+    # 只列活跃(未吊销未过期)的授权;读不到台账/无 LLM → 空(不猜)。
+    silence_grants: list[dict[str, Any]] = []
+    try:
+        from karvyloop.karvy.silence import get_store
+        active = get_store(request.app).active_grants()
+        for bucket, g in active.items():
+            silence_grants.append({
+                "bucket": bucket, "kind": g.get("kind", ""),
+                "domain": g.get("domain", ""),
+                "granted_at": g.get("granted_at", 0.0),
+                "expires_at": g.get("expires_at", 0.0),
+            })
+    except Exception:
+        silence_grants = []
     return {"tools": tools, "skills": skills_out,
             "fs_grants": st.list() if st is not None else [],
+            "silence_grants": silence_grants,
             "executor": cap.get("executor", ""), "sandboxed": cap.get("sandboxed", False),
             "no_llm": bool(sk.get("no_llm"))}
 
@@ -1734,6 +1750,36 @@ def api_fs_grants_revoke(req: FsGrantRevokeRequest, request: Request) -> dict[st
     if st is None:
         return {"ok": False, "reason": "授权台账未接"}
     return {"ok": st.revoke(req.grant_id)}
+
+
+# ---- 挣来的静音:授权撤销 / 翻案(docs/49 机制2;能力总览可见可撤)----
+
+class SilenceRevokeRequest(BaseModel):
+    bucket: str = Field(..., min_length=1, max_length=128)
+
+
+class SilenceOverturnRequest(BaseModel):
+    proposal_id: str = Field(..., min_length=1, max_length=128)
+
+
+@router.post("/silence/revoke")
+def api_silence_revoke(req: SilenceRevokeRequest, request: Request) -> dict[str, Any]:
+    """撤销某桶的静音授权(能力总览里一键撤;调 silence.revoke_grant)。
+
+    没有可撤的授权 → ok=False(可能已过期/已吊销)。撤销后该类卡恢复逐张问你。"""
+    from karvyloop.karvy.silence import revoke_grant
+    ok = revoke_grant(request.app, req.bucket, reason="user")
+    return {"ok": bool(ok)}
+
+
+@router.post("/silence/overturn")
+def api_silence_overturn(req: SilenceOverturnRequest, request: Request) -> dict[str, Any]:
+    """翻案:推翻一条已静音处理的决定(最强负信号)→ 台账标记 + 吊销该桶授权 + 出告知卡。
+
+    找不到该条 / 已翻过 → ok=False。翻案会连坐吊销整桶授权(押错一次不容忍)。"""
+    from karvyloop.karvy.silence import overturn_silenced
+    entry = overturn_silenced(request.app, req.proposal_id)
+    return {"ok": entry is not None, "entry": entry}
 
 
 @router.post("/coding/config")
