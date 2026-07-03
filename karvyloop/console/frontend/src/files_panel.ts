@@ -9,18 +9,34 @@ interface Dom {
   getJSON: (url: string) => Promise<any>;
   postJSON: (url: string, payload: unknown) => Promise<{ ok: boolean; status: number; data: any }>;
 }
-interface Modal { openMgmtModal: (title: string) => void; mgmtBody: () => HTMLElement | null }
+interface Modal { openMgmtModal: (title: string) => void; closeMgmtModal: () => void;
+                  mgmtBody: () => HTMLElement | null }
 interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
 
 // 模块加载晚于 dom.js/modal.js/i18n.js(index.html 顺序保证)→ 这里直接绑全局
 const _KD = (window as unknown as { KarvyDom: Dom }).KarvyDom;
 const _KM = (window as unknown as { KarvyModal: Modal }).KarvyModal;
 const el = _KD.el, _getJSON = _KD.getJSON, _postJSON = _KD.postJSON;
-const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
+const openMgmtModal = _KM.openMgmtModal, closeMgmtModal = _KM.closeMgmtModal, mgmtBody = _KM.mgmtBody;
 const t = (k: string, vars?: Record<string, unknown>) =>
   (window as unknown as { KarvyI18n: I18n }).KarvyI18n.t(k, vars);
 
 let _filesPath = "";
+
+/** data 桥:把「分析这个文件」的 intent 填进聊天输入框(contenteditable)并聚焦;不自动发送。 */
+function _analyzeInChat(rel: string): void {
+  const msg = t("files.analyze_intent", { path: rel });
+  const ce = document.getElementById("chat-input");
+  if (!ce) return;
+  ce.textContent = msg;
+  ce.classList.remove("is-empty");
+  closeMgmtModal();
+  ce.focus();
+  try {   // 光标移到末尾,用户接着补一句就能发
+    const r = document.createRange(); r.selectNodeContents(ce); r.collapse(false);
+    const sel = window.getSelection(); if (sel) { sel.removeAllRanges(); sel.addRange(r); }
+  } catch { /* 旧浏览器无 selection API 也不挡主流程 */ }
+}
 
 function _fmtSize(n: number): string {
   if (n < 1024) return n + " B";
@@ -78,6 +94,10 @@ async function renderFilesPanel(): Promise<void> {
       row.appendChild(el("span", { class: "files-name", text: "📄 " + e.name }));
       row.appendChild(el("span", { class: "files-size", text: _fmtSize(e.size || 0) }));
       row.appendChild(el("button", { class: "files-act", text: t("files.view"), onClick: () => _viewFile(rel) }));
+      // data 桥(docs/44 二②):文件→聊天一键交办("对数据的操作要体现出来")。
+      // 只组 intent 填输入框,不自动发送 —— 发不发仍是人拍板。
+      row.appendChild(el("button", { class: "files-act files-analyze", text: "📊 " + t("files.analyze"),
+        onClick: () => _analyzeInChat(rel) }));
       const dl = el("a", { class: "files-act files-dl", text: t("files.download") }) as HTMLAnchorElement;
       dl.href = "/api/files/download?path=" + encodeURIComponent(rel);
       dl.setAttribute("download", e.name);

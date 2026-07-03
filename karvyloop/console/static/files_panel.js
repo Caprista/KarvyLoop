@@ -3,9 +3,29 @@ var KarvyFilesPanelBundle = (function(exports) {
   const _KD = window.KarvyDom;
   const _KM = window.KarvyModal;
   const el = _KD.el, _getJSON = _KD.getJSON, _postJSON = _KD.postJSON;
-  const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
+  const openMgmtModal = _KM.openMgmtModal, closeMgmtModal = _KM.closeMgmtModal, mgmtBody = _KM.mgmtBody;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
   let _filesPath = "";
+  function _analyzeInChat(rel) {
+    const msg = t("files.analyze_intent", { path: rel });
+    const ce = document.getElementById("chat-input");
+    if (!ce) return;
+    ce.textContent = msg;
+    ce.classList.remove("is-empty");
+    closeMgmtModal();
+    ce.focus();
+    try {
+      const r = document.createRange();
+      r.selectNodeContents(ce);
+      r.collapse(false);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    } catch {
+    }
+  }
   function _fmtSize(n) {
     if (n < 1024) return n + " B";
     if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
@@ -77,6 +97,11 @@ var KarvyFilesPanelBundle = (function(exports) {
         row.appendChild(el("span", { class: "files-name", text: "📄 " + e.name }));
         row.appendChild(el("span", { class: "files-size", text: _fmtSize(e.size || 0) }));
         row.appendChild(el("button", { class: "files-act", text: t("files.view"), onClick: () => _viewFile(rel) }));
+        row.appendChild(el("button", {
+          class: "files-act files-analyze",
+          text: "📊 " + t("files.analyze"),
+          onClick: () => _analyzeInChat(rel)
+        }));
         const dl = el("a", { class: "files-act files-dl", text: t("files.download") });
         dl.href = "/api/files/download?path=" + encodeURIComponent(rel);
         dl.setAttribute("download", e.name);
