@@ -174,6 +174,9 @@
     } else if (msg.type === "system_error") {
       // §0.7:后台 fire-and-forget 任务失败 → 主动冒泡,灭静默死角
       onSystemError(msg.payload);
+    } else if (msg.type === "ambient_recall") {
+      // ⑤c 环境感知召回:相关技能/知识主动浮出到工作台"料"区(新 intent 的料替换旧料)
+      renderAmbientRecall(msg.payload);
     } else if (msg.type === "error") {
       console.warn("[server] error", msg.payload);
     }
@@ -617,6 +620,47 @@
     list.appendChild(card);
   }
 
+  // ── 两张新卡的专属渲染(通用 h2a 卡列表里按 kind 分支)──
+  // revise_skill:old/new steps 上下对照(简单 del/ins 行级对比)+ "依据:N 次运行信号" + trace 引用。
+  // weekly_digest:payload.markdown 经 KarvyRender(DOMPurify 消毒)渲染,缺库回退 pre 裸文本。
+  function _renderProposalKindDetail(card, payload) {
+    const p = (payload && payload.payload) || {};
+    if (payload.kind === "revise_skill") {
+      const box = el("div", { class: "revise-card" });
+      box.appendChild(el("div", { class: "revise-title",
+        text: "🧬 " + t("revise.title", { name: p.skill_name || "" }) }));
+      const oldLines = String(p.old_steps || "").split("\n").filter((s) => s.trim());
+      const newLines = String(p.new_steps || "").split("\n").filter((s) => s.trim());
+      const oldSet = new Set(oldLines), newSet = new Set(newLines);
+      const oldBox = el("div", { class: "revise-block revise-old" },
+        el("div", { class: "revise-label", text: t("revise.old_label") }));
+      oldLines.forEach((ln) => oldBox.appendChild(
+        el("div", { class: "revise-line" + (newSet.has(ln) ? "" : " revise-del"), text: ln })));
+      const newBox = el("div", { class: "revise-block revise-new" },
+        el("div", { class: "revise-label", text: t("revise.new_label") }));
+      newLines.forEach((ln) => newBox.appendChild(
+        el("div", { class: "revise-line" + (oldSet.has(ln) ? "" : " revise-ins"), text: ln })));
+      box.appendChild(oldBox);
+      box.appendChild(newBox);
+      // 依据:N 次运行信号(trace_refs 逗号串)+ trace 引用可核
+      const refs = String(p.trace_refs || "").split(",").map((s) => s.trim()).filter(Boolean);
+      const basisRow = el("div", { class: "revise-basis", text: t("revise.basis", { n: refs.length }) });
+      if (refs.length) basisRow.appendChild(el("span", { class: "revise-traces", text: " · 🔬 " + refs.join(", ") }));
+      box.appendChild(basisRow);
+      card.appendChild(box);
+    } else if (payload.kind === "weekly_digest") {
+      const box = el("div", { class: "digest-card" });
+      box.appendChild(el("div", { class: "digest-title", text: "📅 " + t("digest.title") }));
+      const bodyEl = el("div", { class: "digest-body" });
+      const md = String(p.markdown || "");
+      if (window.KarvyRender) KarvyRender.appendMarkdown(bodyEl, md);   // markdown-it + DOMPurify 消毒
+      else bodyEl.appendChild(el("pre", { class: "digest-pre", text: md }));
+      box.appendChild(bodyEl);
+      box.appendChild(el("div", { class: "digest-hint", text: t("digest.accept_hint") }));
+      card.appendChild(box);
+    }
+  }
+
   function renderProposal(payload) {
     const list = document.getElementById("h2a-list");
     if (!list) return;
@@ -633,6 +677,8 @@
         el("span", { class: "h2a-basis-label", text: t("proposal.basis_label") }),
         el("span", { text: payload.basis })));
     }
+    // 两张新卡的专属渲染:revise_skill(old/new steps 对照)/ weekly_digest(markdown 周报)
+    _renderProposalKindDetail(card, payload);
     // ch4:上下文跳转 —— 跳进那条任务/对话看全貌再拍
     const ctxRef = payload.context_ref || {};
     if (ctxRef.kind === "task" && ctxRef.id) {
@@ -668,7 +714,8 @@
     // #42 优化①「改了再批」:kind→可编辑的"行动文本"字段。你不只认/拒,还能亲手改到该有的样子
     // 再批 —— 修改本身是楔子最富的偏好信号(原文→改文的对照会进偏好结晶)。
     const _EDITABLE_FIELD = { route_to_role: "requirement", merge_knowledge: "merged_content",
-                              merge_atoms: "merged_purpose", run_task: "intent" };
+                              merge_atoms: "merged_purpose", run_task: "intent",
+                              revise_skill: "new_steps" };   // 技能修订卡:改了再批 new_steps
     const _editField = _EDITABLE_FIELD[payload.kind];
     const _editSrc = _editField && payload.payload && typeof payload.payload[_editField] === "string"
       ? payload.payload[_editField] : "";
@@ -2067,8 +2114,13 @@
     }
     if (busy) {
       busy.innerHTML = "";
-      if (!running.length) busy.appendChild(el("div", { class: "empty-state", text: t("empty.busy") }));
-      else running.forEach((tk) => busy.appendChild(_taskCard(tk)));
+      if (!running.length) {
+        // 空态引导(朋友调研):不只说"空",告诉你第一步干嘛 + 一键跳建域
+        busy.appendChild(el("div", { class: "empty-state busy-empty-guide" },
+          el("div", { text: t("empty.busy_guide") }),
+          el("button", { class: "busy-guide-btn", text: t("empty.busy_guide_btn"),
+            onClick: () => openDomainsPanel() })));
+      } else running.forEach((tk) => busy.appendChild(_taskCard(tk)));
     }
     updatePulse();
   }
@@ -2086,7 +2138,9 @@
     if (!pulse) return;
     const ran = _countCards("task-board", "empty-state");
     const pending = _countCards("h2a-list", "h2a-empty");
-    if (pending > 0) pulse.textContent = t("cockpit.pulse_active", { ran: ran, pending: pending });
+    // 顶栏主位让给"有没有任务在跑 / 有没有卡等拍板"(朋友调研;数据源=谁在忙/拍板两列现成)
+    const running = _countCards("busy-list", "empty-state");
+    if (running > 0 || pending > 0) pulse.textContent = t("cockpit.pulse_topline", { running: running, pending: pending });
     else if (ran > 0) pulse.textContent = t("cockpit.pulse_ran", { ran: ran });
     else pulse.textContent = t("cockpit.pulse_idle");
   }
@@ -2103,6 +2157,126 @@
     for (const b of beliefs.slice(0, 6)) {
       list.appendChild(el("div", { class: "know-chip", text: b.content }));  // el text= → textContent, XSS 安全
     }
+  }
+
+  // ============ ⑤c 环境感知召回:「相关的料」区(WS ambient_recall)============
+  // 契约(8c537ae):{"type":"ambient_recall","payload":{"for_intent","hits":[{kind,id,name,summary,score}]}}
+  // 新 intent 的料到达即整块替换旧料;无料不占位(display:none,朋友调研:空态别占地)。
+  function renderAmbientRecall(payload) {
+    const box = document.getElementById("ambient-recall");
+    if (!box) return;
+    const hits = (payload && payload.hits) || [];
+    box.innerHTML = "";
+    if (!hits.length) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    const head = el("div", { class: "ambient-head" },
+      el("span", { class: "ambient-title", text: t("ambient.title") }));
+    if (payload.for_intent) {
+      head.appendChild(el("span", { class: "ambient-for", text: t("ambient.for", { intent: payload.for_intent }) }));
+    }
+    box.appendChild(head);
+    for (const h of hits) {
+      const isSkill = h.kind === "skill";
+      const row = el("div", { class: "ambient-hit ambient-" + (h.kind || "belief"),
+        title: isSkill ? t("ambient.open_skill") : t("ambient.open_belief"),
+        onClick: () => { if (isSkill) _ambientOpenSkill(h); else _ambientOpenBelief(h); } });
+      row.appendChild(el("span", { class: "ambient-ico", text: isSkill ? "⚡" : "📚" }));
+      row.appendChild(el("span", { class: "ambient-name", text: h.name || h.id || "" }));
+      if (h.summary) row.appendChild(el("span", { class: "ambient-summary", text: h.summary }));
+      box.appendChild(row);
+    }
+  }
+  // 点技能料 → 打开技能库面板并定位/高亮那张技能卡
+  async function _ambientOpenSkill(hit) {
+    await window.KarvySkillsPanel.open();
+    _locateMgmtCard(hit.name || "");
+  }
+  // 点知识料 → 打开知识库面板,用列表自带搜索过滤到该条并高亮
+  async function _ambientOpenBelief(hit) {
+    await window.KarvyMemoryPanel.open();
+    const q = (hit.name || hit.summary || "").trim();
+    const search = document.querySelector("#mgmt-body .paged-search");
+    if (search && q) {
+      search.value = q;
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    _locateMgmtCard(q);
+  }
+  // 在管理面板里按名字找卡 → 滚过去 + 脉冲高亮(复用 turn-locate-flash 动画)
+  function _locateMgmtCard(name) {
+    if (!name) return;
+    const body = document.getElementById("mgmt-body");
+    if (!body) return;
+    const cards = Array.from(body.querySelectorAll(".mgmt-card"));
+    const target = cards.find((c) => (c.textContent || "").indexOf(name) >= 0) || cards[0];
+    if (!target) return;
+    setTimeout(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add("turn-locate-flash");
+      setTimeout(() => target.classList.remove("turn-locate-flash"), 1800);
+    }, 60);
+  }
+
+  // ============ 楔子透明化:技能「生命线」时间线(朋友调研:结晶不透明,promote/evict 没有 why)============
+  // 契约(与后端约定死,别改形状):GET /api/skill_lifecycle →
+  //   {"skills":[{"name","sig","events":[{"ts","type","detail","trace_ref"}]}]},
+  //   type ∈ crystallized / revised / rerun / improved。
+  const _LIFECYCLE_ICONS = { crystallized: "💎", revised: "✏️", rerun: "🔁", improved: "📈" };
+  async function openSkillLifecycle(skillName) {
+    openMgmtModal(t("lifeline.title", { name: skillName }));
+    const body = mgmtBody();
+    if (!body) return;
+    body.innerHTML = "";
+    const data = await _getJSON("/api/skill_lifecycle");
+    if (!data || !data.skills) {
+      body.appendChild(el("div", { class: "mgmt-empty", text: t("lifeline.load_failed") }));
+    } else {
+      const rec = (data.skills || []).find((s) => s.name === skillName);
+      const events = (rec && rec.events) || [];
+      if (!events.length) {
+        body.appendChild(el("div", { class: "mgmt-empty", text: t("lifeline.empty") }));
+      } else {
+        body.appendChild(el("div", { class: "mgmt-hint", text: t("lifeline.hint") }));
+        const tl = el("div", { class: "life-timeline" });
+        for (const ev of events) {
+          const when = ev.ts ? new Date(ev.ts * 1000).toLocaleString() : "";
+          tl.appendChild(el("div", { class: "life-ev life-" + (ev.type || "") },
+            el("span", { class: "life-ev-icon", text: _LIFECYCLE_ICONS[ev.type] || "·" }),
+            el("div", { class: "life-ev-main" },
+              el("div", { class: "life-ev-head" },
+                el("span", { class: "life-ev-type", text: t("lifeline.type_" + (ev.type || "rerun")) }),
+                el("span", { class: "life-ev-time", text: when })),
+              ev.detail ? el("div", { class: "life-ev-detail", text: ev.detail }) : null,
+              ev.trace_ref ? el("div", { class: "life-ev-trace", text: "🔬 " + ev.trace_ref }) : null)));
+        }
+        body.appendChild(tl);
+      }
+    }
+    body.appendChild(el("button", { class: "mgmt-submit", text: t("skills.back"),
+      onClick: () => window.KarvySkillsPanel.open() }));
+  }
+  // 技能库面板(TS 构建产物,不在此改)每张技能卡挂「🧬 生命线」入口:
+  // MutationObserver 观察 #mgmt-body,面板每次(重)渲染都补挂,不漏内部 re-render。
+  function _wireSkillLifelineEntries() {
+    const bodyEl = document.getElementById("mgmt-body");
+    if (!bodyEl) return;
+    const decorate = () => {
+      const title = document.getElementById("mgmt-title");
+      if (!title || title.textContent !== t("skills.title")) return;   // 只在技能库面板动手
+      bodyEl.querySelectorAll(".mgmt-card").forEach((card) => {
+        if (card.dataset.lifelineWired) return;
+        const nameEl = card.querySelector(".mc-name span");
+        const nm = nameEl ? (nameEl.textContent || "") : "";
+        if (nm.indexOf("🧩 ") !== 0) return;   // 只挂真技能卡(Coding 能力卡/权限总览卡不是)
+        const actions = card.querySelector(".dpref-actions");
+        if (!actions) return;
+        card.dataset.lifelineWired = "1";
+        actions.appendChild(el("button", { class: "dpref-edit life-btn",
+          title: t("lifeline.btn_title"), text: "🧬 " + t("lifeline.btn"),
+          onClick: () => openSkillLifecycle(nm.slice(2).trim()) }));
+      });
+    };
+    new MutationObserver(decorate).observe(bodyEl, { childList: true, subtree: true });
   }
 
   // ============ 楔子:Skill 库(L0 结晶技能 —— 楔子的家) ============
@@ -2546,6 +2720,7 @@
     // (移除冗余的"🏢 建域"按钮:左导航「业务域」面板已能新建业务域,这个是历史遗产,Hardy)
     // 9.5 #3:左导航管理面(原子库 / 角色库 / 业务域)
     setupMgmtPanels();
+    _wireSkillLifelineEntries();   // 技能库每张技能卡挂「🧬 生命线」入口(观察面板渲染补挂)
     refreshPeers();
     refreshConversations();
     // 立即拉 1 次

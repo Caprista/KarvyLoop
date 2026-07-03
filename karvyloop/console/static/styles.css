@@ -1834,3 +1834,77 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 
 /* #42 成本预估行(花钱之前告诉你) */
 .h2a-cost { font-size: 11px; opacity: .65; margin: 2px 0; }
+
+/* ============ 前端展示波(⑤c 料区 / 两张新卡 / 生命线 / 调研快改)============ */
+
+/* —— 顶栏信息层级重排(朋友调研):脉搏(在跑/待拍板)是主位,统计/token 降级为次级小字 —— */
+.pulse-chip { font-size: var(--fs-13); font-weight: 600; max-width: 460px; }
+.topbar-secondary { display: flex; align-items: center; gap: var(--sp-4); opacity: .72; }
+.topbar-secondary:hover { opacity: 1; }                      /* 要看时凑近即清晰,平时不抢戏 */
+.topbar-secondary .topbar-stats { font-size: 11px; gap: var(--sp-3); }
+.topbar-secondary .token-meter { font-size: 11px; padding: 2px 7px; }
+
+/* —— ⑤c 环境感知召回「相关的料」:无料时 .hidden(display:none)不占位 —— */
+.ambient-recall {
+  border: 1px solid var(--sky-line, var(--border)); background: var(--sky-soft, var(--surface-2));
+  border-radius: 10px; padding: 8px 10px; margin-bottom: 8px;
+}
+.ambient-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.ambient-title { font-size: 12px; font-weight: 700; color: var(--sky-deep, var(--text-2)); }
+.ambient-for { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ambient-hit {
+  display: flex; align-items: baseline; gap: 6px; padding: 3px 4px; border-radius: 7px;
+  font-size: var(--fs-12); cursor: pointer; overflow: hidden;
+}
+.ambient-hit:hover { background: rgba(255,255,255,.65); }
+.ambient-ico { flex: 0 0 auto; }
+.ambient-name { font-weight: 600; color: var(--text-1); white-space: nowrap; }
+.ambient-summary { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* —— revise_skill 卡:old/new steps 上下对照(简单 del/ins)—— */
+.revise-card { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--surface-2, #faf7f0); }
+.revise-title { font-size: var(--fs-13); font-weight: 700; margin-bottom: 6px; }
+.revise-block { border-radius: 8px; padding: 6px 8px; margin: 4px 0; background: var(--bg); border: 1px dashed var(--border); }
+.revise-label { font-size: 11px; font-weight: 700; color: var(--text-3); margin-bottom: 3px; }
+.revise-line { font-size: var(--fs-12); line-height: 1.5; white-space: pre-wrap; }
+.revise-line.revise-del { color: #a5493f; background: #fbe9e5; text-decoration: line-through; border-radius: 4px; padding: 0 3px; }
+.revise-line.revise-ins { color: #2e6b3f; background: #e6f4e6; border-radius: 4px; padding: 0 3px; }
+.revise-basis { font-size: 11px; color: var(--text-3); margin-top: 5px; }
+.revise-traces { word-break: break-all; }
+
+/* —— weekly_digest 卡:markdown 周报正文(通常只需已读,ACCEPT=收下归档)—— */
+.digest-card { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--bg); }
+.digest-title { font-size: var(--fs-13); font-weight: 700; margin-bottom: 4px; }
+.digest-body { font-size: var(--fs-12); max-height: 320px; overflow-y: auto; }
+.digest-pre { white-space: pre-wrap; font-size: var(--fs-12); margin: 0; }
+.digest-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
+
+/* —— 技能「生命线」竖向时间线(结晶透明化:promote/revise/rerun 都有 why)—— */
+.life-btn { white-space: nowrap; }
+.life-timeline { margin: 8px 0; border-left: 2px solid var(--accent-line, var(--border)); padding-left: 14px; }
+.life-ev { display: flex; gap: 8px; padding: 7px 0; position: relative; }
+.life-ev-icon { flex: 0 0 auto; font-size: 14px; line-height: 1.3; }
+.life-ev-main { min-width: 0; }
+.life-ev-head { display: flex; align-items: baseline; gap: 8px; }
+.life-ev-type { font-size: var(--fs-12); font-weight: 700; color: var(--text-1); }
+.life-ev-time { font-size: 11px; color: var(--text-3); }
+.life-ev-detail { font-size: var(--fs-12); color: var(--text-2); margin-top: 2px; white-space: pre-wrap; }
+.life-ev-trace { font-size: 11px; color: var(--text-3); margin-top: 2px; word-break: break-all; }
+
+/* —— 原子库等管理卡的删除钮:hover 才现(降误点;触屏无 hover 保持常显)—— */
+.mgmt-card .mc-del { opacity: 0; transition: opacity .12s; }
+.mgmt-card:hover .mc-del, .mgmt-card:focus-within .mc-del { opacity: 1; }
+@media (hover: none) { .mgmt-card .mc-del { opacity: 1; } }
+
+/* —— 认知图谱"右下点阵"弱化(朋友调研):那是零连接知识点的网格排布,被误读成装饰。
+     零连接节点的 fill-opacity 恰为常量 0.42(0.42 + 0.58×0/maxDeg),按属性选中降透明度。 —— */
+.mem-node[fill-opacity="0.42"] { opacity: .3; }
+
+/* —— 谁在忙 空态引导:说清第一步 + 一键跳建域 —— */
+.busy-empty-guide { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.busy-guide-btn {
+  border: 1px solid var(--accent-line, var(--border)); background: var(--accent-soft, var(--surface-2));
+  color: var(--accent-deep, var(--text-1)); border-radius: 8px; padding: 5px 12px;
+  font-size: var(--fs-12); font-weight: 600; cursor: pointer; font-style: normal;
+}
+.busy-guide-btn:hover { border-color: var(--accent); }

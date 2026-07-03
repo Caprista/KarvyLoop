@@ -21,16 +21,18 @@
         <img class="brand-logo" src="/static/assets/karvyloop-logo.png" alt="KarvyLoop" />
         <span class="brand-name" data-i18n="ui.title">KarvyLoop</span>
       </div>
-      <!-- 脉搏:小卡此刻在看什么(常驻,克制) -->
+      <!-- 脉搏 = 顶栏主位:有没有任务在跑 / 有没有卡等拍板(朋友调研:这才是决策者要瞟的) -->
       <span class="pulse-chip" id="pulse-text" data-i18n="cockpit.pulse_idle">小卡在看着你的工作台</span>
       <div class="topbar-spacer"></div>
-      <!-- 统计 + token 成本表(用得起是护城河,成本必须可见;点 token 开统计弹窗) -->
-      <div class="topbar-stats" id="stats">
-        <span id="stat-drives">drives: —</span>
-        <span class="fast-brain" id="stat-fast-brain">fast-brain: —</span>
-        <span class="crystallizations" id="stat-crystallized">crystallized: —</span>
+      <!-- 统计 + token 成本表:降级为次级小字(成本仍可见可点开,但不抢主位) -->
+      <div class="topbar-secondary">
+        <div class="topbar-stats" id="stats">
+          <span id="stat-drives">drives: —</span>
+          <span class="fast-brain" id="stat-fast-brain">fast-brain: —</span>
+          <span class="crystallizations" id="stat-crystallized">crystallized: —</span>
+        </div>
+        <span class="token-meter" id="token-meter" data-i18n-title="cockpit.token_title">💰 —</span>
       </div>
-      <span class="token-meter" id="token-meter" data-i18n-title="cockpit.token_title">💰 —</span>
       <!-- 小卡永远在场 -->
       <div class="topbar-karvy">
         <img src="/static/assets/karvy-capybara.png" alt="Karvy" />
@@ -101,6 +103,9 @@
         <section class="cockpit-col col-intel">
           <h2 class="col-head" data-i18n="cockpit.intel">📥 流进来的料</h2>
           <div class="col-scroll">
+            <!-- ⑤c 环境感知召回:你说了什么 → 相关技能⚡/知识📚主动浮出(WS ambient_recall)。
+                 无料时整块 display:none 不占位(朋友调研:空态别占地)。 -->
+            <div id="ambient-recall" class="ambient-recall hidden"></div>
             <div id="task-board"><div class="empty-state" data-i18n="empty.task_board">no tasks yet</div></div>
             <div class="material-bar hidden" id="material-bar"></div>
           </div>
