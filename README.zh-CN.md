@@ -219,6 +219,82 @@ KarvyLoop 的答案是一层**翻译层**,带两条硬规矩:
 
 **安全是地基** —— 每个任务签发能力令牌;所有文件/网络/进程访问对照令牌放行;第三方技能脚本在沙箱里以最小授予运行(只限工作区,未经你显式授权无网络)。它低于 agent 的信任边界——绕不过。
 
+### 运行全景——一个请求,从头到尾
+
+下图每个框都是仓库里真实存在的机制(没有一个是"规划中"):
+
+```mermaid
+flowchart TB
+    U(["你 —— 控制台聊天 / CLI"]) -->|意图| ENTRY["控制台入口<br/>REST /api/intent · WebSocket /ws"]
+    ENTRY --> CTX["上下文组装<br/>对话上下文 + 业务域 value.md<br/>+ 个人信念 + 你的决策偏好"]
+    CTX --> DISP{"小卡分发<br/>@点名 → 那个角色,否则精确匹配,<br/>否则 LLM 模糊分发"}
+    DISP -->|自己接| DRIVE
+    DISP -->|route_to_role / roundtable / ops_fix| H2A["决策卡 —— 你拍板<br/>ACCEPT / REJECT / DEFER"]
+    H2A -->|ACCEPT · 单角色| DRIVE["MainLoop.drive<br/>以小卡身份,或以被委派角色的<br/>编译人设 + 域规矩运行"]
+    H2A -->|ACCEPT · 圆桌| RT["圆桌:每个席位并行跑同一条 drive,<br/>主持人收敛结论"]
+    RT --> DRIVE
+    DRIVE --> REC{"快脑 —— 技能召回<br/>token 重叠 + 中文双字 + 语义标签<br/>(无向量)"}
+    REC -->|stable 命中 → 直接返回缓存,零 LLM| OUT
+    REC -->|dynamic 命中 → 方法制导重跑| FORGE
+    REC -->|未命中| FORGE["慢脑 —— Forge,<br/>全系统唯一一条 ReAct loop"]
+    FORGE -->|每次 LLM 调用,计量| GW["Gateway —— LLM 唯一咽喉"]
+    FORGE --> TOOLS["工具:6 个内置 + 你接的 MCP<br/>只读并发跑,写操作串行"]
+    TOOLS -.->|没有现成原子能干| CA["create_atom:先找复用 → 凝炼<br/>→ 合并闸 → 出生即试用"]
+    FORGE --> OUT["结果流式回到你面前"]
+    FORGE --> TRACE["Trace —— 只追加的运行记录<br/>+ 评价事实"]
+    TRACE --> GATE{"结晶闸门:过验证<br/>+ 用得够多 + 成功率 ≥80%"}
+    GATE -->|通过| SKILL["SKILL.md —— 你的方法,白纸黑字"]
+    SKILL -.->|下一次| REC
+    TRACE --> EVAL["耐心的异步评价器,不占热路径:<br/>满意度打分 · 试用原子复审<br/>· 技能进化/淘汰 · 口味校准"]
+```
+
+每个框的位置:入口 `karvyloop/console/`(`routes.py`、`ws.py`)· 分发 `karvyloop/karvy/fuzzy_dispatch.py` · 决策卡 `karvyloop/karvy/h2a.py` + `console/proposal_handlers.py` · drive `karvyloop/runtime/main_loop.py` · 召回 `karvyloop/crystallize/recall.py` · Forge/ReAct `karvyloop/coding/forge.py` → `karvyloop/atoms/executor.py` · 工具 `karvyloop/coding/tools/` · create_atom `karvyloop/atoms/self_create.py` · 结晶 + 异步评价 `karvyloop/crystallize/` · 试用复审 `karvyloop/atoms/provisional.py`。
+
+**角色什么时候会造原子?** `create_atom` 是挂给运行中 agent 的**运行时工具**(它本身永远不是原子,所以永远不会出现在角色的原子列表里)。模型只在**没有任何现成原子能干这件事**时才调它。之后按序发生:**① 先找复用** —— 先搜公共原子池,搜到就直接复用,什么都不新建;**② 凝炼** —— 把能力描述凝成单一职责的规格,只准引用那 6 个真实工具(不许编造工具名;凝不出来就宁可空手失败,绝不写垃圾);**③ 合并闸** —— 更严的词面重叠检查 + 语义标签重叠检查,逮住近义重复就复用;**④ 出生即试用** —— 新原子带着 `provisional` 标记诞生。这次运行失败或你不认可结果,无引用的试用原子会被撤销;成功则组合进创建它的角色,之后周期性复审:被角色真实引用的转正,孤儿撤销。跨角色的近重复原子会以**合并提案**浮上来——你 ACCEPT 之后才先改引用再删除(`atoms/self_create.py`、`atoms/provisional.py`、`atoms/consolidate.py`)。
+
+### 这几个概念怎么咬合
+
+```mermaid
+flowchart LR
+    subgraph DOM["业务域 (L3) —— 一家公司:value.md + 硬规矩 + 私有记忆"]
+        ROLE["角色 (L2) —— 一个人<br/>身份 + 记忆 + 范式<br/>对你负责"]
+        ATOM["原子 (L1) —— 最小可验收的干活单元<br/>对角色负责"]
+        ROLE -->|组合与派活| ATOM
+    end
+    ATOM -->|调用| TOOL["工具 (L0) —— 固定动作<br/>6 个内置 + MCP<br/>人人一样,不会成长"]
+    RUNS["成功且反复的运行"] -.->|结晶| SKILL["技能 (L0) —— 你的方法<br/>一份人能读能改的 SKILL.md<br/>随你的纠正进化"]
+    SKILL -.->|召回制导未来的运行| ROLE
+    KARVY["小卡 🦫 —— 全局助手<br/>观察者:编排与提案,<br/>永不加入任何业务域"] -.->|决策卡| DOM
+```
+
+问责链是**你 ← 角色 ← 原子**:角色对你负责(由你的反馈裁),原子对角色负责(由客观结果裁)。工具人人相同、永不成长;技能只属于你、越用越厚。
+
+### 内置工具——完整清单
+
+内置工具就 6 个(`karvyloop/atoms/tool_catalog.py`——一个不多一个不少),再加你自己接的 MCP:
+
+| 工具 | 干什么 | 护栏 |
+|---|---|---|
+| `run_command` | 跑一条 shell 命令 | 先解析分类再执行;危险模式直接拦;超长输出落盘,长任务转后台 |
+| `read_file` | 带行号读文件 | 只读下限;记快照供后续写操作校验 |
+| `write_file` | 原子化新建/覆盖文件 | 强制先读后写,读后文件被改过就中止 |
+| `edit_file` | 精确字符串替换 | 先读后写;匹配必须存在且唯一 |
+| `web_search` | 搜网(默认免 key;provider 可插拔) | 只读;超时封顶 |
+| `web_fetch` | 抓取 URL 提取正文 | 只允许 HTTPS;大小和超时封顶 |
+| `create_atom` | *仅运行时:*没有原子能干时造一个 | 出生即试用 + 合并闸 + 跑后复审(见上文) |
+| `mcp_<server>_<tool>` | **你自己**配置的 MCP 服务器工具 | 工作区写下限;强制命名空间,冒充不了内置工具 |
+
+每次调用都对照任务的能力令牌校验(`karvyloop/capability/policy.py`):只读任务写不了东西,**不在策略表里的工具默认最严模式**——等于被拒,直到有人有意识地给它定下限。
+
+### 怎么增加
+
+| 想加… | 怎么加 | 入口 |
+|---|---|---|
+| **角色** | 实例化域模板、手动新建,或导入现有 agent——导入会被 LLM **拆解**成角色 + 可复用原子,不是压成一个文件 | 控制台 → 业务域(`POST /api/domain/templates/instantiate`、`/api/role/create`、`/api/agent/import`) |
+| **原子** | 通常不用你动手——角色需要时经 `create_atom` 自造;也可以手动建,或随 agent 导入进来;跨角色近重复会以合并提案浮上来等你确认 | 控制台 → 原子(`POST /api/atom/create`、`/api/atoms/consolidate/*`) |
+| **技能** | 用出来的(默认路径:自然结晶),或导入 Agent Skills 开放标准的 `SKILL.md` 文件夹 / zip / git 仓——导入的一律标 untrusted、哈希锁定、进沙箱 | 控制台 → 技能(`POST /api/skill/import`、`/api/skill/sources`) |
+| **工具** | 接 MCP 服务器:选一键预设(filesystem、fetch、github、memory、time、sqlite),或在 `~/.karvyloop/config.yaml` 的 `mcp.servers` 里自己加;内置工具是代码——欢迎 PR | 控制台 → 模型 → MCP(`GET /api/mcp/presets`、`POST /api/mcp/preset/apply`) |
+
 完整细节请读源码——代码有注释,下面的地图告诉你去哪看。
 
 ### 决策审计流水

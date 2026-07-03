@@ -214,6 +214,82 @@ The code (the **image**) is open and copyable — it's this repo. The **instance
 
 **Safety is foundational** — every task gets a capability token; all file/network/process access is checked against it; third-party skill scripts run in a sandbox with minimal grants (workspace only, no network unless you explicitly authorize). It sits below the agent's trust boundary — it can't be bypassed.
 
+### How it runs — one request, end to end
+
+Every box below is a real mechanism in this repo (nothing aspirational):
+
+```mermaid
+flowchart TB
+    U(["You — console chat / CLI"]) -->|intent| ENTRY["Console entry<br/>REST /api/intent · WebSocket /ws"]
+    ENTRY --> CTX["Context assembly<br/>conversation + domain value.md<br/>+ personal beliefs + your decision prefs"]
+    CTX --> DISP{"Karvy dispatch<br/>@mention → that role, else exact match,<br/>else LLM fuzzy dispatch"}
+    DISP -->|handles it itself| DRIVE
+    DISP -->|route_to_role / roundtable / ops_fix| H2A["Decision card — YOU decide<br/>ACCEPT / REJECT / DEFER"]
+    H2A -->|ACCEPT · single role| DRIVE["MainLoop.drive<br/>as Karvy, or as the routed role with its<br/>compiled persona + domain rules"]
+    H2A -->|ACCEPT · roundtable| RT["Roundtable: every seat runs the<br/>same drive in parallel, host converges"]
+    RT --> DRIVE
+    DRIVE --> REC{"Fast brain — skill recall<br/>token overlap + CJK bigrams + tags<br/>(no vectors)"}
+    REC -->|stable hit → cached result, zero LLM| OUT
+    REC -->|dynamic hit → method guides the re-run| FORGE
+    REC -->|miss| FORGE["Slow brain — Forge,<br/>the one ReAct loop"]
+    FORGE -->|every LLM call, metered| GW["Gateway — single LLM choke point"]
+    FORGE --> TOOLS["Tools: 6 built-ins + your MCP servers<br/>reads run concurrently, writes serialize"]
+    TOOLS -.->|no existing atom fits| CA["create_atom: reuse-first → synthesize<br/>→ merge gates → born provisional"]
+    FORGE --> OUT["Result streams back to you"]
+    FORGE --> TRACE["Trace — append-only run record<br/>+ eval facts"]
+    TRACE --> GATE{"Crystallize gates: verified<br/>+ used enough + ≥80% success"}
+    GATE -->|pass| SKILL["SKILL.md — your method, written down"]
+    SKILL -.->|next time| REC
+    TRACE --> EVAL["Patient async evaluators, off the hot path:<br/>satisfaction scoring · provisional-atom review<br/>· skill improve/evict · taste calibration"]
+```
+
+Where each box lives: entry `karvyloop/console/` (`routes.py`, `ws.py`) · dispatch `karvyloop/karvy/fuzzy_dispatch.py` · decision cards `karvyloop/karvy/h2a.py` + `console/proposal_handlers.py` · drive `karvyloop/runtime/main_loop.py` · recall `karvyloop/crystallize/recall.py` · Forge/ReAct `karvyloop/coding/forge.py` → `karvyloop/atoms/executor.py` · tools `karvyloop/coding/tools/` · create_atom `karvyloop/atoms/self_create.py` · crystallize + async eval `karvyloop/crystallize/` · provisional review `karvyloop/atoms/provisional.py`.
+
+**When does a role create an atom?** `create_atom` is a runtime tool handed to the running agent (it is never itself an atom, so it never shows in a role's atom list). The model calls it only when no existing atom can do the job. What happens then, in order: **(1) reuse first** — the shared atom pool is searched and a match is returned instead of creating anything; **(2) synthesize** — the capability is condensed into a single-responsibility spec that may only reference the six real tools (it cannot invent tool names; if nothing coherent condenses, it fails empty rather than write garbage); **(3) merge gates** — a stricter lexical-overlap check plus a semantic-tag-overlap check catch near-duplicates and reuse them; **(4) provisional birth** — the new atom is created marked `provisional`. If the run fails or you reject the result, an unreferenced provisional atom is removed; if it succeeds, it's composed into the creating role, and a periodic review confirms atoms that roles actually reference and reverts orphans. Near-duplicate atoms across roles later surface as a **merge proposal** — rewired and deleted only after you ACCEPT (`atoms/self_create.py`, `atoms/provisional.py`, `atoms/consolidate.py`).
+
+### How the pieces relate
+
+```mermaid
+flowchart LR
+    subgraph DOM["Domain (L3) — a company: value.md + hard rules + private memory"]
+        ROLE["Role (L2) — a person<br/>identity + memory + paradigm<br/>accountable to YOU"]
+        ATOM["Atom (L1) — smallest verifiable worker<br/>accountable to the role"]
+        ROLE -->|composes & delegates| ATOM
+    end
+    ATOM -->|calls| TOOL["Tools (L0) — fixed actions<br/>6 built-ins + MCP<br/>same for everyone, never grow"]
+    RUNS["successful, repeated runs"] -.->|crystallize| SKILL["Skill (L0) — YOUR method<br/>a readable SKILL.md that evolves<br/>with your corrections"]
+    SKILL -.->|recall guides future runs| ROLE
+    KARVY["Karvy 🦫 — global assistant<br/>observer: orchestrates & proposes,<br/>never a domain member"] -.->|decision cards| DOM
+```
+
+The chain of accountability is **you ← role ← atom**: a role answers to you (judged by your feedback), an atom answers to its role (judged by objective outcomes). Tools are identical for every user and never grow; skills are yours and do.
+
+### Built-in tools — the complete list
+
+Six built-in tools (`karvyloop/atoms/tool_catalog.py` — that's all of them), plus whatever MCP servers you connect:
+
+| Tool | What it does | Guardrail |
+|---|---|---|
+| `run_command` | run a shell command | command parsed & classified before running; destructive patterns blocked; long output spills to disk, long runs go to background |
+| `read_file` | read a file with line numbers | read-only floor; records a snapshot so later writes can be checked |
+| `write_file` | create/overwrite a file atomically | read-before-write enforced, aborts if the file changed since it was read |
+| `edit_file` | exact string replacement in a file | read-before-write; the match must exist and be unique |
+| `web_search` | search the web (keyless by default; pluggable providers) | read-only; timeout-capped |
+| `web_fetch` | fetch a URL and extract readable text | HTTPS only; size- and timeout-capped |
+| `create_atom` | *runtime-only:* mint a new atom when none fits | provisional birth + merge gates + post-run review (see above) |
+| `mcp_<server>_<tool>` | tools from MCP servers *you* configured | workspace-write floor; namespaced so they can't shadow built-ins |
+
+Every call is checked against the task's capability token (`karvyloop/capability/policy.py`): read-only tasks can't write, and any tool *not* in the policy table defaults to the strictest mode — effectively denied until someone consciously grants it a floor.
+
+### Adding your own
+
+| Add a… | How | Entry point |
+|---|---|---|
+| **Role** | instantiate a domain template, create one by hand, or import an existing agent — imports are LLM-decomposed into a role + reusable atoms, not flattened into a file | console → domains (`POST /api/domain/templates/instantiate`, `/api/role/create`, `/api/agent/import`) |
+| **Atom** | usually you don't — roles mint them via `create_atom` when needed; you can also add one by hand or get them from an agent import; cross-role near-duplicates surface as merge proposals you confirm | console → atoms (`POST /api/atom/create`, `/api/atoms/consolidate/*`) |
+| **Skill** | let it crystallize out of use (the default), or import an Agent Skills–standard `SKILL.md` folder / zip / git repo — imports are marked untrusted, integrity-locked, and sandboxed | console → skills (`POST /api/skill/import`, `/api/skill/sources`) |
+| **Tool** | connect an MCP server: pick a one-click preset (filesystem, fetch, github, memory, time, sqlite) or add your own under `mcp.servers` in `~/.karvyloop/config.yaml`; built-ins are code — PRs welcome | console → models → MCP (`GET /api/mcp/presets`, `POST /api/mcp/preset/apply`) |
+
 For the full picture, read the source — it's documented. The map below tells you where to look.
 
 ### Decision audit trail
