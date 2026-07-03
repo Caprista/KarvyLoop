@@ -46,6 +46,12 @@ if (-not $Py) {
 $PyVersion = & $Py @PyArgs -V
 Write-Host "-> Using $PyVersion  ($((Get-Command $Py).Source))"
 
+# pip installs from a git+ URL, which needs the git CLI -- fail early with a clear message
+# instead of a mid-install stack trace (mojibake on non-UTF8 consoles).
+if (-not (Get-Command 'git' -ErrorAction SilentlyContinue)) {
+    throw "git is required (pip installs KarvyLoop from a git URL) but was not found on PATH. Install it from https://git-scm.com/download/win and re-run."
+}
+
 # 2) Self-contained, one path, zero config: a dedicated venv + a .cmd shim on the user PATH. Installing
 #    INTO a venv never touches system Python. Re-running upgrades in place.
 Write-Host "-> Creating an isolated environment at $Venv ..."
@@ -62,7 +68,9 @@ if ($LASTEXITCODE -ne 0) { throw 'install failed.' }
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 $KarvyloopExe = Join-Path $Venv 'Scripts\karvyloop.exe'
 $ShimPath = Join-Path $BinDir 'karvyloop.cmd'
-Set-Content -Path $ShimPath -Value "@echo off`r`n`"$KarvyloopExe`" %*" -Encoding Ascii
+# PYTHONUTF8=1: on Chinese/other non-UTF8 Windows locales, piping output that contains
+# unicode glyphs (doctor's check marks etc.) crashes with UnicodeEncodeError under GBK.
+Set-Content -Path $ShimPath -Value "@echo off`r`nset PYTHONUTF8=1`r`n`"$KarvyloopExe`" %*" -Encoding Ascii
 Write-Host "-> Created shim $ShimPath"
 
 # 4) ensure the bin dir is on the *user* PATH (persistent; no admin needed)

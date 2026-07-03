@@ -95,6 +95,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    # 中文等非 UTF-8 Windows 控制台:输出被管道/重定向时默认 GBK 编码,✓ 等字符直接
+    # UnicodeEncodeError 崩(实测)。errors 不动、只换编码;探不到 reconfigure 就算了。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            if getattr(_stream, "encoding", "utf-8").lower() not in ("utf-8", "utf8"):
+                _stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
     parser = _build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
