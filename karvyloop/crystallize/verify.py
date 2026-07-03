@@ -20,6 +20,13 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+# ---- 验据来源标注(docs/44 断⑭:自报成功与独立验据分开存)----
+# 自报:执行器 terminal=completed + 用了工具 → drive 自动盖章(M1 v1 简化,名实要如实)
+SELF_REPORT_NOTE = "slow-brain success"
+# 独立:checker(独立验收者,coding/checker.py)PASS 回流时打的 note 前缀
+INDEPENDENT_NOTE = "independent-checker"
+
+
 @dataclass
 class VerifyResult:
     """单次验证结果(满足 HR-7 留 trace_ref)。"""
@@ -73,5 +80,16 @@ class VerifyStore:
         with self._lock:
             return list(self._by_sig.get(sig) or [])
 
+    def has_independent(self, sig: str) -> bool:
+        """该 sig 是否有**独立验据**(checker verdict 回流,非执行器自报)。
 
-__all__ = ["VerifyResult", "VerifyStore"]
+        docs/44 断⑭:has_gate 只说明"至少自报成功过一次";这里区分"真有独立验收
+        PASS 过"。基于 self.proofs() 实现 → sqlite 子类免改即生效。
+        """
+        return any(
+            r.passed and (r.note or "").startswith(INDEPENDENT_NOTE)
+            for r in self.proofs(sig)
+        )
+
+
+__all__ = ["VerifyResult", "VerifyStore", "SELF_REPORT_NOTE", "INDEPENDENT_NOTE"]

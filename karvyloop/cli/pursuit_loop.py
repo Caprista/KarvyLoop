@@ -56,6 +56,25 @@ def _check_kwargs(rk: dict) -> Optional[dict]:
     )
 
 
+def _record_verdict(ml: Any, result: Any, verdict: "Verdict") -> None:
+    """独立验收 verdict 回流(docs/44 断⑭):此前 verdict 只用于 replan,VerifyStore/eval_fact
+    全不知情 —— 结晶"验证门"名实不符(只有执行器自报)。PASS/FAIL 都回流;inconclusive
+    不回(没证据≠差评)。duck-type 防御:测试桩/旧 ml 没有 record_verdict → 静默跳过。"""
+    if verdict.inconclusive:
+        return
+    rec = getattr(ml, "record_verdict", None)
+    if not callable(rec):
+        return
+    sig = getattr(result, "sig", "") or ""
+    if not sig:
+        return
+    try:
+        rec(sig, passed=bool(verdict.passed), feedback=verdict.feedback or "",
+            task_id=getattr(result, "task_id", "") or "")
+    except Exception:
+        pass   # 回流失败不阻断 pursue(记账是旁路,不是执行路径)
+
+
 def pursue(
     goal: str,
     *,
@@ -124,6 +143,7 @@ def pursue(
 
         verdict = asyncio.run(independent_check(goal, getattr(result, "text", "") or "", **ck))
         last_verdict = verdict
+        _record_verdict(ml, result, verdict)   # docs/44 断⑭:verdict 回流验证门/eval_fact
         if verdict.passed or verdict.inconclusive:
             attempts.append({"attempt": i, "terminal": "completed",
                              "note": "验收过" if verdict.passed else "验收 inconclusive"})

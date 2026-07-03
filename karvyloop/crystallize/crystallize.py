@@ -58,6 +58,14 @@ class CrystallizeThresholds:
     # 真机标定 0.2:6 种"平方"说法塌缩成 1 簇,而"爬虫/邮件"(只共享 python)不误并。
     # 这是 M1 测试期 #1 要调的旋钮(偏"结晶宽松"→调低更易长技能库,但过低会误并不同任务)。
     cluster_overlap_threshold: float = 0.2
+    # docs/44 断⑭:关 2 并入满意度(Trace 派生,含 checker 差评/LLM 质量)——"被打差评的不晋升"。
+    # 保守标定(floor 必须 < 0.5):样本 overall 的量纲是 —— 已核验成功 ≥0.6;成功但未核验
+    # (无验证门,诚实打 5 折)= 0.5;失败/checker FAIL = 0.0。spec 明说"无独立验据仍可结晶,
+    # 只是标 verified:false" → 纯"未核验成功"历史(0.5)**不许**被这道关拦,故 floor 取 0.45:
+    # 只有**确凿差评**(0 分样本,即失败或独立验收 FAIL)占近期 ~1/4 以上权重才压到线下。
+    # 样本 <min 不判(没证据不拦 —— 拦是要有据的,同一套诚实哲学)。
+    satisfaction_floor: float = 0.45
+    satisfaction_min_samples: int = 3
 
 
 DEFAULT_THRESHOLDS = CrystallizeThresholds()
@@ -153,6 +161,7 @@ def maybe_promote(
     *,
     now: Optional[float] = None,
     thresholds: "CrystallizeThresholds" = DEFAULT_THRESHOLDS,
+    satisfaction: Optional[object] = None,
 ) -> PromoteDecision:
     """两关判定。顺序不能反(spec §4 硬约束)。
 
@@ -160,6 +169,9 @@ def maybe_promote(
     NOT_YET → 等下次;NOT_ELIGIBLE → 不该结晶)。
 
     `thresholds`:结晶灵敏度旋钮(9.4 可配置;默认 = 原硬编码值,向后兼容)。
+    `satisfaction`:SatisfactionStore(docs/44 断⑭)。给了才启用满意度关(None=旧行为,
+    0 回归)——闸门条件从"跑成了 N 次"升级为"跑成且验过且**没被打差评** N 次":
+    Trace 派生的满意度(含 checker FAIL 差评/LLM 低质量评)持续低于 floor → 不晋升。
     """
     now = now if now is not None else time.time()
     stats = store.get(sig)
@@ -183,6 +195,20 @@ def maybe_promote(
         return PromoteDecision.NotYet(f"success_rate {sr:.2f} < {thresholds.min_success_rate}")
     if not (generalized or high_freq):
         return PromoteDecision.NotYet("not generalized and not high_freq")
+    # 关 2(信用,docs/44 断⑭):满意度(新近度加权,抗滞后)不许持续差评。保守:
+    # 样本不足 min_samples 不判;评不出(异常)不拦 —— 只有**确凿**差评才挡晋升。
+    if satisfaction is not None:
+        floor = getattr(thresholds, "satisfaction_floor", 0.45)
+        min_n = getattr(thresholds, "satisfaction_min_samples", 3)
+        try:
+            samples = satisfaction.samples(sig)
+            if len(samples) >= min_n:
+                sat = satisfaction.mean_overall_recent(sig)
+                if sat is not None and sat < floor:
+                    return PromoteDecision.NotYet(
+                        f"satisfaction {sat:.2f} < {floor}(近期被打差评,不晋升)")
+        except Exception:
+            pass  # 满意度评不出 → 不拦(信号缺失≠差评)
     return PromoteDecision.Ready(
         reason="two gates passed",
         score=score, success_rate=sr,
@@ -207,12 +233,16 @@ def build_skill_md(
     scope: str = "user",
     arguments: Optional[list[dict]] = None,
     result_reuse: str = "dynamic",
+    verified: Optional[bool] = None,
 ) -> str:
     """构造 SKILL.md 文本。
 
     - frontmatter 必含 name/signature/description/when_to_use/verify_proof/trace_refs(scope+arguments 可选)
     - signature: 用于 sig↔name 反查(SkillIndex 从磁盘重建)
     - verify_proof + trace_refs 满足 AC5(结晶产物是合法 SKILL.md,含 verify_proof + trace_refs)
+    - verified(docs/44 断⑭):结晶时有无**独立验据**(checker verdict 回流,非执行器自报)。
+      False 也照样结晶 —— 只是诚实标 `verified: false`,recall 排序吃这个标;None=不写(兼容
+      非结晶路径的手工调用,行为同旧)。
     """
     args = arguments or []
     fm_lines = [
@@ -225,6 +255,8 @@ def build_skill_md(
         fm_lines.append(f"when_to_use: {when_to_use}")
     fm_lines.append(f"scope: {scope}")
     fm_lines.append(f"result_reuse: {result_reuse or 'dynamic'}")   # #2 §13:dynamic=命中重跑/stable=可回放
+    if verified is not None:
+        fm_lines.append(f"verified: {'true' if verified else 'false'}")
     if args:
         fm_lines.append("arguments:")
         for a in args:
@@ -251,6 +283,41 @@ def build_skill_md(
     fm_lines.append(body.rstrip())
     fm_lines.append("")
     return "\n".join(fm_lines)
+
+
+_FRONT_VERIFIED = re.compile(r"^verified:\s*(true|false)\s*$", re.MULTILINE)
+
+
+def mark_skill_verified(skill_md_path: Path) -> bool:
+    """独立验收 PASS 回流后,把已落盘 SKILL.md 的 `verified: false` 翻成 true(幂等)。
+
+    docs/44 断⑭:无独立验据时诚实结晶成 `verified: false`;之后 checker 真验过了,
+    这个标要跟着事实走(否则"诚实标"变成"永久污点")。只动 frontmatter 里的那一行,
+    正文一个字不碰;没有 verified 行(旧技能)→ 不补写(不伪造出生记录),返回 False。
+    """
+    p = Path(skill_md_path)
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    # 只在 frontmatter 块(第一对 --- ... ---)内替换,防正文里恰好有同形行被误改
+    if not text.startswith("---"):
+        return False
+    end = text.find("\n---", 3)
+    if end < 0:
+        return False
+    head, tail = text[: end + 4], text[end + 4:]
+    m = _FRONT_VERIFIED.search(head)
+    if m is None:
+        return False
+    if m.group(1) == "true":
+        return True   # 已是 true,幂等
+    new_head = head[: m.start()] + "verified: true" + head[m.end():]
+    try:
+        p.write_text(new_head + tail, encoding="utf-8")
+    except OSError:
+        return False
+    return True
 
 
 def write_skill_md(skill_dir: Path, skill_md_text: str) -> Path:
@@ -281,6 +348,7 @@ def crystallize(
     now: Optional[float] = None,
     thresholds: "CrystallizeThresholds" = DEFAULT_THRESHOLDS,
     result_reuse: str = "dynamic",   # #2 §13:dynamic=命中重跑/stable=可回放(默认 dynamic,宁重跑不投毒)
+    satisfaction: Optional[object] = None,   # docs/44 断⑭:与调用方 maybe_promote 同一份(否则闸门半接)
 ) -> Skill:
     """M1 v1 简化版 crystallize(同步,参数显式传入):
 
@@ -296,7 +364,8 @@ def crystallize(
     这里用默认阈值重判 not-ready 就会抛(VM 实测:配 promote_score=1.0 时 drive 说 ready、
     本函数用默认 3.0 重判 score 2.00<3.0 抛 ValueError → 配置旋钮只被半接)。
     """
-    decision = maybe_promote(sig, store, verify, now=now, thresholds=thresholds)
+    decision = maybe_promote(sig, store, verify, now=now, thresholds=thresholds,
+                             satisfaction=satisfaction)
     if decision.kind is not DecisionKind.READY:
         raise ValueError(f"sig {sig} not ready: {decision.reason}")
     proof = verify.latest_proof(sig)
@@ -309,6 +378,10 @@ def crystallize(
         "note": proof.note,
     }
     trace_refs = [proof.trace_ref] if proof.trace_ref else []
+    # docs/44 断⑭:自报与独立验据分开 —— 结晶时如实标"有没有独立验收 PASS 过"。
+    # duck-type 防御:老的/第三方 VerifyStore 没这方法 → None(frontmatter 不写,行为同旧)。
+    _has_ind = getattr(verify, "has_independent", None)
+    verified_flag: Optional[bool] = bool(_has_ind(sig)) if callable(_has_ind) else None
     skill_md = build_skill_md(
         name=name,
         description=description,
@@ -320,6 +393,7 @@ def crystallize(
         scope=scope,
         arguments=arguments,
         result_reuse=result_reuse,
+        verified=verified_flag,
     )
     path = write_skill_md(skills_dir / name, skill_md)
     stats = store.get(sig) or UsageStats()
@@ -332,6 +406,7 @@ def crystallize(
                   "when_to_use": when_to_use, "scope": scope,
                   "arguments": arguments or [], "result_reuse": result_reuse,
                   "verify_proof": verify_proof, "trace_refs": trace_refs,
+                  "verified": verified_flag,
                   "path": str(path)},
         body=body,
         from_candidate=sig,
@@ -352,5 +427,5 @@ __all__ = [
     "DecisionKind", "PromoteDecision", "maybe_promote",
     "usage_score", "success_rate",
     # 结晶
-    "build_skill_md", "write_skill_md", "crystallize",
+    "build_skill_md", "write_skill_md", "crystallize", "mark_skill_verified",
 ]

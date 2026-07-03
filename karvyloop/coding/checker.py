@@ -181,8 +181,20 @@ def verify_and_fix_with_rk(
         token=rk["token"], sandbox=rk["sandbox"], gateway=rk["gateway"],
         workspace_root=rk.get("workspace_root", "/"), model_ref=rk.get("model_ref", ""),
     )
-    return verify_and_fix(intent, drive_fn=drive_fn, check_kwargs=check_kwargs,
-                          max_fix_rounds=max_fix_rounds)
+    checked = verify_and_fix(intent, drive_fn=drive_fn, check_kwargs=check_kwargs,
+                             max_fix_rounds=max_fix_rounds)
+    # docs/44 断⑭:最终 verdict 回流验证门/eval_fact(此前只用于修一轮,结晶闸门全不知情)。
+    # inconclusive 不回(没证据≠差评);duck-type 防御:测试桩 ml 没有 record_verdict → 跳过。
+    v = checked.verdict
+    rec = getattr(ml, "record_verdict", None)
+    sig = getattr(checked.result, "sig", "") or ""
+    if callable(rec) and sig and not v.inconclusive:
+        try:
+            rec(sig, passed=bool(v.passed), feedback=v.feedback or "",
+                task_id=getattr(checked.result, "task_id", "") or "")
+        except Exception:
+            logger.warning("[checker] verdict 回流失败(sig=%s);验收结论不受影响", sig[:8], exc_info=True)
+    return checked
 
 
 def verdict_suffix(checked: CheckedResult) -> str:

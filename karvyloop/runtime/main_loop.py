@@ -178,6 +178,8 @@ class MainLoop:
         from karvyloop.crystallize import SatisfactionStore
         self.satisfaction = SatisfactionStore()
         self._last_task_id = ""   # drive 记下,background_review 据此只评最近 task(控开销)
+        # docs/44 断⑧:dynamic 重跑计数的去抖水位(sig → 上次计数时刻;防爆发灌计数,同 observe 窗口)
+        self._rerun_accounted_at: dict[str, float] = {}
         self.skill_index = skill_index if skill_index is not None else SkillIndex()
         self.scope = scope
         # 时钟(测试用);默认 wall clock。生产路径不传,observe/maybe_promote
@@ -317,6 +319,45 @@ class MainLoop:
         except Exception:
             pass
 
+    # ---- docs/44 断⑧:召回命中/重跑的 usage 记账(早返回路径此前跳过 observe → usage 冻结)----
+
+    def _touch_usage(self, sig: str, now: float) -> None:
+        """召回命中 = "用进":只刷 last_used_at(不动计数,计数归 observe/重跑记账)。
+
+        只用既有 get/put 接口 → InMemory / Sqlite 两个后端免改即生效。失败不阻断 drive。
+        """
+        try:
+            st = self.store.get(sig)
+            if st is not None and now > st.last_used_at:
+                self.store.put(sig, st.model_copy(update={"last_used_at": now}))
+        except Exception:
+            logger.warning("[evict] 刷新 last_used_at 失败(sig=%s);drive 继续", sig[:8], exc_info=True)
+
+    def _account_rerun(self, sig: str, *, success: bool, now: float) -> None:
+        """dynamic 命中重跑的 usage/成败记账(29112e9 只补了 eval_fact,这里补 usage 半边)。
+
+        与 observe 同一去抖窗口(防爆发灌计数)—— 窗口内只保留 _touch_usage 刷过的
+        last_used_at,不重复 +1(去抖水位记在实例内 `_rerun_accounted_at`,不能借
+        last_used_at:_touch_usage 在前,它已被推到本轮 now)。技能已结晶,这里的计数
+        喂的是 evict("用进废退")与 success_rate 的诚实账本。失败不阻断 drive。
+        """
+        try:
+            last = self._rerun_accounted_at.get(sig, 0.0)
+            if (now - last) < self.thresholds.usage_debounce_sec:
+                return   # 爆发窗口内:last_used_at 已刷,计数去抖
+            st = self.store.get(sig)
+            if st is None:
+                return
+            self.store.put(sig, st.model_copy(update={
+                "usage_count": st.usage_count + 1,
+                "success_count": st.success_count + (1 if success else 0),
+                "failure_count": st.failure_count + (0 if success else 1),
+                "last_used_at": max(now, st.last_used_at),
+            }))
+            self._rerun_accounted_at[sig] = now
+        except Exception:
+            logger.warning("[evict] 技能重跑 usage 记账失败(sig=%s);drive 继续", sig[:8], exc_info=True)
+
     # ---- 启动:从磁盘重建索引 ----
 
     def bootstrap(self) -> int:
@@ -374,6 +415,13 @@ class MainLoop:
             skill_index=self.skill_index,
             satisfaction=self.satisfaction,   # docs/40:飞轮产物回到行为(满意度影响召回排序)
         )
+        # docs/44 断⑧(evict 误杀):**任何**召回命中都是"用进" —— 两条命中路径(stable 回放 /
+        # dynamic 重跑)都早返回跳过 observe,usage 冻结在结晶时刻,天天用的技能 30 天照样被
+        # 归档,再靠命中 restore 兜底 → archive/restore 横跳 + 错 badge。这里用 drive 自己的
+        # 时钟刷新 last_used_at(recall_count_inc 已在 recall() 里 +1,但它不带时钟 ——
+        # 时间戳归 drive 记,与 observe/evict 同一时钟)。
+        if hit is not None and hit.sig:
+            self._touch_usage(hit.sig, now)
         # #2 §13.6:命中后分两条路 —— stable 才回放缓存结果;dynamic(默认)**不回放**,拿当前输入重跑。
         guided_skill = None   # 非 None = 命中了 dynamic 技能 → 重跑(产出新鲜),且不再 observe/结晶
         if hit is not None and (hit.result_reuse or "dynamic").lower() == "stable":
@@ -406,6 +454,7 @@ class MainLoop:
             result.restored = hit.restored
             if hit.restored:
                 self.stats.auto_restores += 1
+
 
         # 2. 慢脑 —— 慢脑读 ctx 消解多轮指代(CV-8)。
         #    向后兼容:slow_brain 若不接 ctx kwarg,退回 slow_brain(intent)(0 回归)。
@@ -456,6 +505,10 @@ class MainLoop:
         if fresh or guided_skill is not None:
             if guided_skill is not None:
                 result.sig = guided_skill.sig   # 归属到被复用的那个技能
+                # docs/44 断⑧:重跑也是"用进" —— 补 usage/成败记账(带去抖),否则技能的
+                # usage 冻结在结晶时刻,evict 只看 usage_score → 天天重跑照样 30 天被归档。
+                if guided_skill.sig:
+                    self._account_rerun(guided_skill.sig, success=bool(run.success), now=now)
                 # 修订闭环数据源:技能重跑的客观信号也必须进 Trace(此前这条早返回把
                 # eval_fact 漏掉了 → 技能重跑成败/满意度从不入账,Trace 驱动修订无米下锅)。
                 # sig 归属被复用的技能;埋在既有 eval_fact 写入路径上,评价器零改动即可消费。
@@ -537,14 +590,18 @@ class MainLoop:
         # 不是可复用技能,结晶进去 = 污染技能库 + 被快脑跨场 replay(Hardy 抓到的串味真 bug:
         # 一句"你是谁"在业务域被结晶成 user 全局技能,私聊时冒充设计师)。技能 = 用工具的任务流程。
         if run.success and not ctx_dependent and run.tool_calls:
-            # M1 v1 简化:慢脑成功 → 自动 mark_verified(实战可接 executor 的
-            # verify_proof 字段;这里先打通端到端路径)
+            # 自报验据(docs/44 断⑭:名实如实 —— 这是执行器自报成功,不是独立验收;
+            # note 用常量,与 checker verdict 回流的 INDEPENDENT_NOTE 分开存)
+            from karvyloop.crystallize import SELF_REPORT_NOTE
             self.verify.mark_verified(
-                sig, run.trace_ref, note="slow-brain success",
+                sig, run.trace_ref, note=SELF_REPORT_NOTE,
                 clock=self._clock,
             )
+            # 闸门升级(docs/44 断⑭):从"自报成功 N 次"→"跑成且**没被打差评** N 次"。
+            # satisfaction 是 Trace 派生的(含独立验收 FAIL 回流的 0 分样本);无样本=旧行为。
             decision = maybe_promote(sig, self.store, self.verify, now=now,
-                                     thresholds=self.thresholds)
+                                     thresholds=self.thresholds,
+                                     satisfaction=self.satisfaction)
             if decision.kind.value == "ready":
                 # 自动结晶(用 intent 当 name/when_to_use 兜底,实战由访谈填)
                 name = f"skill_{sig[:8]}"
@@ -575,6 +632,7 @@ class MainLoop:
                             now=now,
                             thresholds=self.thresholds,   # 与上面 maybe_promote 同一套阈值(否则配置旋钮半接)
                             result_reuse=reuse,
+                            satisfaction=self.satisfaction,   # 同一份满意度(否则闸门半接,重判不一致会抛)
                         )
                         # 写进 SkillIndex(下次 recall 直接命中)
                         self.skill_index.register(
@@ -618,6 +676,72 @@ class MainLoop:
         })
 
         return result
+
+    # ---- 独立验收 verdict 回流(docs/44 断⑭:验证门不再名实不符)----
+
+    def record_verdict(
+        self,
+        sig: str,
+        *,
+        passed: bool,
+        feedback: str = "",
+        task_id: str = "",
+        trace_ref: str = "",
+    ) -> bool:
+        """独立验收者(coding/checker)的 verdict 回流 —— 此前 verdict 只用于 replan,
+        VerifyStore/eval_fact 全不知情,"验证门"实际只有执行器自报(docs/44 断⑭)。
+
+        - PASS → VerifyStore 记一条 note=INDEPENDENT_NOTE 的独立验据(与自报分开存,
+          has_independent 据此判);技能已落盘且 frontmatter 有 verified 标 → 翻成 true。
+        - PASS/FAIL 都写一条 eval_fact 进 Trace(kind 同 drive,评价器零改动即可消费):
+          FAIL = success:false → 满意度 0 分样本 → 结晶闸门的"被打差评的不晋升"有了数据源。
+        - inconclusive 的 verdict **不该**进来(没证据≠差评)—— 由调用方过滤。
+
+        返回是否真记了账(sig 为空 / 全部落账失败 → False)。绝不抛(不阻断 pursue/handler)。
+        """
+        if not sig:
+            return False
+        ok = False
+        note_fb = (feedback or "").strip().replace("\n", " ")[:120]
+        vref = trace_ref or f"verdict://{task_id or uuid.uuid4().hex[:12]}/{uuid.uuid4().hex[:8]}"
+        if passed:
+            try:
+                from karvyloop.crystallize import INDEPENDENT_NOTE
+                note = f"{INDEPENDENT_NOTE}: {note_fb}" if note_fb else INDEPENDENT_NOTE
+                self.verify.mark_verified(sig, vref, note=note, clock=self._clock)
+                ok = True
+            except Exception:
+                logger.warning("[verify] 独立验据回流失败(sig=%s)", sig[:8], exc_info=True)
+            # 诚实标跟着事实走:结晶时无独立验据标了 verified:false,现在真验过了 → 翻 true(幂等)
+            try:
+                name = self.skill_index.name_for_sig(sig)
+                if name:
+                    entry = self.skill_index.lookup_by_name(name)
+                    if entry is not None and entry.path:
+                        from karvyloop.crystallize import mark_skill_verified
+                        mark_skill_verified(Path(entry.path))
+            except Exception:
+                logger.warning("[verify] 翻 verified 标失败(sig=%s);验据已入库", sig[:8], exc_info=True)
+        # eval_fact:自报与独立验据分开存 —— trace_ref 不同(verdict:// 前缀),水位不撞。
+        try:
+            from karvyloop.crystallize import EVAL_FACT_KIND
+            self.trace.append(TraceEntry(
+                task_id=task_id or uuid.uuid4().hex[:16], kind=EVAL_FACT_KIND,
+                payload={
+                    "sig": sig,
+                    "success": bool(passed),
+                    "verified": bool(passed),
+                    "steps": 0,   # verdict 无步数语义;baseline 忽略 0 步样本,不污染效率基线
+                    "trace_ref": vref,
+                    "checker_verdict": True,   # 标记:独立验收回流(审计/修订可辨,区分自报)
+                    "feedback": note_fb,
+                },
+                ts=self._clock(), source="main_loop.verdict",
+            ))
+            ok = True
+        except Exception:
+            logger.warning("[verify] verdict eval_fact 落 Trace 失败(sig=%s)", sig[:8], exc_info=True)
+        return ok
 
     # ---- 后台维护(可选)----
 

@@ -22,6 +22,7 @@ from .crystallize import (
     PromoteDecision,
     build_skill_md,
     crystallize,
+    mark_skill_verified,
     maybe_promote,
     success_rate,
     usage_score,
@@ -77,7 +78,7 @@ from .revision import (
 from .signature import compute_signature, same_signature
 from .skill_index import IndexEntry, SkillIndex
 from .store import USAGE_DEBOUNCE_SEC, InMemoryUsageStore, UsageStore
-from .verify import VerifyResult, VerifyStore
+from .verify import INDEPENDENT_NOTE, SELF_REPORT_NOTE, VerifyResult, VerifyStore
 from .sqlite_store import SqliteUsageStore, SqliteVerifyStore
 from .auto_suggest import SuggestHit, auto_suggest
 from .atom_critic import (
@@ -109,11 +110,12 @@ __all__ = [
     "UsageStore", "InMemoryUsageStore", "SqliteUsageStore", "USAGE_DEBOUNCE_SEC",
     # observe
     "observe",
-    # verify
+    # verify(docs/44 断⑭:自报 vs 独立验据分开存,按 note 前缀区分)
     "VerifyResult", "VerifyStore", "SqliteVerifyStore",
+    "SELF_REPORT_NOTE", "INDEPENDENT_NOTE",
     # crystallize
     "DecisionKind", "PromoteDecision", "maybe_promote", "crystallize",
-    "build_skill_md", "write_skill_md",
+    "build_skill_md", "write_skill_md", "mark_skill_verified",
     "usage_score", "success_rate",
     "PROMOTE_SCORE", "MIN_SUCCESS_RATE", "HALFLIFE_DAYS",
     "MIN_RECENCY_FACTOR", "EVICT_SCORE", "STALE_DAYS",

@@ -302,10 +302,12 @@ def recall(
             })
 
     best: Optional[RecallHit] = None
-    # 排序键 = (意图匹配主分, 满意度裁决分)。**字典序**:意图匹配**绝对优先**,满意度
-    # **只在意图打平时**裁决 —— 绝不能盖过真实的匹配差(对抗验收 MEDIUM:+0.3 加权曾能
-    # 翻盘 20-30% 的匹配差 = 召回错技能;改成严格平手裁决兑现"只在打平时")。
-    best_key: tuple[float, float] = (-1.0, -1.0)
+    # 排序键 = (意图匹配主分, 满意度裁决分, 独立验据标)。**字典序**:意图匹配**绝对优先**,
+    # 满意度**只在意图打平时**裁决 —— 绝不能盖过真实的匹配差(对抗验收 MEDIUM:+0.3 加权曾能
+    # 翻盘 20-30% 的匹配差 = 召回错技能;改成严格平手裁决兑现"只在打平时")。第三键(docs/44
+    # 断⑭):frontmatter `verified: true`(独立验收 PASS 过)> false/缺标 —— 只在前两键全平
+    # 时破平,Trace 派生的真实使用信号(满意度)仍优先于出生标。
+    best_key: tuple[float, float, float] = (-1.0, -1.0, -1.0)
     for c in candidates:
         overlap = intent_tokens & c["all_tokens"]
         if not overlap:
@@ -330,7 +332,10 @@ def recall(
                     secondary = float(sat)
             except Exception:
                 pass
-        key = (primary, secondary)
+        # 独立验据标(断⑭"诚实结晶"):简易 YAML 解析回来是字符串,"true" 才算有独立验据;
+        # 缺标(老技能/未验)与 false 同级 —— 都是"没有独立验据",不追溯惩罚也不伪造资历。
+        verified_rank = 1.0 if str((c.get("raw") or {}).get("verified", "")).strip().lower() == "true" else 0.0
+        key = (primary, secondary, verified_rank)
         if key > best_key:
             best = RecallHit(
                 name=c["name"],

@@ -115,9 +115,12 @@ class SatisfactionStore:
         """
         with self._lock:
             rows = self._by_sig.get(sig) or []
-            if not rows:
+            # 0 步样本不进基线:无工具的纯推理 run / checker verdict 回流(steps=0 是"无步数
+            # 语义"不是"零成本")—— 混进中位数会把基线压塌,真干活的 run 全被冤枉低效。
+            steps = [s for _, s in rows if s > 0]
+            if not steps:
                 return None
-            return float(statistics.median(s for _, s in rows))
+            return float(statistics.median(steps))
 
     def record(self, sig: str, sat: AtomSatisfaction, steps: int) -> None:
         with self._lock:

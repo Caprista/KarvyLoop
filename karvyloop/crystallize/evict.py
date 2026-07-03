@@ -41,7 +41,14 @@ def evict_stale(
     for sig, stats in store.all():
         if store.is_archived(sig):
             continue
-        score = usage_score(stats, now=now)
+        # docs/44 断⑧:evict 判据认**复用**(recall_count 是快脑命中的真"用进"信号,
+        # store.py 拍 9 就承诺"evict 应优先看它"但从未实现)。把复用并进活跃度再算分:
+        # 天天被召回重跑的技能不因 usage_count 冻结在结晶时刻而被误杀;recall_count=0 的
+        # 技能分数与旧公式完全一致(0 回归)。只会更保守(少归档),不会多归档。
+        activity = stats.model_copy(update={
+            "usage_count": stats.usage_count + stats.recall_count,
+        })
+        score = usage_score(activity, now=now)
         dsl = days_since(stats.last_used_at, now=now)
         if score < EVICT_SCORE and dsl > STALE_DAYS:
             store.archive(sig)
