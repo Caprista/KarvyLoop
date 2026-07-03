@@ -2052,3 +2052,22 @@ button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outl
   font-size: 12.5px; font-weight: 600;
   background: var(--surface-2); color: var(--text-2); border: 1px dashed var(--border-strong);
 }
+
+/* ============================================================================
+   docs/46 S4 — 新手引导:重看入口 + 空态行动链接(tour 本体样式来自
+   vendored driver.min.css,按需注入,不常驻)。
+   ========================================================================= */
+.tour-replay {
+  padding: 5px 10px; border-radius: 999px; cursor: pointer;
+  background: var(--surface); color: var(--text-2);
+  border: 1px solid var(--border-strong); font-size: var(--fs-12);
+}
+.tour-replay:hover { border-color: var(--accent); color: var(--accent-deep); }
+/* 空态行动链接:空态不只解释"为什么空",还给一步能点的动作 */
+.empty-act {
+  display: block; margin-top: 8px; padding: 5px 12px;
+  border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent-deep);
+  border-radius: 8px; font-size: var(--fs-12); font-weight: 600; cursor: pointer;
+  font-style: normal;   /* 空态本体是斜体,按钮回正 */
+}
+.empty-act:hover { border-color: var(--accent); }

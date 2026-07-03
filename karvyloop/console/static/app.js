@@ -873,7 +873,11 @@
   }
   function _clearPredict() {
     const list = document.getElementById("predict-list");
-    if (list) list.innerHTML = '<div class="empty-state">' + t("empty.predict") + "</div>";
+    if (!list) return;
+    list.innerHTML = "";
+    const emp = el("div", { class: "empty-state", text: t("empty.predict") });
+    emp.appendChild(_emptyAction("empty.predict_act", requestProposal));   // S4:空态给下一步动作
+    list.appendChild(emp);
   }
 
   // ============ 9.2c:建业务域(像建公司)============
@@ -2160,8 +2164,12 @@
     const running = tasks.filter((tk) => tk.status === "running");
     if (board) {
       board.innerHTML = "";
-      if (!done.length) board.appendChild(el("div", { class: "empty-state", text: t("empty.task_board") }));
-      else done.forEach((tk) => board.appendChild(_taskCard(tk)));
+      if (!done.length) {
+        const emp = el("div", { class: "empty-state", text: t("empty.task_board") });
+        // S4 空态引导:跟小卡说句话,料就会流进来(指向聊天)
+        emp.appendChild(_emptyAction("empty.task_board_act", () => openChatModal()));
+        board.appendChild(emp);
+      } else done.forEach((tk) => board.appendChild(_taskCard(tk)));
     }
     if (busy) {
       busy.innerHTML = "";
@@ -2820,6 +2828,85 @@
   // ============ H2A demo buttons (per snapshot proposal) ============
   // Note:真实 H2A 走 PROPOSE envelope 到达时由 server push;这里 demo 是 manual trigger
 
+  // ============ docs/46 S4:新手引导 ============
+  // tour 用 driver.js(vendored static/vendor/,MIT v1.3.6;intro.js/shepherd 是 AGPL 不许用)。
+  // 按需注入:首启 / 点「重看引导」才加载那 ~21KB,不压常驻包。IIFE 全局 = window.driver.js.driver。
+  let _driverLoading = null;
+  function _ensureDriverJs() {
+    if (window.driver && window.driver.js && window.driver.js.driver) return Promise.resolve();
+    if (_driverLoading) return _driverLoading;
+    _driverLoading = new Promise((resolve, reject) => {
+      const css = document.createElement("link");
+      css.rel = "stylesheet"; css.href = "/static/vendor/driver.min.css";
+      document.head.appendChild(css);
+      const s = document.createElement("script");
+      s.src = "/static/vendor/driver.min.js";
+      s.onload = () => (window.driver && window.driver.js && window.driver.js.driver
+        ? resolve() : reject(new Error("driver.js global missing")));
+      s.onerror = () => { _driverLoading = null; reject(new Error("driver.min.js load failed")); };
+      document.head.appendChild(s);
+    });
+    return _driverLoading;
+  }
+
+  const _TOUR_DONE_KEY = "karvyloop_tour_done";
+  // 6 步 spotlight(docs/46 §6 脚本):全部真实 UI 锚点,≤45s,随时可跳过(点遮罩/×)。
+  function _tourSteps() {
+    const step = (sel, n) => ({ element: sel, popover: {
+      title: t("tour.s" + n + ".title"), description: t("tour.s" + n + ".desc") } });
+    return [
+      step("#pulse-text", 1),                        // 脉搏:不用来回问"怎么样了"
+      step("#chat-input", 2),                        // 说话 = 干活的起点
+      step('.nav-item[data-panel="domains"]', 3),    // 开公司:建业务域
+      step("#chat-input", 4),                        // 群里 @角色 交活
+      step("#h2a-list", 5),                          // 拍板列:ACCEPT/DEFER/REJECT + 理由被记住
+      step("#token-meter", 6),                       // 成本可见 + 结晶成技能库
+    ];
+  }
+  function startTour(force) {
+    if (!force) {
+      try { if (localStorage.getItem(_TOUR_DONE_KEY)) return; } catch (e) {}
+      // 无 Key 强制引导(must_setup 锁)开着 → 不抢戏;配好 key 重载后 tour 自然起
+      const mgmt = document.getElementById("mgmt-modal");
+      if (mgmt && !mgmt.classList.contains("hidden")) return;
+    }
+    _ensureDriverJs().then(() => {
+      const drv = window.driver.js.driver({
+        showProgress: true,
+        progressText: "{{current}} / {{total}}",
+        nextBtnText: t("tour.next"), prevBtnText: t("tour.prev"), doneBtnText: t("tour.done"),
+        // 跳过/走完都算"看过":不再自动打扰(顶栏 💡 随时重看)
+        onDestroyed: () => { try { localStorage.setItem(_TOUR_DONE_KEY, "1"); } catch (e) {} },
+        steps: _tourSteps(),
+      });
+      drv.drive();
+    }).catch((e) => console.warn("[tour] driver.js unavailable", e));
+  }
+
+  // —— 空态行动链接(docs/46 §6):空态不只解释"为什么空",还给下一步动作 ——
+  function _emptyAction(labelKey, onClick) {
+    return el("button", { class: "empty-act", text: t(labelKey), onClick: onClick });
+  }
+  // index.html 静态空态占位(h2a / predict)开机补挂行动链接(有卡时会被 _stripEmpty 一并撤走)
+  function _decorateStaticEmpties() {
+    const h2aEmpty = document.querySelector("#h2a-list .h2a-empty");
+    if (h2aEmpty) h2aEmpty.appendChild(_emptyAction("empty.h2a_act", requestProposal));
+    const predictEmpty = document.querySelector("#predict-list .empty-state");
+    if (predictEmpty) predictEmpty.appendChild(_emptyAction("empty.predict_act", requestProposal));
+  }
+
+  // —— 输入框 placeholder 轮换真实示例(域模板 seed_intents 的前端静态表,i18n en/zh)——
+  const _PH_EXAMPLES = 5;
+  let _phIdx = 0;
+  function _rotatePlaceholder() {
+    const ce = document.getElementById("chat-input");
+    if (!ce) return;
+    if (document.activeElement === ce) return;   // 正在打字/聚焦不换,不闪人
+    _phIdx = (_phIdx % _PH_EXAMPLES) + 1;
+    ce.setAttribute("data-placeholder", t("input.ex" + _phIdx));
+  }
+  function _startPlaceholderRotation() { setInterval(_rotatePlaceholder, 8000); }
+
   // ============ Boot ============
 
   function boot() {
@@ -2883,6 +2970,13 @@
     fetchRecentDecisions();    // 最近拍板流水(只读回看)
     fetchUpdateStatus();       // 有新版 → 顶部横幅(绝不自动升级)
     window.KarvyModelsPanel.checkSetupGate({ pollSnapshot });   // 无 Key → 强制引导录入模型(进系统就判)
+    // docs/46 S4:新手引导 —— 重看入口 + 空态行动链接 + placeholder 轮换 + 首启 tour
+    const tourBtn = document.getElementById("tour-replay");
+    if (tourBtn) tourBtn.addEventListener("click", () => startTour(true));
+    _decorateStaticEmpties();
+    _startPlaceholderRotation();
+    // 首启自动起(localStorage 无 tour_done):稍等 checkSetupGate 先判无 Key 锁,有锁就不抢戏
+    setTimeout(() => startTour(false), 1600);
   }
 
   if (document.readyState === "loading") {
