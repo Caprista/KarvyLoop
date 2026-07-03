@@ -624,7 +624,10 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
     # Changelog + Trace 审计(「改了再批」生效:落的是 ACCEPT 时 payload 里的 new_steps)。
     # trace 从 main_loop 取(--no-llm / 测试 app=None 时为 None → 只落盘不写审计,handler 自身兜底)。
     _ml = getattr(getattr(app, "state", None), "main_loop", None) if app is not None else None
+    # cocreate_finalize(共创定稿卡):ACCEPT → 真建域+角色(模板 instantiate / 自建 finalize)
+    from karvyloop.karvy.cocreation import KIND_COCREATE_FINALIZE, make_cocreate_finalize_handler
     return {
+        KIND_COCREATE_FINALIZE: make_cocreate_finalize_handler(app),
         KIND_REVISE_SKILL: partial(apply_revision_proposal, trace=getattr(_ml, "trace", None)),
         KIND_CRYSTALLIZE_SKILL: _crystallize_skill_handler,
         KIND_ROUTE_TO_ROLE: _route_to_role_handler(app),

@@ -21,7 +21,8 @@ class GlobalKarvy:
     def __init__(self, *, main_loop: Any, conversation_manager: Any = None,
                  runtime_kwargs: Optional[dict] = None,
                  dashboard_fn: Optional[Callable[[], dict]] = None,
-                 governance_fn: Optional[Callable[[str], str]] = None) -> None:
+                 governance_fn: Optional[Callable[[str], str]] = None,
+                 app: Any = None) -> None:
         self._ml = main_loop
         self._mgr = conversation_manager
         self._rk = runtime_kwargs or {}
@@ -29,6 +30,9 @@ class GlobalKarvy:
         # Step 0(a):你的决策标准/知识 装配器(intent → governance)。接了 → 语音/TUI 也认你的标准,
         # 不再认知失明;None → 退化成只有 ctx+人格(旧行为)。
         self._governance_fn = governance_fn
+        # 共创模式(docs/47):会话态挂 app.state.cocreation_sessions;没接 app(纯 TUI 壳)
+        # → 共创不可用,ask() 走旧行为(诚实降级,不装)。
+        self._app = app
 
     @property
     def ready(self) -> bool:
@@ -42,6 +46,26 @@ class GlobalKarvy:
         """
         from karvyloop.coding.persona import build_karvy_persona_prompt
         mgr = self._mgr
+
+        # 共创模式(docs/47,与 console 两条路同款接缝):已在共创态 → 整轮进状态机。
+        if self._app is not None:
+            try:
+                from karvyloop.karvy.cocreation import cocreation_take_turn
+                _coc = await cocreation_take_turn(
+                    self._app, mgr, intent,
+                    gateway=self._rk.get("gateway"),
+                    model_ref=self._rk.get("model_ref", ""))
+            except Exception:
+                _coc = None
+            if _coc is not None:
+                if mgr is not None:
+                    try:
+                        mgr.record_turn(intent, _coc, brain="slow")
+                    except Exception:
+                        pass
+                from karvyloop.workbench.main_loop_bridge import Brain
+                return DriveOutcome(intent=intent, text=_coc, brain=Brain.SLOW)
+
         ctx = mgr.context_view() if mgr is not None else None
         ws = self._rk.get("workspace_root", "/")
         # intent 透传:建 agent 类意图 → 注入系统自我认知(语音/TUI 同样能指导建 agent)
@@ -55,6 +79,18 @@ class GlobalKarvy:
                 governance = ""
         outcome = await drive_in_tui(intent, self._ml, ctx=ctx, persona=persona,
                                      governance=governance, on_event=on_event, **self._rk)
+        # 共创递口(建 agent 意图 → 回复末尾递"一起共创"口,挂 OFFERED 态;零副作用失败静默)
+        if self._app is not None and not getattr(outcome, "error", ""):
+            try:
+                from karvyloop.karvy.cocreation import maybe_offer_cocreation
+                _offer = await maybe_offer_cocreation(
+                    self._app, mgr, intent,
+                    gateway=self._rk.get("gateway"),
+                    model_ref=self._rk.get("model_ref", ""))
+                if _offer:
+                    outcome.text = ((outcome.text or "").rstrip() + "\n\n" + _offer).strip()
+            except Exception:
+                pass
         if mgr is not None and not getattr(outcome, "error", ""):
             try:
                 mgr.record_turn(intent, outcome.text or "",

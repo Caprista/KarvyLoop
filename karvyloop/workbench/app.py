@@ -124,6 +124,13 @@ class WorkbenchApp(App):
                                   dashboard_fn=self._build_snapshot,   # 看板也走同一接口(语音可复用)
                                   governance_fn=_gov_fn)
 
+    def attach_console_app(self, app: Any) -> None:
+        """console 起来后回挂 FastAPI app(共创会话态住 app.state;构造顺序上 app 晚于本类)。"""
+        try:
+            self._karvy._app = app
+        except Exception:
+            pass
+
     # ---- 拍 3b 接入:K5 决策闭环 ----
 
     async def _proposal_user_input(self, prompt: str, user: Address) -> H2ADecision:

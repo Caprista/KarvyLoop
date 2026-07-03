@@ -164,6 +164,11 @@ def cmd_console(args: argparse.Namespace) -> int:
         runtime_kwargs=runtime_kwargs,
         workbench_app=workbench_app,
     )
+    # 共创模式(docs/47):语音/TUI 渠道(GlobalKarvy)也接同一套共创会话态(app 晚于 workbench_app 构造,回挂)。
+    try:
+        workbench_app.attach_console_app(app)
+    except Exception:
+        pass
     # 9.4:存 config 路径,供 /api/lang 持久化语言偏好 + 模型管理(写回 config.yaml)。
     # 断①修:非 no_llm 时**恒设**默认路径(不管文件在不在)—— 纯新机器的强制引导才能真保存 key。
     app.state.config_path = resolve_config_state_path(config_path, no_llm)

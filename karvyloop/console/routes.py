@@ -739,6 +739,33 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     # 9.1d:取当前对话上下文(CV-8),喂 drive(上下文依赖门 + 慢脑消解多轮)
     # 9.2b:业务域线注入 value.md(CV-14)
     mgr = getattr(request.app.state, "conversation_manager", None)
+
+    # 共创模式(docs/47 ④,镜像 ws._handle_intent_ws 同款接缝):对话已在共创态 →
+    # 整轮进状态机,不再依赖逐轮关键词;早返回必 record_turn(防 ctx 串台)。
+    try:
+        from karvyloop.karvy.cocreation import cocreation_take_turn
+        _coc_reply = await cocreation_take_turn(
+            request.app, mgr, req.intent,
+            gateway=runtime_kwargs.get("gateway"),
+            model_ref=runtime_kwargs.get("model_ref", ""))
+    except Exception:
+        logger.warning("[api_intent] cocreation 轮处理失败,降级正常 drive", exc_info=True)
+        _coc_reply = None
+    if _coc_reply is not None:
+        if workbench_app is not None:
+            try:
+                workbench_app.push_chat_log_line("agent", _coc_reply)
+            except Exception:
+                pass
+        if mgr is not None:
+            try:
+                mgr.record_turn(req.intent, _coc_reply, brain="slow")
+            except Exception:
+                pass
+        return {"intent": req.intent, "brain": "SLOW", "fast_brain_hit": False,
+                "crystallized": False, "skill_name": "", "routed": False,
+                "cocreation": True, "text": _coc_reply, "error": None}
+
     ctx = mgr.context_view() if mgr is not None else None
     governance = mgr.governance_text() if mgr is not None else ""
     _domain_gov = governance   # 域治理块(value.md+deontic);persona 已编入时在下方去重
@@ -846,6 +873,21 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
 
     if task_reg is not None and task_id is not None:
         task_reg.finish(task_id, result=(outcome.text or ""), error=(outcome.error or ""))
+
+    # 共创递口(docs/47 §3.1,镜像 ws 同款):建 agent 意图命中 → 回复末尾递"一起共创"口
+    # 并挂 OFFERED 会话态;零副作用,失败静默=旧行为。
+    if not outcome.error:
+        try:
+            from karvyloop.karvy.cocreation import maybe_offer_cocreation
+            _offer = await maybe_offer_cocreation(
+                request.app, mgr, req.intent,
+                gateway=runtime_kwargs.get("gateway"),
+                model_ref=runtime_kwargs.get("model_ref", ""))
+            if _offer:
+                outcome.text = ((outcome.text or "").rstrip() + "\n\n" + _offer).strip()
+        except Exception:
+            logger.debug("[api_intent] 共创递口失败(静默)", exc_info=True)
+
     # fs_grants:这轮 drive 里碰壁的工作区外路径 → 升授权卡(去重;敏感路径永不出卡)
     try:
         from karvyloop.console.proposals import raise_fs_access_cards
