@@ -293,6 +293,11 @@ var KarvyModelsPanelBundle = (function(exports) {
       return;
     }
     await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });
+    if (r.data.restart_required) {
+      _setMsg(msg, true, t("onb.saved_restart"));
+      msg.classList.add("onb-restart-big");
+      return;
+    }
     _setMsg(msg, true, t("onb.validating"));
     const v = await _postJSON("/api/model/validate", {});
     if (v.ok && v.data && v.data.ok) {

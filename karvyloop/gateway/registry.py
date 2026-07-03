@@ -58,9 +58,13 @@ class ModelRegistry:
                 if m.id in models:
                     raise ValueError(f"duplicate model id: {m.id}")  # 全局唯一
                 models[m.id] = m
+        # embedding 是**可选**槽位(闭环审计断②尾巴:网页引导只写 chat 模型,没有 embedding 段;
+        # 此前 cfg["embedding"] 硬取 → KeyError → 重启后 gateway 仍构造失败 → 永远到不了首次对话,
+        # 且 readiness 连带永远 must_setup=强制引导死循环)。项目匹配/召回不上向量(既定决策),
+        # embed() 无生产调用者 —— 没配就留空,真调 embed 时 fail-closed(UnknownModelError)。
         reg = cls(providers, models,
                   default_chat=cfg["agents"]["defaults"]["model"],
-                  default_embedding=cfg["embedding"]["model"])
+                  default_embedding=((cfg.get("embedding") or {}).get("model", "") or ""))
         reg._validate()
         return reg
 
@@ -72,7 +76,7 @@ class ModelRegistry:
     def _validate(self) -> None:
         if self.default_chat not in self.models:
             raise ValueError(f"agents.defaults.model '{self.default_chat}' 不在 models 注册表里")
-        if self.default_embedding not in self.models:
+        if self.default_embedding and self.default_embedding not in self.models:
             raise ValueError(f"embedding.model '{self.default_embedding}' 不在 models 注册表里")
 
     def get(self, model_ref: str) -> ModelDefinition:

@@ -1455,6 +1455,12 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .mgmt-msg { font-size: 13px; margin-top: 6px; }
 .mgmt-msg.ok { color: var(--green); }
 .mgmt-msg.err { color: var(--danger); }
+/* 冷启动引导:密钥已保存但 fresh 进程无 gateway → 大字提示"重启生效"(闭环审计断②) */
+.mgmt-msg.onb-restart-big {
+  font-size: 16px; font-weight: 700; line-height: 1.5;
+  margin-top: 12px; padding: 12px; border: 2px solid var(--green);
+  border-radius: 9px; background: var(--surface-2);
+}
 
 /* === 9.4 渲染层:markdown 正文 + tool 卡 + 输出面板 + status === */
 .md p { margin: 2px 0; }

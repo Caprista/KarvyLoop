@@ -114,6 +114,7 @@
         "onb.validating": "verifying the key works…",
         "onb.ok": "✓ working — you're set.",
         "onb.validate_failed": "Saved, but the test call failed: {err}. Check the key/endpoint and try again.",
+        "onb.saved_restart": "✓ Key saved. One last step: restart the console for it to take effect — stop the running process in your terminal (Ctrl+C), then run `karvyloop console` again.",
         "skills.title": "🧩 Skill Library (crystallized)",
         "skills.subtitle": "Skills crystallized from how you use Karvy — the fast brain hits these next time (faster, cheaper). This is the wedge's home.",
         "skills.no_llm": "Skill library needs the runtime (started with --no-llm = read-only).",
@@ -252,8 +253,11 @@
         "cockpit.predict": "🔮 You might want to",
         "cockpit.busy": "🔄 Who's busy",
         "cockpit.token_title": "Token spend (model · tokens · cost)",
+        "cockpit.pulse_topline": "🦫 ▶ {running} running · ⚖ {pending} awaiting your call",
         "empty.predict": "Still observing how you work — once enough usage builds up, suggestions show up here. Hit ⟳ to check right now.",
         "empty.busy": "Agents working in the background appear here.",
+        "empty.busy_guide": "No roles at work yet — create a business domain and hand something over.",
+        "empty.busy_guide_btn": "＋ Create a domain",
         "proposal.basis_label": "Why: ",
         "proposal.jump": "See context →",
         "material.ask": "Ask Karvy about these {n} →",
@@ -662,10 +666,7 @@
         "lifeline.type_crystallized": "crystallized",
         "lifeline.type_revised": "revised",
         "lifeline.type_rerun": "rerun",
-        "lifeline.type_improved": "improved",
-        "cockpit.pulse_topline": "🦫 ▶ {running} running · ⚖ {pending} awaiting your call",
-        "empty.busy_guide": "No roles at work yet — create a business domain and hand something over.",
-        "empty.busy_guide_btn": "＋ Create a domain"
+        "lifeline.type_improved": "improved"
       },
       zh: {
         "ui.title": "KarvyLoop",
@@ -779,6 +780,7 @@
         "onb.validating": "正在验证 key 是否真能用…",
         "onb.ok": "✓ 通了 —— 配好了。",
         "onb.validate_failed": "已保存,但试调用失败:{err}。检查 key/端点后再试一次。",
+        "onb.saved_restart": "✓ 密钥已保存。最后一步:重启 console 后生效 —— 在终端里关掉正在跑的进程(Ctrl+C),再重新运行 karvyloop console。",
         "skills.title": "🧩 技能库(已结晶)",
         "skills.subtitle": "从你怎么用小卡里结晶出来的技能 —— 下次快脑直接命中(更快更省)。这是楔子的家。",
         "skills.no_llm": "技能库需要运行时(--no-llm 启动=只读视图)。",
@@ -917,8 +919,11 @@
         "cockpit.predict": "🔮 你可能想做",
         "cockpit.busy": "🔄 谁在忙",
         "cockpit.token_title": "token 花费(模型 · tokens · 成本)",
+        "cockpit.pulse_topline": "🦫 ▶ {running} 在跑 · ⚖ {pending} 等你拍板",
         "empty.predict": "还在观察你的使用习惯,积累够了会在这里提建议。点 ⟳ 可以现在就问一次。",
         "empty.busy": "在后台干活的 agent 会出现在这里。",
+        "empty.busy_guide": "还没有角色在干活 —— 先建一个业务域,把活交出去试试。",
+        "empty.busy_guide_btn": "＋ 建一个业务域",
         "proposal.basis_label": "依据:",
         "proposal.jump": "看上下文 →",
         "material.ask": "拿这 {n} 条问小卡 →",
@@ -1327,10 +1332,7 @@
         "lifeline.type_crystallized": "结晶",
         "lifeline.type_revised": "修订",
         "lifeline.type_rerun": "重跑",
-        "lifeline.type_improved": "进化",
-        "cockpit.pulse_topline": "🦫 ▶ {running} 在跑 · ⚖ {pending} 等你拍板",
-        "empty.busy_guide": "还没有角色在干活 —— 先建一个业务域,把活交出去试试。",
-        "empty.busy_guide_btn": "＋ 建一个业务域"
+        "lifeline.type_improved": "进化"
       }
     };
     function normalize(lang) {
@@ -1439,7 +1441,10 @@
       "这个群里没有可上桌的角色(先去业务域入职 agent)": "no roles available for a roundtable in this group (onboard agents into a domain first)",
       "这条圆桌不在对齐中(可能已开始或结束)": "this roundtable is not aligning (it may have started or ended)",
       "请在圆桌窗里对齐": "align inside the roundtable window",
-      "请在圆桌窗里开始": "start inside the roundtable window"
+      "请在圆桌窗里开始": "start inside the roundtable window",
+      "此类卡当前无法自动处置(no handler),已保留在待决列表 — 等处置能力接上,或 REJECT 关闭它": "this card can't be auto-handled yet (no handler) — it stays in your pending list until the capability lands, or REJECT to dismiss it",
+      "已归档本周周报 —— 数字都来自你真实的运行记录": "this week's digest archived — every number comes from your real run records",
+      "已记录处置:技能「": "resolution recorded: skill 「"
     };
     function tBackend(text) {
       const s = String(text == null ? "" : text);

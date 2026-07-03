@@ -75,6 +75,29 @@ def _probe_karvyloop_version(host: str, port: int, *, timeout: float = 0.6):
         return None
 
 
+def resolve_config_state_path(config_path: Optional[Path], no_llm: bool) -> str:
+    """app.state.config_path 的唯一决定逻辑(闭环审计断① CRITICAL 修)。
+
+    - 显式 --config → 用它。
+    - 显式 --no-llm → ""(只读模式,有意不接配置写入)。
+    - 其余 → **恒设**默认 `~/.karvyloop/config.yaml`,**不管文件在不在**。
+      病根:此前"默认 config 已存在才设路径",纯新机器上默认 config 还不存在 →
+      config_path="" → `/api/model/save` 拒绝写 key → 强制引导永远保存失败
+      (主推安装路径 `karvyloop console` 的第一环断)。下游 `config_models._load/_save`
+      本就处理文件不存在(load 返 {},save mkdir+写),恒设路径零风险。
+    """
+    if config_path:
+        return str(config_path)
+    if no_llm:
+        return ""
+    _default_cfg = Path.home() / ".karvyloop" / "config.yaml"
+    try:
+        _default_cfg.parent.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"[karvyloop console] 创建 ~/.karvyloop 目录失败(保存配置时会再试): {e}")
+    return str(_default_cfg)
+
+
 def cmd_console(args: argparse.Namespace) -> int:
     """`karvyloop console` 入口(8.5-C-frontend 实做)。
 
@@ -142,16 +165,8 @@ def cmd_console(args: argparse.Namespace) -> int:
         workbench_app=workbench_app,
     )
     # 9.4:存 config 路径,供 /api/lang 持久化语言偏好 + 模型管理(写回 config.yaml)。
-    # 未显式 --config 但已加载默认配置(非 no_llm)→ 记下**默认路径**,
-    # 否则 app.state.config_path 为空会让模型/语言管理误判"无配置"(VM 实测踩到)。
-    if config_path:
-        app.state.config_path = str(config_path)
-    elif not no_llm:
-        from pathlib import Path as _CfgP
-        _default_cfg = _CfgP.home() / ".karvyloop" / "config.yaml"
-        app.state.config_path = str(_default_cfg) if _default_cfg.exists() else ""
-    else:
-        app.state.config_path = ""
+    # 断①修:非 no_llm 时**恒设**默认路径(不管文件在不在)—— 纯新机器的强制引导才能真保存 key。
+    app.state.config_path = resolve_config_state_path(config_path, no_llm)
     # 无 Key 强制引导(/api/setup_status):记下是不是用户**显式** --no-llm
     # (显式只读模式不强制录模型;非 no_llm 但无可用 key → 网页强制引导)。
     app.state.no_llm = bool(no_llm)
@@ -511,4 +526,4 @@ def build_console_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentPa
     return p_console
 
 
-__all__ = ["cmd_console", "build_console_parser"]
+__all__ = ["cmd_console", "build_console_parser", "resolve_config_state_path"]

@@ -234,6 +234,13 @@ async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Pro
     return;
   }
   await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });  // 刚加的设为默认
+  if (r.data.restart_required) {
+    // 闭环审计断②诚实面:fresh 进程(冷启动无 config)没有 gateway/main_loop,保存成功也
+    // 到不了首次对话 —— 大字告知"重启生效",留在引导页(不关模态、不跑必败的 validate)。
+    _setMsg(msg, true, t("onb.saved_restart"));
+    msg.classList.add("onb-restart-big");
+    return;
+  }
   _setMsg(msg, true, t("onb.validating"));   // 实时校验:坏 key/连不上当场抓
   const v = await _postJSON("/api/model/validate", {});
   if (v.ok && v.data && v.data.ok) {

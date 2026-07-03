@@ -3951,6 +3951,18 @@ class ModelSaveRequest(BaseModel):
     reasoning: bool = False
 
 
+def _restart_required(app, reloaded: bool) -> bool:
+    """保存/改配置后,进程还到不到得了"能真聊"?(闭环审计断②诚实面)
+
+    fresh 进程(无 config 启动)gateway/main_loop 都是 None:热加载没有对象可替换,
+    且 pump/质量裁判/trace 漏斗/task sink 全在 entry 启动期按 main_loop 接线 ——
+    在线重建=半活状态,诚实答案是"重启 console"。前端拿这个标志显示大字提示。
+    """
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    return (not reloaded) or rk.get("gateway") is None \
+        or getattr(app.state, "main_loop", None) is None
+
+
 @router.post("/model/save")
 def api_model_save(req: ModelSaveRequest, request: Request) -> dict[str, Any]:
     """新增/编辑全局模型(写 config.yaml + 热加载注册表)。密钥留空=保留原值。"""
@@ -3962,7 +3974,10 @@ def api_model_save(req: ModelSaveRequest, request: Request) -> dict[str, Any]:
     if not ok:
         return {"ok": False, "reason": reason}
     reloaded, rmsg = _reload_gateway_registry(request.app)
-    return {"ok": True, "reloaded": reloaded, "reload_note": rmsg}
+    return {"ok": True, "reloaded": reloaded, "reload_note": rmsg,
+            # 断②:保存成功≠能聊。fresh 进程无 gateway/main_loop → 明确告知要重启,
+            # 前端(引导页)据此显示"密钥已保存,重启 console 后生效"的大字提示,不再静默。
+            "restart_required": _restart_required(request.app, reloaded)}
 
 
 @router.get("/providers/presets")
