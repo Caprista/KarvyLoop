@@ -143,6 +143,32 @@ def build_console_app(
                             learned = await asyncio.to_thread(_ml.lessons_review)
                             if learned:
                                 logger.info(f"[karvyloop console] 跨-run 蒸出经验 {learned} 条")
+                        # Trace-conditioned 技能修订(crystallize.revision,同 lessons_review 节奏):
+                        # 客观信号差的技能 → LLM 修 Steps;小改自动落 + Changelog,大改出 revise_skill 卡。
+                        if _ml is not None and hasattr(_ml, "revision_review"):
+                            rres = await asyncio.to_thread(_ml.revision_review)
+                            if rres.get("revised") or rres.get("proposed"):
+                                logger.info(f"[karvyloop console] 技能修订:小改自动落 {rres.get('revised', 0)} 个、"
+                                            f"大改出卡 {rres.get('proposed', 0)} 张")
+                        # 周报卡(cognition.weekly_digest):7 天一发,幂等防重(水位落盘);
+                        # 数字全部从 Trace/tokens.db/决策流水确定性汇总,零 LLM。发卡后推前端。
+                        _wtrace = getattr(_ml, "trace", None) if _ml is not None else None
+                        if _wtrace is not None:
+                            from karvyloop.cognition.weekly_digest import weekly_digest_tick
+                            wres = await weekly_digest_tick(
+                                trace=_wtrace,
+                                token_ledger=getattr(app.state, "token_ledger", None),
+                                taste_store=getattr(app.state, "taste_predictions", None),
+                                registry=getattr(app.state, "proposal_registry", None),
+                                decision_log=getattr(app.state, "decision_log", None))
+                            if wres.get("ran"):
+                                _wreg = getattr(app.state, "proposal_registry", None)
+                                _wcard = (_wreg.get(wres.get("proposal_id", ""))
+                                          if _wreg is not None else None)
+                                if _wcard is not None:
+                                    from karvyloop.console.proposals import broadcast_proposal
+                                    sent = await broadcast_proposal(app, _wcard)
+                                    logger.info(f"[karvyloop console] 周报卡已发(推 {sent} client(s))")
                         # docs/02 §15.5:临时原子生命周期 —— 被角色复用的转正,孤儿撤回(护城河自清洁)。
                         _areg = getattr(app.state, "atom_registry", None)
                         _rreg = getattr(app.state, "role_registry", None)

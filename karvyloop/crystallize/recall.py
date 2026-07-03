@@ -149,7 +149,12 @@ def compose_rerun_context(hit: "RecallHit", intent: str) -> str:
     """
     method, guidance = split_body_guidance(hit.body if hit is not None else "")
     if not method and not guidance:
-        method = ((hit.body if hit is not None else "") or "").strip()
+        # 兜底只为"无 header 的裸 body"设(理论防御)。方法/指导都拆空但 body 非空,
+        # 只可能是 body 全由被剥的审计段组成(如只剩 ## Changelog)—— 审计痕不是方法,
+        # 按空方法处理,**绝不**把 Changelog 复活进"已有方法"块(旧日期/旧 trace 会投毒重跑)。
+        raw = ((hit.body if hit is not None else "") or "").strip()
+        has_stripped = any(line.strip() in _STRIP_HEADERS for line in raw.splitlines())
+        method = "" if has_stripped else raw
     parts: list[str] = []
     if method:
         parts.append(

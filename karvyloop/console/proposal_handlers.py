@@ -13,8 +13,10 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import Any, Callable, Dict, Tuple
 
+from karvyloop.crystallize.revision import KIND_REVISE_SKILL, apply_revision_proposal
 from karvyloop.karvy.proposal_registry import (
     KIND_CONFIRM_DECISION_PREF, KIND_CONFIRM_RESULT, KIND_CRYSTALLIZE_SKILL,
     KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
@@ -551,7 +553,12 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
 
     只放有真实目的地的 kind;其余靠 registry 默认诚实回执("no handler")。
     """
+    # revise_skill(技能大改 H2A 卡):ACCEPT → apply_revision_proposal 落 SKILL.md +
+    # Changelog + Trace 审计(「改了再批」生效:落的是 ACCEPT 时 payload 里的 new_steps)。
+    # trace 从 main_loop 取(--no-llm / 测试 app=None 时为 None → 只落盘不写审计,handler 自身兜底)。
+    _ml = getattr(getattr(app, "state", None), "main_loop", None) if app is not None else None
     return {
+        KIND_REVISE_SKILL: partial(apply_revision_proposal, trace=getattr(_ml, "trace", None)),
         KIND_CRYSTALLIZE_SKILL: _crystallize_skill_handler,
         KIND_ROUTE_TO_ROLE: _route_to_role_handler(app),
         KIND_ROUNDTABLE: _roundtable_handler(app),

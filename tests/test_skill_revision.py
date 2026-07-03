@@ -96,6 +96,27 @@ def test_recall_hit_carries_guidance_and_rerun_context_labels_it(tmp_path):
     assert ctx.count("markdown 表格") == 1
 
 
+def test_changelog_only_body_never_resurrects_into_method(tmp_path):
+    """对抗验收边缘:body 只剩 ## Changelog(方法段没了/手写技能只有审计痕)时,
+    compose_rerun_context 的兜底不许把 Changelog 复活进"已有方法"块 ——
+    审计痕(旧日期/旧 trace refs)当方法喂 LLM 是投毒。method 按空处理。"""
+    skills_dir = tmp_path / "skills"
+    body = "## Changelog\n\n- (2026-07-02) [revision:auto] traces: t1 — 调整步骤\n"
+    _write_skill(skills_dir, body=body)
+    hit = recall(INTENT, skills_dir=skills_dir, scope="user")
+    assert hit is not None
+    ctx = compose_rerun_context(hit, INTENT)
+    # 空 method + 空 guidance + 只有 Changelog → 不出"已有方法"块,更不带 Changelog 内容
+    assert "已有方法" not in ctx
+    assert "Changelog" not in ctx and "revision:auto" not in ctx and "2026-07-02" not in ctx
+    assert f"[当前任务]\n{INTENT}" in ctx
+    # 兜底本职不回归:无 header 的裸 body 仍走"已有方法"
+    ctx2 = compose_rerun_context(
+        type(hit)(name="x", body="直接一段裸打法,没有任何 ## 段", path="", score=1.0,
+                  manifest={}), INTENT)
+    assert "已有方法" in ctx2 and "裸打法" in ctx2
+
+
 def test_drive_guided_rerun_feeds_guidance_to_slow_brain(tmp_path):
     """端到端:dynamic 命中重跑时,慢脑收到的 intent 里有标注过的纠正段。"""
     skills_dir = tmp_path / "skills"

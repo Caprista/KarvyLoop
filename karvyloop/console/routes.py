@@ -1413,6 +1413,65 @@ def api_skills(request: Request) -> dict[str, Any]:
     return {"skills": out}
 
 
+@router.get("/skill_lifecycle")
+def api_skill_lifecycle(request: Request) -> dict[str, Any]:
+    """每技能事件时间线(给前端时间线视图供数;K4 只读,全部从 Trace 聚合)。
+
+    契约(别改形状):{"skills": [{"name", "sig", "events": [{"ts", "type", "detail",
+    "trace_ref"}]}]}。type ∈ crystallized(kind=crystallize)/ revised(kind=skill_revision,
+    29112e9)/ rerun(eval_fact 带 skill_rerun 标)。improved:improve.py 写回目前不留
+    Trace 痕 → 数据不可得,该 type 诚实不出现(不编)。无 main_loop / 无 Trace → 空表。
+    """
+    ml = getattr(request.app.state, "main_loop", None)
+    trace = getattr(ml, "trace", None) if ml is not None else None
+    if trace is None:
+        return {"skills": []}
+    from karvyloop.crystallize import EVAL_FACT_KIND, REVISION_KIND
+    by_sig: dict[str, dict[str, Any]] = {}
+
+    def _slot(sig: str, name: str) -> dict[str, Any]:
+        s = by_sig.setdefault(sig, {"name": "", "sig": sig, "events": []})
+        if name and not s["name"]:
+            s["name"] = name
+        return s
+
+    try:
+        task_ids = trace.all_tasks()
+    except Exception:
+        return {"skills": []}
+    for tid in task_ids:
+        for e in trace.query(tid):
+            p = e.payload or {}
+            sig = str(p.get("sig", "") or "")
+            if not sig:
+                continue   # 没 sig 归不了属,跳过(不猜)
+            if e.kind == "crystallize":
+                ev_type, name = "crystallized", str(p.get("name", "") or "")
+                detail = str(p.get("when_to_use", "") or "")
+                trace_ref = str(p.get("trace_ref", "") or "") or f"{e.task_id}:{e.seq}"
+            elif e.kind == REVISION_KIND:
+                ev_type, name = "revised", str(p.get("skill_name", "") or "")
+                note = str(p.get("note", "") or "")
+                mode = str(p.get("mode", "") or "")
+                detail = f"{mode}: {note}" if note else mode
+                trace_ref = f"{e.task_id}:{e.seq}"   # skill_revision 本身就是审计事件
+            elif e.kind == EVAL_FACT_KIND and p.get("skill_rerun"):
+                ev_type, name = "rerun", str(p.get("skill_name", "") or "")
+                detail = "success" if p.get("success") else "failure"
+                trace_ref = str(p.get("trace_ref", "") or "") or f"{e.task_id}:{e.seq}"
+            else:
+                continue
+            _slot(sig, name)["events"].append({
+                "ts": e.ts, "type": ev_type, "detail": detail, "trace_ref": trace_ref,
+            })
+    skills = list(by_sig.values())
+    for s in skills:
+        s["events"].sort(key=lambda ev: ev["ts"])
+    # 最近有动静的技能在前(时间线视图默认关注活跃技能)
+    skills.sort(key=lambda s: -(s["events"][-1]["ts"] if s["events"] else 0.0))
+    return {"skills": skills}
+
+
 @router.get("/coding/capability")
 def api_coding_capability(request: Request) -> dict[str, Any]:
     """内建「Coding」技能(#1 v1.0):把编码能力当一个**可在技能库里看见**的技能露出。

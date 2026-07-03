@@ -234,6 +234,26 @@ def test_extract_json_array_survives_prose_with_brackets() -> None:
         json.loads(_extract_json_array("没有数组,只有散文[未闭合"))
 
 
+def test_extract_json_array_prefers_all_dict_array_over_prose_array() -> None:
+    """对抗验收边缘:散文里的合法数组(`看了 [1,2] 条`)不许遮蔽后面的真数组 ——
+    第一遍扫描优先返回"非空且全 dict 项"的数组,否则建议整批丢失。"""
+    import json
+
+    from karvyloop.karvy.fastbrain.trace_habit import _extract_json_array
+
+    prose = '看了 [1,2] 条。结论:[{"pattern": "用户常整理周报", "strength": 0.8}]'
+    arr = json.loads(_extract_json_array(prose))
+    assert arr == [{"pattern": "用户常整理周报", "strength": 0.8}]
+
+    # 真数组被截断时,散文数组同样不许上位(截断兜底只认 dict 项,优先级在其后)
+    truncated = '看了 [1,2] 条。结论:[{"pattern": "整理周报", "strength": 0.9}, {"pat'
+    assert json.loads(_extract_json_array(truncated)) == [
+        {"pattern": "整理周报", "strength": 0.9}]
+
+    # 全文只有非 dict 数组 → 仍退回第一个合法数组(不比旧行为更空)
+    assert json.loads(_extract_json_array("只有 [1,2] 没别的")) == [1, 2]
+
+
 def test_extract_json_array_salvages_truncated_tail() -> None:
     """2026-07-03 真跑取证:思考型模型把 max_tokens 烧在思考上,数组尾被截在半个对象。
 

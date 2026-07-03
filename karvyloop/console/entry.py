@@ -250,6 +250,23 @@ def cmd_console(args: argparse.Namespace) -> int:
                         except Exception:
                             return ""
                     main_loop.set_lesson_judge(_lesson_judge)
+
+                # Trace-conditioned 技能修订裁判(crystallize.revision,慢侧):同 lesson judge
+                # 桥法(async judge_revision → sync)。daily tick 跑 ml.revision_review():
+                # 客观信号差的技能 → LLM 修 Steps;小改自动落,大改出 revise_skill H2A 卡。
+                if hasattr(main_loop, "set_revision_judge"):
+                    def _revision_judge(material, _gw=_gw, _mref=_mref):
+                        import asyncio
+                        from karvyloop.crystallize.revision import judge_revision
+                        try:
+                            return asyncio.run(judge_revision(material, gateway=_gw, model_ref=_mref))
+                        except Exception:
+                            return ""
+                    main_loop.set_revision_judge(_revision_judge)
+                # 大改 H2A 卡出口 → 待决议表(无 sink 时 revision 只记 Trace 不落盘,绝不静默自动落)
+                _preg = getattr(app.state, "proposal_registry", None)
+                if _preg is not None and hasattr(main_loop, "set_revision_proposal_sink"):
+                    main_loop.set_revision_proposal_sink(_preg.register)
             sys.stderr.write(
                 (t("console.karvy_wired_on") if bundle.has_llm
                  else t("console.karvy_wired_off")) + "\n"

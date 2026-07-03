@@ -382,25 +382,35 @@ def _extract_json_array(text: str) -> str:
 
     旧实现取「首 `[` … 末 `]`」切片 —— 真模型(思考型,如 MiniMax-M3)的散文里常有
     方括号,切出来是跨散文的垃圾 → parse 永败(2026-07-03 真跑确诊)。
-    现改为:对每个 `[` 起点用 json.JSONDecoder().raw_decode 试解,取第一个合法数组。
+    现改为:对每个 `[` 起点用 json.JSONDecoder().raw_decode 试解;**第一遍优先取
+    "非空且全 dict 项"的数组**(真产物形态)—— 否则散文里 `看了 [1,2] 条` 这类合法但
+    无关的数组会遮蔽后面的真数组(建议整批丢失,2026-07 对抗验收边缘);一个全 dict
+    数组都没有,再退回截断兜底,最后退回第一个合法数组。
     仍是严格 JSON(宁空勿毒:不抽 prose,只找**完整合法**的数组);找不到返原文
     (让 json.loads 自己报错,调用方 warning)。
     """
     cleaned = _strip_code_fences(text)
     decoder = json.JSONDecoder()
+    first_any: Optional[str] = None
     idx = cleaned.find("[")
     while idx != -1:
         try:
             obj, _end = decoder.raw_decode(cleaned, idx)
             if isinstance(obj, list):
-                return json.dumps(obj, ensure_ascii=False)
+                if obj and all(isinstance(it, dict) for it in obj):
+                    return json.dumps(obj, ensure_ascii=False)   # 全 dict 项 = 真数组,绝对优先
+                if first_any is None:
+                    first_any = json.dumps(obj, ensure_ascii=False)
         except json.JSONDecodeError:
             pass
         idx = cleaned.find("[", idx + 1)
-    # 没有一个完整数组 → 截断兜底(真模型思考烧掉 max_tokens,数组尾被截是常态)
+    # 没有完整的全-dict 数组 → 截断兜底(真模型思考烧掉 max_tokens,数组尾被截是常态);
+    # 兜底同样只认 dict 项,所以排在"第一个合法数组"之前(被截的真数组 > 散文里的 [1,2])。
     salvaged = _salvage_truncated_array(cleaned)
     if salvaged is not None:
         return salvaged
+    if first_any is not None:
+        return first_any
     return cleaned
 
 
