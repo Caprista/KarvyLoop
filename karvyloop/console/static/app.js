@@ -2864,18 +2864,49 @@
   }
 
   const _TOUR_DONE_KEY = "karvyloop_tour_done";
-  // 6 步 spotlight(docs/46 §6 脚本):全部真实 UI 锚点,≤45s,随时可跳过(点遮罩/×)。
+  // 元素"当前视图下是否真可见"(非"存在"):三视图藏锚方式不同(看板 hidden 聊天/桌面
+  // display:none 侧栏/聊天窗最小化),隐藏元素 rect 全 0 → driver.js 把 popover 钉左上角
+  // 0×0 压 logo = UI 错乱。offsetParent 判 display 链;dock 是 fixed(offsetParent 恒 null
+  // 但可见)→ rect 面积兜底。
+  function _tourVisible(el) {
+    if (!el) return false;
+    if (el.offsetParent !== null) return true;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+  // 候选链取第一个可见者(文档序会先撞被 display:none 藏的同名元素,所以挑"可见"非"第一个")
+  function _tourAnchor(sels) {
+    for (let i = 0; i < sels.length; i++) {
+      const nodes = document.querySelectorAll(sels[i]);
+      for (let j = 0; j < nodes.length; j++) { if (_tourVisible(nodes[j])) return nodes[j]; }
+    }
+    return null;
+  }
+  // 引导前归位:决策列(步5 核心)折叠了先展开——只动 DOM 不写 localStorage,刷新后仍复用户偏好。
+  function _prepForTour() {
+    try {
+      document.querySelectorAll(".col-decide.col-collapsed").forEach((c) => c.classList.remove("col-collapsed"));
+    } catch (e) { /* 某视图无此列不挡 */ }
+  }
+  // 6 步 spotlight(docs/46 §6 脚本):锚点用**候选链**,三视图各取当前可见者;全不可见 → 跳过该步
+  // (绝不 0×0 钉左上角)。修 UI 自查 6 BLOCKER(对话折叠列/看板藏聊天/桌面侧栏与最小化)。
   function _tourSteps() {
-    const step = (sel, n) => ({ element: sel, popover: {
-      title: t("tour.s" + n + ".title"), description: t("tour.s" + n + ".desc") } });
-    return [
-      step("#pulse-text", 1),                        // 脉搏:不用来回问"怎么样了"
-      step("#chat-input", 2),                        // 说话 = 干活的起点
-      step('.nav-item[data-panel="domains"]', 3),    // 开公司:建业务域
-      step("#chat-input", 4),                        // 群里 @角色 交活
-      step("#h2a-list", 5),                          // 拍板列:ACCEPT/DEFER/REJECT + 理由被记住
-      step("#token-meter", 6),                       // 成本可见 + 结晶成技能库
-    ];
+    const CAND = {
+      1: ["#pulse-text"],                                                          // 脉搏(顶栏,三视图都在)
+      2: ["#chat-input", "#chat-open", "#mobile-chat-open"],                        // 说话:输入框→打开聊天入口
+      3: ['.nav-item[data-panel="domains"]', '#desk-dock .dock-item[data-panel="domains"]'], // 建域:侧栏→dock
+      4: ["#chat-input", "#chat-open", "#mobile-chat-open"],                        // @角色 交活
+      5: ["#h2a-list", ".col-decide .col-head", ".col-decide"],                    // 拍板列:内容→列头→便签本体
+      6: ["#token-meter"],                                                         // 成本+结晶(顶栏)
+    };
+    const steps = [];
+    for (let n = 1; n <= 6; n++) {
+      const anchor = _tourAnchor(CAND[n]);
+      if (!anchor) continue;   // 三视图下都不可见 → 跳过,不制造错乱
+      steps.push({ element: anchor, popover: {
+        title: t("tour.s" + n + ".title"), description: t("tour.s" + n + ".desc") } });
+    }
+    return steps;
   }
   function startTour(force) {
     if (!force) {
@@ -2889,11 +2920,14 @@
       // 弹出 0.4s 内按 ESC 会静默不触发 → 标记不落、每次访问重弹(真浏览器烟测抓到的竞态)。
       // 顶栏 💡 随时可重看,所以提前写零代价。
       try { localStorage.setItem(_TOUR_DONE_KEY, "1"); } catch (e) {}
+      _prepForTour();
+      const steps = _tourSteps();
+      if (!steps.length) return;   // 极端:一步锚都不可见 → 不启动空引导(driver 空 steps 会炸)
       const drv = window.driver.js.driver({
         showProgress: true,
         progressText: "{{current}} / {{total}}",
         nextBtnText: t("tour.next"), prevBtnText: t("tour.prev"), doneBtnText: t("tour.done"),
-        steps: _tourSteps(),
+        steps: steps,
       });
       drv.drive();
     }).catch((e) => console.warn("[tour] driver.js unavailable", e));
