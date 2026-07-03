@@ -288,3 +288,27 @@ def test_detect_local_ollama_absent_is_graceful():
            / "frontend" / "src" / "models_panel.ts").read_text(encoding="utf-8")
     assert "/api/providers/detect_local" in src and "onb.ollama_found" in src
     assert "error_class" in src   # 错误分类学真被前端消费
+
+
+def test_task_cost_estimate_endpoint_and_card_wiring():
+    """#42 成本预估:端点给分布(无账本=零值不崩);卡面接线在位(样本门 n>=3 在前端)。"""
+    from fastapi.testclient import TestClient
+    from karvyloop.console import build_console_app
+    from karvyloop.karvy.observer import WorkbenchObserver
+    from karvyloop.llm.token_ledger import TokenLedger
+
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    client = TestClient(app)
+    z = client.get("/api/task_cost_estimate").json()
+    assert z == {"n": 0, "mean": 0, "min": 0, "max": 0}     # 无账本诚实零值
+    led = TokenLedger()
+    for i, tok in enumerate((100, 200, 300)):
+        led.record(source="route_to_role", model="m", input=tok, output=0, task_id=f"t{i}")
+    app.state.token_ledger = led
+    est = client.get("/api/task_cost_estimate").json()
+    assert est["n"] == 3 and est["mean"] == 200 and est["min"] == 100 and est["max"] == 300
+    import pathlib
+    app_js = (pathlib.Path(__file__).resolve().parents[1] / "karvyloop" / "console"
+              / "static" / "app.js").read_text(encoding="utf-8")
+    assert "/api/task_cost_estimate" in app_js and "proposal.cost_estimate" in app_js
+    assert "est.n >= 3" in app_js                            # 样本门:少于 3 不显示数字

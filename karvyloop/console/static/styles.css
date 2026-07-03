@@ -1831,3 +1831,6 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
   .update-banner { row-gap: 4px; }
   .update-banner .update-x { min-height: 36px; min-width: 36px; }
 }
+
+/* #42 成本预估行(花钱之前告诉你) */
+.h2a-cost { font-size: 11px; opacity: .65; margin: 2px 0; }

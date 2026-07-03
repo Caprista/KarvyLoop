@@ -586,6 +586,17 @@
 
   // ============ 9.0e:小卡主动建议(h2a_proposal)渲染 ============
 
+  // 成本预估(60s 缓存;样本来自 per-task 归因账本)
+  let _costEstCache = null, _costEstAt = 0;
+  async function _getTaskCostEstimate() {
+    const now = Date.now();
+    if (_costEstCache && now - _costEstAt < 60000) return _costEstCache;
+    const d = await _getJSON("/api/task_cost_estimate");
+    _costEstCache = d; _costEstAt = now;
+    return d;
+  }
+  function _fmtTok(n) { return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n); }
+
   // ── 多卡不覆盖:同 proposal_id 替换、新 id 追加;清空态占位;绝不 innerHTML="" 抹掉兄弟卡 ──
   // (病根:renderProposal/renderPredict 原来每次都 innerHTML="",第二张卡一来就抹掉第一张;
   //  fetchPendingProposals 遍历所有 pending 也只剩最后一张。决策 loop 不该让待拍的板互相顶掉。)
@@ -633,6 +644,19 @@
         class: "h2a-strength",
         text: t("proposal.strength", { pct: Math.round(payload.strength * 100) }),
       }));
+    }
+    // #42 打计费黑箱:"花钱之前告诉你" —— 执行类提案带最近同类任务的真实消耗分布。
+    // 诚实:样本<3 不显示;数字来自 per-task 归因账本,不是猜的。
+    const _COSTLY_KINDS = ["route_to_role", "run_task", "roundtable"];
+    if (_COSTLY_KINDS.indexOf(payload.kind) >= 0) {
+      const costLine = el("div", { class: "h2a-cost" });
+      card.appendChild(costLine);
+      _getTaskCostEstimate().then((est) => {
+        if (est && est.n >= 3) {
+          costLine.textContent = t("proposal.cost_estimate",
+            { mean: _fmtTok(est.mean), min: _fmtTok(est.min), max: _fmtTok(est.max), n: est.n });
+        }
+      }).catch(() => {});
     }
     const proposalId = payload.proposal_id || ("p-" + (payload.habit_id || 0));
 

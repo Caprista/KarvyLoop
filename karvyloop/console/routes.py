@@ -823,14 +823,17 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     try:
         # @ 命中 → 用被 @ 角色配置的模型(空=默认);否则全局 default。
         eff_rk = _rk_model(runtime_kwargs, _model_for_role(request.app, req.mention)) if m_persona is not None else runtime_kwargs
-        outcome = await drive_in_tui(req.intent, main_loop, ctx=ctx, governance=governance,
-                                     persona=persona, scope=eff_scope,
-                                     images=_normalize_images(req.images),
-                                     # §15.5:直接聊天也挂 create_atom(角色标配,Hardy)+ 归属当前角色
-                                     atom_registry=getattr(request.app.state, "atom_registry", None),
-                                     role_registry=getattr(request.app.state, "role_registry", None),
-                                     self_create_role=self_create_role_id(mgr),
-                                     **eff_rk)
+        # per-task token 归因(#42):这轮 drive 烧的每个 token 记到任务名下(成本预估样本)
+        from karvyloop.llm.token_ledger import token_task as _token_task
+        with _token_task(task_id or ""):
+            outcome = await drive_in_tui(req.intent, main_loop, ctx=ctx, governance=governance,
+                                         persona=persona, scope=eff_scope,
+                                         images=_normalize_images(req.images),
+                                         # §15.5:直接聊天也挂 create_atom(角色标配,Hardy)+ 归属当前角色
+                                         atom_registry=getattr(request.app.state, "atom_registry", None),
+                                         role_registry=getattr(request.app.state, "role_registry", None),
+                                         self_create_role=self_create_role_id(mgr),
+                                         **eff_rk)
     except Exception as e:
         logger.exception(f"api_intent drive 异常: {e}")
         if task_reg is not None and task_id is not None:
@@ -1522,6 +1525,20 @@ def api_domain_template_instantiate(req: DomainTemplateRequest, request: Request
         domain_registry=getattr(app.state, "domain_registry", None),
         role_registry=getattr(app.state, "role_registry", None),
         domain_store=getattr(app.state, "domain_store", None))
+
+
+@router.get("/task_cost_estimate")
+def api_task_cost_estimate(request: Request) -> dict[str, Any]:
+    """#42 打计费黑箱:"花钱之前告诉你" —— 最近 n 个有归因任务的 token 消耗分布。
+
+    诚实边界:只统计接了 per-task 归因之后的任务(老账不猜);样本 <3 前端不显示数字。"""
+    led = getattr(request.app.state, "token_ledger", None)
+    if led is None:
+        return {"n": 0, "mean": 0, "min": 0, "max": 0}
+    try:
+        return led.estimate_task_cost(n=10)
+    except Exception:
+        return {"n": 0, "mean": 0, "min": 0, "max": 0}
 
 
 @router.get("/fs_grants")
