@@ -62,6 +62,11 @@ def _bootstrap_runtime(
     from karvyloop.llm.token_ledger import TokenLedger, get_ledger, register_ledger
     if get_ledger() is None:
         register_ledger(TokenLedger(Path.home() / ".karvyloop" / "tokens.db"))
+    # 花费预算刹车(spend budget):读同一份 config.yaml 的 `budget:` 块 → 注册全局刹车;
+    # 未配 = 无限(0 回归)。gateway 咽喉在每次调用前 check(前台永不拦,只拦后台自动烧钱)。
+    # emit_card 留 None(CLI 无 broadcast;console 接线时传 broadcast 回调 —— 见接线清单)。
+    from karvyloop.llm.spend_budget import wire_spend_budget
+    wire_spend_budget(registry=reg, config_path=cfg_path)
     sb = default_sandbox()
     ws = workspace_root or str(Path.cwd())
     token = _make_token(ws)

@@ -91,6 +91,13 @@ class GatewayClient:
         m = self.reg.get(model_ref)
         prov = self.reg.provider_of(model_ref)
         adapter = self._adapter(m.api)
+        # 花费预算刹车(唯一咽喉,调用前 check;**不改任何记账**——只在其旁新增一个"调用前预算 check")。
+        # 三级:达 75/90% 出提醒卡 + 放行;达 100% + on_limit=pause + **后台自动 source** → 抛
+        # SpendBudgetExceeded fail-loud 拒发(前台永不拦)。未注册预算/未配 budget → no-op(0 回归)。
+        # 软护栏 fail-open 的隔离在 spend_budget.check 内做;这里只让 SpendBudgetExceeded 冒出去。
+        from karvyloop.llm.spend_budget import check_spend_budget
+        from karvyloop.llm.token_ledger import current_source
+        check_spend_budget(current_source())
         # 推理强度落参(只改请求体;Usage/记账路径一字不动 —— 咽喉纪律)
         level = reasoning if reasoning is not None else getattr(self.reg, "default_reasoning", "")
         extra_body = reasoning_params(level, m) if level else {}

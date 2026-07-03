@@ -251,6 +251,26 @@ class TokenLedger:
             "total": int(inp) + int(out), "calls": int(n),
         }
 
+    def window_by_model(self, *, start_ts: Optional[float] = None,
+                        end_ts: Optional[float] = None) -> list[dict]:
+        """时间窗内按 model 聚合(spend budget 按每模型价格算钱要 per-model 分解)。**只读**。
+
+        含 cache_read/cache_write —— 花费换算按模型 cost 表逐列算(input/output/cache_*)。"""
+        w, p = self._window_where(start_ts, end_ts)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT model, COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"FROM token_usage {w} GROUP BY model "
+                f"ORDER BY SUM(input)+SUM(output) DESC", p,
+            ).fetchall()
+        return [
+            {"model": r[0], "input": int(r[1]), "output": int(r[2]),
+             "cache_read": int(r[3]), "cache_write": int(r[4]),
+             "total": int(r[1]) + int(r[2]), "calls": int(r[5])}
+            for r in rows
+        ]
+
     def window_by_source(self, *, start_ts: Optional[float] = None,
                          end_ts: Optional[float] = None) -> list[dict]:
         """时间窗内按 source 聚合("这周谁烧的"),烧得多在前。**只读**。"""
