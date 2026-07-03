@@ -23,7 +23,8 @@ from pathlib import Path, PurePosixPath
 from typing import List, Optional, Tuple
 
 # 根级排除(精确名):凭证与运行时秘密,绝不入包
-_EXCLUDE_ROOT_NAMES = ("config.yaml", "console.runtime.json")
+# channel_secret = 邮件决策闭环的 HMAC secret(docs/43 ⑤a)——本机凭证,带走即可伪造回批码。
+_EXCLUDE_ROOT_NAMES = ("config.yaml", "console.runtime.json", "channel_secret")
 
 # 已知顶层条目 → MANIFEST 一句话说明(未知条目走通用说明,不漏)
 _KNOWN_ENTRIES = {
@@ -37,6 +38,7 @@ _KNOWN_ENTRIES = {
     "tokens.db": "token spend ledger (who burned what, when)",
     "taste_predictions.json": "taste model predictions (decision pre-alignment)",
     "pending_proposals.json": "decision cards still waiting for your call",
+    "channel_used_codes.json": "email-channel replay guard (hashes of spent decision codes)",
     "consolidate_tick.json": "daily knowledge-consolidation watermark state",
     "skill_tags_tick.json": "daily skill-tagging watermark state",
 }
@@ -106,6 +108,8 @@ def _manifest_text(included: List[Tuple[Path, PurePosixPath]], excluded: List[st
         "                         Re-add your keys on the new machine (the setup",
         "                         wizard or `karvyloop init` will ask).",
         "  console.runtime.json   local runtime access token — machine-specific.",
+        "  channel_secret         email-channel HMAC secret — machine-specific credential",
+        "                         (a new one is generated on the new machine).",
         "  *.lock                 process lock files — meaningless elsewhere.",
     ]
     if excluded:

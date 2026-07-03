@@ -25,10 +25,15 @@ import dataclasses
 import hashlib
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# DEFER 老化阈值(docs/43 ⑤a):挂龄超过它的卡在 digest 里置顶标「⏳挂了N天」;
+# DEFER 过的卡满该阈值重新计入下一封 digest(DEFER≠消失,只是暂缓)。
+AGING_THRESHOLD_S = 48 * 3600
 
 # ---- kind 常量(docs/30 PR-1)----
 KIND_CRYSTALLIZE_SKILL = "crystallize_skill"
@@ -92,6 +97,9 @@ class PendingProposalRegistry:
 
     def __init__(self, persist_path=None) -> None:
         self._pending: Dict[str, object] = {}
+        # 卡龄元数据(docs/43 ⑤a DEFER 老化):pid → {"created_ts": float, "deferred_at": float|None}。
+        # 放 registry 不放 Proposal 本体(Proposal 是 frozen 语义对象;挂龄是登记表的事)。
+        self._meta: Dict[str, dict] = {}
         self._persist_path = Path(persist_path) if persist_path else None
         if self._persist_path:
             self._load()
@@ -114,6 +122,24 @@ class PendingProposalRegistry:
                 continue
             if getattr(prop, "proposal_id", ""):
                 self._pending[prop.proposal_id] = prop
+        # 卡龄元数据:v2 文件带 meta;v1 旧文件无戳 → 按加载时刻记(向后兼容,不误报老龄)。
+        raw_meta = data.get("meta") or {}
+        load_now = time.time()
+        for pid in self._pending:
+            m = raw_meta.get(pid) if isinstance(raw_meta, dict) else None
+            m = m if isinstance(m, dict) else {}
+            try:
+                created = float(m.get("created_ts") or 0.0)
+            except (TypeError, ValueError):
+                created = 0.0
+            try:
+                deferred = float(m.get("deferred_at") or 0.0)
+            except (TypeError, ValueError):
+                deferred = 0.0
+            self._meta[pid] = {
+                "created_ts": created if created > 0 else load_now,
+                "deferred_at": deferred if deferred > 0 else None,
+            }
 
     def _save(self) -> None:
         p = self._persist_path
@@ -122,19 +148,27 @@ class PendingProposalRegistry:
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             payload = {
-                "version": 1,
+                "version": 2,  # v2:多了 meta(卡龄戳);v1 读者忽略之,v2 读者兼容 v1(无 meta 按加载时刻)
                 "pending": [prop.to_dict() for prop in self._pending.values() if hasattr(prop, "to_dict")],
+                "meta": {pid: dict(self._meta.get(pid) or {}) for pid in self._pending},
             }
             p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as e:  # 落盘失败不阻断内存操作
             logger.warning("[proposal] 待决卡落盘失败(不阻断):%s", e)
 
-    def register(self, proposal) -> str:
-        """登记一条 Proposal,返回 proposal_id(幂等:同 id 覆盖)。"""
+    def register(self, proposal, *, now: Optional[float] = None) -> str:
+        """登记一条 Proposal,返回 proposal_id(幂等:同 id 覆盖)。
+
+        卡龄戳:首次登记记 created_ts;同 id 重复登记(幂等收敛卡,如 ops_fix)**不重置**
+        created_ts / deferred_at —— 挂龄从第一次出现算,DEFER 状态不被重复建议洗掉。
+        """
         pid = getattr(proposal, "proposal_id", "") or ""
         if not pid:
             raise ValueError("proposal 缺 proposal_id(应由 Proposal.__post_init__ 派生)")
         self._pending[pid] = proposal
+        if pid not in self._meta:
+            self._meta[pid] = {"created_ts": time.time() if now is None else float(now),
+                               "deferred_at": None}
         self._save()
         return pid
 
@@ -142,14 +176,40 @@ class PendingProposalRegistry:
         return self._pending.get(proposal_id)
 
     def remove(self, proposal_id: str) -> Optional[object]:
-        """移除并返回(ACCEPT 兑现后 / REJECT 丢弃)。"""
+        """移除并返回(ACCEPT 兑现后 / REJECT 丢弃)。卡龄元数据随卡清。"""
         removed = self._pending.pop(proposal_id, None)
+        self._meta.pop(proposal_id, None)
         if removed is not None:
             self._save()
         return removed
 
     def pending(self) -> List[object]:
         return list(self._pending.values())
+
+    def proposal_meta(self, proposal_id: str) -> dict:
+        """某张卡的卡龄元数据副本 {"created_ts", "deferred_at"};未知 id → 空 dict。"""
+        m = self._meta.get(proposal_id)
+        return dict(m) if m else {}
+
+    def aging_scan(self, now: Optional[float] = None, *,
+                   threshold_s: float = AGING_THRESHOLD_S) -> List[dict]:
+        """挂龄超阈值(默认 48h)的卡列表(docs/43 ⑤a)。
+
+        返回 [{"proposal_id", "proposal", "age_s", "deferred_at"}],按挂龄降序(最老在前)——
+        digest 把这些置顶标「⏳挂了N天」。挂龄一律从 created_ts 算(DEFER 只影响 digest
+        计入节奏,不重置挂龄:拖着的板就是拖着的板)。
+        """
+        t = time.time() if now is None else float(now)
+        out: List[dict] = []
+        for pid, prop in self._pending.items():
+            meta = self._meta.get(pid) or {}
+            created = meta.get("created_ts") or t
+            age = t - created
+            if age >= threshold_s:
+                out.append({"proposal_id": pid, "proposal": prop, "age_s": age,
+                            "deferred_at": meta.get("deferred_at")})
+        out.sort(key=lambda d: -d["age_s"])
+        return out
 
     def __len__(self) -> int:
         return len(self._pending)
@@ -161,6 +221,7 @@ class PendingProposalRegistry:
         *,
         handlers: Optional[Dict[str, ProposalHandler]] = None,
         edits: Optional[Dict[str, str]] = None,
+        now: Optional[float] = None,
     ) -> Optional[DispatchResult]:
         """按用户决策处置一条 Proposal(PR-3)。
 
@@ -185,6 +246,12 @@ class PendingProposalRegistry:
             return DispatchResult(proposal_id, getattr(proposal, "kind", ""), True, "rejected")
 
         if decision == "DEFER":
+            # DEFER 老化(docs/43 ⑤a):记 deferred_at;满 AGING_THRESHOLD_S 后重新计入
+            # 下一封 digest(DEFER≠消失)。挂龄仍从 created_ts 算。
+            meta = self._meta.setdefault(proposal_id, {"created_ts": time.time() if now is None else float(now),
+                                                       "deferred_at": None})
+            meta["deferred_at"] = time.time() if now is None else float(now)
+            self._save()
             return DispatchResult(proposal_id, getattr(proposal, "kind", ""), True, "deferred")
 
         if decision == "ACCEPT":
@@ -636,6 +703,7 @@ def proposal_for_infeasible_report(
 
 __all__ = [
     "PendingProposalRegistry",
+    "AGING_THRESHOLD_S",
     "DispatchResult",
     "dispatch_accept",
     "apply_payload_edits",
