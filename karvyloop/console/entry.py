@@ -184,6 +184,30 @@ def cmd_console(args: argparse.Namespace) -> int:
     except Exception as e:
         logger.warning(f"[karvyloop console] PROPOSE 待决议表接线失败(不影响启动): {e}")
 
+    # === 邮件决策闭环(docs/43 ⑤a):出门在外靠自己的邮箱拍板 ===
+    # 未配置 channels.email → build 返 None,零负担;配置了 → app.py 的 tick 循环
+    # 发 digest + 轮询回批。决策落地与 REST /api/h2a_decide 同一条路(handlers + 决策信号)。
+    try:
+        from karvyloop.channels.email_channel import build_email_channel
+        _preg = getattr(app.state, "proposal_registry", None)
+
+        def _email_decide(pid: str, decision: str, _app=app, _reg=_preg):
+            from karvyloop.console.decision_wire import record_decision_signals
+            record_decision_signals(_app, decision=decision, proposal_id=pid,
+                                    reason="(via email)", domain="", role="")
+            return _reg.decide(pid, decision,
+                               handlers=getattr(_app.state, "proposal_handlers", None) or {})
+
+        app.state.email_channel = (
+            build_email_channel(registry=_preg, decide=_email_decide,
+                                config_path=str(config_path) if config_path else None)
+            if _preg is not None else None)
+        if app.state.email_channel is not None:
+            logger.info("[karvyloop console] 邮件决策通道已接线(digest+回批)")
+    except Exception as e:
+        app.state.email_channel = None
+        logger.warning(f"[karvyloop console] 邮件通道接线失败(不影响启动): {e}")
+
     # === 9.0e:接线小卡 IntentAnalyst → console 推送桥 ===
     # 小卡跟着 console 一起起,每天后台看一次行为,够强的建议弹到 H2A 列。
     # --no-llm 时跳过(无 LLM analyzer 会静默,接了也不出建议,省开销)。

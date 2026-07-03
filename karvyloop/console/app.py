@@ -226,6 +226,20 @@ def build_console_app(
         app.state.scheduler_task = asyncio.create_task(_scheduler_loop())
         logger.info("[karvyloop console] 定时任务调度器已起(30s tick)")
 
+        # 邮件决策通道心跳(docs/43 ⑤a):digest 自带 min_interval 节流,60s 拍无妨;
+        # 未配置(email_channel=None)时 tick 空转零开销。
+        async def _email_channel_loop() -> None:
+            from karvyloop.channels.email_channel import email_channel_tick
+            while True:
+                try:
+                    await asyncio.sleep(60)
+                    await email_channel_tick(getattr(app.state, "email_channel", None))
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"[karvyloop console] 邮件通道 tick 异常(下轮再试): {e}")
+        app.state.email_channel_task = asyncio.create_task(_email_channel_loop())
+
         # predict 启动兜底:延迟一次 boot_poll(修"第一条建议要等 24h"→ 页签体感永远空)。
         # pump 在(有 LLM)→ 真习惯分析;pump 沉默/未接 → proactive_from_state 确定性兜底
         # (任务看板有失败任务 → 提议重试)。没 WS client 也照样进 proposal_registry 待决表,
@@ -309,6 +323,9 @@ def build_console_app(
         _sched_task = getattr(app.state, "scheduler_task", None)
         if _sched_task is not None:
             _sched_task.cancel()
+        _email_task = getattr(app.state, "email_channel_task", None)
+        if _email_task is not None:
+            _email_task.cancel()
         app.state.ws_clients.clear()
         close_fn = getattr(app.state, "proposal_close", None)
         if callable(close_fn):
