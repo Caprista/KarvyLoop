@@ -2492,11 +2492,11 @@
       else m.classList.add("hidden");                    // 弹层态:起始收起(FAB/入口再弹)
     }
     document.body.classList.remove("chat-open");   // 切视图 = 回到干净弹层态
-    const btn = document.getElementById("view-toggle");
-    if (btn) {   // 按钮显示"要切去的视图"
-      btn.textContent = board ? t("view.chat") : t("view.board");
-      btn.title = board ? t("view.chat.title") : t("view.board.title");
-    }
+    // switch 两态明示(Hardy:别让用户猜):active 落在**当前**视图上
+    const optChat = document.getElementById("view-opt-chat");
+    const optBoard = document.getElementById("view-opt-board");
+    if (optChat) optChat.classList.toggle("active", !board);
+    if (optBoard) optBoard.classList.toggle("active", board);
     _updateDockYield();
   }
   function _setView(mode) {
@@ -2584,8 +2584,8 @@
   function setupChatModal() {
     const open = document.getElementById("chat-open");
     if (open) open.addEventListener("click", openChatModal);
-    const karvyBtn = document.getElementById("topbar-karvy");
-    if (karvyBtn) karvyBtn.addEventListener("click", _talkToKarvy);   // S2:副驾=聊天第二入口
+    // 【你的副驾】按钮已撤(Hardy 2026-07-03);_talkToKarvy 保留给移动端/后续桌面隐喻复用。
+    void _talkToKarvy;
     const close = document.getElementById("chat-modal-close");
     if (close) close.addEventListener("click", closeChatModal);
     const overlay = document.getElementById("chat-modal");
@@ -3056,7 +3056,11 @@
     let _viewPref = "chat";
     try { _viewPref = localStorage.getItem("karvyloop_view") || "chat"; } catch (e) {}
     _applyView(_viewPref === "board" ? "board" : "chat");
-    const viewBtn = document.getElementById("view-toggle");
+    const optChat = document.getElementById("view-opt-chat");
+    const optBoard = document.getElementById("view-opt-board");
+    if (optChat) optChat.addEventListener("click", () => _setView("chat"));
+    if (optBoard) optBoard.addEventListener("click", () => _setView("board"));
+    const viewBtn = document.getElementById("view-toggle");   // 兼容留存的隐藏钮(老测试/脚本)
     if (viewBtn) viewBtn.addEventListener("click", () =>
       _setView(document.body.classList.contains("board-view") ? "chat" : "board"));
     const mobileChat = document.getElementById("mobile-chat-open");
@@ -3069,7 +3073,9 @@
       if (mq.addEventListener) mq.addEventListener("change", onMq);
       else if (mq.addListener) mq.addListener(onMq);
     }
-    _startKarvyIdleBubble();   // 右下角卡皮巴拉定时冒省略号泡,提示可点
+    // 副驾按钮撤下(Hardy 2026-07-03):顶栏冒泡随之停用;卡皮巴拉常驻感交给
+    // 右下 dock 与桌面隐喻演进(docs/51)。函数保留,桌面版把泡挂回 dock 时复用。
+    void _startKarvyIdleBubble;
     connectWS();
     startPolling();
     // 9.0e:绑"看建议"按钮

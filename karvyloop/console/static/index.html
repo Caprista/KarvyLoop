@@ -33,16 +33,18 @@
         </div>
         <span class="token-meter" id="token-meter" data-i18n-title="cockpit.token_title">💰 —</span>
       </div>
-      <!-- 小卡永远在场:【你的副驾】从纯装饰升级为按钮(docs/46 S2)——
-           点击 = 切到与小卡的私聊 + 聚焦输入框;冒泡动效(karvy-bubble)也挂它头上 -->
-      <button class="topbar-karvy" id="topbar-karvy" data-i18n-title="app.karvy_talk">
+      <!-- 冒泡动效(karvy-bubble)保留:挂在顶栏右侧,元素隐形只做锚点(【你的副驾】按钮
+           按 Hardy 2026-07-03 拍板撤下;小卡入场感交给右下角常驻形象与桌面隐喻演进) -->
+      <div class="topbar-karvy-anchor" id="topbar-karvy" aria-hidden="true">
         <div class="karvy-bubble hidden" id="karvy-bubble"><span class="karvy-bubble-dots">·</span></div>
-        <img src="/static/assets/karvy-capybara.png" alt="Karvy" />
-        <span class="role" data-i18n="app.karvy_role">你的副驾</span>
-      </button>
+      </div>
       <div class="top-actions">
-        <!-- docs/46 S1:对话⇄看板 一键切换(body.board-view class 换挡;偏好记 localStorage) -->
-        <button class="view-toggle" id="view-toggle">⊞</button>
+        <!-- 对话⇄看板:明示两态的 switch(不让用户猜),active 态高亮;偏好记 localStorage -->
+        <div class="view-switch" id="view-switch" role="tablist">
+          <button class="view-switch-opt active" id="view-opt-chat" data-i18n="view.chat">💬 对话</button>
+          <button class="view-switch-opt" id="view-opt-board" data-i18n="view.board">⊞ 看板</button>
+        </div>
+        <button class="view-toggle hidden" id="view-toggle" aria-hidden="true">⊞</button>
         <!-- docs/46 S4:重看新手引导(首启 tour 可跳过,这里随时唤回) -->
         <button class="tour-replay" id="tour-replay" data-i18n-title="tour.replay.title">💡</button>
         <span class="lang-switcher" id="lang-switcher"></span>

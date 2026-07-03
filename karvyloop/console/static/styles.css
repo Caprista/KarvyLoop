@@ -1970,14 +1970,23 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
    ".col-decide 的 order 不得出现在移动块之前";本段桌面规则全部包在 min-width:721px 里)。
    ========================================================================= */
 
-/* 顶栏 对话⇄看板 切换钮(label 由 JS 按当前视图写 t("view.*")) */
-.view-toggle {
-  padding: 5px 12px; border-radius: 999px; cursor: pointer;
-  background: var(--surface); color: var(--text-2);
-  border: 1px solid var(--border-strong); font-size: var(--fs-12); font-weight: 600;
-  white-space: nowrap;
+/* 顶栏 对话⇄看板:两态明示 switch(Hardy:别让用户猜)。active=当前视图。 */
+.view-switch {
+  display: inline-flex; border: 1px solid var(--border-strong); border-radius: 999px;
+  background: var(--surface); overflow: hidden;
 }
-.view-toggle:hover { border-color: var(--accent); color: var(--accent-deep); }
+.view-switch-opt {
+  padding: 5px 12px; border: none; cursor: pointer; background: transparent;
+  color: var(--text-2); font-size: var(--fs-12); font-weight: 600; white-space: nowrap;
+}
+.view-switch-opt.active {
+  background: var(--accent-light); color: var(--accent-deep);
+}
+.view-switch-opt:not(.active):hover { color: var(--accent-deep); }
+/* 旧切换钮退役为隐藏兼容锚点 */
+.view-toggle { display: none; }
+/* 副驾按钮撤下后的隐形锚点:只承载 karvy-bubble 定位,不占布局 */
+.topbar-karvy-anchor { position: relative; width: 0; height: 0; }
 
 /* 移动端聊天入口大按钮:桌面永不显示(聊天常驻/看板走 FAB) */
 .mobile-chat-entry { display: none; }
