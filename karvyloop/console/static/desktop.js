@@ -380,12 +380,22 @@
         setTimeout(() => bubble.classList.add("hidden"), 6e3);
       }
     }
-    function computeNoteDefault(col, prevBottom) {
+    const KARVY_ZONE = { w: 220, h: 200 };
+    function computeNoteDefault(col, idx, colBottoms) {
       const desk = deskEl();
-      if (!desk) return { x: 12, y: prevBottom };
+      if (!desk) return { x: 12, y: 16 };
       const d = desk.getBoundingClientRect();
       const w = col.offsetWidth || 304;
-      return { x: Math.max(12, d.width - w - 16), y: prevBottom };
+      const h = col.offsetHeight || 180;
+      const lane = Math.floor(idx / 2);
+      const x = Math.max(12, d.width - (lane + 1) * (w + 24));
+      const laneStart = lane === 0 ? 16 : 44;
+      let y = colBottoms[lane] !== void 0 ? colBottoms[lane] : laneStart;
+      if (lane === 0 && y + h > d.height - KARVY_ZONE.h && d.width - w - 24 < d.width - KARVY_ZONE.w) {
+        y = Math.max(16, d.height - KARVY_ZONE.h - h - 12);
+      }
+      colBottoms[lane] = y + h + 14;
+      return { x, y };
     }
     function wireAll() {
       if (_wired) return;
@@ -427,13 +437,12 @@
       _store = loadStore();
       _entered = true;
       _zTop = BASE_Z;
-      let stackY = 12;
-      noteEls().forEach((col) => {
+      const colBottoms = [];
+      noteEls().forEach((col, idx) => {
         const k = noteKey(col);
         const saved = _store.notes[k];
-        const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDefault(col, stackY);
+        const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDefault(col, idx, colBottoms);
         applyPos(col, pos.x, pos.y);
-        stackY = pos.y + (col.offsetHeight || 180) + 12;
         col.style.zIndex = String(++_zTop);
       });
       const cw = _store.windows.chat;

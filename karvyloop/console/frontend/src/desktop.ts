@@ -381,13 +381,27 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     }
   }
 
-  // ---- 默认摆位:右侧一列便签(⚖最上,继承"⚖永远第一"),按实测高度依次堆 ----
-  function computeNoteDefault(col: HTMLElement, prevBottom: number): Pos {
+  // ---- 默认摆位:办公桌式铺开(Hardy 2026-07-03:堆一列=墙角,不是桌子)----
+  // 便签铺成右侧**两列错落**:第 1 列(最右)⚖最上(继承"⚖永远第一")+ 🔄;
+  // 第 2 列(中右,y 略降造错落感)📥 + 🔮。左半留给聊天主窗;
+  // 右下 220×200 是卡皮巴拉的地盘,默认摆位永不侵入(超出往上收)。
+  const KARVY_ZONE = { w: 220, h: 200 };
+  function computeNoteDefault(col: HTMLElement, idx: number, colBottoms: number[]): Pos {
     const desk = deskEl();
-    if (!desk) return { x: 12, y: prevBottom };
+    if (!desk) return { x: 12, y: 16 };
     const d = desk.getBoundingClientRect();
     const w = col.offsetWidth || 304;
-    return { x: Math.max(12, d.width - w - 16), y: prevBottom };
+    const h = col.offsetHeight || 180;
+    const lane = Math.floor(idx / 2);                       // 0=最右列,1=中右列
+    const x = Math.max(12, d.width - (lane + 1) * (w + 24));
+    const laneStart = lane === 0 ? 16 : 44;                 // 第 2 列略降,错落有桌感
+    let y = colBottoms[lane] !== undefined ? colBottoms[lane] : laneStart;
+    // 最右列避让卡皮巴拉地盘:便签底部会压进右下角 → 往上收(至少留出顶部 16px)
+    if (lane === 0 && y + h > d.height - KARVY_ZONE.h && d.width - w - 24 < d.width - KARVY_ZONE.w) {
+      y = Math.max(16, d.height - KARVY_ZONE.h - h - 12);
+    }
+    colBottoms[lane] = y + h + 14;
+    return { x, y };
   }
 
   // ---- enter / leave(视图切换的唯一入口;幂等)----
@@ -422,14 +436,13 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     _store = loadStore();
     _entered = true;
     _zTop = BASE_Z;
-    // 便签:存过用存的(clamp 进当前视口),没存过按默认右列依次堆
-    let stackY = 12;
-    noteEls().forEach((col) => {
+    // 便签:存过用存的(clamp 进当前视口),没存过按"办公桌铺开"默认位(两列错落,避卡皮巴拉)
+    const colBottoms: number[] = [];
+    noteEls().forEach((col, idx) => {
       const k = noteKey(col);
       const saved = _store.notes[k];
-      const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDefault(col, stackY);
+      const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDefault(col, idx, colBottoms);
       applyPos(col, pos.x, pos.y);
-      stackY = pos.y + (col.offsetHeight || 180) + 12;   // 只影响"没存过"的下一张默认位
       col.style.zIndex = String(++_zTop);
     });
     // 聊天窗:默认开、默认左上主位;记住上次位置与最小化态

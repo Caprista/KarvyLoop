@@ -290,7 +290,9 @@ body.desk-view .desk-dock .dock-win.is-off { display: none; }
    冒泡动效(#karvy-bubble)从顶栏锚点搬回它头上(CSS 重定位,DOM 不动)
    ========================================================================= */
 body.desk-view .modal-overlay:not(.hidden) ~ .karvy-dock { display: flex; }
-body.desk-view .karvy-dock { z-index: 9400; }
+/* 吉祥物永远在内容之下(Hardy:便签被卡皮巴拉挡住=本末倒置)——便签/窗口 z 从 220 起,
+   它压 210:桌面空着时它可见可点,便签拖过来时内容盖它,谁重要谁在上 */
+body.desk-view .karvy-dock { z-index: 210; }
 body.desk-view .karvy-dock.dock-yield { opacity: 1; pointer-events: auto; }
 body.desk-view .karvy-dock .karvy-dock-label { display: none; }
 body.desk-view #karvy-bubble {
