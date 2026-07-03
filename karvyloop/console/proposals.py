@@ -110,11 +110,32 @@ class ProposalPump:
 
     **依赖倒置**:analyst 用 duck type(只调 boot_poll/daily_poll/on_event),
     避免 console import 小卡私有 IntentAnalyst。
+
+    **distill 钩子**(修"predict 页签永远空"的真根因):drive 事件只落 Trace **原文**层,
+    而 analyst 读的是**摘要**层 —— 此前 raw→summary 提炼器在生产路径无人调用(孤儿函数),
+    摘要层永远空 → analyst 永远沉默。接线层(intent_pump)把提炼器作为 callable 注入,
+    boot/daily 每次先提炼再分析(duck type:console 不 import fastbrain)。
     """
 
-    def __init__(self, app: Any, analyst: Any) -> None:
+    def __init__(self, app: Any, analyst: Any, *, distill: Optional[Any] = None) -> None:
         self._app = app
         self._analyst = analyst
+        self._distill = distill
+
+    def _run_distill(self) -> None:
+        """boot/daily 前先跑 raw→summary 提炼(注入的 callable;幂等由提炼器 watermark 保证)。
+
+        fail-loud:提炼失败打 warning(此前这条链静默断掉,页签空得毫无线索)。"""
+        if self._distill is None:
+            return
+        try:
+            got = self._distill()
+            if got is not None:
+                logger.info(
+                    f"[proposals] raw→summary 提炼完成:覆盖 {got.get('from_raw_count', '?')} 条原文事件"
+                )
+        except Exception as e:
+            logger.warning(f"[proposals] raw→summary 提炼失败(analyst 只能看旧摘要): {e}")
 
     async def on_event(self, chunk: Any) -> tuple[Optional[Any], int]:
         """事件驱动:analyst.on_event → 推。"""
@@ -122,12 +143,14 @@ class ProposalPump:
         return await self._maybe_push(proposal)
 
     async def boot(self, recent_n: int = 20) -> tuple[Optional[Any], int]:
-        """启动一次:analyst.boot_poll → 推。"""
+        """启动一次:先 raw→summary 提炼,再 analyst.boot_poll → 推。"""
+        self._run_distill()
         proposal = self._analyst.boot_poll(recent_n=recent_n)
         return await self._maybe_push(proposal)
 
     async def daily(self, recent_n: int = 50) -> tuple[Optional[Any], int]:
-        """每天一次:analyst.daily_poll → 推。"""
+        """每天一次:先 raw→summary 提炼,再 analyst.daily_poll → 推。"""
+        self._run_distill()
         proposal = self._analyst.daily_poll(recent_n=recent_n)
         return await self._maybe_push(proposal)
 

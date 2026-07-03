@@ -2526,6 +2526,9 @@
     // 9.0e:绑"看建议"按钮
     const proposeBtn = document.getElementById("propose-btn");
     if (proposeBtn) proposeBtn.addEventListener("click", requestProposal);
+    // predict(你可能想做)手动刷新:现在就问一次(WS propose,回退 POST /api/propose)
+    const predictRefreshBtn = document.getElementById("predict-refresh-btn");
+    if (predictRefreshBtn) predictRefreshBtn.addEventListener("click", requestProposal);
     // ch4 #4:点钱包 → token 统计弹窗
     const tokMeter = document.getElementById("token-meter");
     if (tokMeter) tokMeter.addEventListener("click", () => window.KarvyTokens.open());

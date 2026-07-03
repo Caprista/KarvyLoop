@@ -42,6 +42,11 @@ STATIC_DIR = Path(__file__).parent / "static"
 _ACTIVE_TICK_S = 600            # 活跃子 tick(10min)看一眼积压
 _QUALITY_BACKLOG_TRIGGER = 20   # 待质量评积压 ≥ 此 → 提前评
 
+# predict(你可能想做)启动兜底:console 起来后延迟这么多秒自动跑一次 boot_poll
+# (让系统先稳);此前第一条建议要等 24h daily,用户体感 = 页签永远空。
+# 测试可用 app.state.boot_poll_delay_s 覆盖(0=立即);负数 = 关闭。
+BOOT_POLL_DELAY_S = 30.0
+
 
 def _review_decision(*, now: float, next_daily: float, backlog: int,
                      trigger: int = _QUALITY_BACKLOG_TRIGGER) -> str:
@@ -195,6 +200,44 @@ def build_console_app(
         app.state.scheduler_task = asyncio.create_task(_scheduler_loop())
         logger.info("[karvyloop console] 定时任务调度器已起(30s tick)")
 
+        # predict 启动兜底:延迟一次 boot_poll(修"第一条建议要等 24h"→ 页签体感永远空)。
+        # pump 在(有 LLM)→ 真习惯分析;pump 沉默/未接 → proactive_from_state 确定性兜底
+        # (任务看板有失败任务 → 提议重试)。没 WS client 也照样进 proposal_registry 待决表,
+        # 前端开机 fetchPendingProposals 会捞回来 —— 不丢。
+        boot_poll_task = None
+        _boot_delay = getattr(app.state, "boot_poll_delay_s", None)
+        if _boot_delay is None:
+            _boot_delay = BOOT_POLL_DELAY_S
+        if _boot_delay >= 0:
+            async def _boot_poll_once() -> None:
+                try:
+                    await asyncio.sleep(_boot_delay)
+                    from karvyloop.console.proposals import proactive_from_state
+                    proposal, sent = None, 0
+                    _pump = getattr(app.state, "proposal_pump", None)
+                    if _pump is not None:
+                        # 线程里跑(内含 LLM 调用,可能慢),不阻塞事件循环… pump.boot 是
+                        # async(推 WS)→ 直接 await;真正慢的 LLM 在 analyst 里同步跑,
+                        # 但这是低频后台 task,一次性的,可接受。
+                        proposal, sent = await _pump.boot()
+                    if proposal is None:
+                        proposal, sent = await proactive_from_state(app)
+                    if proposal is not None:
+                        logger.info(
+                            f"[karvyloop console] 启动 boot_poll 出建议 → 推 {sent} client(s): "
+                            f"{getattr(proposal, 'summary', '')[:40]}"
+                        )
+                    else:
+                        logger.info("[karvyloop console] 启动 boot_poll:暂无可提建议(继续观察)")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    # fail-loud:predict 启动链失败要响,别静默空着
+                    logger.warning(f"[karvyloop console] 启动 boot_poll 失败(不影响运行): {e}")
+            boot_poll_task = asyncio.create_task(_boot_poll_once())
+            app.state.boot_poll_task = boot_poll_task
+            logger.info(f"[karvyloop console] predict 启动 boot_poll 已排程(+{_boot_delay:g}s)")
+
         # A:接 MCP server(若 config.yaml 配了 mcp.servers)→ **在主循环上**连,工具注入 agent 工具集。
         # agent 跑在 worker 线程的另一个 asyncio.run 循环里,McpAgentTool 会跨循环桥回这个主循环。
         # 没配 → 不连(0 影响);连失败 → 降级无 MCP 工具,不挡 console 启动。
@@ -232,9 +275,11 @@ def build_console_app(
             except Exception:
                 pass
 
-        # 关闭:取消 daily task + 定时调度器 + 清 ws clients + 关 pump 资源(trace/habit sqlite)
+        # 关闭:取消 daily task + boot poll + 定时调度器 + 清 ws clients + 关 pump 资源(trace/habit sqlite)
         if daily_task is not None:
             daily_task.cancel()
+        if boot_poll_task is not None:
+            boot_poll_task.cancel()
         _sched_task = getattr(app.state, "scheduler_task", None)
         if _sched_task is not None:
             _sched_task.cancel()

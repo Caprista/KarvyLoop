@@ -378,16 +378,60 @@ def _strip_code_fences(text: str) -> str:
 
 
 def _extract_json_array(text: str) -> str:
-    """从 LLM 文本里抽出第一个 JSON 数组(裁掉前后散文)。
+    """从 LLM 文本里抽出第一个**能整体 json.loads 的**数组(裁掉前后散文)。
 
-    返回 `[...]` 子串;找不到返原文(让 json.loads 自己报错)。
+    旧实现取「首 `[` … 末 `]`」切片 —— 真模型(思考型,如 MiniMax-M3)的散文里常有
+    方括号,切出来是跨散文的垃圾 → parse 永败(2026-07-03 真跑确诊)。
+    现改为:对每个 `[` 起点用 json.JSONDecoder().raw_decode 试解,取第一个合法数组。
+    仍是严格 JSON(宁空勿毒:不抽 prose,只找**完整合法**的数组);找不到返原文
+    (让 json.loads 自己报错,调用方 warning)。
     """
     cleaned = _strip_code_fences(text)
-    start = cleaned.find("[")
-    end = cleaned.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        return cleaned[start : end + 1]
+    decoder = json.JSONDecoder()
+    idx = cleaned.find("[")
+    while idx != -1:
+        try:
+            obj, _end = decoder.raw_decode(cleaned, idx)
+            if isinstance(obj, list):
+                return json.dumps(obj, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+        idx = cleaned.find("[", idx + 1)
+    # 没有一个完整数组 → 截断兜底(真模型思考烧掉 max_tokens,数组尾被截是常态)
+    salvaged = _salvage_truncated_array(cleaned)
+    if salvaged is not None:
+        return salvaged
     return cleaned
+
+
+def _salvage_truncated_array(cleaned: str) -> Optional[str]:
+    """截断数组兜底:思考型真模型(如 MiniMax-M3)把 max_tokens 烧在思考上,可见输出的
+    JSON 数组常被截在半个对象上(2026-07-03 真跑确诊,gateway 无按调用 max_tokens 覆盖口)。
+
+    从每个 `[` 起点逐项 raw_decode **完整合法的 dict 项**,丢掉被截断的尾项 ——
+    仍是严格 JSON(每个收进来的项都整体 loads 得过;绝不抽 prose,非 dict 项一律不算数,
+    防止散文里 `[0-1]` 这类误捞)。一个完整 dict 项都捞不到 → None。
+    """
+    decoder = json.JSONDecoder()
+    n = len(cleaned)
+    start = cleaned.find("[")
+    while start != -1:
+        idx = start + 1
+        items: list = []
+        while idx < n:
+            while idx < n and cleaned[idx] in " \t\r\n,":
+                idx += 1
+            if idx >= n or cleaned[idx] == "]":
+                break
+            try:
+                obj, idx = decoder.raw_decode(cleaned, idx)
+            except json.JSONDecodeError:
+                break
+            items.append(obj)
+        if items and all(isinstance(it, dict) for it in items):
+            return json.dumps(items, ensure_ascii=False)
+        start = cleaned.find("[", start + 1)
+    return None
 
 
 def _summary_to_line(rec: TraceRecord) -> str:
@@ -469,7 +513,9 @@ class BehaviorPatternAnalyzer:
                     temperature=0.3,
                 )
         except Exception as e:
-            logger.debug(f"[BehaviorPatternAnalyzer] LLM chat 失败,返 []: {e}")
+            # fail-loud:这里静默 = predict(你可能想做)无声空转,用户毫无线索(2026-07-03 确诊)。
+            # 只 log 异常消息,不碰 headers/api_key(日志范围只覆盖 body 纪律)。
+            logger.warning(f"[BehaviorPatternAnalyzer] LLM chat 失败,本轮不出建议: {e}")
             return []
 
         # 3. robust parse
@@ -485,7 +531,13 @@ class BehaviorPatternAnalyzer:
         try:
             arr = json.loads(_extract_json_array(raw or ""))
         except (json.JSONDecodeError, ValueError) as e:
-            logger.debug(f"[BehaviorPatternAnalyzer] JSON parse 失败,返 []: {e}")
+            # 宁空勿毒(解析失败绝不抽 prose);但要响 —— 静默返 [] 让 predict 空得毫无线索。
+            # 附截断的模型输出片段(纯 body,不含 headers/key)方便定位是散文还是坏 JSON。
+            snippet = (raw or "")[:200]
+            logger.warning(
+                f"[BehaviorPatternAnalyzer] LLM 输出 JSON parse 失败,本轮不出建议: {e}; "
+                f"raw[:200]={snippet!r}"
+            )
             return []
         if not isinstance(arr, list):
             return []

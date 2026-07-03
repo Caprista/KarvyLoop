@@ -123,6 +123,10 @@ _SIGNAL_KINDS = frozenset({
     "task",          # 用户在做任务
     "drive",         # MainLoop 慢脑路径
     "user_action",   # 用户主动行为
+    # 摘要层的真实生产产物(修"predict 永远空":此前门控只认上面 4 个 kind,
+    # 而摘要层真正落的是这两种 → 全被拒之门外,analyst 永远沉默):
+    "distilled_summary",      # trace_poll.distill_raw_to_summary(原文事件聚合,含 recent_intents)
+    "conversation_summary",   # ConversationManager 旧对话轮换时喂的对话摘要(CV-4)
 })
 
 

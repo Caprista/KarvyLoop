@@ -71,10 +71,24 @@ def distill_raw_to_summary(index: TraceIndex, *, recent_n: int = 50) -> Optional
     0.1.0 规则版(无 LLM,省 token):读最近 N 条原文事件 → 聚合成一条事件级摘要
     (按 kind 计数 + 最近 intent 文本)→ append_summary。返摘要 dict;无原文返 None。
     (LLM 版摘要 = P1,接 BehaviorPatternAnalyzer 思路;此处先把"原文→摘要"链打通。)
+
+    **watermark 幂等**:摘要里记 `up_to_raw_seq`(本次覆盖到的最大原文 seq)。
+    没有比上次更新的原文 → 返 None 不重复写(否则每次 boot/propose 都堆一条重复摘要)。
     """
     raw = index.list_raw(limit=recent_n)
     if not raw:
         return None
+    newest_seq = max(int(rec.seq) for rec in raw)
+    # watermark:找最近一条 distilled_summary,若已覆盖到 newest_seq → 无新事件,跳过
+    for prev in index.list_summary(limit=20):
+        p = prev.payload if isinstance(prev.payload, dict) else {}
+        if p.get("kind") == "distilled_summary":
+            try:
+                if int(p.get("up_to_raw_seq", -1)) >= newest_seq:
+                    return None
+            except (TypeError, ValueError):
+                pass
+            break
     by_kind: dict[str, int] = {}
     intents: list[str] = []
     for rec in raw:
@@ -89,6 +103,7 @@ def distill_raw_to_summary(index: TraceIndex, *, recent_n: int = 50) -> Optional
         "from_raw_count": len(raw),
         "by_kind": by_kind,
         "recent_intents": intents,
+        "up_to_raw_seq": newest_seq,
     }
     index.append_summary(summary)
     return summary

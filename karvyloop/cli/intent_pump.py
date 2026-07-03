@@ -119,6 +119,12 @@ def build_proposal_pump(
     llm_client = _try_build_llm_client(config_path, gateway=gateway, model_ref=model_ref)
     analyzer = BehaviorPatternAnalyzer(llm_client=llm_client)
 
+    # 主 loop 的默认模型(runtime model_ref)要进解析链的"全局默认"位:否则 resolve_model_ref
+    # 落到硬编码 anthropic 兜底 —— 用户配的是 minimax/deepseek 时,analyst 打错 provider
+    # → LLM 调用静默失败 → predict 永远沉默(2026-07-03 真跑确诊的第 3 死因)。
+    if global_config is None and model_ref:
+        global_config = {"default_model": model_ref}
+
     def _resolver(agent: str) -> Any:
         return resolve_model_ref(agent, global_config)
 
@@ -130,7 +136,16 @@ def build_proposal_pump(
         model_ref_resolver=_resolver,
         strength_threshold=strength_threshold,
     )
-    pump = ProposalPump(app, analyst)
+
+    # 修"predict 永远空"的真根因:drive 落的是 trace **原文**层,analyst 读**摘要**层,
+    # 而 raw→summary 提炼器(trace_poll.distill_raw_to_summary)此前在生产路径无人调用
+    # → 摘要层永远空 → analyst 永远沉默。这里把提炼器注入 pump,boot/daily 先提炼再分析。
+    from karvyloop.karvy.fastbrain.trace_poll import distill_raw_to_summary
+
+    def _distill():
+        return distill_raw_to_summary(trace_index)
+
+    pump = ProposalPump(app, analyst, distill=_distill)
 
     closed = {"done": False}
 

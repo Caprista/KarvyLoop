@@ -207,8 +207,20 @@ def cmd_console(args: argparse.Namespace) -> int:
             pump_trace_index = bundle.trace_index
             # 9.3c(修 D1):MainLoop 把每次 drive 事件落进**共享**漏斗原文层
             # → 提炼器异步 原文→摘要→习惯(与 IntentAnalyst 同一 TraceIndex)
+            # fail-loud(predict 页签靠这条链活着):接上打 info,接不上打 warning,不再静默。
             if main_loop is not None and hasattr(main_loop, "set_trace_funnel"):
                 main_loop.set_trace_funnel(bundle.trace_index)
+                logger.info("[karvyloop console] trace 漏斗已接线:drive 事件 → 原文层(predict 数据源)")
+            elif main_loop is not None:
+                logger.warning(
+                    "[karvyloop console] main_loop 没有 set_trace_funnel — 漏斗未接线,"
+                    "predict(你可能想做)只剩确定性兜底"
+                )
+            else:
+                logger.warning(
+                    "[karvyloop console] 无 main_loop(config 缺失/构造失败)— drive 漏斗未接线,"
+                    "predict(你可能想做)只剩确定性兜底"
+                )
             # §14.2 / docs/40 §3 慢侧 atom 质量裁判:复用已接好的 gateway,把 judge_quality(async)
             # 桥成同步注入 MainLoop;daily_poll 跑 ml.quality_review() → 读 Trace 里已确定性评、做对站住
             # 的 run,LLM 评质量补到样本(跑评分离:绝不在 drive 热路径,只在每日慢侧 tick)。
@@ -244,8 +256,12 @@ def cmd_console(args: argparse.Namespace) -> int:
             )
             sys.stderr.flush()
         except Exception as e:
-            # 接线失败不该阻断 console 启动(降级为"无主动建议")
-            logger.warning(f"[karvyloop console] 小卡意图分析接线失败(console 照常起): {e}")
+            # 接线失败不该阻断 console 启动(降级为"无主动建议")。
+            # fail-loud:这条链断 = predict 页签死;打 error+堆栈,别再让它安静地空着。
+            logger.error(
+                f"[karvyloop console] 小卡意图分析接线失败(console 照常起,但 predict 建议链断): {e}",
+                exc_info=True,
+            )
 
     # === 9.1d:接线对话编排器(ConversationManager)===
     # 续上最近一段(CV-6),旧对话开新时摘要喂 Trace(CV-4,复用 pump 的 trace_index)。
