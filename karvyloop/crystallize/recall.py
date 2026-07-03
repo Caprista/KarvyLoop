@@ -31,6 +31,7 @@ from .store import UsageStore
 _STOP_DIGITS = re.compile(r"\d+")
 _STOP_PUNCT = re.compile(r"[^\w\s]+")
 _STOP_WS = re.compile(r"\s+")
+_CJK_RUN = re.compile(r"[一-鿿]+")
 
 
 # ---- improve.py 写回段 ↔ 重跑上下文(闭环的"读"半条腿)----
@@ -82,13 +83,25 @@ def _tokenize(text: str) -> set[str]:
     s = _STOP_DIGITS.sub(" ", s)
     s = _STOP_PUNCT.sub(" ", s)
     s = _STOP_WS.sub(" ", s).strip()
-    return set(s.split())
+    toks = set(s.split())
+    # 中文无空格切不出词:整句一个 token,tags/when_to_use 的中文永不重叠 → 对 CJK 连续段
+    # 补 2 字滑窗(bigram),与 cluster.intent_tokens / context.relevance 同思路(无向量,
+    # [[matching-is-grep-overlap-tags-no-vectors]])。纯英文文本 0 变化。
+    for tok in tuple(toks):
+        for seg in _CJK_RUN.findall(tok):
+            toks.update(seg[i:i + 2] for i in range(len(seg) - 1))
+    return toks
+
+
+def _is_cjk_pair(tok: str) -> bool:
+    """是否 2 字中文对(bigram 产物或 2 字中文词,词面上无法区分)。"""
+    return len(tok) == 2 and all("一" <= ch <= "鿿" for ch in tok)
 
 
 def _load_skill_index(skills_dir: Path) -> list[dict]:
     """从 skills_dir 读所有 SKILL.md,构造轻量索引(无 SkillIndex 时的兜底)。
 
-    返回:[{name, when_tokens, desc_tokens, scope, manifest, body, path, sig}, ...]
+    返回:[{name, when_tokens, desc_tokens, scope, source, manifest, body, path, sig}, ...]
     """
     out: list[dict] = []
     if not skills_dir.is_dir():
@@ -112,6 +125,8 @@ def _load_skill_index(skills_dir: Path) -> list[dict]:
             "desc_tokens": desc_tokens,
             "all_tokens": all_tokens,
             "scope": fm.scope or "user",
+            # source=system(出厂方法技能)→ 跨场可见;缺省按 user(隔离语义不变)
+            "source": (str((fm.raw or {}).get("source", "")).strip().lower() or "user"),
             "raw": fm.raw or {},
             "body": body,
             "path": str(p),
@@ -231,8 +246,9 @@ def recall(
 ) -> Optional[RecallHit]:
     """按意图召回一个最匹配的已结晶技能;没命中 → None(走慢脑)。
 
-    匹配规则 v1.1:intent 经 normalize 后取 token 集,跟每个 skill 的
-    when_to_use+description token 集求交集;交集非空 + scope 一致即命中;
+    匹配规则 v1.1:intent 经 normalize 后取 token 集(中文补 CJK bigram),跟每个 skill 的
+    when_to_use+description+tags token 集求交集;交集非空 + scope 一致即命中
+    (**例外**:source=system 的出厂方法技能跨场可见,不受 scope 过滤);
     取交集覆盖度最大者。
 
     skill_index:有就优先用它(快、不读盘);没有走 _load_skill_index 兜底。
@@ -248,7 +264,10 @@ def recall(
     candidates: list[dict] = []
     if skill_index is not None and len(skill_index) > 0:
         for entry in skill_index.all():
-            if entry.scope != scope:
+            # scope 过滤:user 技能严格同场(隔离语义不变);**system 来源放行全场** ——
+            # 出厂方法技能是镜像资产(人人一样、不含用户私数据),业务域(scope=domain)
+            # 正是最该用 data-analyst 这类方法技能的场,不该被 scope:user 挡在门外。
+            if entry.scope != scope and getattr(entry, "source", "user") != "system":
                 continue
             try:
                 _fm, body = parse_frontmatter(Path(entry.path))
@@ -270,7 +289,8 @@ def recall(
             })
     else:
         for c in _load_skill_index(skills_dir):
-            if c["scope"] != scope:
+            # 同上:system 来源放行全场,user 技能严格同场
+            if c["scope"] != scope and c.get("source", "user") != "system":
                 continue
             candidates.append({
                 "name": c["name"],
@@ -289,6 +309,12 @@ def recall(
     for c in candidates:
         overlap = intent_tokens & c["all_tokens"]
         if not overlap:
+            continue
+        # CJK bigram 门(借 cluster._MIN_SHARED 同思路):交集若**只**是 1 个 2 字中文对,
+        # 不算信号 —— 否则"报表"这种通用词会把无关意图吸进技能(实证:"生成报表"被
+        # data-analyst 的 tag 单词截胡 → 挤掉本该结晶的新技能)。≥2 个共享单元才命中;
+        # 英文整词/长词命中不受此门(0 回归)。
+        if len(overlap) == 1 and _is_cjk_pair(next(iter(overlap))):
             continue
         primary = len(overlap) / max(1, len(intent_tokens))
         if c["name"] in prefer_set:

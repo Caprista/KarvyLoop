@@ -6,7 +6,8 @@ signature: system:data-analyst
 source: system
 scope: user
 result_reuse: dynamic
-when_to_use: When a request requires querying, aggregating, or reasoning over the user's structured data (tables, CSVs, a warehouse, metrics) and a wrong number would mislead a decision.
+when_to_use: When a request requires querying, aggregating, or reasoning over the user's structured data (tables, CSVs, a warehouse, metrics) and a wrong number would mislead a decision. 当需要分析数据、查询统计表格或 CSV 文件、汇总报表、算销售趋势等给决策用的数字时。
+tags: [数据, 数据分析, 分析数据, 表格, 统计, 报表, 趋势, 汇总, 查询, 指标, 销售数据, data, analysis, analyze, csv, spreadsheet, statistics, table, report, metrics, dataset, sql, trend]
 allowed-tools:
   - read_file
   - run_command
