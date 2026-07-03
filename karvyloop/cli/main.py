@@ -91,6 +91,24 @@ def _build_parser() -> argparse.ArgumentParser:
     p_import.add_argument("--force", action="store_true", help=_t_exp("cli.import.help.force"))
     p_import.add_argument("--dry-run", action="store_true", help=_t_exp("cli.import.help.dry_run"))
 
+    # relay-serve / relay-pair(docs/43 第二级:Karvy 信使 relay,「信使不拆信」)。
+    # 文案暂英文硬编码(照 export 先例;i18n 表本任务不动)。
+    p_rserve = sub.add_parser(
+        "relay-serve",
+        help="run the Karvy messenger relay — stateless, diskless, blind-forwarding rendezvous "
+             "(it only ever sees end-to-end ciphertext)")
+    p_rserve.add_argument("--host", type=str, default="0.0.0.0",
+                          help="bind address (default 0.0.0.0 — a relay is meant to be reachable; "
+                               "it holds no keys and sees only ciphertext)")
+    p_rserve.add_argument("--port", type=int, default=8767, help="port (default 8767)")
+    p_rpair = sub.add_parser(
+        "relay-pair",
+        help="print pairing info for the messenger relay: room id, console key fingerprint, "
+             "one-time pairing code (v1 text pairing; QR/browser pairing is P2)")
+    p_rpair.add_argument("--relay-url", type=str, default=None,
+                         help="relay address to print in the pairing info (e.g. wss://relay.example)")
+    p_rpair.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
+
     return p
 
 
@@ -233,6 +251,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "import":
         from .import_cmd import cmd_import
         return cmd_import(args.archive, force=args.force, dry_run=args.dry_run)
+
+    if args.cmd == "relay-serve":
+        from karvyloop.relay.server import cmd_relay_serve
+        return cmd_relay_serve(host=args.host, port=args.port)
+
+    if args.cmd == "relay-pair":
+        from karvyloop.relay.pairing import cmd_relay_pair
+        return cmd_relay_pair(relay_url=args.relay_url, state_dir=args.dir)
 
     from karvyloop.i18n import t
     parser.error(t("cli.unknown_cmd", cmd=args.cmd))

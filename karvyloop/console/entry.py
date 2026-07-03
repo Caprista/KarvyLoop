@@ -471,6 +471,28 @@ def cmd_console(args: argparse.Namespace) -> int:
         sys.stderr.write(t("console.url_hint", cmd=_cli) + "\n")
         sys.stderr.flush()
 
+    # === docs/43 第二级:Karvy 信使 relay(--relay)——「信使不拆信」 ===
+    # console 出站 WSS 长连 relay(家里发不了入站、发得了出站);解密后的请求打回本机
+    # loopback(下面这台 uvicorn),复用全部既有中间件 + token 门(深度防御:loopback 免
+    # token 也照带)。收尾照 email_channel_task 先例:uvicorn 退出后 stop() 收线程。
+    relay_handle = None
+    relay_url = getattr(args, "relay", None)
+    if relay_url:
+        try:
+            from karvyloop.relay.client import start_relay_client_thread
+            relay_handle = start_relay_client_thread(
+                relay_url, console_host="127.0.0.1", console_port=port, token=_token)
+            sys.stderr.write(
+                f"[karvyloop console] messenger relay client: outbound to {relay_url} "
+                "(end-to-end encrypted; the relay only ever sees ciphertext). "
+                "Pair devices with `karvyloop relay-pair`.\n")
+            sys.stderr.flush()
+        except Exception as e:
+            # 用户显式要了 --relay → 起不来就诚实失败(缺 cryptography 时报 pip install karvyloop[relay])
+            sys.stderr.write(f"[karvyloop console] --relay failed to start: {e}\n")
+            sys.stderr.flush()
+            return 1
+
     # === 自动开浏览器(非 --no-browser 时,后台 thread 0.5s 后 open)===
     if not no_browser:
         # 绑 0.0.0.0/::(LAN 可达)时浏览器**不能**导航到 0.0.0.0 → 开 localhost(同机可达)
@@ -505,6 +527,9 @@ def cmd_console(args: argparse.Namespace) -> int:
         # E.g. port already in use
         sys.stderr.write(t("console.bind_failed", error=e) + "\n")
         return 1
+    finally:
+        if relay_handle is not None:      # --relay 收尾:停信使客户端线程(照 email task cancel 先例)
+            relay_handle.stop()
     return 0
 
 
@@ -528,6 +553,11 @@ def build_console_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentPa
                           help=t("cli.help.console.no_llm"))
     p_console.add_argument("--lang", type=str, default=None,
                           help=t("cli.help.lang"))
+    # docs/43 第二级:Karvy 信使 relay(文案暂英文硬编码,照 export 先例;i18n 表本任务不动)
+    p_console.add_argument("--relay", type=str, default=None, metavar="WSS_URL",
+                          help="connect out to a Karvy messenger relay (end-to-end encrypted; "
+                               "the relay only sees ciphertext). Pair devices with `karvyloop relay-pair`; "
+                               "needs `pip install karvyloop[relay]`")
     return p_console
 
 

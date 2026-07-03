@@ -30,6 +30,12 @@ mcp = [
 redis = [
     "redis>=5.0",
 ]
+# Karvy 信使 relay 的 E2E 加密(X25519 + ChaCha20-Poly1305,docs/43 第二级「信使不拆信」);
+# 没装 → `karvyloop console --relay` / `relay-pair` 诚实报 "pip install karvyloop[relay]"。
+# relay 服务本体(relay-serve)只用 FastAPI/uvicorn(基础依赖),不需要这个 extra。
+relay = [
+    "cryptography>=42",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

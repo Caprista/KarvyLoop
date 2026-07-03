@@ -124,6 +124,7 @@ The base install runs the whole product. A few capabilities need an extra packag
 | **mcp** | `pip install -e ".[mcp]"` (+ `pip install uv` for `uvx`) | Connect any [MCP](https://modelcontextprotocol.io) server; its tools are injected into every agent (keys prefixed `mcp_<server>_`) | MCP tools unavailable; using one returns a clear "install mcp" error |
 | **web** | `pip install -e ".[web]"` then `playwright install chromium` | Real **runtime** verification of web output (`karvyloop verify-web`) — actually loads the page | Falls back to syntax-only checks; honestly tells you runtime wasn't verified |
 | **redis** | `pip install -e ".[redis]"` | Cross-process / cross-machine agent collaboration (Redis A2A transport) | Auto-falls back to in-process transport — fine for a single process |
+| **relay** | `pip install -e ".[relay]"` | End-to-end encryption for the Karvy messenger relay: reach your console from anywhere via `karvyloop console --relay` + `karvyloop relay-pair` (the relay itself — `karvyloop relay-serve` — is stateless, blind-forwarding, and needs no extra) | `--relay` / `relay-pair` refuse with a clear "pip install karvyloop[relay]" message |
 | **dev** | `pip install -e ".[dev]"` | Run the test suite (`pytest`, `respx`, …) | — (only needed to develop/test KarvyLoop) |
 
 Combine them: `pip install -e ".[mcp,web]"`. None of these gate the core loop — chat, domains/roles, decisions, skills, and token accounting all work on the base install.
