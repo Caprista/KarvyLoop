@@ -23,7 +23,7 @@ Where most agent frameworks make a *single* LLM call more reliable, KarvyLoop is
 - 🤖 **A team of AI agents, locally.** Create *domains* (companies) with *roles* (agents) composed of reusable *atoms* (sub-agents) — an OS-like L0→L4 entity ladder.
 - 🧭 **Plain-language orchestration, you approve.** Tell Karvy *"get a few people in Product to analyze the competitor"* — it plans a single hand-off, a **roundtable** (agents think in parallel, then converge), a **workflow** (multi-step pipeline), or an **ops** check, and returns a **decision card**. Nothing runs until you confirm (**H2A**).
 - 🔁 **Loop-native design.** Two loops with opposite natures — the *execution loop* (an atom does a job, self-verifies; fully automated) and the *decision loop* (role ↔ you; deliberately **not** automated). The role/atom split *is* that cut.
-- 🧠 **Everything compounds into you.** Runs that pass a verify gate crystallize into reusable **skills**; your accept/reject/edit choices crystallize into **decision preferences** that pre-align future proposals. This is the moat — copyable code, **un-copyable instance**.
+- 🧠 **Everything compounds into you.** Runs that pass a verify gate crystallize into reusable **skills**; your accept/reject/edit choices crystallize into **decision preferences** that pre-align future proposals. Copyable code, **un-copyable instance** — your instance, your data.
 - 📬 **Decisions reach you — you don't chase them.** Pending cards wait on the console, and with the optional **email channel** they travel to your inbox as a digest with signed one-tap replies (works behind any NAT, no third-party service); a **weekly report card** sums up what your team ran, spent and learned, every number traceable. Stale cards age visibly instead of silently rotting.
 - 🔍 **See why, not just what.** As you type, related skills and knowledge surface unprompted (pure local matching — zero extra LLM calls); every skill has a **lifecycle timeline** (crystallized → revised → rerun) so "why did my skill change" always has an answer.
 - 📚 **Personal knowledge base + cognition graph.** Feed it links or notes; it distills them into searchable **beliefs** on a mesh graph (grep + concept overlap, **no vector DB**), browsable in the console.
@@ -184,11 +184,11 @@ The first kind, others will eventually build. The second is the part almost no o
 
 Crystallization and "you stay the decider" only work if something underneath keeps score honestly. That something is one substrate — the **Trace** — and a deliberate split of speed:
 
-- **One source of truth.** An append-only Trace records everything: what each role and atom *did*, what you and the system *said*, what you and a role *decided*, the *method* an atom used, and what the system *learned* from all of it (learning writes back into the Trace too). Every evaluation derives from the Trace — nothing is scored off to the side. The Trace stays *readable* (so you, and the safety/verify machinery, can audit it); the moat is "your instance can't be lifted out," never "you can't read your own data".
+- **One source of truth.** An append-only Trace records everything: what each role and atom *did*, what you and the system *said*, what you and a role *decided*, the *method* an atom used, and what the system *learned* from all of it (learning writes back into the Trace too). Every evaluation derives from the Trace — nothing is scored off to the side. The Trace stays *readable* (so you, and the safety/verify machinery, can audit it); the promise is "your instance can't be lifted out," never "you can't read your own data".
 - **Fast and slow, separated.** Running a task is urgent and must not pay for evaluating itself — so a drive only *executes and writes facts to the Trace*, and a patient learner reads the Trace **off the hot path** to score how things went. The fast side never waits on the slow side; the slow side (the patient "becoming more *you*" work) can take its time. (We borrow the *shape* of large-scale RL's actor/learner split — fast actor, patient learner, Trace as the log — **not the mechanism: nothing here trains model weights.**)
 - **Evaluated along the chain of accountability.** A role answers to *you*, so **your decisions evaluate the role** (that's the decision-preference half of the wedge). An atom answers to its *role* — you don't even see what it did — so **the role's own objective measures evaluate the atom**: did the sub-goal land, faster, better, past its verify gate? Each layer is judged by the one it's responsible to, all of it read from the Trace.
 
-This is the difference between *remembering what you repeated* (memory) and *learning what actually works for you* (the moat). The methods that prove out start to surface first; each turn the loop gets a little cheaper and a little more yours. The wedge is the promise — this flywheel is the proof it can keep it.
+This is the difference between *remembering what you repeated* (memory) and *learning what actually works for you* (what's truly yours). The methods that prove out start to surface first; each turn the loop gets a little cheaper and a little more yours. The wedge is the promise — this flywheel is the proof it can keep it.
 
 ### Your assets, not someone else's agents
 
@@ -198,9 +198,9 @@ Already invested in agents elsewhere? Bring them. An imported agent isn't flatte
 
 That library — your roles, atoms, skills, and decision style — is the part that compounds into leverage and **can't be lifted out**.
 
-### The moat: image vs instance
+### Your instance, your data: image vs instance
 
-The code (the **image**) is open and copyable — it's this repo. The **instance** you grow on it — your memory, your skills, your decision style — is yours and can't be copied. Open source and the moat are consistent: we publish the image, never your instance.
+The code (the **image**) is open and copyable — it's this repo. The **instance** you grow on it — your memory, your skills, your decision style — is yours and can't be copied. Open source and this promise are consistent: we publish the image, never your instance.
 
 ---
 
