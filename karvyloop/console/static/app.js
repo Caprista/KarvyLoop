@@ -151,9 +151,10 @@
       if (d) pushChatLine("system", t("proposal.dispatch", { kind: d.kind, detail: tB(d.detail) }));
       // 决策已发 → **只撤刚拍的那张卡**(带 proposal_id),保留还挂着的兄弟卡(多卡不覆盖);
       // 若兑现产了执行后回报卡,就地追加"它到底验过没";列真空了才回填"已处置"空态。
+      const pid = (msg.payload && (msg.payload.proposal_id || (d && d.proposal_id))) || "";
+      _finalizeInlineCards(pid, null);   // S3:聊天流里的同卡同步转终态(本端拍的已终态,幂等跳过)
       const list = document.getElementById("h2a-list");
       if (list) {
-        const pid = (msg.payload && (msg.payload.proposal_id || (d && d.proposal_id))) || "";
         _removeCardById(list, pid);
         if (msg.payload && msg.payload.report_card) _renderReportCard(list, msg.payload.report_card);
         if (_countCards("h2a-list", "h2a-empty") === 0) {
@@ -669,6 +670,15 @@
       return;
     }
     _stripEmpty(list, "h2a-empty");   // 清空态占位,但**保留已挂的兄弟卡**(多卡不覆盖)
+    const built = _buildProposalCard(payload);
+    _placeCard(list, built.proposalId, built.card);   // 多卡不覆盖:同 id 替换、新 id 追加
+    _renderProposalInChat(payload, built.proposalId); // S3:决策卡双面出 —— 同时冒进聊天流
+    updatePulse();   // step5:拍板数变了 → 刷脉搏
+  }
+
+  // 一张 H2A 决策卡的 DOM(docs/46 S3 抽出:右栏列表和聊天流 inline 共用同一套渲染 +
+  // 同一个拍板 API;两处各建实例、各自 judgeState,拍任意一张 = 同一条 h2a_decision)。
+  function _buildProposalCard(payload) {
     const card = el("div", { class: "h2a-card" });
     card.appendChild(el("div", { class: "h2a-summary", text: "💡 " + (payload.summary || t("proposal.no_desc")) }));
     // ch4 #6.1:拍板必须带决策依据(为什么)—— 否则凭啥拍
@@ -768,6 +778,7 @@
         };
         if (_edits) msg.edits = _edits;
         sendWS("h2a_decision", msg);
+        _finalizeInlineCards(proposalId, decision);   // S3:任一侧拍板,聊天流里的同卡即刻转终态
       });
     };
     btnRow.appendChild(el("button", { class: "h2a-accept", onClick: () => decide("ACCEPT"), text: t("proposal.accept") }));
@@ -775,8 +786,48 @@
     btnRow.appendChild(el("button", { class: "h2a-reject", onClick: () => decide("REJECT"), text: t("proposal.reject") }));
     card.appendChild(btnRow);
     card.appendChild(reasonInput);   // 可选拒绝理由(不填也能拒)
-    _placeCard(list, proposalId, card);   // 多卡不覆盖:同 id 替换、新 id 追加
-    updatePulse();   // step5:拍板数变了 → 刷脉搏
+    return { card: card, proposalId: proposalId };
+  }
+
+  // ============ S3 决策卡双面出(docs/46 §4.1,业界 HITL 范式)============
+  // 新 H2A 提案除右栏列表外,同时以"小卡递来一张待签单"的卡片消息冒进当前 chat-log;
+  // 两处操作同一条数据:任一侧拍板 → 聊天流里的卡转终态、右栏卡经 h2a_envelope 撤下。
+  function _renderProposalInChat(payload, proposalId) {
+    const log = document.getElementById("chat-log");
+    if (!log) return;
+    // 同 id 未拍的旧 inline 卡先撤(幂等重推不叠);已拍的终态卡保留(历史可回看)
+    Array.from(log.querySelectorAll("[data-proposal-id]")).forEach((n) => {
+      if (n.getAttribute("data-proposal-id") === String(proposalId) &&
+          !n.getAttribute("data-decided")) n.remove();
+    });
+    const follow = isNearBottom(log);
+    const line = el("div", { class: "chat-line agent chat-h2a" },
+      el("span", { class: "role", text: t("chat.karvy") }));
+    line.setAttribute("data-proposal-id", String(proposalId));
+    const wrap = el("div", { class: "chat-h2a-card" });
+    wrap.appendChild(el("div", { class: "chat-h2a-head", text: t("h2a.inline_head") }));
+    wrap.appendChild(_buildProposalCard(payload).card);   // 复用同一套卡渲染 + 拍板路径
+    line.appendChild(wrap);
+    log.appendChild(line);
+    if (follow) log.scrollTop = log.scrollHeight;
+  }
+
+  // 聊天流里的 inline 卡转终态:撤操作面(按钮/理由/改了再批/判断依据),盖终态戳。
+  // decision 已知(本端拍的)显 ✅/✖/🕒;不知道(别端拍的,envelope 兜底)显 ✔ 已处置。
+  const _DECISION_DONE_KEY = { ACCEPT: "h2a.done_accept", REJECT: "h2a.done_reject", DEFER: "h2a.done_defer" };
+  function _finalizeInlineCards(proposalId, decision) {
+    const log = document.getElementById("chat-log");
+    if (!log || !proposalId) return;
+    Array.from(log.querySelectorAll("[data-proposal-id]")).forEach((line) => {
+      if (line.getAttribute("data-proposal-id") !== String(proposalId)) return;
+      if (line.getAttribute("data-decided")) return;   // 已终态(幂等,双路径都会调这里)
+      line.setAttribute("data-decided", decision || "handled");
+      line.querySelectorAll(".h2a-buttons, .h2a-reason, .h2a-edit-wrap, .dcard-basis, .dcard-crit-btns")
+        .forEach((n) => n.remove());
+      const wrap = line.querySelector(".chat-h2a-card") || line;
+      wrap.appendChild(el("div", { class: "chat-h2a-done",
+        text: (_DECISION_BADGE[decision] || "✔") + " " + t(_DECISION_DONE_KEY[decision] || "h2a.done_generic") }));
+    });
   }
 
   // ch4 预判:主动建议按 kind 分流。**显式映射 + fail-safe 默认进【拍板】**:真决策(需你判断

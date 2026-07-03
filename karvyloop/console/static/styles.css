@@ -2032,3 +2032,23 @@ button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outl
   border: 8px solid transparent; border-top-color: transparent;
   border-bottom-color: var(--border);
 }
+
+/* ============================================================================
+   docs/46 S3 — 决策卡双面出:H2A 卡以"小卡递来一张待签单"形态冒进聊天流。
+   复用 .h2a-card / .dcard 整套卡渲染;这里只做聊天气泡容器 + 终态戳。
+   ========================================================================= */
+.chat-line.chat-h2a { align-self: flex-start; max-width: 92%; width: 100%; }
+.chat-h2a-card {
+  background: var(--surface); border: 1px solid var(--proposal);
+  border-radius: 12px; border-top-left-radius: 3px;
+  padding: 10px 12px; box-shadow: var(--shadow-sm);
+}
+.chat-h2a-head { font-size: 11.5px; font-weight: 700; color: var(--accent-deep); margin-bottom: 6px; }
+/* 卡进气泡后自身不再套一层边框底色(容器已有) */
+.chat-h2a-card .h2a-card { border: none; background: transparent; padding: 0; margin-bottom: 0; }
+/* 拍完的终态戳(历史里已拍的卡显示终态,操作面已撤) */
+.chat-h2a-done {
+  margin-top: 8px; padding: 6px 10px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 600;
+  background: var(--surface-2); color: var(--text-2); border: 1px dashed var(--border-strong);
+}
