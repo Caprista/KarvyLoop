@@ -10,13 +10,25 @@
 
 ---
 
+If you use AI for real work, you already know the tax: babysitting its output (surveys peg it at ~6.4 hours a week), re-explaining yourself to a tool that forgets you overnight, and a review pile that *grows* with everything you delegate. KarvyLoop is built to bend that curve the other way: **the longer you use it, the fewer approvals it asks of you — and the more accurate they get.**
+
 ## What is KarvyLoop?
 
-KarvyLoop is a runtime for **AI agents that run on your own machine**. You assemble a team — business *domains* (like companies) staffed by *roles* (agents with an identity and preferences), each built from *atoms* (single-responsibility sub-agents) — and a built-in assistant, **Karvy 🦫**, orchestrates them from plain language. It runs your repetitive work, **verifies its own output**, and **crystallizes every use into a version of _you_** (skills, knowledge, decision preferences) — all while a hard **human-in-the-loop** rule (the AI proposes, *you* decide) keeps you in the driver's seat.
+KarvyLoop is a runtime for **AI agents that run on your own machine**. You assemble a team: business *domains* (a "company" — say, *Data Team*) staffed by *roles* (agents with an identity and preferences — an *Analyst*, a *Reviewer*), each built from *atoms* (sub-agents that do one checkable thing, like *fetch two CSVs and diff them*). A built-in assistant, **Karvy 🦫**, orchestrates them from plain language. It runs your repetitive work and **verifies its own output**, and every use **crystallizes into a version of _you_**: repeated tasks become *skills* (the third time you ask for a weekly summary, it's a written-down method reused for pennies), and your choices become *decision preferences* shown beside future calls. A hard **human-in-the-loop** rule — **H2A**: the AI proposes, *you* decide — means nothing runs until you accept a *decision card* (*"Hand the monthly report to the Analyst?"* — you click accept, then it moves).
+
+![The KarvyLoop console — chatting with Karvy on the left, a decision card waiting for your call on the right](docs/assets/console-overview.png)
 
 Where most agent frameworks make a *single* LLM call more reliable, KarvyLoop is **loop-native**: the unit of design is the whole self-running cycle — *discover work → run it → verify → compound → (you decide) → repeat*. The companion chat surface is **KarvyChat**.
 
 > Most AI tools sideline you, burn tokens, and feel the same for everyone. KarvyLoop keeps you in the driver's seat, stays affordable, and turns every use into a version of *you* that can't be copied.
+
+### If you've used other agent tools
+
+- **AutoGen / CrewAI** are good at making several agents cooperate *inside one run*. KarvyLoop's unit is the recurring loop *across* runs: the 40th monthly report should be cheaper, better verified, and more aligned with you than the 1st.
+- **LangGraph** gives you precise control flow inside a task graph. KarvyLoop focuses on what happens around and between tasks — verify gates, decision cards, and the residue each run leaves behind (skills, preferences) that compounds.
+- **Manus** and similar autonomous agents run the "give it a goal and it works" promise in the cloud. KarvyLoop runs it on your machine, keeps you the decider by construction, and everything it learns lands in a local instance that is yours.
+
+In one line: they optimize a single call or a single orchestration; KarvyLoop optimizes the whole loop that repeats — and makes the repetition compound.
 
 ## Features
 
@@ -91,6 +103,18 @@ embedding:
 > You can also manage models in the console (left nav 🤖 Models). Any Anthropic-compatible endpoint works; OpenAI-compatible endpoints use `api: openai-completions`.
 > Just want to see the UI without a model? `karvyloop console --no-llm` (read-only, no key needed).
 
+## Your first 5 minutes
+
+The whole loop, one pass — roughly a minute per step:
+
+1. **Install & connect** (Quickstart above). *You should see:* the console opens, verifies your key, and Karvy greets you.
+2. **Say one small, concrete thing** to Karvy in the private chat — e.g. *"list the 5 largest files in my workspace."* *You should see:* it runs and streams the result back. That's the **execution loop**.
+3. **Give it something to route.** Create a domain with one role from the left nav (30 seconds), then tell Karvy *"hand the monthly report to the Analyst."* *You should see:* Karvy doesn't act — a **decision card** appears under 🤝 with what it's about and on what basis.
+4. **Decide.** Accept as-is, or edit a line first (*"…and keep it under 200 words"*). *You should see:* the work runs, and your call lands in 🗳 **Recent calls**.
+5. **Come back later.** *You should see:* your edit has become a standard shown beside the next card, and the repeated task is on its way to becoming a **skill**. You get asked less, and more precisely — that's the point.
+
+Want the same journey slower, with more of the why? See [the guided first 15 minutes](#your-first-15-minutes-guided) below.
+
 ### Optional features (extras)
 
 The base install runs the whole product. A few capabilities need an extra package — **all of them degrade gracefully when absent** (Karvy keeps working, you just don't get that one feature, and where you try to use it you get a clear "install X" message — never a crash). Install only what you need:
@@ -104,103 +128,39 @@ The base install runs the whole product. A few capabilities need an extra packag
 
 Combine them: `pip install -e ".[mcp,web]"`. None of these gate the core loop — chat, domains/roles, decisions, skills, and token accounting all work on the base install.
 
-## Your first 15 minutes
+<a id="your-first-15-minutes-guided"></a>
+## Your first 15 minutes (guided)
 
-No need to understand agents — here's the whole loop, end to end:
+The same loop as ["Your first 5 minutes"](#your-first-5-minutes), unhurried — no need to understand agents:
 
 1. **Start & connect a model (~5 min).** `karvyloop console` → the setup screen asks where your AI comes from; pick a provider, it shows a "get a key (30s)" link, paste the key, it verifies it works. (Prefer running locally? Pick the local option and follow the install hint.) Your key lives in `~/.karvyloop/config.yaml`, never in any repo.
 2. **Talk to Karvy.** In the private chat, ask for something small and concrete. It runs it and returns — that's the **execution loop**.
 3. **Make a team.** Left nav → create a business **domain** (like a company) and give it a few **roles** (e.g. domain "Data", roles "Analyst" and "Reviewer").
 4. **Hand off work.** Back in the private chat with Karvy, say something like *"hand the monthly report to the Analyst."* Karvy doesn't barge into the domain — it proposes routing it, and a **decision card** appears under 🤝.
 5. **Decide.** The card tells you, in your terms, what it's about and on what basis; it shows a verified region (✓/✗) separate from Karvy's narration; your own standards are pre-aligned beside it. Accept / edit a criterion / reject — your call. It then shows up in 🗳 **Recent calls** so you can look back.
+
+   ![A decision card — honest "not verified" narration, your own crystallized standards pre-aligned beside the call, and a basis box that teaches Karvy how you judge](docs/assets/decision-card.png)
+
 6. **It compounds.** Your accept/reject/edit choices crystallize into **decision preferences** that pre-align future proposals (you're asked less, re-explain yourself less); repeated tasks crystallize into **skills** a "fast brain" reuses — cheaper and more *you* each time.
+
+   ![The skill library — crystallized skills with usage counts, verify status, and a per-skill Lifeline (crystallized → revised → rerun)](docs/assets/skills-panel.png)
 
 ---
 
-## The idea — why "loop-native"
+## Why "loop-native" — the short version
 
-> This section is the *why*. If you just want to run it, everything above is enough — come back when you're curious what makes it different.
+> The full essay lives in [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md). Here's the skeleton, one idea per line.
 
-The industry climbed a ladder of paradigms: **prompt engineering → context engineering → harness engineering**. Each rung made a *single* LLM call more reliable. Today's agent runtimes are *harness-native*: they wrap one call in scaffolding — tools, ReAct, retries, guardrails — to make one agent dependable.
+- **The industry optimizes a call; we optimize the cycle.** Prompt → context → harness engineering each made *one* LLM call more reliable. KarvyLoop's unit of design is the loop that repeats — *discover → run → verify → compound → (you decide) → repeat* — because your report is due again next Monday.
+- **A loop is not neutral.** The same loop makes one person leveraged and quietly automates another out of their own judgment, one accepted suggestion at a time. Everything here is built to keep you the loop's *engineer*, not its spectator.
+- **Two loops, split by one question: does it carry your responsibility?** *How to fetch and diff the numbers* → execution loop, automated hard. *Whether the report goes out under your name* → decision loop, never automated. That's what **H2A** is structurally.
+- **No "how's that task going?".** If you have to ask, the decision loop has already collapsed. Blocked work surfaces itself with evidence — *"tried three routes, stuck here, need you to decide this"* — never a silent hang.
+- **A veto you can't exercise intelligently is theater.** More AI explanation increases trust whether or not the answer is right (the overtrust trap). So the **decision card** shows only gate-verified claims as ✓, marks the rest honestly "not verified", and puts your own past standards beside the call.
+- **Two crystallizations.** Runs compound into **skills** — the *method*, never the cached answer (a stale competitor list replayed six months later is poison; a hit re-runs the method on fresh inputs). Your accepts/rejects/edits compound into **decision preferences** — *"never email a client directly"* pre-aligns every future proposal.
+- **One honest scorekeeper.** An append-only **Trace** records everything; evaluation happens off the hot path; each layer is judged by whoever it answers to — you judge roles, roles judge atoms.
+- **Image vs instance.** The code is open and copyable — it's this repo. The instance you grow on it — memory, skills, decision style — can't be lifted out.
 
-KarvyLoop is **loop-native**. The unit of design isn't a call or an agent — it's the whole self-running cycle that finds work, runs it, checks itself, and compounds:
-
-```
-discover work → run it → verify independently → COMPOUND (crystallize) → (you decide) → repeat
-        ▲                                                                      │
-        └──────────────── the loop gets cheaper & more "you" each turn ────────┘
-```
-
-That shift sounds incremental. It isn't — because of one uncomfortable fact about loops:
-
-> **The same loop, in two people's hands, produces opposite outcomes.** For one it compounds into leverage. For the other it quietly takes over their judgment, one accepted suggestion at a time, until they can no longer tell whether the output is right — they've been automated out of their own work without noticing. A loop is not neutral. What decides which outcome you get is whether you stay the *engineer* of the loop or slide into being its *spectator*.
-
-Everything below is how KarvyLoop is built so you stay the engineer.
-
-> **Everyone is building agents that need you less. KarvyLoop builds the agent that learns how you decide — and proves it by never deciding for you.**
-
-### Two loops, not one
-
-Look closely and a running loop is really *two* loops with opposite natures:
-
-- **The execution loop** — *how to do X.* An atom (L1) does one job and can write a verify gate for its own output. This loop is fully automatable, and it's becoming a commodity — everyone's execution loop converges to roughly the same thing.
-- **The decision loop** — *whether, and on whose terms.* This runs between a role (L2) and you. It **can't** be automated, because automating it *is* the failure mode above. It's where your intent, taste, and accountability live.
-
-How do you tell which loop something belongs to? One knife, and it never wavers: **"does it carry your responsibility?"** Direction, trade-offs, sign-off → decision loop, stays with you. Purely getting the work out → execution loop, goes to the machine.
-
-So KarvyLoop automates the execution loop hard (cheap, fast, self-verifying) and **refuses** to automate the decision loop. The role/atom split in the architecture *is* this cut. **H2A** (the AI proposes, you decide) isn't a setting you can switch off — it's the structural guarantee that the decision loop stays yours.
-
-One more consequence of taking the decision loop seriously: **if you ever have to ask "how's that task going?", the decision loop has already collapsed** — you've become the system's heartbeat monitor. Roles here work under a *resourceful subordinate* contract: hit a wall, exhaust self-help first (swap plan, swap atom, find or forge a skill); come back only when it's genuinely infeasible — **with evidence** ("tried these three routes, stuck here, need you to decide this"), never a silent hang, never a bare "failed". Blocked work surfaces itself; your attention is spent on *deciding*, not *checking up*.
-
-### Staying the decider takes more than a yes/no button
-
-A veto you can't exercise *intelligently* is theater. To really keep the wheel you have to **understand** the decision — but understanding can't mean "go read the tool logs." The distance between what the system did and what you can tell from its output is what Don Norman called the **Gulf of Evaluation**, and the obvious fixes make it worse:
-
-- **The overtrust trap.** A large review of AI explanations (Microsoft, ~60 studies) found that *more* explanation increases reliance **regardless of whether the answer is correct** — a fluent rationale earns trust it hasn't deserved. "Just explain more" doesn't keep you in control; it lulls you out of it.
-- **Over-judgment = no judgment.** Ask for a decision too often and the human either kills the loop or rubber-stamps everything — both are surrender. There's a narrow band between asking too little (silent autopilot) and too much (decision fatigue).
-
-KarvyLoop's answer is a **translation layer** with two hard rules:
-
-1. **Grounded, not trust-inducing.** What the loop claims to have *solved* may be shown as solved **only** when it passed a deterministic verify gate. Everything else is presented as Karvy's *narration* and visibly marked "not verified." Your phone isn't "slow because storage is full" — you're told what was actually checked, and what wasn't.
-2. **Decision-forcing, not explanation-dumping.** The interface doesn't try to make you *trust* it; it makes you *judge*. It surfaces rarely (pure verified success doesn't interrupt you), and when it does it puts your own prior standards next to the call, asks you to keep / edit / drop the criteria, and **won't let a high-stakes accept be rubber-stamped**.
-
-Concretely, this is the **decision card**: the problem and approach in your terms; a *verified* region (✓ / ✗, traceable to the gate) kept visibly separate from Karvy's narration; your own crystallized standards pre-aligned beside it; and a gate that stops a high-stakes "accept" you were about to wave through. That — not a checkbox — is what "you stay the decider" is actually made of.
-
-> The verified ✓ region appears for a step that passed an **automatic verify gate**; many steps have nothing to auto-verify, so they show honestly as narration marked "not verified" rather than a fake ✓. That region lights up for more of your work as verify gates get wired into more flows — we'd rather show you less green than green you can't trust.
-
-### The compounding wedge: two loops, two crystallizations
-
-The two loops don't just run — each one **sediments**, and each sediments a different thing:
-
-- **The execution loop crystallizes into skills** — *how you work.* Every run is observed; once it passes a verify gate and is used enough, it **crystallizes into a persistent skill**. Next time a "fast brain" hits it directly: cheaper, and shaped to you.
-
-  And a rule we consider load-bearing: a skill stores **the method, never the answer**. Caching last quarter's competitor list and replaying it six months later isn't memory — it's **poisoning your own library** with stale conclusions. So a skill records *how you do it* (where to look, what to check, what counts as done), and every hit **re-runs the method on fresh inputs**. What compounds is your way of working — answers expire, methods don't.
-
-- **The decision loop crystallizes into taste** — *how you decide.* Your accept / reject / edit choices crystallize into standards that **pre-align** future proposals, so you're asked less and re-explain yourself less. These are deliberately easy to revoke — a contradicting decision weakens or retires one — because the goal is to *fit* you, never to lock you in.
-
-The first kind, others will eventually build. The second is the part almost no one else builds — and it's why the loop becomes **yours**, not merely good.
-
-### The flywheel underneath: how it actually compounds
-
-Crystallization and "you stay the decider" only work if something underneath keeps score honestly. That something is one substrate — the **Trace** — and a deliberate split of speed:
-
-- **One source of truth.** An append-only Trace records everything: what each role and atom *did*, what you and the system *said*, what you and a role *decided*, the *method* an atom used, and what the system *learned* from all of it (learning writes back into the Trace too). Every evaluation derives from the Trace — nothing is scored off to the side. The Trace stays *readable* (so you, and the safety/verify machinery, can audit it); the promise is "your instance can't be lifted out," never "you can't read your own data".
-- **Fast and slow, separated.** Running a task is urgent and must not pay for evaluating itself — so a drive only *executes and writes facts to the Trace*, and a patient learner reads the Trace **off the hot path** to score how things went. The fast side never waits on the slow side; the slow side (the patient "becoming more *you*" work) can take its time. (We borrow the *shape* of large-scale RL's actor/learner split — fast actor, patient learner, Trace as the log — **not the mechanism: nothing here trains model weights.**)
-- **Evaluated along the chain of accountability.** A role answers to *you*, so **your decisions evaluate the role** (that's the decision-preference half of the wedge). An atom answers to its *role* — you don't even see what it did — so **the role's own objective measures evaluate the atom**: did the sub-goal land, faster, better, past its verify gate? Each layer is judged by the one it's responsible to, all of it read from the Trace.
-
-This is the difference between *remembering what you repeated* (memory) and *learning what actually works for you* (what's truly yours). The methods that prove out start to surface first; each turn the loop gets a little cheaper and a little more yours. The wedge is the promise — this flywheel is the proof it can keep it.
-
-### Your assets, not someone else's agents
-
-Software here is disposable — you describe what you want, it gets written, used, and discarded. What *stays* is the reusable shape underneath, crystallized into a library that's yours: skills (*how to do X*), decision preferences (*how you decide*), and the **roles & atoms** your work is built from.
-
-Already invested in agents elsewhere? Bring them. An imported agent isn't flattened into a file — a model **decomposes it into a role** (its persona) **plus reusable atoms** (its capabilities), dropped into a shared pool any of your roles can compose. Near-duplicate atoms across roles get merged into one canonical atom — *you* confirm the merge, since it's your asset — and each atom is labeled honestly: *executable* (its tools are real and wired) or *advisory* (persona reasoning only), so "it ran" never masquerades as "it works".
-
-That library — your roles, atoms, skills, and decision style — is the part that compounds into leverage and **can't be lifted out**.
-
-### Your instance, your data: image vs instance
-
-The code (the **image**) is open and copyable — it's this repo. The **instance** you grow on it — your memory, your skills, your decision style — is yours and can't be copied. Open source and this promise are consistent: we publish the image, never your instance.
+Want the argument, the failure modes, and the receipts behind each line? → **[docs/PHILOSOPHY.md](docs/PHILOSOPHY.md)**
 
 ---
 
