@@ -2465,24 +2465,25 @@
       });
     });
   }
-  // 右下角卡皮巴拉:每隔一阵冒个省略号泡(· → ······ 循环),让人知道它能点(沟通是核心)。
-  // 佛系人设:不说生硬话术,只发省略号动效。聊天开着 / 鼠标在它上面时不弹。
+  // 顶栏小卡(docs/46 S2):每隔一阵冒个省略号泡(· → ······ 循环),提示副驾能点。
+  // 佛系人设:不说生硬话术,只发省略号动效。正在打字 / 弹层聊天开着 / 鼠标悬上时不弹。
   function _startKarvyIdleBubble() {
     const bubble = document.getElementById("karvy-bubble");
-    const dock = document.querySelector(".karvy-dock");
-    if (!bubble || !dock) return;
+    const host = document.getElementById("topbar-karvy");
+    if (!bubble || !host) return;
     const dots = bubble.querySelector(".karvy-bubble-dots");
     let dotTimer = null, hideTimer = null, hovering = false;
-    dock.addEventListener("mouseenter", () => { hovering = true; });
-    dock.addEventListener("mouseleave", () => { hovering = false; });
+    host.addEventListener("mouseenter", () => { hovering = true; });
+    host.addEventListener("mouseleave", () => { hovering = false; });
     const hide = () => {
       bubble.classList.add("hidden");
       if (dotTimer) { clearInterval(dotTimer); dotTimer = null; }
     };
     const show = () => {
       const modal = document.getElementById("chat-modal");
-      const chatOpen = modal && !modal.classList.contains("hidden");
-      if (chatOpen || hovering) return;   // 聊天开着 / 鼠标悬上 → 不打扰
+      const overlayOpen = modal && !modal.classList.contains("hidden") && !_chatDocked();
+      const typing = document.activeElement === document.getElementById("chat-input");
+      if (overlayOpen || typing || hovering) return;   // 聊着呢 / 打字中 / 鼠标悬上 → 不打扰
       bubble.classList.remove("hidden");
       let n = 1;
       if (dots) {
@@ -2496,9 +2497,31 @@
     setTimeout(show, 4000);        // 进来 4s 先冒一次(立刻让人发现能点)
     setInterval(show, 30000);      // 放 15s + 歇 15s = 每 30s 冒一次
   }
+  // docs/46 §5:顶栏副驾按钮 —— 点击 = 切到与小卡的私聊并聚焦输入框
+  // (对话视图下 = switchPeer(小卡)+focus;看板视图/移动端下 openChatModal 先弹层)。
+  function _talkToKarvy() {
+    openChatModal();
+    const list = document.getElementById("peer-list");
+    if (list) {
+      const rows = Array.from(list.querySelectorAll(".peer-row"));
+      for (const row of rows) {
+        let p = null;
+        try { p = JSON.parse(row.dataset.peer || ""); } catch (e) { continue; }
+        if (p && p.domain_id === "l0" && !p.is_group) {     // 小卡私聊线(isKarvy 判据同 _setChatTitle)
+          if (!row.classList.contains("active")) row.click();   // 已在小卡场就不重切(免重拉历史)
+          break;
+        }
+      }
+    }
+    const input = document.getElementById("chat-input");
+    if (input) setTimeout(() => input.focus(), 80);
+  }
+
   function setupChatModal() {
     const open = document.getElementById("chat-open");
     if (open) open.addEventListener("click", openChatModal);
+    const karvyBtn = document.getElementById("topbar-karvy");
+    if (karvyBtn) karvyBtn.addEventListener("click", _talkToKarvy);   // S2:副驾=聊天第二入口
     const close = document.getElementById("chat-modal-close");
     if (close) close.addEventListener("click", closeChatModal);
     const overlay = document.getElementById("chat-modal");

@@ -33,11 +33,13 @@
         </div>
         <span class="token-meter" id="token-meter" data-i18n-title="cockpit.token_title">💰 —</span>
       </div>
-      <!-- 小卡永远在场 -->
-      <div class="topbar-karvy">
+      <!-- 小卡永远在场:【你的副驾】从纯装饰升级为按钮(docs/46 S2)——
+           点击 = 切到与小卡的私聊 + 聚焦输入框;冒泡动效(karvy-bubble)也挂它头上 -->
+      <button class="topbar-karvy" id="topbar-karvy" data-i18n-title="app.karvy_talk">
+        <div class="karvy-bubble hidden" id="karvy-bubble"><span class="karvy-bubble-dots">·</span></div>
         <img src="/static/assets/karvy-capybara.png" alt="Karvy" />
         <span class="role" data-i18n="app.karvy_role">你的副驾</span>
-      </div>
+      </button>
       <div class="top-actions">
         <!-- docs/46 S1:对话⇄看板 一键切换(body.board-view class 换挡;偏好记 localStorage) -->
         <button class="view-toggle" id="view-toggle">⊞</button>
@@ -220,8 +222,7 @@
          私聊 / 业务域 / 圆桌都从这进(切场在弹起的聊天里完成)。
          未来可在此并一个语音入口(voice),两个入口共用同一套对话。 -->
     <div class="karvy-dock">
-      <!-- 定时冒泡:让人知道这只卡皮巴拉能点(沟通是核心功能)。佛系人设 → 只发省略号动效 … -->
-      <div class="karvy-bubble hidden" id="karvy-bubble"><span class="karvy-bubble-dots">·</span></div>
+      <!-- 冒泡动效已移到顶栏副驾按钮头上(docs/46 S2) -->
       <span class="karvy-dock-label" data-i18n="chat.open">跟小卡说…</span>
       <button class="karvy-fab" id="chat-open" data-i18n-title="chat.open" aria-label="Talk to Karvy">
         <img src="/static/assets/karvy-capybara.png" alt="Karvy" />

@@ -2004,3 +2004,31 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
   /* 移动端聊天弹层开着时收起 FAB(同看板视图,body class 由 JS 维护) */
   body.chat-open .karvy-dock { display: none; }
 }
+
+/* ============================================================================
+   docs/46 S2 — 顶栏【你的副驾】升级为按钮:点击 = 跟小卡私聊 + 聚焦输入框。
+   karvy-bubble 冒泡动效随之挂到它头上(泡在头像下方,尾巴朝上指向小卡)。
+   ========================================================================= */
+button.topbar-karvy {
+  cursor: pointer; font-family: inherit; position: relative;
+  transition: background var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+button.topbar-karvy:hover { background: var(--accent-light); border-color: var(--accent); }
+button.topbar-karvy:active { transform: translateY(1px); }
+button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+/* 泡从"头顶"(FAB 时代)换到"头下"(顶栏没有上方空间):箭头翻转朝上 */
+.topbar-karvy .karvy-bubble {
+  top: calc(100% + 9px); bottom: auto; right: 8px; left: auto;
+  z-index: 95;
+}
+.topbar-karvy .karvy-bubble::after {
+  top: auto; bottom: 100%; right: 22px;
+  border: 7px solid transparent; border-top-color: transparent;
+  border-bottom-color: var(--surface);
+}
+.topbar-karvy .karvy-bubble::before {
+  top: auto; bottom: calc(100% + 1px); right: 21px;
+  border: 8px solid transparent; border-top-color: transparent;
+  border-bottom-color: var(--border);
+}
