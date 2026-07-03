@@ -615,6 +615,44 @@ def _fs_access_handler(proposal: Any) -> Tuple[bool, str]:
     return True, f"已放行 {path}({'/'.join(g['ops'])});能力总览可撤"
 
 
+def _silence_grant_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """KIND_SILENCE_GRANT 兑现(「挣来的静音」,docs/49 机制2 / docs/50 决定1)。
+
+    ACCEPT = 授权该桶(kind+可选 domain)静音处理 → 落 ~/.karvyloop/silence_grants.json
+    (可撤销;押错一次自动吊销)。高危 kind 双保险:出卡前 HIGH_RISK_KINDS 滤过一次,
+    store.grant 再拒一次(硬地板 —— 卡被伪造也授不出权)。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        from karvyloop.karvy.silence import (
+            SILENCE_MIN_CONFIDENCE, get_store,
+        )
+        payload = getattr(proposal, "payload", None) or {}
+        kind = (payload.get("kind") or "").strip()
+        domain = (payload.get("domain") or "").strip()
+        if not kind:
+            return False, "缺 kind —— 无法授权"
+        try:
+            n = int(payload.get("n") or 0)
+            hits = int(payload.get("hits") or 0)
+        except (TypeError, ValueError):
+            n = hits = 0
+        g = get_store(app).grant(kind, domain, n=n, hits=hits)
+        if g is None:
+            return False, f"高危类型「{kind}」不允许静音授权(硬地板,不该出这张卡)"
+        scope = f"(域「{domain}」)" if domain else ""
+        return True, (f"已授权:「{kind}」{scope}这类卡以后我按你的口味先办 —— 只办我押你会 "
+                      f"ACCEPT 且把握 ≥{int(SILENCE_MIN_CONFIDENCE * 100)}% 的,每次完整留痕、"
+                      f"月度对账;我押错一次立即自动收回,你随时可撤")
+    return handler
+
+
+def _silence_revoked_handler(proposal) -> Tuple[bool, str]:
+    """KIND_SILENCE_REVOKED 兑现:纯知悉卡(授权已在押错/翻案时**自动**吊销,不在此执行)。"""
+    payload = getattr(proposal, "payload", None) or {}
+    kind = (payload.get("kind") or "").strip() or "该类"
+    return True, f"已知悉 —— 「{kind}」这类卡已恢复逐张问你;要再静音得重新挣(攒新鲜命中)"
+
+
 def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool, str]]]:
     """构造 ACCEPT 兑现 handler 表(注入 app.state.proposal_handlers)。
 
@@ -626,6 +664,7 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
     _ml = getattr(getattr(app, "state", None), "main_loop", None) if app is not None else None
     # cocreate_finalize(共创定稿卡):ACCEPT → 真建域+角色(模板 instantiate / 自建 finalize)
     from karvyloop.karvy.cocreation import KIND_COCREATE_FINALIZE, make_cocreate_finalize_handler
+    from karvyloop.karvy.silence import KIND_SILENCE_GRANT, KIND_SILENCE_REVOKED
     return {
         KIND_COCREATE_FINALIZE: make_cocreate_finalize_handler(app),
         KIND_REVISE_SKILL: partial(apply_revision_proposal, trace=getattr(_ml, "trace", None)),
@@ -642,6 +681,8 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_FS_ACCESS: _fs_access_handler,
         KIND_RESOLVE_CONFLICT: _resolve_conflict_handler(app),   # 断③:处置决议真落地(台账+Trace)
         KIND_WEEKLY_DIGEST: _weekly_digest_handler,              # ACCEPT=归档(对齐前端承诺)
+        KIND_SILENCE_GRANT: _silence_grant_handler(app),         # 挣来的静音:授权落台账(可撤)
+        KIND_SILENCE_REVOKED: _silence_revoked_handler,          # 吊销告知:纯知悉
     }
 
 

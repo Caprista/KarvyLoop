@@ -97,6 +97,14 @@ class TastePredictionStore:
             self._save()
         return len(stale)
 
+    def outcomes(self) -> list[dict]:
+        """**只读**:对账流水副本(旧→新,[{pid, predicted, actual, hit, ts}])。
+
+        「挣来的静音」(karvy/silence.py,docs/49②/50 决定1)的分桶命中率从这里读 ——
+        复用同一账本不另起;桶的 kind/domain 由 decision_log 按 pid 关联(本 store 不记,
+        写入面保持不变)。返回副本,调用方改不到内部状态。"""
+        return [dict(o) for o in self._outcomes]
+
     def stats(self) -> dict:
         """给 UI 的口味命中率:{n, hit_rate, prev_rate, trend, enough, need_more}。
         样本门:n<MIN_N → hit_rate=None + need_more=还差几次;趋势要两期都满窗才报。"""

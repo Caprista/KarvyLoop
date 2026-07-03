@@ -76,6 +76,7 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
     ctx = ""
     kind = ""
     orig_payload: dict = {}
+    eff_domain = domain or ""
     try:
         reg = getattr(app.state, "proposal_registry", None)
         if reg is not None:
@@ -83,6 +84,13 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
             ctx = getattr(p, "summary", "") or ""
             kind = getattr(p, "kind", "") or ""
             orig_payload = dict(getattr(p, "payload", {}) or {})
+            if p is not None:
+                # 域以**卡自己的 payload 为权威**(与 silence._proposal_domain 同口径):
+                # 传输层的 to_address_domain_id 是 pydantic 占位默认("dom-1"),前端常不填
+                # → 直接用会把全部流水记进假域,静音分桶两侧永远对不上(对抗验收缺陷①)。
+                _cd = str(orig_payload.get("domain_id")
+                          or orig_payload.get("group_domain_id") or "").strip()
+                eff_domain = "" if _cd in ("", "l0") else _cd
     except Exception as e:
         logger.warning(f"[decision_wire] 读回提案失败(proposal_id={proposal_id},"
                        f"样本 context 降级为 id): {e}")
@@ -107,13 +115,33 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
         logger.warning(f"[decision_wire] 折 edits 对照失败(proposal_id={proposal_id},"
                        f"改批信号丢了这条): {e}")
     # 段3:口味命中率对账(押过的注开奖;没押过=不计入,诚实)
+    hit = None
     try:
         tstore = getattr(app.state, "taste_predictions", None)
         if tstore is not None:
-            tstore.resolve(proposal_id, decision)
+            hit = tstore.resolve(proposal_id, decision)
     except Exception as e:
         logger.warning(f"[decision_wire] 口味对账失败(proposal_id={proposal_id},"
                        f"这次开奖丢了): {e}")
+    # 段3a:decision_log 回看流水 —— **必须在静音钩子之前**:静音分桶命中率靠
+    # outcomes⨝decision_log(按 proposal_id)算,本条流水晚写一步,授权门就永远差一次
+    # 看不见刚开的这一奖(对抗验收缺陷②,off-by-one)。域用 eff_domain(卡 payload 权威)。
+    try:
+        log = getattr(app.state, "decision_log", None)
+        if log is not None:
+            log.record(decision=decision, summary=ctx, proposal_id=proposal_id,
+                       reason=eff_reason, kind=kind, domain=eff_domain, role=role or "")
+    except Exception as e:
+        logger.warning(f"[decision_wire] decision_log 记录失败(proposal_id={proposal_id}): {e}")
+    # 段3b:挣来的静音(docs/49②/50 决定1)—— 命中率从仪表变控制器,单一接缝就在开奖处:
+    # 押错且该桶已授权 → 自动吊销 + 出卡告知;押中 → 达门(同桶 n≥20 且 ≥90%)才提授权卡。
+    try:
+        if hit is not None:
+            from karvyloop.karvy.silence import on_outcome
+            on_outcome(app, proposal_id=proposal_id, kind=kind, domain=eff_domain, hit=hit)
+    except Exception as e:
+        logger.warning(f"[decision_wire] 静音控制器钩子失败(proposal_id={proposal_id},"
+                       f"不阻断决策流): {e}")
     # 段4:样本入结晶缓冲 + 调度结晶(楔子的进料口 —— 丢了必须可见)
     try:
         observe_decision(app, DecisionSample(
@@ -131,14 +159,7 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
             stats.record(decision)
     except Exception as e:
         logger.warning(f"[decision_wire] decision_stats 记录失败(proposal_id={proposal_id}): {e}")
-    # 段6:decision_log 回看流水
-    try:
-        log = getattr(app.state, "decision_log", None)
-        if log is not None:
-            log.record(decision=decision, summary=ctx, proposal_id=proposal_id,
-                       reason=eff_reason, kind=kind, domain=domain or "", role=role or "")
-    except Exception as e:
-        logger.warning(f"[decision_wire] decision_log 记录失败(proposal_id={proposal_id}): {e}")
+    # (decision_log 回看流水已提前到段3a —— 静音分桶 join 需要它先落账)
 
 
 def _existing_pref_list(mem: Any) -> list:

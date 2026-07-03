@@ -31,18 +31,31 @@ logger = logging.getLogger(__name__)
 WS_TYPE_H2A_PROPOSAL = "h2a_proposal"
 
 
-async def broadcast_proposal(app: Any, proposal: Any) -> int:
+async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = True) -> int:
     """把一条 Proposal 广播给所有 WS clients。
 
     Args:
         app: FastAPI app(读 app.state.ws_clients)
         proposal: 任何有 `.to_dict()` 的对象(duck type — IntentAnalyst.Proposal)
+        allow_silence: 「挣来的静音」拦截开关;silence 模块回退重入时传 False 防递归
 
     Returns:
-        成功推送的 client 数量(死连接被剔除,不计入)
+        成功推送的 client 数量(死连接被剔除,不计入;被静音接管 → 0)
 
     K5:本函数**只推建议**,不替用户决策(决策走 ws.h2a_decision → decision_to_envelope)。
     """
+    # 挣来的静音(docs/49 机制2 / docs/50 决定1):**register 咽喉**在此 —— 已授权桶的卡
+    # 不进待决表、不推卡,由 karvy/silence.py 按口味预测自动兑现 + 完整留痕 + WS 轻通知。
+    # 判定链任何一环不满足(高危 kind / 未授权 / 预测非 ACCEPT / 置信不足 / 无 handler)
+    # → try_silence 返 False / silence 内部回退到本函数(allow_silence=False),正常出卡。
+    if allow_silence:
+        try:
+            from karvyloop.karvy.silence import try_silence
+            if try_silence(app, proposal):
+                return 0
+        except Exception as e:   # 静音判定失败 → 走正常路径(宁可少静音绝不静音错)
+            logger.debug(f"[proposals] 静音判定失败,走正常路径: {e}")
+
     # D5(docs/30 PR-2):推给用户前先进待决议表 → ACCEPT 时凭 proposal_id 查回兑现。
     registry = getattr(app.state, "proposal_registry", None)
     if registry is not None and getattr(proposal, "proposal_id", ""):
