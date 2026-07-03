@@ -85,6 +85,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--out", type=str, default=None,
         help="output archive path (.zip or .tar.gz; default: ./karvyloop-instance-<YYYYMMDD>.zip)")
 
+    # import — export 的回程:一键迁移,把实例包解回 ~/.karvyloop(秘密永不落地)
+    p_import = sub.add_parser("import", help=_t_exp("cli.import.help"))
+    p_import.add_argument("archive", type=str, help=_t_exp("cli.import.help.archive"))
+    p_import.add_argument("--force", action="store_true", help=_t_exp("cli.import.help.force"))
+    p_import.add_argument("--dry-run", action="store_true", help=_t_exp("cli.import.help.dry_run"))
+
     return p
 
 
@@ -214,6 +220,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "export":
         from .export_cmd import cmd_export
         return cmd_export(out=args.out)
+
+    if args.cmd == "import":
+        from .import_cmd import cmd_import
+        return cmd_import(args.archive, force=args.force, dry_run=args.dry_run)
 
     from karvyloop.i18n import t
     parser.error(t("cli.unknown_cmd", cmd=args.cmd))

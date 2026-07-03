@@ -338,6 +338,7 @@ KarvyLoop ships **by version** ([CHANGELOG](CHANGELOG.md)), and it tells you whe
 - **Or by hand**: from a clone → `git pull && pip install -e .`; from PyPI (once published) → `pip install -U karvyloop`. The banner also shows the exact command for your install.
 - **Your data survives.** Everything you grow lives in `~/.karvyloop/` (config, beliefs, skills, roles/atoms, decision log) — outside the repo — and stays across upgrades. A breaking data change always ships with a migration and is called out loudly in the release notes.
 - **Take it with you.** `karvyloop export` packs your whole instance (skills, knowledge, preferences, history) into one portable archive — API keys are deliberately left behind; unpack it into `~/.karvyloop` on the new machine and you're home.
+- **One-command return trip.** `karvyloop import <archive>` unpacks it back into `~/.karvyloop` for you — path-safe, never touches your local `config.yaml`, and refuses to clobber an existing instance unless you say `--force` (`--dry-run` shows the plan first).
 
 ## Running the tests
 

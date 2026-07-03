@@ -150,6 +150,25 @@ _EN = {
     "cli.export.done": "Exported your instance: {n} files ({size}) -> {path}",
     "cli.export.excluded": "Excluded on purpose: config.yaml (your API keys stay put), console.runtime.json, *.lock",
     "cli.export.restore": "Restore: unpack into ~/.karvyloop on the new machine, add your key, then run karvyloop console",
+    # karvyloop import(export 的回程:一键迁移)
+    "cli.import.help": "restore an exported instance archive into ~/.karvyloop — the return trip of `karvyloop export`",
+    "cli.import.help.archive": "the archive produced by `karvyloop export` (.zip or .tar.gz)",
+    "cli.import.help.force": "merge into an existing instance: overwrite colliding files one by one (local-only files are kept)",
+    "cli.import.help.dry_run": "list what would be restored, write nothing",
+    "cli.import.not_found": "Archive not found: {path}",
+    "cli.import.unreadable": "Cannot read archive (not a zip/tar.gz, or truncated/corrupt): {path} — nothing was written",
+    "cli.import.unsafe": "Refusing this archive: unsafe member '{name}' (absolute path, '..', or a link) — nothing was written",
+    "cli.import.nothing": "Archive has no instance data to restore: {path}",
+    "cli.import.refuse": "{root} already has instance data — refusing to merge without --force.",
+    "cli.import.refuse.collisions": "Would overwrite (top-level): {items}",
+    "cli.import.refuse.no_collisions": "No file collisions — --force would merge without overwriting anything.",
+    "cli.import.refuse.hint": "Use --dry-run to see the full plan, or --force to merge (file-by-file overwrite; your local-only files are kept).",
+    "cli.import.dry_run.header": "Dry run — nothing written. Would restore {n} files into {root}:",
+    "cli.import.skipped": "Skipped on purpose: {items} (secrets/locks never land; MANIFEST.txt is the archive's own README)",
+    "cli.import.done": "Restored your instance: {n} files -> {root}",
+    "cli.import.overwrote": "Overwrote {n} existing files (--force)",
+    "cli.import.config_kept": "Your local config.yaml was not touched — API keys stay per-machine.",
+    "cli.import.next": "Next: add your model API key (`karvyloop init`, or edit ~/.karvyloop/config.yaml), then run `karvyloop console` — your skills, knowledge and history are home.",
 }
 
 # ---- 中文 ----
@@ -284,6 +303,25 @@ _ZH = {
     "cli.export.done": "已导出你的实例:{n} 个文件({size})-> {path}",
     "cli.export.excluded": "刻意排除:config.yaml(你的 API 密钥留在原地)、console.runtime.json、*.lock",
     "cli.export.restore": "恢复:在新机器解压到 ~/.karvyloop,补上密钥,然后 karvyloop console",
+    # karvyloop import(export 的回程:一键迁移)
+    "cli.import.help": "把导出的实例包恢复到 ~/.karvyloop —— `karvyloop export` 的回程",
+    "cli.import.help.archive": "`karvyloop export` 产出的包(.zip 或 .tar.gz)",
+    "cli.import.help.force": "合并进已有实例:冲突文件逐个覆盖(本机独有文件保留)",
+    "cli.import.help.dry_run": "只列出会恢复什么,不写盘",
+    "cli.import.not_found": "找不到包:{path}",
+    "cli.import.unreadable": "读不了这个包(不是 zip/tar.gz,或已截断/损坏):{path} —— 没有写入任何东西",
+    "cli.import.unsafe": "拒收这个包:不安全成员 '{name}'(绝对路径、'..' 或链接)—— 没有写入任何东西",
+    "cli.import.nothing": "包里没有可恢复的实例数据:{path}",
+    "cli.import.refuse": "{root} 已有实例数据 —— 不加 --force 不合并。",
+    "cli.import.refuse.collisions": "会被覆盖的顶层项:{items}",
+    "cli.import.refuse.no_collisions": "没有文件冲突 —— 加 --force 合并不会覆盖任何东西。",
+    "cli.import.refuse.hint": "用 --dry-run 看完整清单,或 --force 合并(逐文件覆盖;本机独有文件保留)。",
+    "cli.import.dry_run.header": "干跑 —— 零写盘。将恢复 {n} 个文件到 {root}:",
+    "cli.import.skipped": "刻意跳过:{items}(秘密/锁永不落地;MANIFEST.txt 是包自己的说明书)",
+    "cli.import.done": "已恢复你的实例:{n} 个文件 -> {root}",
+    "cli.import.overwrote": "覆盖了 {n} 个已有文件(--force)",
+    "cli.import.config_kept": "本机 config.yaml 一字未动 —— API 密钥按机器各留各的。",
+    "cli.import.next": "下一步:补上模型 API key(`karvyloop init`,或编辑 ~/.karvyloop/config.yaml),然后 `karvyloop console` —— 你的技能、知识和历史都在原位。",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

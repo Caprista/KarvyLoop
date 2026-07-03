@@ -342,6 +342,7 @@ KarvyLoop **按版本发布**([CHANGELOG](CHANGELOG.md)),有新版会**提示你
 - **或者手动**:从 clone 装的 → `git pull && pip install -e .`;从 PyPI(将来发布后)→ `pip install -U karvyloop`。横幅也会按你的安装方式显示对的命令。
 - **你的数据不丢**:你长出来的一切都在 `~/.karvyloop/`(config、beliefs、skills、角色/原子、决策流水)——在仓库之外——跨版本存活。破坏性的数据变更必随附迁移,并在发布说明里明确标出。
 - **打包带走**:`karvyloop export` 把整个实例(技能、知识、偏好、历史)打成一个可携带压缩包——API key 刻意留在原机;新机器上解进 `~/.karvyloop` 就是回家。
+- **一条命令的回程**:`karvyloop import <包>` 替你解回 `~/.karvyloop`——路径安全、绝不碰本机 `config.yaml`、已有实例默认拒绝覆盖(`--force` 才合并,`--dry-run` 先看清单)。
 
 ## 跑测试
 
