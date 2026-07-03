@@ -43,6 +43,28 @@ def current_source() -> str:
     return _SOURCE.get()
 
 
+# ---- task contextvar(per-task 归因;#42 成本预估的地基)----
+
+_TASK: contextvars.ContextVar[str] = contextvars.ContextVar("token_task", default="")
+
+
+@contextlib.contextmanager
+def token_task(task_id: str):
+    """标记接下来的 LLM 调用归属哪个任务(任务看板 registry id)。
+
+    与 token_source 正交:source 答"哪个功能烧的",task 答"哪次任务烧的"。
+    contextvars 跨 await/to_thread 传播(asyncio 复制上下文),drive 顶层裹一次即可。"""
+    tok = _TASK.set(task_id or "")
+    try:
+        yield
+    finally:
+        _TASK.reset(tok)
+
+
+def current_task() -> str:
+    return _TASK.get()
+
+
 # ---- 全局 ledger 注册 + record 入口 ----
 
 _LEDGER: Optional["TokenLedger"] = None
@@ -75,6 +97,7 @@ def record(
             source=current_source(), model=model or "",
             input=int(input or 0), output=int(output or 0),
             cache_read=int(cache_read or 0), cache_write=int(cache_write or 0),
+            task_id=current_task(),
         )
     except Exception:
         # 账本失败绝不打断主流程(测量是增益,不是阻塞)
@@ -116,6 +139,11 @@ class TokenLedger:
             ":memory:" if path is None else str(self._path), check_same_thread=False
         )
         self._conn.executescript(_SCHEMA)
+        # 迁移(幂等):老库补 task_id 列(per-task 归因;老行 task_id='' 不参与任务级聚合,诚实)
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(token_usage)").fetchall()}
+        if "task_id" not in cols:
+            self._conn.execute("ALTER TABLE token_usage ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS token_usage_task ON token_usage(task_id)")
         self._conn.commit()
         self._lock = threading.Lock()
         self._clock = clock
@@ -123,13 +151,14 @@ class TokenLedger:
     def record(
         self, *, source: str, model: str,
         input: int, output: int, cache_read: int = 0, cache_write: int = 0,
+        task_id: str = "",
     ) -> None:
         ts = self._clock()
         with self._lock:
             self._conn.execute(
-                "INSERT INTO token_usage (ts, day, source, model, input, output, cache_read, cache_write) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (ts, _day_of(ts), source, model, input, output, cache_read, cache_write),
+                "INSERT INTO token_usage (ts, day, source, model, input, output, cache_read, cache_write, task_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ts, _day_of(ts), source, model, input, output, cache_read, cache_write, task_id or ""),
             )
             self._conn.commit()
 
@@ -176,6 +205,32 @@ class TokenLedger:
                 "total": int(r[1]) + int(r[2]), "calls": int(r[5]),
             })
         return out
+
+    def task_total(self, task_id: str) -> int:
+        """某任务烧了多少(input+output)。"""
+        if not task_id:
+            return 0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(input),0)+COALESCE(SUM(output),0) FROM token_usage WHERE task_id=?",
+                (task_id,)).fetchone()
+        return int(row[0] or 0)
+
+    def estimate_task_cost(self, *, n: int = 10) -> dict:
+        """"花钱之前告诉你"(#42 打计费黑箱):最近 n 个**有归因**任务的消耗分布。
+
+        诚实边界:只统计 task_id 非空的行(归因接线之前的历史不猜);样本 <3 → n 照实返回、
+        由调用方决定不显示。返回 {n, mean, min, max}(单位 token,input+output)。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT task_id, SUM(input)+SUM(output) AS total, MAX(ts) AS last "
+                "FROM token_usage WHERE task_id != '' GROUP BY task_id "
+                "ORDER BY last DESC LIMIT ?", (max(1, int(n)),)).fetchall()
+        totals = [int(r[1] or 0) for r in rows]
+        if not totals:
+            return {"n": 0, "mean": 0, "min": 0, "max": 0}
+        return {"n": len(totals), "mean": int(sum(totals) / len(totals)),
+                "min": min(totals), "max": max(totals)}
 
     def recent(self, *, limit: int = 50) -> list[dict]:
         """最近 N 条原始调用(时间线:何时、哪个 source/model、烧多少)—— 定位某次尖峰是谁。"""
@@ -237,6 +292,8 @@ class TokenLedger:
 __all__ = [
     "TokenLedger",
     "token_source",
+    "token_task",
+    "current_task",
     "current_source",
     "register_ledger",
     "get_ledger",

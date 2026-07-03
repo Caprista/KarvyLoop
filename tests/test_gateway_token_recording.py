@@ -88,3 +88,45 @@ def test_no_usage_event_no_record(ledger):
     gw = GatewayClient(_Reg(), adapters={"fake": _NoUsage()})
     _run(gw, "x")
     assert ledger.totals()["calls"] == 0
+
+
+# ---- per-task 归因 + 成本预估(#42:打计费黑箱,"花钱之前告诉你"的地基)----
+
+def test_task_attribution_and_estimate(ledger):
+    from karvyloop.llm.token_ledger import token_task
+    gw = GatewayClient(_Reg(), adapters={"fake": _Adapter(100, 20)})
+
+    async def go(task):
+        with token_source("route_to_role"), token_task(task):
+            async for _ in gw.complete([{"role": "user", "content": "x"}], [], "test-model"):
+                pass
+    asyncio.run(go("prop-1"))
+    asyncio.run(go("prop-1"))   # 同任务两次调用 → 聚到一起
+    asyncio.run(go("prop-2"))
+    assert ledger.task_total("prop-1") == 240 and ledger.task_total("prop-2") == 120
+    est = ledger.estimate_task_cost(n=10)
+    assert est["n"] == 2 and est["mean"] == 180 and est["min"] == 120 and est["max"] == 240
+    # 无归因的调用(老路径)不进任务级聚合(诚实:不猜)
+    asyncio.run(go(""))
+    assert ledger.estimate_task_cost(n=10)["n"] == 2
+
+
+def test_migration_old_db_gains_task_column(tmp_path):
+    """老 tokens.db(无 task_id 列)→ 新版打开自动迁移,老数据保留、老行不进任务聚合。"""
+    import sqlite3
+    p = tmp_path / "tokens.db"
+    conn = sqlite3.connect(str(p))
+    conn.executescript(
+        "CREATE TABLE token_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, "
+        "day TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'unknown', model TEXT NOT NULL DEFAULT '', "
+        "input INTEGER NOT NULL DEFAULT 0, output INTEGER NOT NULL DEFAULT 0, "
+        "cache_read INTEGER NOT NULL DEFAULT 0, cache_write INTEGER NOT NULL DEFAULT 0);")
+    conn.execute("INSERT INTO token_usage (ts, day, source, model, input, output) "
+                 "VALUES (1.0, '2026-07-01', 'forge', 'm', 50, 50)")
+    conn.commit(); conn.close()
+    led = TokenLedger(p)
+    assert led.totals()["total"] == 100                      # 老数据在
+    assert led.estimate_task_cost()["n"] == 0                # 老行无归因,不猜
+    led.record(source="s", model="m", input=10, output=0, task_id="t")
+    assert led.task_total("t") == 10                         # 新列可用
+    led.close()

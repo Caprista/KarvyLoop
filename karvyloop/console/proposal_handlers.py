@@ -142,7 +142,10 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
                 **rk)
             # docs/02 §15:role 作为尽责下属在预算内自助追求 —— drive + 独立验收,没跑完/验收不过
             # 在同一预算内 replan/修,infra-dead 立即 fail-loud,耗尽则带证据升不可行报告卡。
-            outcome = pursue(requirement, ml=ml, slow_brain=slow_brain, rk=rk)
+            # per-task token 归因:委派烧的 token 记到该提案名下(成本预估的样本单元)
+            from karvyloop.llm.token_ledger import token_task
+            with token_task(getattr(proposal, "proposal_id", "") or ""):
+                outcome = pursue(requirement, ml=ml, slow_brain=slow_brain, rk=rk)
             checked = outcome.checked
             result = checked.result
         except Exception as e:
@@ -255,8 +258,11 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
             slow_brain = forge_slow_brain_factory(governance=gov, persona=persona, **rk)
             # loop step3:重跑后过一道**独立验收**(maker→checker→不过则修一轮),
             # 让 loop 真的"验过了"而不是作者自述。无验收能力时诚实退回单跑。
+            # per-task token 归因(#42 成本预估地基):这个任务烧的每个 token 记到它名下
+            from karvyloop.llm.token_ledger import token_task
             from karvyloop.coding.checker import verify_and_fix_with_rk, verdict_suffix
-            checked = verify_and_fix_with_rk(intent, ml=ml, slow_brain=slow_brain, rk=rk)
+            with token_task(tid or ""):
+                checked = verify_and_fix_with_rk(intent, ml=ml, slow_brain=slow_brain, rk=rk)
             result = checked.result
         except Exception as e:
             if task_reg is not None and tid:
