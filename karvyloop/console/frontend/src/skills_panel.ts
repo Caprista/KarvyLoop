@@ -31,6 +31,91 @@ const tB = (x: unknown): string => {
   return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
 };
 
+// ---- 结晶裸分曲线(docs/57 P1 护城河可感知):纯 SVG 手画,不引第三方图表库 ----
+const _SVG_NS = "http://www.w3.org/2000/svg";
+function _svgEl(tag: string, attrs: Record<string, string>): SVGElement {
+  const n = document.createElementNS(_SVG_NS, tag) as SVGElement;
+  for (const k of Object.keys(attrs)) n.setAttribute(k, attrs[k]);
+  return n;
+}
+
+// 把一列 {ts, v} 点映射成 SVG polyline 的 points 串(x 按时间等比,y 线性归一,内边距 pad)
+function _polylinePoints(pts: Array<{ ts: number; v: number }>, w: number, h: number,
+  pad: number, yMax: number): string {
+  const t0 = pts[0].ts, t1 = pts[pts.length - 1].ts;
+  const span = (t1 - t0) || 1;
+  const ymax = yMax > 0 ? yMax : 1;
+  return pts.map((p) => {
+    const x = pad + ((p.ts - t0) / span) * (w - 2 * pad);
+    const y = h - pad - (Math.min(p.v, ymax) / ymax) * (h - 2 * pad);
+    return x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+}
+
+// 迷你 sparkline:usage_score 曲线 + 末点圆点;单点退化成一个点(空序列 → null,优雅缺席)
+function _sparkline(points: any[], opts?: { w?: number; h?: number; yMax?: number;
+  color?: string; title?: string }): SVGElement | null {
+  const pts = (points || [])
+    .map((p) => ({ ts: Number(p.ts) || 0, v: Number(p.usage_score) || 0 }));
+  if (!pts.length) return null;
+  const w = (opts && opts.w) || 96, h = (opts && opts.h) || 22, pad = 2;
+  const yMax = (opts && opts.yMax) || Math.max(1, ...pts.map((p) => p.v));
+  const color = (opts && opts.color) || "#4f8cc9";
+  const svg = _svgEl("svg", { class: "skill-spark", width: String(w), height: String(h),
+    viewBox: "0 0 " + w + " " + h });
+  if (opts && opts.title) {
+    const ti = _svgEl("title", {});
+    ti.textContent = opts.title;
+    svg.appendChild(ti);
+  }
+  if (pts.length > 1) {
+    svg.appendChild(_svgEl("polyline", {
+      points: _polylinePoints(pts, w, h, pad, yMax),
+      fill: "none", stroke: color, "stroke-width": "1.5", "stroke-linejoin": "round" }));
+  }
+  const last = pts[pts.length - 1];
+  const lastXY = _polylinePoints([last], w, h, pad, yMax).split(",");
+  // 单点时 _polylinePoints 的 x 落在 pad(span=1)→ 点画在左缘;多点时末点在右缘
+  const cx = pts.length > 1 ? String(w - pad) : lastXY[0];
+  svg.appendChild(_svgEl("circle", { cx: cx, cy: lastXY[1], r: "2", fill: color }));
+  return svg;
+}
+
+// 面板顶部:全库成长曲线 —— 技能数(实线)+ 复用命中率(虚线),越用越像你的可见增长线
+function _growthSection(growth: any[]): HTMLElement {
+  const wrap = el("div", { class: "mgmt-buysugar skill-growth" });
+  wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("skills.growth_title") }));
+  const pts = growth || [];
+  if (!pts.length) {
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("skills.growth_empty") }));
+    return wrap;
+  }
+  const last = pts[pts.length - 1];
+  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("skills.growth_legend", {
+    skills: last.skills_total || 0,
+    promos: last.promotions || 0,
+    rate: Math.round((Number(last.avg_success_rate) || 0) * 100),
+    hit: Math.round((Number(last.hit_rate) || 0) * 100) }) }));
+  const w = 560, h = 64, pad = 4;
+  const svg = _svgEl("svg", { class: "skill-growth-chart", width: "100%",
+    height: String(h), viewBox: "0 0 " + w + " " + h, preserveAspectRatio: "none" });
+  const skillsPts = pts.map((p: any) => ({ ts: Number(p.ts) || 0, v: Number(p.skills_total) || 0 }));
+  const hitPts = pts.map((p: any) => ({ ts: Number(p.ts) || 0, v: Number(p.hit_rate) || 0 }));
+  const yMax = Math.max(1, ...skillsPts.map((p) => p.v));
+  if (pts.length > 1) {
+    svg.appendChild(_svgEl("polyline", { points: _polylinePoints(skillsPts, w, h, pad, yMax),
+      fill: "none", stroke: "#4f8cc9", "stroke-width": "2", "stroke-linejoin": "round" }));
+    svg.appendChild(_svgEl("polyline", { points: _polylinePoints(hitPts, w, h, pad, 1),
+      fill: "none", stroke: "#7bbf7b", "stroke-width": "1.5", "stroke-dasharray": "4 3",
+      "stroke-linejoin": "round" }));
+  } else {
+    const only = _polylinePoints(skillsPts, w, h, pad, yMax).split(",");
+    svg.appendChild(_svgEl("circle", { cx: only[0], cy: only[1], r: "3", fill: "#4f8cc9" }));
+  }
+  wrap.appendChild(svg);
+  return wrap;
+}
+
 // 导入第三方技能(Agent Skills 开放标准:官方仓库 / 市场 / 本地)——加入大家都在用的生态
 function _skillImportForm(): HTMLElement {
   const srcIn = el("input", { type: "text", placeholder: t("skills.import_ph") }) as HTMLInputElement;
@@ -161,6 +246,11 @@ async function renderSkillsPanel(): Promise<void> {
   body.appendChild(el("div", { class: "mgmt-section-title", text: t("skills.subtitle") }));
   const data = await _getJSON("/api/skills");
   if (data && data.no_llm) { body.appendChild(el("div", { class: "mgmt-empty", text: t("skills.no_llm") })); return; }
+  // 结晶裸分曲线(docs/57 P1):一次取全库 —— 顶部成长曲线 + 每技能迷你 sparkline 共用
+  const curves = await _getJSON("/api/skills/curve");
+  const curveBySig: Record<string, any[]> = {};
+  for (const c of (curves && curves.skills) || []) curveBySig[c.sig] = c.points || [];
+  body.appendChild(_growthSection((curves && curves.growth && curves.growth.points) || []));
   await _renderCodingCapability(body);    // #1:内建「Coding」技能 —— 编码能力露在技能库里
   _renderCapabilityOverviewCard(body);    // P3-d:能力合一清单 —— 工具下限 + 技能授予一张表
   body.appendChild(_skillImportForm());   // 导入入口常驻顶部(空库时也能先导)
@@ -181,6 +271,13 @@ async function renderSkillsPanel(): Promise<void> {
           text: "🌐 " + t("skills.third_party_badge") })
       : null;
     const stats = t("skills.stats", { recall: s.recall_count || 0, use: s.usage_count || 0, ok: s.success_count || 0 });
+    // 迷你 sparkline:该技能的 usage_score 时间曲线(Trace 回放推导);无数据 → 优雅缺席
+    const cpts = curveBySig[s.sig] || [];
+    const lastPt = cpts.length ? cpts[cpts.length - 1] : null;
+    const spark = lastPt ? _sparkline(cpts, { title: t("skills.spark_title", {
+      score: (Number(lastPt.usage_score) || 0).toFixed(1),
+      rate: Math.round((Number(lastPt.success_rate) || 0) * 100),
+      prog: Math.round((Number(lastPt.promote_progress) || 0) * 100) }) }) : null;
     const actions = el("div", { class: "dpref-actions" });
     if (archived) {
       actions.appendChild(el("button", { class: "dpref-confirm", text: t("skills.restore"),
@@ -193,7 +290,9 @@ async function renderSkillsPanel(): Promise<void> {
         el("div", { class: "mc-name" }, el("span", { text: "🧩 " + s.name }), " ", stBadge,
           " ", badge, tpBadge ? " " : null, tpBadge),
         el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
-        el("div", { class: "mc-meta", text: stats })),
+        spark
+          ? el("div", { class: "mc-meta skill-spark-row" }, spark, el("span", { text: " " + stats }))
+          : el("div", { class: "mc-meta", text: stats })),
       actions));
   }
   body.appendChild(list);

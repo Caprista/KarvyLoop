@@ -125,6 +125,41 @@ def api_skill_lifecycle(request: Request) -> dict[str, Any]:
     return {"skills": skills}
 
 
+@router.get("/skills/curve")
+def api_skills_curve(request: Request, sig: str = "") -> dict[str, Any]:
+    """结晶裸分曲线(docs/57 P1 护城河可感知):每技能 day 粒度分数时间序列
+    (usage_score / success_rate / promote_progress)+ 全库成长曲线(技能数/晋级数/
+    平均成功率/复用命中率随时间)——"越用越像你"的可见增长线。
+
+    契约(别改形状):{"bucket": "day", "promote_score", "min_success_rate",
+    "skills": [{"sig", "name", "crystallized_ts", "points": [{"day", "ts",
+    "usage_count", "success_count", "usage_score", "success_rate",
+    "promote_progress", "reruns", "crystallized"}]}], "growth": {"points": [{"day",
+    "ts", "skills_total", "promotions", "revisions", "runs_total",
+    "avg_success_rate", "hit_rate"}]}}。
+
+    K4 只读:全部从 Trace 回放推导(eval_fact / crystallize / skill_revision),
+    不改记账、不在执行热路径另算(铁律:Trace 是所有评价的唯一数据源)。
+    ``?sig=`` 只取一个技能的序列(growth 仍全库)。无 main_loop / 无 Trace → 优雅空。
+    """
+    from karvyloop.crystallize.crystallize import MIN_SUCCESS_RATE, PROMOTE_SCORE
+    from karvyloop.crystallize.curve import build_curves
+    ml = getattr(request.app.state, "main_loop", None)
+    trace = getattr(ml, "trace", None) if ml is not None else None
+    if trace is None:
+        return build_curves(None)
+    th = getattr(ml, "thresholds", None)
+    idx = getattr(ml, "skill_index", None)
+    resolver = (lambda s: idx.name_for_sig(s) or "") if idx is not None else None
+    from karvyloop.crystallize.store import USAGE_DEBOUNCE_SEC
+    return build_curves(
+        trace, sig=(sig or "")[:128],
+        promote_score=float(getattr(th, "promote_score", PROMOTE_SCORE)),
+        min_success_rate=float(getattr(th, "min_success_rate", MIN_SUCCESS_RATE)),
+        debounce_sec=float(getattr(th, "usage_debounce_sec", USAGE_DEBOUNCE_SEC)),
+        name_resolver=resolver)
+
+
 @router.get("/desk/memento")
 def api_desk_memento(request: Request) -> dict[str, Any]:
     """周五纪念物(P1.5 灵魂缺口③,轻读口)。契约形状冻结:
