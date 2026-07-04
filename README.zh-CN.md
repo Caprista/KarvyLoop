@@ -4,7 +4,7 @@
 
 **一个本地优先、loop 原生的 AI agent 运行时 —— 在你自己的机器上组建一支 AI agent 团队,替你跑活、自己验证产出,并把每一次使用都结晶成"你的"技能;而你始终是拍板的人。**
 
-![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-early%2Fpre--1.0-orange)
+[![CI](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-early%2Fpre--1.0-orange)
 
 `AI agent` · `多智能体编排` · `LLM 运行时` · `loop engineering` · `本地优先` · `人在环 (H2A)` · `技能结晶` · `MCP` · `沙箱执行`
 
@@ -344,7 +344,7 @@ npm run verify   # 类型检查 + 构建 → ../static + 运行时 smoke(jsdom)
 
 ## 贡献
 
-欢迎 PR。提交前:`pytest -q` 必须全绿;用户可见字符串走双语 i18n 表。真实 API key 永不入库——只放 `~/.karvyloop/config.yaml`(仓库外);测试 fixture 用明显的假 key。
+欢迎 PR —— 完整贡献流程见 **[CONTRIBUTING.md](CONTRIBUTING.md)**(clone → `pip install -e ".[dev]"` → `pytest` → `ruff check`)。简言之:每个 PR 都会跑 [CI](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml)(Ubuntu,Python 3.11 + 3.12),必须全绿——即 `ruff check`(lint 门,不自动改码)加完整测试套件。用户可见字符串走双语 i18n 表。真实 API key 永不入库——只放 `~/.karvyloop/config.yaml`(仓库外);测试 fixture 用明显的假 key。
 
 ## 许可证
 

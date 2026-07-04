@@ -41,11 +41,17 @@ winsandbox = []
 relay = [
     "cryptography>=42",
 ]
+# 测试/开发依赖。**装了 `.[dev]` 后 `pytest --co` 必须 0 collection error**——这是开源可信度地板:
+# respx / psutil 是仅有的两个「测试模块顶层直接 import」的非核心依赖(3 + 1 个测试文件),
+# 缺它们 = 干净 clone 后一堆 collection error(朋友的「81 error」根因正是他只跑了 `pip install -e .`
+# 没带 `[dev]`)。其余真·可选依赖(mcp/playwright/redis/cryptography)测试内都用 pytest.importorskip
+# / lazy-import 优雅降级,没装则整模块自跳,不报 collection error。CI 装 `.[dev]` 即全绿。
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "respx>=0.21",   # HTTP mock:gateway adapter 的请求体形状/SSE 测试用
-    "psutil>=5.9",   # test_mcp_client.py 验子进程清理(AC6;mcp 组需另装 `pip install mcp`)
+    "respx>=0.21",   # HTTP mock:gateway adapter 的请求体形状/SSE 测试用(test_web_tools/multimodal/openai_completions 顶层 import)
+    "psutil>=5.9",   # test_mcp_client.py 验子进程清理(AC6;顶层 import;mcp 组需另装 `pip install mcp`)
+    "ruff>=0.6",     # lint 门(仅 `ruff check`,不 --fix);见 [tool.ruff] + .github/workflows/ci.yml
 ]
 
 [project.scripts]
@@ -74,3 +80,46 @@ karvyloop = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+# ---------------------------------------------------------------------------
+# ruff — lint 门(dev-time infra,不进运行时,不违背「少脚手架多信模型」铁律)。
+# 立门原则:先把门立起来让**现有代码全过**(0 违规),别一上来 strict 刷全仓红 / 别 --fix 大改。
+# `ruff check .` 现状 = All checks passed。以下 ignore 全是「需要改代码才能消、留作后续渐进收紧」
+# 的存量债,不是「永久放行」——每一条都标了为什么现在忽略。收紧路线见 docs/58 §2 ②。
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+# line-length 仅供未来 `ruff format` 参考;E501 本身在下面 ignore(见理由),不作门。
+line-length = 120
+extend-exclude = ["build", "_local", "*.egg-info"]
+
+[tool.ruff.lint]
+# 业界基线三组:E(pycodestyle 错)、F(pyflakes 逻辑)、W(pycodestyle 警)。
+select = ["E", "F", "W"]
+# 存量债忽略清单(装 ruff 后 `ruff check .` 实测:去掉任一条都会亮现有代码,需改码才能消):
+ignore = [
+    "E501",  # line-too-long:5388 处。仓内大量中英双语行内注释,强行折行=改动数千行(动码);
+             #   line-length 交给未来一次性 `ruff format`,不作 lint 门。
+    "E402",  # module-import-not-at-top:测试里 pytest.importorskip / sys.path 垫底后再 import 是**有意**
+             #   (顶部已有 `# noqa: E402`),不是错。
+    "E401",  # multiple-imports-on-one-line:19 处风格,消它要改码。
+    "E701", "E702",  # 多语句同行(冒号/分号,~126 处):风格,消它要改码。
+    "E731",  # lambda 赋值:7 处,风格。
+    "E741",  # ambiguous 变量名(l/I/O):16 处,风格。
+    "F401",  # unused-import:326 处,多为 __init__ re-export + TYPE_CHECKING 转发;--fix 会误删转发导出,
+             #   留作后续人工/format 阶段清(见 per-file-ignores 已单独放行 __init__.py)。
+    "F811",  # redefined-while-unused:5 处,消它要改码。
+    "F841",  # unused-variable:28 处,消它要改码。
+    "F821",  # undefined-name:9 处**全是** `Optional["GovConfig"]` 这类**前向引用字符串注解**
+             #   (真类型在 TYPE_CHECKING 下导),是 ruff 静态误报,不是真 bug。
+    "F541",  # f-string-missing-placeholders:19 处,消它要改码。
+    "W292",  # no-newline-at-end-of-file:23 文件。纯可 --fix,但本轮「立门不 --fix」纪律下先放行,
+             #   下次 `ruff format`/`ruff check --fix` 一次性收(安全无逻辑改动)。
+]
+# 仍然**生效**并守着真 bug 的:E9(语法/运行期错)、F63/F7(坏断言/坏语法)、F82 逻辑、
+# W605(无效正则转义)等——这些现状本就 0 违规,门抓的是**新引入**的这类问题(防回归)。
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py 的「导入即为对外 re-export」本就不算 unused。
+"__init__.py" = ["F401"]
+

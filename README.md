@@ -4,7 +4,7 @@
 
 **A local-first, loop-native AI agent runtime — build a team of AI agents that run your work, verify themselves, and compound into skills that are _yours_, while you stay the one who decides.**
 
-![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-early%2Fpre--1.0-orange)
+[![CI](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-early%2Fpre--1.0-orange)
 
 `AI agents` · `multi-agent orchestration` · `LLM runtime` · `loop engineering` · `local-first` · `human-in-the-loop` · `skill crystallization` · `MCP` · `sandboxed execution`
 
@@ -344,7 +344,7 @@ npm run verify   # typecheck + build → ../static + runtime smoke (jsdom)
 
 ## Contributing
 
-Pull requests welcome. Before submitting: `pytest -q` must be green; user-facing strings go through the bilingual i18n tables. Real API keys never go in the repo — only `~/.karvyloop/config.yaml` (outside the repo); test fixtures use obviously-fake keys.
+Pull requests welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full contributor loop (clone → `pip install -e ".[dev]"` → `pytest` → `ruff check`). In short: every PR runs [CI](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml) (Ubuntu, Python 3.11 + 3.12) which must be green — that's `ruff check` (lint gate, no autofix) plus the full test suite. User-facing strings go through the bilingual i18n tables. Real API keys never go in the repo — only `~/.karvyloop/config.yaml` (outside the repo); test fixtures use obviously-fake keys.
 
 ## License
 
