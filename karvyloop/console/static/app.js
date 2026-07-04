@@ -2187,7 +2187,7 @@
       else notice.appendChild(document.createTextNode(text || ""));
       log.appendChild(notice);
       if (follow) log.scrollTop = log.scrollHeight;
-      return;
+      return notice;   // 返回节点:旅程收官要对「方法复用回执」聚光(调用方多数忽略)
     }
     const line = el("div", { class: "chat-line " + role },
       el("span", { class: "role", text: _roleLabel(role) }));
@@ -2199,6 +2199,7 @@
     else line.appendChild(document.createTextNode(_txt));
     log.appendChild(line);
     if (follow) log.scrollTop = log.scrollHeight;
+    return line;
   }
 
   function renderChatHistory(lines) {
@@ -3041,6 +3042,40 @@
     return _driverLoading;
   }
 
+  // —— 蒙版聚光统一档(Hardy 2026-07-04:「引导气泡不认真看找不到」)——
+  // 标准做法 = 黑半透蒙版罩住其余界面、目标镂空高亮、popover 对比度拉足。driver.js 原生
+  // 支持,这里**显式锁配置**(防 vendor 默认漂移);光圈/popover 样式在 styles.css
+  // (.driver-active-element / .karvy-tour-pop)。蒙版只在引导激活时存在:Esc / 点蒙版即撤。
+  function _spotCfg() {
+    const reduced = !!(window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    return {
+      overlayColor: "#000", overlayOpacity: 0.7,
+      stagePadding: 6, stageRadius: 10,
+      popoverClass: "karvy-tour-pop",
+      animate: !reduced,   // 减动效偏好 → 蒙版/镂空不做过渡动画(光圈脉动由 CSS 同一偏好关)
+    };
+  }
+  // 单元素聚光(旅程时刻用):无 popover —— 旅程条/回执自己就是气泡,蒙版只负责「躲不开」。
+  let _spot = null;
+  function _spotlightDismiss() {
+    if (_spot) { try { _spot.destroy(); } catch (e) {} _spot = null; }
+  }
+  function _spotlightEl(target) {
+    if (!target || !_tourVisible(target)) return;
+    // 强制配 Key 锁(mgmt-modal)开着不抢戏;6 步 tour 正开着也不叠蒙版
+    const mgmt = document.getElementById("mgmt-modal");
+    if (mgmt && !mgmt.classList.contains("hidden")) return;
+    if (!_spot && document.body.classList.contains("driver-active")) return;
+    _ensureDriverJs().then(() => {
+      if (!_tourVisible(target)) return;   // 异步回来再核一次形态(视图可能已切走)
+      if (!_spot && document.body.classList.contains("driver-active")) return;
+      _spotlightDismiss();
+      _spot = window.driver.js.driver(_spotCfg());
+      _spot.highlight({ element: target });
+    }).catch(() => {});
+  }
+
   const _TOUR_DONE_KEY = "karvyloop_tour_done";
   // 元素"当前形态下是否真可见"(非"存在"):各形态藏锚方式不同(rail 放大态 hidden 聊天/桌面
   // display:none 侧栏/聊天窗最小化),隐藏元素 rect 全 0 → driver.js 把 popover 钉左上角
@@ -3098,15 +3133,16 @@
       // 弹出 0.4s 内按 ESC 会静默不触发 → 标记不落、每次访问重弹(真浏览器烟测抓到的竞态)。
       // 顶栏 💡 随时可重看,所以提前写零代价。
       try { localStorage.setItem(_TOUR_DONE_KEY, "1"); } catch (e) {}
+      _spotlightDismiss();   // 旅程聚光正开着 → 先撤,不叠两层蒙版
       _prepForTour();
       const steps = _tourSteps();
       if (!steps.length) return;   // 极端:一步锚都不可见 → 不启动空引导(driver 空 steps 会炸)
-      const drv = window.driver.js.driver({
+      const drv = window.driver.js.driver(Object.assign(_spotCfg(), {
         showProgress: true,
         progressText: "{{current}} / {{total}}",
         nextBtnText: t("tour.next"), prevBtnText: t("tour.prev"), doneBtnText: t("tour.done"),
         steps: steps,
-      });
+      }));
       drv.drive();
     }).catch((e) => console.warn("[tour] driver.js unavailable", e));
   }
@@ -3181,7 +3217,17 @@
     return tasks["task" + n] || "";
   }
   function _journeyChip(labelKey, onClick) {
-    return el("button", { class: "journey-chip", text: t(labelKey), onClick: onClick });
+    // 点行动 chip 先撤聚光蒙版(接下来要弹面板/切视图,蒙版留着会把它们罩黑)
+    return el("button", { class: "journey-chip", text: t(labelKey),
+      onClick: () => { _spotlightDismiss(); onClick(); } });
+  }
+  // 旅程引导时刻聚光:一个时刻只聚一次(15s 轮询/重渲**绝不重弹蒙版**——W2 纪律:
+  // 轮询重入不许拽视图/抢焦点,蒙版同罪)。Esc / 点蒙版即撤,撤了不追。
+  let _journeySpotKey = "";
+  function _journeySpotMoment(key) {
+    if (_journeySpotKey === key) return;
+    _journeySpotKey = key;
+    _spotlightEl(document.getElementById("journey-bar"));
   }
   function _renderJourneyBar() {
     const bar = document.getElementById("journey-bar");
@@ -3189,13 +3235,14 @@
     const active = _journeyActive();
     bar.innerHTML = "";
     bar.classList.toggle("hidden", !active);
-    if (!active) return;
+    if (!active) { _spotlightDismiss(); _journeySpotKey = ""; return; }
     bar.appendChild(el("div", { class: "journey-head" },
       el("span", { class: "journey-title", text: t("journey.title") }),
       el("button", { class: "journey-skip", text: t("journey.skip"),
         onClick: () => { _journeyAwait = 0; _journeySetStage("skipped"); } })));
     if (!_journey.llm_ready) {
-      // 诚实引导:没配模型演示跑不了 → 先配模型(不演假戏)
+      // 诚实引导:没配模型演示跑不了 → 先配模型(不演假戏)。不聚光:强制配 Key
+      // 弹窗(checkSetupGate)才是这一态的主角,旅程条只是回声。
       bar.appendChild(el("div", { class: "journey-desc", text: t("journey.need_model") }));
       bar.appendChild(_journeyChip("journey.model_cta", () => window.KarvyModelsPanel.open()));
       return;
@@ -3203,14 +3250,17 @@
     if (_journeyAwait) {
       bar.appendChild(el("div", { class: "journey-desc",
         text: t(_journeyAwait === 1 ? "journey.running1" : "journey.running2") }));
+      _spotlightDismiss();   // 任务跑着,无需行动 → 不拿蒙版罩人
       return;
     }
     if (_journey.stage === "fresh") {
       bar.appendChild(el("div", { class: "journey-desc", text: t("journey.desc") }));
       bar.appendChild(_journeyChip("journey.chip1", () => _journeyRunTask(1)));
+      _journeySpotMoment("chip1");   // 引导时刻①:跑第一个演示任务(蒙版聚光,躲不开)
     } else {   // step1(任务1回来了)/ step2(重进来:任务2没跑完)→ 都给第二步 chip
       bar.appendChild(el("div", { class: "journey-desc", text: t("journey.step2_hint") }));
       bar.appendChild(_journeyChip("journey.chip2", () => _journeyRunTask(2)));
+      _journeySpotMoment("chip2");   // 引导时刻②:再跑一次同类 → 亲眼看方法复用
     }
   }
   async function _journeyRunTask(n) {
@@ -3245,7 +3295,7 @@
       const c = await _getJSON("/api/skills/curve");
       hasPoint = !!((c && c.skills) || []).some((s) => s.points && s.points.length);
     } catch (e) {}
-    pushChatLine("system", t(reused ? "journey.done_receipt" : "journey.done_noreuse"));
+    const receipt = pushChatLine("system", t(reused ? "journey.done_receipt" : "journey.done_noreuse"));
     if (hasPoint) {
       const log = document.getElementById("chat-log");
       if (log) {
@@ -3274,6 +3324,9 @@
         log.scrollTop = log.scrollHeight;
       }
     }
+    // 引导时刻③:方法复用回执 = 10 分钟 wow 的主菜,同一套蒙版聚光。
+    // 诚实红线:真 recall 命中(reused)才聚 —— 没命中不拿蒙版庆祝空气。
+    if (reused && receipt) _spotlightEl(receipt);
   }
 
   // ============ 语音输入 v1(Hardy ⑪)============

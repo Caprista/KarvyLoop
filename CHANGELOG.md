@@ -37,6 +37,17 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
     report as budget stops instead of "network down". This fixes the week's real pain: a swallowed
     `TypeError` was reported as "model unreachable" and sent debugging in the wrong direction.
 
+### Fixed
+- **Onboarding guidance is now impossible to miss.** First-10-minutes feedback: the guidance
+  bubbles were easy to overlook. Guidance now uses the standard spotlight treatment — a black
+  semi-transparent mask (0.7) covers everything else, the target is cut out with a pulsing accent
+  ring, and the guide popover got a high-contrast restyle (larger title, accent CTA button). The
+  journey's action moments (first demo-task chip, run-it-again chip, and the method-reuse receipt
+  on a real recall hit) get the same spotlight — one mask per moment, never re-popped by polling.
+  The mask only exists while guidance is active: Esc or clicking the mask dismisses it, the
+  spotlit button stays clickable through the cutout, and `prefers-reduced-motion` disables the
+  animations. Locked with a real-browser regression test across both views (chat + desk).
+
 ### Planned
 - **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
   near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the

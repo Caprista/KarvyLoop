@@ -323,3 +323,55 @@ def test_decision_card_shows_your_standard_with_receipt(console_with_proposal):
         browser.close()
     assert "没备份" in found.get("receipt_text", ""), f"回执没渲染:{found}"
     assert "备份" in found.get("h2a_text", ""), f"标准没摆上卡:{found}"
+
+
+def test_tour_spotlight_mask_both_views(console_no_llm):
+    """引导可见性(Hardy 2026-07-04:「引导气泡不认真看找不到」)回归锁:开 tour 必须有
+    黑半透蒙版(≥0.6)罩住其余界面 + 目标镂空高亮(driver-active-element + 3px 光圈)+
+    高对比 popover(karvy-tour-pop);Esc 退出蒙版即撤。对话/桌面两视图各验一遍,0 JS 报错。"""
+    from playwright.sync_api import sync_playwright
+
+    probe = """() => {
+      const ov = document.querySelector('.driver-overlay');
+      const path = ov ? ov.querySelector('path') : null;
+      const act = document.querySelector('.driver-active-element');
+      const pop = document.querySelector('.driver-popover');
+      return {
+        overlay: !!ov,
+        opacity: path ? parseFloat(getComputedStyle(path).opacity) : 0,
+        z: ov ? parseInt(getComputedStyle(ov).zIndex || '0', 10) : 0,
+        ring: act ? getComputedStyle(act).outlineWidth + ' ' + getComputedStyle(act).outlineStyle : '',
+        popClass: pop ? pop.className : '',
+      };
+    }"""
+    errors: list[str] = []
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.on("console", lambda m: errors.append(f"console.error: {m.text}") if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+        page.add_init_script(
+            "try { localStorage.setItem('karvyloop_tour_done', '1');"
+            " localStorage.setItem('karvyloop_view', 'chat'); } catch (e) {}")
+        page.goto(console_no_llm, wait_until="commit", timeout=10000)
+        page.wait_for_selector("#tour-replay", timeout=10000)
+
+        for view_btn, view_name in ((None, "chat"), ("#view-opt-desk", "desk")):
+            if view_btn:
+                page.click(view_btn)
+                page.wait_for_function("document.body.classList.contains('desk-view')", timeout=5000)
+                page.wait_for_timeout(500)
+            page.click("#tour-replay")
+            page.wait_for_selector(".driver-popover", timeout=8000)
+            page.wait_for_timeout(400)     # 蒙版入场动画提交
+            m = page.evaluate(probe)
+            assert m["overlay"], f"[{view_name}] 开 tour 没有蒙版 —— 引导又回到「不认真看找不到」"
+            assert m["opacity"] >= 0.6, f"[{view_name}] 蒙版太浅(opacity={m['opacity']}),挡不住其它部分"
+            assert m["z"] > 9600, f"[{view_name}] 蒙版层级 {m['z']} 会被桌面便签/壁纸部件(≤9600)盖掉"
+            assert m["ring"] == "3px solid", f"[{view_name}] 目标没有镂空光圈(ring={m['ring']!r})"
+            assert "karvy-tour-pop" in m["popClass"], f"[{view_name}] popover 没走高对比样式:{m['popClass']!r}"
+            page.keyboard.press("Escape")
+            page.wait_for_function("!document.querySelector('.driver-overlay')", timeout=3000)
+
+        browser.close()
+    assert not errors, "tour 蒙版高亮下必须 0 JS 报错:\n" + "\n".join(errors)

@@ -178,6 +178,10 @@ def test_frontend_wired_to_journey():
     assert "/api/onboarding/sample" in app_js, "前端没接样例数据端点"
     assert "_journeyOnDriveDone" in app_js, "drive_done 没接旅程状态机"
     assert "drive.method_reuse" in app_js, "方法复用回执(Cut1 可见化)没接进聊天"
+    # 引导可见性(Hardy 2026-07-04):旅程行动时刻(chip1/chip2/回执)必须接蒙版聚光,
+    # 否则引导退化回「不认真看找不到」的裸条
+    assert "_journeySpotMoment" in app_js, "旅程引导时刻没接蒙版聚光(_journeySpotMoment)"
+    assert "_spotlightEl" in app_js, "单元素聚光助手(_spotlightEl)丢了"
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     assert 'id="journey-bar"' in html
     assert 'id="journey-replay"' in html, "「重看旅程」重入口丢了(可跳过必须可重入)"

@@ -886,7 +886,8 @@ html, body {
   display: flex; flex-direction: column; gap: 6px;
   margin: 6px 16px 0; flex-shrink: 0;
   padding: 10px 12px; border-radius: 10px;
-  background: rgba(122, 165, 201, 0.10); border: 1px solid var(--border);
+  /* 蒙版撤掉后条本身也得站得住:accent 描边(引导时刻的蒙版聚光在 app.js _spotlightEl) */
+  background: rgba(122, 165, 201, 0.10); border: 1px solid var(--accent-line);
 }
 .journey-bar.hidden { display: none; }
 .journey-head { display: flex; align-items: center; gap: 8px; }
@@ -2166,6 +2167,39 @@ button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outl
   border: 1px solid var(--border-strong); font-size: var(--fs-12);
 }
 .tour-replay:hover { border-color: var(--accent); color: var(--accent-deep); }
+
+/* —— 引导聚光(Hardy 2026-07-04:「引导气泡不认真看找不到」)——
+   蒙版/镂空 = driver.js 原生(vendored driver.min.css + 内联 SVG;配置锁在 app.js
+   _spotCfg:黑 0.7 全屏蒙版、目标按 stagePadding=6px 镂空)。只在引导激活时存在,
+   Esc / 点蒙版即撤。这里补两件事:①目标光圈 ②popover 对比度拉足。 */
+/* ① 目标光圈:driver 给目标挂 .driver-active-element;光圈画在 2px offset 处,
+   恰好落在 6px 镂空环里 → 蒙版盖不住;脉动尊重 prefers-reduced-motion */
+.driver-active-element { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .driver-active-element { animation: karvy-spot-pulse 1.8s ease-in-out infinite; }
+}
+@keyframes karvy-spot-pulse {
+  0%, 100% { outline-color: var(--accent); }
+  50% { outline-color: var(--accent-light); }
+}
+/* ② popover 对比度:driver 默认白底小字太素,黑蒙版下要一眼看到、一眼知道点哪 */
+.karvy-tour-pop.driver-popover {
+  border-radius: 12px; padding: 16px 18px; max-width: 340px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.karvy-tour-pop .driver-popover-title { font-size: 16px; color: var(--text); }
+.karvy-tour-pop .driver-popover-description { font-size: 13.5px; color: var(--text-2); }
+.karvy-tour-pop .driver-popover-progress-text { color: var(--text-3); }
+.karvy-tour-pop .driver-popover-footer button {
+  border-radius: 8px; padding: 6px 12px; text-shadow: none; font-weight: 600;
+}
+.karvy-tour-pop .driver-popover-next-btn {
+  background-color: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700;
+}
+.karvy-tour-pop .driver-popover-next-btn:hover,
+.karvy-tour-pop .driver-popover-next-btn:focus {
+  background-color: var(--accent-deep); border-color: var(--accent-deep); color: #fff;
+}
 /* 空态行动链接:空态不只解释"为什么空",还给一步能点的动作 */
 .empty-act {
   display: block; margin-top: 8px; padding: 5px 12px;
