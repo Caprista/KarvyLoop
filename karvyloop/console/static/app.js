@@ -3145,14 +3145,22 @@
   async function _initJourney() {
     const j = await _getJSON("/api/onboarding/journey");
     if (!j || !j.stage) return false;
+    const bar = document.getElementById("journey-bar");
+    const mounted = !!(bar && !bar.classList.contains("hidden"));   // 旅程条已在场?
+    const changed = !_journey || _journey.stage !== j.stage ||
+      !!_journey.llm_ready !== !!j.llm_ready;
     _journey = j;
-    _renderJourneyBar();
+    if (!mounted || changed) _renderJourneyBar();   // 轮询重入且无变化:连重渲都省(不打断悬停/点击)
     if (_journeyActive()) {
-      // docs/59 方案A:旅程永远落在对话视图(桌面/放大偏好不许截胡第一个 10 分钟;
-      // 只回放视图不改写 karvyloop_view 偏好,旅程结束后下次开机仍回用户自己的家)
-      if (document.body.classList.contains("desk-view") || _boardZoomed()) _applyView("chat");
-      openChatModal();   // 旅程活跃 → 聊天当主场(对话视图本就常驻;移动端弹起)
-      // 还没配模型:轮询等它配好(配好那刻 CTA 自动换成第一步 chip,不用刷新页面)
+      if (!mounted) {
+        // docs/59 方案A:旅程永远落在对话视图(桌面/放大偏好不许截胡第一个 10 分钟;
+        // 只回放视图不改写 karvyloop_view 偏好,旅程结束后下次开机仍回用户自己的家)。
+        // **只在首次挂载旅程条时回放**:未配模型态的 15s 轮询重入绝不再拽视图/弹层/
+        // 抢焦点 —— 用户切去 🖥 桌面或 ⛶ 放大后不被循环拉回(2026-07-04 独立验收 W2)。
+        if (document.body.classList.contains("desk-view") || _boardZoomed()) _applyView("chat");
+        openChatModal();   // 旅程活跃 → 聊天当主场(对话视图本就常驻;移动端弹起)
+      }
+      // 还没配模型:轮询等它配好(配好那刻 CTA 自动换成第一步 chip,不用刷新页面;只刷状态不动视图)
       if (!_journey.llm_ready) setTimeout(_initJourney, 15000);
     }
     return _journeyActive();
@@ -3248,13 +3256,15 @@
     }
     pushChatLine("system", t("journey.tagline"));
     // docs/59 方案A:桌面视图不再是冷启动三选一,由旅程收官当"奖励时刻"介绍
-    // (🖥 去看看你的团队上班;≤720px 无桌面隐喻 → 不提)
+    // (🖥 去看看你的团队上班;≤720px 无桌面隐喻 → 不提)。
+    // 用 _applyView 只应用**不写偏好**:点一次奖励时刻不把开机视图持久换成 desk ——
+    // "家"永远是对话,想常住桌面由顶栏 🖥 档位(_setView)明确表态(2026-07-04 W2 顺修)。
     if (!_isMobile()) {
       const log = document.getElementById("chat-log");
       if (log) {
         const deskNotice = el("div", { class: "chat-notice journey-desk" });
         deskNotice.appendChild(document.createTextNode(t("journey.desk_moment") + " "));
-        deskNotice.appendChild(_journeyChip("journey.desk_btn", () => _setView("desk")));
+        deskNotice.appendChild(_journeyChip("journey.desk_btn", () => _applyView("desk")));
         log.appendChild(deskNotice);
         log.scrollTop = log.scrollHeight;
       }
