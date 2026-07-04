@@ -69,10 +69,15 @@ def _recall_aligned_prefs(app: Any, payload: dict) -> tuple[list[dict], int]:
         return [], 0   # 召回失败不挡决策卡(降级为无预对齐)
 
 
-async def check_violations(app: Any, proposal_text: str, standards: list[str]) -> list[dict]:
+async def check_violations(app: Any, proposal_text: str, standards: list[str],
+                           *, strict: bool = False) -> list[dict]:
     """Cut 2 守线:LLM 判这条提案**违背**了哪些已定标准。无 gateway/无标准/空提案 → []。
 
-    宁可漏拦不可错拦(prompt 已嘱)。返回 [{"standard","why"}]。失败 → [](不挡决策卡)。
+    宁可漏拦不可错拦(prompt 已嘱)。返回 [{"standard","why"}]。
+    - 默认(建卡路径):失败 → [](不挡决策卡 —— 人还会看到卡,人兜底)。
+    - strict=True(静音路径,karvy/silence 用):LLM 调用失败**上抛** —— 静音没有人兜底,
+      "查不了"必须当"拦"而不是当"干净"(方向翻转;解析层的宁空勿毒不变:能拿到输出但
+      解析不出=不标违背,与人路径同一诚实口径)。
     """
     rk = getattr(getattr(app, "state", None), "runtime_kwargs", None) or {}
     gw = rk.get("gateway")
@@ -91,6 +96,8 @@ async def check_violations(app: Any, proposal_text: str, standards: list[str]) -
             if type(ev).__name__ == "TextDelta":
                 out += getattr(ev, "text", "")
     except Exception:
+        if strict:
+            raise
         return []
     return parse_violations(out)
 

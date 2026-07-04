@@ -10,14 +10,29 @@
    也从不代发;头部模型厂商的自动模式弃"信任分/历史战绩"、改逐动作判险。战绩再好也不解锁。
 2. **门槛 = Wilson 95% 置信下界 ≥ 0.90**(wilson_lower_bound,z=1.96)+ **评估水位**:
    每桶每攒满 SILENCE_EVAL_BATCH_N 个新对账样本才允许判一次门(固定批次窗口,治 peeking)。
-3. **判别力门杀常数策略**:桶内必须有 ≥SILENCE_MIN_REJECT_CORRECT 条"预测 REJECT 且押中"
-   的样本 —— 全押 ACCEPT 的零智能策略在这条上必挂;没见过你拒,就不出授权卡(诚实)。
+3. **批/拒两类分别达标**(docs/52 原文"批准准确率和拒绝准确率各自过线",杀常数策略):
+   ACCEPT 向(静音真正会自动执行的方向)该向 Wilson 下界也须 ≥0.90,不许靠拒向样本撑整体;
+   REJECT 向须押中 ≥SILENCE_MIN_REJECT_CORRECT 条 **且**该向 Wilson 下界 ≥SILENCE_MIN_REJECT_LB
+   (95% 置信优于抛硬币)—— 全押 ACCEPT 的零智能策略 0 样本必挂,"大量瞎押 REJECT 碰运气
+   凑 2 条"的带噪变体在拒向准确率上必挂。
 4. **不告知随机抽查**:已授权桶的新卡按 SILENCE_AUDIT_RATE 概率照常出卡(**卡上不标注**,
    防应付)—— automation complacency 文献里唯一被证实有效的解;抽查样本照常进对账流。
-5. **月度强制续期**:授权带 expires_at(30 天);到期回正常出卡 + 出续期卡(带上月对账:
-   静音 N 次/抽查对账 M 次中 H 次/最老留痕指针),人 ACCEPT 才续 30 天。
-6. **爆炸半径硬顶**:执行类 kind(SILENCE_EXEC_KINDS)静音前查该桶近期平均 token 成本
-   (token_ledger 按 token_task 归因),超 SILENCE_COST_CAP_TOKENS 不静音回人工。
+5. **月度强制续期 + 风险加权复核**:授权带 expires_at(30 天);到期回正常出卡 + 出续期卡
+   (带上月对账:静音 N 次/抽查对账 M 次中 H 次/最老留痕指针,**并按风险加权抽 5 条本期留痕
+   摆上卡供逐条复核**:翻案>失败>最贵>新近),人看过、ACCEPT 才续 30 天。
+6. **爆炸半径硬顶**(基础设施层,不信战绩)两层:①**单日次数顶**——任何桶(不分 kind)
+   滚动 24h 静音 ≥SILENCE_DAILY_MAX 次即回人工,授权≠无限流量;②执行类 kind
+   (SILENCE_EXEC_KINDS)再查该桶近期平均 token 成本(token_ledger 按 token_task 归因),
+   超 SILENCE_COST_CAP_TOKENS 不静音回人工。
+
+**红线(不可破坏,任务钉死)**:静音永远不吞**高价值卡**与**违背你已定标准的卡**——
+决策卡的 Cut2 守线(decision_card_wire.check_violations → high_value=True 挡拍板)长在建卡
+路径上,而被静音的卡永远走不到建卡那步 → 本模块在静音路径内**自带同口径检查**:
+① 卡命中你已结晶的高价值决策偏好(is_high_value,确定性)→ 永不静音;
+② 押 ACCEPT 且够置信后、真兑现前,跑同一 check_violations(strict:检查失败=拦,不是放
+   —— 建卡路径失败可以放因为有人兜底,静音路径没有人)→ 有违背/查不了 → 回人工出卡。
+K5 不变量:静音兑现走 dispatch_accept(handler 直调),不伪造用户决策、不进 decision_log、
+不进命中率账本(没有 ground truth 的"命中"绝不记账);授权/续期/吊销本身永远走 H2A。
 
 原有骨架保留:分桶命中率复用 TastePredictionStore 对账流水 ⨝ decision_log(唯一账本);
 授权本身永远走 H2A;只静音 ACCEPT 向 + 完整留痕;押错/翻案立即吊销,重挣只认新鲜证据;
@@ -61,10 +76,21 @@ SILENCE_MIN_N = 35
 #   上次评估后该桶新增对账样本 < 25 就不再判门;"每来一个样本试一次门"= 无 alpha-spending
 #   的序贯作弊(允许系统挑最好看的一段样本报账)。
 SILENCE_EVAL_BATCH_N = 25
-# 判别力门(杀常数策略,docs/52 §2 修正③):用户批准基线 ~93% → "无脑押 ACCEPT"稳过任何
-#   裸命中率门。要求桶内存在 ≥2 条"预测 REJECT 向且预测正确"的样本 —— 证明它能替你挡坏的,
-#   不只是会跟着你点头。达不到就诚实不出授权卡(还没见过你拒这类,无法证明判别力)。
+# 分向达标门(docs/52 §2 修正③「批/拒两类分别达标…各自过线」,杀常数策略):
+#   用户批准基线 ~93% → "无脑押 ACCEPT"稳过任何整体裸命中率门;更阴的带噪变体是
+#   "大量押 ACCEPT + 顺手瞎押几条 REJECT 碰运气凑证据"——只数"押 REJECT 且中 ≥2 条"
+#   会被它骗过(拒向错 8 条中 2 条也算过)。所以两向**各自过线**:
+#   - ACCEPT 向:该向 Wilson 95% 下界 ≥ SILENCE_MIN_WILSON_LB(0.90)——这是静音真正会
+#     自动执行的方向,必须独立扛满线,不许靠拒向样本把整体撑过去。
+#   - REJECT 向:押中 ≥ SILENCE_MIN_REJECT_CORRECT 条 且 该向 Wilson 95% 下界 ≥
+#     SILENCE_MIN_REJECT_LB(0.50 = 95% 置信优于抛硬币;最小达门形态:4/4 全对 → 0.5101,
+#     3/3 → 0.4385 不够,7/8 → 0.529 够)。
+#   诚实勘误(设计侧,统计上诚实为准绳):docs/52 只说"各自过线"没给拒向的线。拒向若也套
+#   0.90,按 ~93% 批准基线要攒 ≥35 条押 REJECT 全对 ≈ 500+ 次拍板/桶,超过账本留存上限
+#   (_OUTCOME_RETAIN=500)——门在数学上不可达 = 假门。拒向从不被自动执行(押 REJECT 一律
+#   问人),它的统计职责是证明判别力(不是常数策略),"95% 置信优于随机"是其最小诚实形态。
 SILENCE_MIN_REJECT_CORRECT = 2
+SILENCE_MIN_REJECT_LB = 0.50
 # 单卡执行门:桶级授权之外,每张卡的预测还要 ACCEPT 向且置信 ≥ 此值才真静音执行;
 # 0.80 与"押注要压低 confidence 表达不确定"(taste_eval prompt)对齐 —— 模型自己没把握就问人。
 SILENCE_MIN_CONFIDENCE = 0.80
@@ -75,11 +101,17 @@ SILENCE_AUDIT_RATE = 0.15
 # 月度强制续期(docs/52 §2 修正⑤):授权 30 天后过期,回正常出卡 + 续期卡;"没人看的月度
 #   对账"改成"不 ACCEPT 就停"的硬门(自动合并类事故的复盘:60% 无人过目)。
 SILENCE_GRANT_TTL_S = 30 * 86400
-# 爆炸半径硬顶(docs/52 §2 修正⑥):执行类 kind 会真跑任务烧 token(半径不只是"办错一张卡")。
-#   现状没有 per-handler 预算注入口(dispatch_accept 的 handler 只收 proposal),所以在静音
-#   执行前查该桶近期平均成本(token_ledger 按 token_task="silenced:<pid>" 归因,近
-#   SILENCE_COST_WINDOW 次均值),超过 30k token(约一次重任务的量级)不静音回人工 ——
-#   预算上限在基础设施层,不信任"战绩"能约束半径。
+# 爆炸半径硬顶(docs/52 §2 修正⑥「每类自动动作配基础设施层上限(单日次数/金额/影响面)」,
+#   预算上限在基础设施层,不信任"战绩"能约束半径)。两层:
+#   ① 单日次数顶(设计原文的"次数"维,**所有 kind 都吃**):一个桶滚动 24h 静音处理
+#     ≥ SILENCE_DAILY_MAX 次 → 后续回人工。授权 ≠ 无限流量;上游疯了(提案风暴)时,
+#     静音不放大爆炸半径,人在第 N+1 张卡就看见异常。从静音台账现数,确定性零 LLM。
+#   ② 成本顶(执行类 kind 会真跑任务烧 token,半径不只是"办错一张卡"):现状没有
+#     per-handler 预算注入口(dispatch_accept 的 handler 只收 proposal),所以在静音执行前
+#     查该桶近期平均成本(token_ledger 按 token_task="silenced:<pid>" 归因,近
+#     SILENCE_COST_WINDOW 次均值),超过 30k token(约一次重任务的量级)不静音回人工。
+SILENCE_DAILY_MAX = 10
+SILENCE_DAILY_WINDOW_S = 86400
 SILENCE_EXEC_KINDS = frozenset({"route_to_role", "run_task", "roundtable"})
 SILENCE_COST_CAP_TOKENS = 30_000
 SILENCE_COST_WINDOW = 10
@@ -209,11 +241,15 @@ def _proposal_domain(proposal: Any) -> str:
 
 
 def bucket_stats(app: Any, *, min_ts: float = 0.0) -> dict[str, dict]:
-    """分桶命中率:{bucket: {kind, domain, n, hits, hit_rate, reject_correct}}。
+    """分桶命中率:{bucket: {kind, domain, n, hits, hit_rate, wilson_lb,
+                            accept_n, accept_hits, accept_lb,
+                            reject_n, reject_hits, reject_lb, reject_correct}}。
 
     数据源 = TastePredictionStore.outcomes()(唯一账本,只读)⨝ decision_log(proposal_id →
     kind/domain)。min_ts>0 时只算该时刻**之后**的对账 —— 吊销后重挣授权只认新鲜证据。
-    reject_correct = 预测 REJECT 向且押中的条数(判别力门的证据,docs/52 §2 修正③)。
+    分向计数(docs/52 §2 修正③「批/拒分别达标」):按**预测方向**切 —— accept_* 是"押你会批"
+    的样本(静音真正会自动执行的方向),reject_* 是"押你会拒"的样本(判别力证据);
+    reject_correct ≡ reject_hits(留旧名,授权卡 payload/旧调用方兼容)。
     任何一环读不到 → 返回空(没有统计就没有授权,保守)。
     """
     tstore = getattr(app.state, "taste_predictions", None)
@@ -245,16 +281,29 @@ def bucket_stats(app: Any, *, min_ts: float = 0.0) -> dict[str, dict]:
             continue   # 关联不上 → 不计入(不猜桶)
         kind, domain = km
         b = bucket_key(kind, domain)
-        d = buckets.setdefault(b, {"kind": kind, "domain": domain,
-                                   "n": 0, "hits": 0, "reject_correct": 0})
+        d = buckets.setdefault(b, {"kind": kind, "domain": domain, "n": 0, "hits": 0,
+                                   "accept_n": 0, "accept_hits": 0,
+                                   "reject_n": 0, "reject_hits": 0, "reject_correct": 0})
         d["n"] += 1
-        if o.get("hit"):
+        hit = bool(o.get("hit"))
+        if hit:
             d["hits"] += 1
-            if str(o.get("predicted", "")).upper() == "REJECT":
+        # record_prediction 只收 ACCEPT/REJECT;万一账本混入别的值,归到 accept 向 ——
+        # accept 向的线(0.90)比 reject 向(0.50)严,归错方向只会更难过门(保守)。
+        if str(o.get("predicted", "")).upper() == "REJECT":
+            d["reject_n"] += 1
+            if hit:
+                d["reject_hits"] += 1
                 d["reject_correct"] += 1
+        else:
+            d["accept_n"] += 1
+            if hit:
+                d["accept_hits"] += 1
     for d in buckets.values():
         d["hit_rate"] = (d["hits"] / d["n"]) if d["n"] else 0.0
         d["wilson_lb"] = wilson_lower_bound(d["hits"], d["n"])
+        d["accept_lb"] = wilson_lower_bound(d["accept_hits"], d["accept_n"])
+        d["reject_lb"] = wilson_lower_bound(d["reject_hits"], d["reject_n"])
     return buckets
 
 
@@ -436,6 +485,72 @@ def record_silenced(app: Any, entry: dict) -> None:
         logger.warning("[silence] 静音台账落盘失败(Trace 仍会记): %s", e)
 
 
+def _ledger_bucket(it: dict) -> str:
+    return it.get("bucket") or bucket_key(it.get("kind", ""), it.get("domain", ""))
+
+
+def _ledger_ts(it: dict) -> float:
+    try:
+        return float(it.get("ts", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _daily_marks(app: Any) -> dict[str, list[float]]:
+    """进程内的静音时间戳标记(单日顶的第二本账)。台账文件坏掉时 read_ledger 返空 ——
+    硬顶不许因此失明放行,所以 _silent_handle 每次兑现同时在内存记一笔;
+    计数取两本账的 max(重启后靠台账,进程内靠这里,谁在谁兜底)。"""
+    d = getattr(app.state, "_silence_daily_marks", None)
+    if d is None:
+        d = app.state._silence_daily_marks = {}
+    return d
+
+
+def note_daily_mark(app: Any, bucket: str, *, now: Optional[float] = None) -> None:
+    n_ts = now if now is not None else time.time()
+    marks = _daily_marks(app).setdefault(bucket, [])
+    marks.append(n_ts)
+    cutoff = n_ts - SILENCE_DAILY_WINDOW_S
+    if len(marks) > 4 * SILENCE_DAILY_MAX:   # 有界:窗外的顺手剪(计数时还会再滤)
+        marks[:] = [t for t in marks if t >= cutoff]
+
+
+def bucket_daily_count(app: Any, bucket: str, *, now: Optional[float] = None) -> int:
+    """该桶滚动 24h 内的静音处理次数(修正⑥-① 单日次数顶的判决量)。确定性零 LLM;
+    取 max(台账现数, 进程内标记) —— 台账坏文件当空会让硬顶失明,进程内账兜住这半。"""
+    n_ts = now if now is not None else time.time()
+    since = n_ts - SILENCE_DAILY_WINDOW_S
+    from_ledger = sum(1 for it in read_ledger(app)
+                      if _ledger_bucket(it) == bucket and _ledger_ts(it) >= since)
+    in_mem = sum(1 for t in _daily_marks(app).get(bucket, []) if t >= since)
+    return max(from_ledger, in_mem)
+
+
+def risk_weighted_review_items(app: Any, bucket: str, *, since: float = 0.0,
+                               k: int = 5) -> list[dict]:
+    """续期复核抽样(docs/52 §2 修正⑤「每月按风险加权抽 5 条,逐条复核完毕授权才延续」):
+    从该桶本期(since=granted_at 之后)的静音台账抽 k 条风险最高的,摆进续期卡供人逐条看 ——
+    续期不是盲点头,是"看过这些还愿意续"。风险序(高→低):被翻案 > 兑现失败 > 成本高 > 新近。
+    纯查表零 LLM;条目字段做过防御归一(坏值当 0/空,不崩续期卡)。"""
+    items = []
+    for it in read_ledger(app):
+        if _ledger_bucket(it) != bucket or _ledger_ts(it) < since:
+            continue
+        try:
+            cost = int(float(it.get("cost_tokens", 0) or 0))
+        except (TypeError, ValueError):
+            cost = 0
+        items.append({"proposal_id": str(it.get("proposal_id") or ""),
+                      "ts": _ledger_ts(it),
+                      "summary": str(it.get("summary") or "")[:120],
+                      "ok": bool(it.get("ok", True)),
+                      "overturned": bool(it.get("overturned", False)),
+                      "cost_tokens": cost})
+    items.sort(key=lambda x: (x["overturned"], not x["ok"], x["cost_tokens"], x["ts"]),
+               reverse=True)
+    return items[:max(0, int(k))]
+
+
 # ---------------------------------------------------------------- 爆炸半径(执行类成本顶)
 def bucket_recent_avg_cost(app: Any, bucket: str, *, limit: int = SILENCE_COST_WINDOW) -> float:
     """该桶最近 limit 次静音执行的平均 token 成本(input+output)。
@@ -478,8 +593,10 @@ def bucket_recent_avg_cost(app: Any, bucket: str, *, limit: int = SILENCE_COST_W
 
 # ---------------------------------------------------------------- 卡片工厂
 def proposal_for_silence_grant(*, kind: str, domain: str = "", n: int, hits: int, ts: float,
-                               wilson_lb: float = 0.0, reject_correct: int = 0):
-    """授权卡:达门的桶 → 问人"要不要以后这类替你静音处理?"。稳定 id 按桶派生(同桶收敛一张)。"""
+                               wilson_lb: float = 0.0, reject_correct: int = 0,
+                               accept_n: int = 0, accept_hits: int = 0, reject_n: int = 0):
+    """授权卡:达门的桶 → 问人"要不要以后这类替你静音处理?"。稳定 id 按桶派生(同桶收敛一张)。
+    分向数据(accept_*/reject_*)进 payload —— 成绩单两向都摆,不只报整体(修正③可核)。"""
     from karvyloop.karvy.atoms import Proposal
     d = _norm_domain(domain)
     b = bucket_key(kind, d)
@@ -493,11 +610,15 @@ def proposal_for_silence_grant(*, kind: str, domain: str = "", n: int, hits: int
         strength=0.6, evidence_refs=(), habit_id=0, model_ref="", ts=ts,
         kind=KIND_SILENCE_GRANT,
         payload={"kind": kind, "domain": d, "bucket": b, "n": int(n), "hits": int(hits),
-                 "wilson_lb": round(float(lb), 4), "reject_correct": int(reject_correct)},
+                 "wilson_lb": round(float(lb), 4), "reject_correct": int(reject_correct),
+                 "accept_n": int(accept_n), "accept_hits": int(accept_hits),
+                 "reject_n": int(reject_n)},
         proposal_id=f"{KIND_SILENCE_GRANT}-0-{digest}",
         basis=(f"这不是要更多权限 —— 是同类卡上我 {n} 次押中 {hits} 次的成绩单,按 95% 置信"
-               f"下界算也 ≥{int(SILENCE_MIN_WILSON_LB * 100)}%(不是碰巧连中),其中我押"
-               f"你会拒且押对 {reject_correct} 次(证明我能替你挡坏的,不只会点头)。"
+               f"下界算也 ≥{int(SILENCE_MIN_WILSON_LB * 100)}%(不是碰巧连中,批/拒两向"
+               f"各自过线),其中我押"
+               f"你会拒 {reject_n or reject_correct} 次、押对 {reject_correct} 次"
+               f"(证明我能替你挡坏的,不只会点头)。"
                f"ACCEPT 后 30 天内:这类卡我**只**替你办「我押你会 ACCEPT 且把握 ≥"
                f"{int(SILENCE_MIN_CONFIDENCE * 100)}%」的;押 REJECT 或没把握的照旧问你;"
                f"我还会不定期抽一部分照常出卡对答案(哪张是抽查不告诉你);删除/外发/付款/"
@@ -509,8 +630,10 @@ def proposal_for_silence_grant(*, kind: str, domain: str = "", n: int, hits: int
 
 def proposal_for_silence_renewal(*, kind: str, domain: str = "", granted_at: float,
                                  silenced_n: int, audit_n: int, audit_hits: int,
-                                 oldest_pid: str = "", ts: float):
-    """续期卡(docs/52 §2 修正⑤):授权满 30 天到期 → 带上月对账数据问人续不续。
+                                 oldest_pid: str = "", ts: float,
+                                 review_items: Optional[list] = None):
+    """续期卡(docs/52 §2 修正⑤):授权满 30 天到期 → 带上月对账数据 + **风险加权复核抽样**
+    (本期留痕里翻案/失败/最贵优先的 ≤5 条,payload.review_items,逐条看完再续)问人续不续。
     id 按 桶+granted_at 派生:同一期授权只收敛一张,下一期是新卡(不撞已拍过的)。"""
     from karvyloop.karvy.atoms import Proposal
     d = _norm_domain(domain)
@@ -519,6 +642,14 @@ def proposal_for_silence_renewal(*, kind: str, domain: str = "", granted_at: flo
     dom_disp = f"(域「{d}」)" if d else ""
     audit_disp = (f"抽查对账 {audit_n} 次中 {audit_hits} 次" if audit_n
                   else "本期没攒到抽查对账样本")
+    review = list(review_items or [])
+    review_disp = ""
+    if review:
+        gists = ";".join(
+            f"{'⚠翻案 ' if it.get('overturned') else ('✗失败 ' if not it.get('ok', True) else '')}"
+            f"「{(it.get('summary') or it.get('proposal_id') or '')[:40]}」"
+            for it in review[:5])
+        review_disp = f"。本期风险最高的 {len(review)} 条(翻案/失败/最贵优先):{gists}"
     return Proposal(
         summary=(f"「{kind}」{dom_disp}的静音授权满 30 天到期 —— 上月替你静音 {silenced_n} 次,"
                  f"{audit_disp};要续 30 天吗?"),
@@ -529,14 +660,16 @@ def proposal_for_silence_renewal(*, kind: str, domain: str = "", granted_at: flo
                  "n": int(audit_n), "hits": int(audit_hits), "renew": True,
                  "silenced_n": int(silenced_n), "audit_n": int(audit_n),
                  "audit_hits": int(audit_hits), "oldest_pid": oldest_pid,
-                 "prev_granted_at": float(granted_at)},
+                 "prev_granted_at": float(granted_at),
+                 "review_items": review},
         proposal_id=f"{KIND_SILENCE_GRANT}-1-{digest}",
         basis=(f"静音授权只有 30 天,到期必须你亲手续 —— 没人看的对账不算数,不点就停"
                f"(这类卡已恢复逐张问你)。本期账:静音 {silenced_n} 次、{audit_disp}"
                + (f"、最老一条留痕 {oldest_pid}" if oldest_pid else "")
-               + ";每条都在台账/运行记录里可查。ACCEPT=续 30 天(规则不变:只办押你会 ACCEPT"
-                 f" 且把握 ≥{int(SILENCE_MIN_CONFIDENCE * 100)}% 的,继续不定期抽查,押错"
-                 f"一次立即收回);REJECT=不续,每张都问你。"),
+               + review_disp
+               + ";每条都在台账/运行记录里可查,逐条看完再决定。ACCEPT=续 30 天(规则不变:"
+                 f"只办押你会 ACCEPT 且把握 ≥{int(SILENCE_MIN_CONFIDENCE * 100)}% 的,"
+                 f"继续不定期抽查,押错一次立即收回);REJECT=不续,每张都问你。"),
     )
 
 
@@ -670,15 +803,30 @@ def maybe_offer_grant(app: Any, *, kind: str, domain: str = "",
     lb = wilson_lower_bound(st["hits"], st["n"])
     if lb < SILENCE_MIN_WILSON_LB:
         return None
-    if st.get("reject_correct", 0) < SILENCE_MIN_REJECT_CORRECT:
-        # 杀常数策略:没见过"押你会拒且押对"的证据 → 诚实不出卡(无法证明能替你挡坏的)
-        logger.info("[silence] 桶 %s Wilson 下界 %.3f 达标但判别力不足"
-                    "(押 REJECT 且中 %s/%s 次)→ 不出授权卡",
-                    b, lb, st.get("reject_correct", 0), SILENCE_MIN_REJECT_CORRECT)
+    # 修正③ 分向达标(批/拒各自过线):整体达标可能是混合幻觉 —— 两向单独验。
+    accept_lb = wilson_lower_bound(st.get("accept_hits", 0), st.get("accept_n", 0))
+    reject_lb = wilson_lower_bound(st.get("reject_hits", 0), st.get("reject_n", 0))
+    if accept_lb < SILENCE_MIN_WILSON_LB:
+        # ACCEPT 向是会被自动执行的方向,必须自己扛满 0.90 的线(不许靠拒向样本撑整体)
+        logger.info("[silence] 桶 %s 整体下界 %.3f 达标但 ACCEPT 向仅 %.3f(%s/%s)"
+                    "→ 不出授权卡", b, lb, accept_lb,
+                    st.get("accept_hits", 0), st.get("accept_n", 0))
+        return None
+    if st.get("reject_correct", 0) < SILENCE_MIN_REJECT_CORRECT or \
+            reject_lb < SILENCE_MIN_REJECT_LB:
+        # 杀常数策略及其带噪变体:押 REJECT 的证据要够数、且拒向准确率 95% 置信优于抛硬币
+        # (只数"押中 ≥2"会被"瞎押 10 条 REJECT 碰中 2 条"骗过)。诚实不出卡。
+        logger.info("[silence] 桶 %s 整体下界 %.3f 达标但判别力不足"
+                    "(押 REJECT %s 次中 %s 次,拒向下界 %.3f < %.2f)→ 不出授权卡",
+                    b, lb, st.get("reject_n", 0), st.get("reject_correct", 0),
+                    reject_lb, SILENCE_MIN_REJECT_LB)
         return None
     card = proposal_for_silence_grant(kind=k, domain=d, n=st["n"], hits=st["hits"],
                                       ts=n_ts, wilson_lb=lb,
-                                      reject_correct=st.get("reject_correct", 0))
+                                      reject_correct=st.get("reject_correct", 0),
+                                      accept_n=st.get("accept_n", 0),
+                                      accept_hits=st.get("accept_hits", 0),
+                                      reject_n=st.get("reject_n", 0))
     store.note_offer(b, now=n_ts)
     _deliver(app, card)
     logger.info("[silence] 桶 %s 达授权门(n=%s, wilson_lb=%.3f, reject_correct=%s)"
@@ -708,14 +856,19 @@ def maybe_offer_renewal(app: Any, *, kind: str, domain: str = "",
     audit = bucket_stats(app, min_ts=granted_at).get(b) or {"n": 0, "hits": 0}
     oldest_pid = ""
     for it in read_ledger(app):
-        ib = it.get("bucket") or bucket_key(it.get("kind", ""), it.get("domain", ""))
-        if ib == b and float(it.get("ts", 0.0) or 0.0) >= granted_at:
+        if _ledger_bucket(it) == b and _ledger_ts(it) >= granted_at:
             oldest_pid = str(it.get("proposal_id") or "")
             break
+    # 修正⑤:风险加权抽 ≤5 条本期留痕摆上卡(翻案>失败>最贵>新近),逐条复核完毕才续
+    try:
+        review = risk_weighted_review_items(app, b, since=granted_at, k=5)
+    except Exception as e:
+        logger.warning("[silence] 续期复核抽样失败(续期卡带空样本,对账计数仍在): %s", e)
+        review = []
     card = proposal_for_silence_renewal(
         kind=k, domain=d, granted_at=granted_at, silenced_n=int(bstat.get("silenced", 0)),
         audit_n=int(audit.get("n", 0)), audit_hits=int(audit.get("hits", 0)),
-        oldest_pid=oldest_pid, ts=n_ts)
+        oldest_pid=oldest_pid, ts=n_ts, review_items=review)
     store.note_offer(b, now=n_ts)
     _deliver(app, card)
     logger.info("[silence] 桶 %s 授权到期 → 出续期卡(静音 %s 次/对账 %s 次)",
@@ -749,13 +902,78 @@ def on_outcome(app: Any, *, proposal_id: str, kind: str, domain: str = "",
     maybe_offer_grant(app, kind=kind, domain=d, now=n_ts)
 
 
+# ---------------------------------------------------------------- 红线:高价值 / Cut2 违背
+def _applicable_prefs(app: Any, proposal: Any) -> list:
+    """本卡适用的已结晶决策偏好(与 decision_card_wire._recall_aligned_prefs 同口径:
+    applicable_decision_prefs 按 payload 域/角色过滤 + 相关性排序)。异常上抛,调用方 fail-closed。"""
+    mem = getattr(app.state, "memory", None)
+    if mem is None:
+        return []   # 无记忆 = 无已结晶标准(不是失明,是真没有)
+    from karvyloop.crystallize.decision_pref import applicable_decision_prefs
+    beliefs: list = []
+    for sc in ("personal", "domain"):
+        beliefs.extend(mem.index.all(sc))
+    payload = getattr(proposal, "payload", {}) or {}
+    query = " ".join([getattr(proposal, "summary", "") or ""]
+                     + [str(payload.get(k, "")) for k in ("requirement", "topic", "intent")]).strip()
+    return applicable_decision_prefs(
+        beliefs, query=query,
+        domain=str(payload.get("domain_id") or payload.get("group_domain_id") or ""),
+        role=str(payload.get("role") or ""))
+
+
+def _high_value_pref_blocks(app: Any, proposal: Any) -> bool:
+    """红线①(确定性半):这张卡如果走建卡路径会不会被标 high_value —— 命中你已结晶的
+    **高价值**决策偏好(is_high_value,strength ≥0.7)= 「这类该你拍的」,永不静音。
+
+    比建卡逻辑更保守:建卡只看相关性前 5 条,这里看**全部适用条**(超集;静音是没有人
+    兜底的路径,红线只许更宽不许更窄)。读不出(异常)→ True(fail-closed:红线失明时不放行)。
+    """
+    try:
+        from karvyloop.crystallize.decision_pref import is_high_value
+        return any(is_high_value(b) for b in _applicable_prefs(app, proposal))
+    except Exception as e:
+        logger.warning("[silence] 高价值偏好检查失败 → 不静音(fail-closed): %s", e)
+        return True
+
+
+async def _cut2_blocks(app: Any, proposal: Any) -> bool:
+    """红线②(LLM 半,Cut2 违背即拦):对这张待静音的卡跑与建卡守线**同一个** check_violations
+    (标准 = 适用偏好按相关性前 5 条,与 decision_card_wire 建卡口径一致)。
+
+    方向翻转:建卡路径检查失败返 [](放 —— 人还会看到卡,人兜底);静音路径没有人兜底,
+    所以走 strict(失败=抛)且本函数把**任何异常当拦**。有违背 / 查不了 → True(回人工)。
+    """
+    try:
+        prefs = _applicable_prefs(app, proposal)[:5]   # 建卡同口径:相关性前 5 条上守线
+        if not prefs:
+            return False   # 没有适用标准 → 无线可违背
+        from karvyloop.console.decision_card_wire import check_violations
+        from karvyloop.llm.token_ledger import token_source
+        payload = getattr(proposal, "payload", {}) or {}
+        text = " ".join([getattr(proposal, "summary", "") or "",
+                         getattr(proposal, "basis", "") or ""]
+                        + [str(payload.get(k, "")) for k in ("requirement", "topic", "intent")]).strip()
+        with token_source("silence_cut2"):
+            violations = await check_violations(app, text, [b.content for b in prefs], strict=True)
+        if violations:
+            logger.info("[silence] 卡 %s 违背已定标准(%s 条)→ 不静音,回人工出卡",
+                        getattr(proposal, "proposal_id", ""), len(violations))
+            return True
+        return False
+    except Exception as e:
+        logger.warning("[silence] Cut2 守线检查失败 → 不静音(fail-closed): %s", e)
+        return True
+
+
 # ---------------------------------------------------------------- 静音拦截(register 咽喉)
 def try_silence(app: Any, proposal: Any) -> bool:
     """broadcast_proposal 顶部调:已授权桶的卡 → 走静音路径(不进待决表、不推卡)。
 
     返回 True = 已接管(caller 直接返回);False = 走正常路径。**判定链任何一环不满足都
     返回 False**(高危 kind / 不可逆语义 / 未授权 / 已到期 / 无兑现 handler / 无 LLM /
-    无事件循环 / 爆炸半径超顶 / 抽中随机抽查 —— 宁可打扰)。
+    命中高价值标准[红线①] / 单日次数超顶 / 爆炸半径超顶 / 抽中随机抽查 / 无事件循环
+    —— 宁可打扰)。接管后 _silent_handle 里还有红线②(Cut2 违背即拦,strict)与置信门。
     """
     kind = (getattr(proposal, "kind", "") or "").strip()
     pid = getattr(proposal, "proposal_id", "") or ""
@@ -794,7 +1012,21 @@ def try_silence(app: Any, proposal: Any) -> bool:
     if rk.get("gateway") is None:
         return False   # 无 LLM 无预测 → 不静音
     b = bucket_key(kind, dom)
-    # 修正⑥:爆炸半径硬顶 —— 执行类 kind 查该桶近期平均成本,超顶回人工
+    # 红线①:命中你已结晶的高价值标准的卡 = 建卡路径会标 high_value 的卡 —— 永不静音
+    # (确定性检查,查不出也不放行;LLM 半[Cut2 违背]在 _silent_handle 里,同样 fail-closed)
+    if _high_value_pref_blocks(app, proposal):
+        logger.info("[silence] 卡 %s 命中高价值决策标准 → 永不静音,照常出卡", pid)
+        return False
+    # 修正⑥-①:单日次数硬顶(所有 kind)—— 授权 ≠ 无限流量,滚动 24h 超顶回人工
+    try:
+        today_n = bucket_daily_count(app, b)
+    except Exception:
+        today_n = SILENCE_DAILY_MAX   # 数不出来当到顶(硬顶失明时不放行,保守)
+    if today_n >= SILENCE_DAILY_MAX:
+        logger.info("[silence] 桶 %s 滚动 24h 已静音 %s 次(顶 %s)→ 回人工",
+                    b, today_n, SILENCE_DAILY_MAX)
+        return False
+    # 修正⑥-②:爆炸半径成本顶 —— 执行类 kind 查该桶近期平均成本,超顶回人工
     if kind in SILENCE_EXEC_KINDS:
         try:
             avg = bucket_recent_avg_cost(app, b)
@@ -877,10 +1109,17 @@ async def _silent_handle(app: Any, proposal: Any) -> None:
         # **只静音 ACCEPT 向**:预测 REJECT / 置信不足 / 预测失败 → 出卡问人(宁可打扰绝不错办)
         await _fallback(app, proposal)
         return
+    # 红线②(Cut2 违背即拦):真兑现前跑建卡同款守线 —— 违背你已定的标准 / 守线查不了
+    # → 回人工出卡(人路径的卡也会带 violations 红条,链路不受静音影响)。
+    if await _cut2_blocks(app, proposal):
+        await _fallback(app, proposal)
+        return
     handlers = getattr(app.state, "proposal_handlers", None) or {}
     if handlers.get(kind) is None:   # try_silence 查过;授权/接线在 await 间隙变了也兜住
         await _fallback(app, proposal)
         return
+    # 单日顶的进程内账(与台账 1:1;台账坏文件时硬顶靠这本不失明)
+    note_daily_mark(app, bucket_key(kind, dom))
     from karvyloop.karvy.proposal_registry import dispatch_accept
     tid = f"silenced:{pid}"
     cost = 0
@@ -1009,12 +1248,14 @@ def monthly_reconciliation(app: Any, *, days: int = 30, now: Optional[float] = N
 __all__ = [
     "KIND_SILENCE_GRANT", "KIND_SILENCE_REVOKED",
     "WILSON_Z", "SILENCE_MIN_WILSON_LB", "SILENCE_MIN_N", "SILENCE_EVAL_BATCH_N",
-    "SILENCE_MIN_REJECT_CORRECT", "SILENCE_MIN_CONFIDENCE",
+    "SILENCE_MIN_REJECT_CORRECT", "SILENCE_MIN_REJECT_LB", "SILENCE_MIN_CONFIDENCE",
     "SILENCE_AUDIT_RATE", "SILENCE_GRANT_TTL_S",
+    "SILENCE_DAILY_MAX", "SILENCE_DAILY_WINDOW_S",
     "SILENCE_EXEC_KINDS", "SILENCE_COST_CAP_TOKENS", "SILENCE_COST_WINDOW",
     "OFFER_COOLDOWN_S", "HIGH_RISK_KINDS", "WS_TYPE_SILENCE_NOTICE",
     "wilson_lower_bound", "irreversible_semantics",
     "bucket_key", "bucket_stats", "bucket_recent_avg_cost",
+    "bucket_daily_count", "note_daily_mark", "risk_weighted_review_items",
     "SilenceGrantStore", "get_store",
     "read_ledger", "record_silenced",
     "proposal_for_silence_grant", "proposal_for_silence_renewal",

@@ -1,16 +1,23 @@
-"""test_silence — 「挣来的静音」v2:统计判决版授权门(docs/52 §2 六条修正)。
+"""test_silence — 「挣来的静音」v3:六道统计门全落(docs/52 §2 六条修正)+ 红线。
 
 不变量(全部向保守倒:宁可少静音绝不静音错):
-① 分桶命中率吃**真账本**(TastePredictionStore 对账流水 ⨝ decision_log),关联不上不计入
+① 分桶命中率吃**真账本**(TastePredictionStore 对账流水 ⨝ decision_log),关联不上不计入;
+   静音处理过的卡**不进**命中率账本(没有 ground truth 的"命中"绝不记账)
 ② 授权门 = Wilson 95% 下界 ≥0.90(裸命中率门已死:47/50=94% 也不够)+ n≥35
 ③ 评估水位:每满 25 个新对账样本才判一次门(每来一个试一次 = 序贯凑连击,必须拒)
-④ 判别力门杀常数策略:桶内须有 ≥2 条"预测 REJECT 且押中",否则全押 ACCEPT 也能过门
+④ 批/拒两向**各自过线**杀常数策略及带噪变体:ACCEPT 向(会被自动执行)下界也须 ≥0.90;
+   REJECT 向须押中 ≥2 条 **且**该向下界 ≥0.50(95% 置信优于抛硬币)——
+   "全押 ACCEPT"0 样本必挂,"瞎押 10 条 REJECT 碰中 2 条"在拒向准确率上必挂
 ⑤ 不可逆语义(外发/删除/支付/生产写)kind 级 + 单卡级双层硬排除;高危 kind 表扩容
 ⑥ 不告知随机抽查 15%:抽中的卡照常出卡且**无任何标注**;概率统计上站得住
-⑦ 授权 30 天到期:回正常出卡 + 续期卡(带对账数据),人 ACCEPT 才续
-⑧ 爆炸半径硬顶:执行类桶近期平均成本 >30k token 不静音回人工(token_task 归因)
+⑦ 授权 30 天到期:回正常出卡 + 续期卡(带对账数据 + **风险加权抽 ≤5 条本期留痕**
+   [翻案>失败>最贵>新近] 供逐条复核),人 ACCEPT 才续
+⑧ 爆炸半径硬顶两层:单日次数顶(所有 kind,滚动 24h ≥10 次回人工)+
+   执行类桶近期平均成本 >30k token 不静音回人工(token_task 归因)
 ⑨ 静音处理 = 自动兑现 + 完整留痕(台账+Trace+WS);只静音 ACCEPT 向;押错/翻案立即吊销;
    吊销后重挣只认新鲜证据;授权卡自指防护
+⑩ 红线:命中高价值决策标准的卡永不静音(确定性,fail-closed);兑现前跑建卡同款
+   Cut2 守线(strict:违背/查不了都拦);K5 —— 静音不伪造用户决策、不进 decision_log
 """
 from __future__ import annotations
 
@@ -38,14 +45,15 @@ from karvyloop.karvy.atoms import Proposal  # noqa: E402
 from karvyloop.karvy.proposal_registry import PendingProposalRegistry  # noqa: E402
 from karvyloop.karvy.silence import (  # noqa: E402
     HIGH_RISK_KINDS, KIND_SILENCE_GRANT, KIND_SILENCE_REVOKED,
-    SILENCE_AUDIT_RATE, SILENCE_COST_CAP_TOKENS, SILENCE_EVAL_BATCH_N,
-    SILENCE_GRANT_TTL_S, SILENCE_MIN_N, SILENCE_MIN_REJECT_CORRECT,
+    SILENCE_AUDIT_RATE, SILENCE_COST_CAP_TOKENS, SILENCE_DAILY_MAX,
+    SILENCE_EVAL_BATCH_N, SILENCE_GRANT_TTL_S, SILENCE_MIN_N,
+    SILENCE_MIN_REJECT_CORRECT, SILENCE_MIN_REJECT_LB,
     SILENCE_MIN_WILSON_LB, WS_TYPE_SILENCE_NOTICE,
-    bucket_key, bucket_recent_avg_cost, bucket_stats, get_store,
-    irreversible_semantics, maybe_offer_grant, maybe_offer_renewal,
+    bucket_daily_count, bucket_key, bucket_recent_avg_cost, bucket_stats,
+    get_store, irreversible_semantics, maybe_offer_grant, maybe_offer_renewal,
     monthly_reconciliation, on_outcome, overturn_silenced,
-    proposal_for_silence_grant, read_ledger, revoke_grant, try_silence,
-    wilson_lower_bound,
+    proposal_for_silence_grant, read_ledger, revoke_grant,
+    risk_weighted_review_items, try_silence, wilson_lower_bound,
 )
 from karvyloop.llm.token_ledger import TokenLedger, register_ledger  # noqa: E402
 from karvyloop.llm.token_ledger import record as record_tokens  # noqa: E402
@@ -67,14 +75,20 @@ def make_app(tmp_path):
     return SimpleNamespace(state=state)
 
 
+def seed_outcome(app, kind, domain, pid, pred, actual):
+    """走真路径喂**一条**对账:押注 → decision_log 记 kind/domain → 开奖。"""
+    app.state.taste_predictions.record_prediction(pid, pred, 0.9)
+    app.state.decision_log.record(decision=actual, proposal_id=pid, kind=kind, domain=domain)
+    app.state.taste_predictions.resolve(pid, actual)
+
+
 def seed_bucket(app, kind, domain, n, hits, *, prefix="", reject_correct=0):
     """走真路径喂一个桶:押注 → decision_log 记 kind/domain → 对账开奖。
 
     n 条里 hits 条押中;押中里前 reject_correct 条是「押 REJECT 且用户真 REJECT」
-    (判别力门的证据),其余押中是 ACCEPT/ACCEPT;押错的是 押ACCEPT/实REJECT。
+    (判别力门的证据,全对 → 拒向下界 = wilson_lb(rc, rc)),其余押中是 ACCEPT/ACCEPT;
+    押错的是 押ACCEPT/实REJECT(算在 accept 向)。
     """
-    ts = app.state.taste_predictions
-    log = app.state.decision_log
     assert reject_correct <= hits <= n
     for i in range(n):
         pid = f"{prefix}{kind}-{domain}-{i}"
@@ -84,9 +98,13 @@ def seed_bucket(app, kind, domain, n, hits, *, prefix="", reject_correct=0):
             pred, actual = "ACCEPT", "ACCEPT"
         else:
             pred, actual = "ACCEPT", "REJECT"
-        ts.record_prediction(pid, pred, 0.9)
-        log.record(decision=actual, proposal_id=pid, kind=kind, domain=domain)
-        ts.resolve(pid, actual)
+        seed_outcome(app, kind, domain, pid, pred, actual)
+
+
+# 拒向最小达门形态(修正③):全对也要 ≥4 条 —— wilson_lb(4,4)=0.5101 ≥ 0.50,
+# 3/3=0.4385 不够。正例统一喂 4;SILENCE_MIN_REJECT_CORRECT(=2)只是计数地板,
+# 真正的线是拒向 Wilson 下界 ≥ SILENCE_MIN_REJECT_LB。
+RC_OK = 4
 
 
 def card(kind="run_task", *, domain="", summary="重跑上次没跑完的任务", pid="", payload=None):
@@ -144,6 +162,11 @@ def test_wilson_lower_bound_math():
     assert wilson_lower_bound(-3, 50) == wilson_lower_bound(0, 50)
     # 同命中率下 n 越大下界越高(样本量真的在起作用)
     assert wilson_lower_bound(90, 100) > wilson_lower_bound(18, 20)
+    # 拒向线(修正③,SILENCE_MIN_REJECT_LB=0.50)的达门边界:全对要 ≥4 条
+    assert wilson_lower_bound(4, 4) >= SILENCE_MIN_REJECT_LB     # 0.5101
+    assert wilson_lower_bound(3, 3) < SILENCE_MIN_REJECT_LB      # 0.4385
+    assert wilson_lower_bound(7, 8) >= SILENCE_MIN_REJECT_LB     # 0.529(容 1 错的形态)
+    assert wilson_lower_bound(2, 10) < SILENCE_MIN_REJECT_LB     # 0.057(瞎押碰中 2 条)
 
 
 # ---------------------------------------------------------------- ① 分桶统计对真数据
@@ -159,9 +182,15 @@ def test_bucket_stats_joins_real_stores(tmp_path):
     assert abs(stats["run_task"]["hit_rate"] - 0.9) < 1e-9
     assert stats["run_task"]["reject_correct"] == 2          # 判别力证据被数出来
     assert abs(stats["run_task"]["wilson_lb"] - wilson_lower_bound(9, 10)) < 1e-9
+    # 分向计数(修正③):2 条押 REJECT 全中;7 条押 ACCEPT 中 7、1 条押 ACCEPT 押错
+    assert stats["run_task"]["reject_n"] == 2 and stats["run_task"]["reject_hits"] == 2
+    assert stats["run_task"]["accept_n"] == 8 and stats["run_task"]["accept_hits"] == 7
+    assert abs(stats["run_task"]["accept_lb"] - wilson_lower_bound(7, 8)) < 1e-9
+    assert abs(stats["run_task"]["reject_lb"] - wilson_lower_bound(2, 2)) < 1e-9
     b = bucket_key("route_to_role", "biz1")
     assert stats[b]["n"] == 4 and stats[b]["hits"] == 2
-    assert stats[b]["reject_correct"] == 0
+    assert stats[b]["reject_correct"] == 0 and stats[b]["reject_n"] == 0
+    assert stats[b]["reject_lb"] == 0.0                      # 无拒向样本 → 下界 0(保守)
     assert sum(d["n"] for d in stats.values()) == 14   # orphan 没被算进任何桶
     # l0 与空域同桶(归一)
     seed_bucket(app, "run_task", "l0", 1, 1, prefix="z")
@@ -171,13 +200,16 @@ def test_bucket_stats_joins_real_stores(tmp_path):
 # ---------------------------------------------------------------- ② 授权门正反(Wilson)
 def test_grant_gate_positive(tmp_path):
     app = make_app(tmp_path)
-    seed_bucket(app, "run_task", "", 50, 50, reject_correct=SILENCE_MIN_REJECT_CORRECT)
+    seed_bucket(app, "run_task", "", 50, 50, reject_correct=RC_OK)
     got = maybe_offer_grant(app, kind="run_task")
     assert got is not None and got.kind == KIND_SILENCE_GRANT
     assert got.payload["bucket"] == "run_task"
     assert got.payload["n"] == 50 and got.payload["hits"] == 50
     assert got.payload["wilson_lb"] >= SILENCE_MIN_WILSON_LB
-    assert got.payload["reject_correct"] == SILENCE_MIN_REJECT_CORRECT
+    assert got.payload["reject_correct"] == RC_OK
+    # 分向成绩单进 payload(修正③可核):46 条押批全中 / 4 条押拒全中
+    assert got.payload["accept_n"] == 46 and got.payload["accept_hits"] == 46
+    assert got.payload["reject_n"] == RC_OK
     # 无事件循环 → 直接登记进待决表
     assert app.state.proposal_registry.get(got.proposal_id) is not None
 
@@ -185,36 +217,80 @@ def test_grant_gate_positive(tmp_path):
 def test_grant_gate_wilson_kills_raw_rate(tmp_path):
     # 旧门回归杀:47/50 = 94% 裸命中率(旧门 ≥90% 稳过)—— Wilson 下界 0.838,必须拒
     app = make_app(tmp_path)
-    seed_bucket(app, "run_task", "", 50, 47, reject_correct=2)
+    seed_bucket(app, "run_task", "", 50, 47, reject_correct=RC_OK)
     assert maybe_offer_grant(app, kind="run_task") is None
     # docs/52 的"约 48/50":精确计算 0.865 —— 也拒(见 test_wilson_lower_bound_math 勘误)
     app2 = make_app(tmp_path / "b")
-    seed_bucket(app2, "run_task", "", 50, 48, reject_correct=2)
+    seed_bucket(app2, "run_task", "", 50, 48, reject_correct=RC_OK)
     assert maybe_offer_grant(app2, kind="run_task") is None
     # n 不够:30/30 全中(下界 0.887)—— n < SILENCE_MIN_N=35,拒
     app3 = make_app(tmp_path / "c")
-    seed_bucket(app3, "run_task", "", 30, 30, reject_correct=2)
+    seed_bucket(app3, "run_task", "", 30, 30, reject_correct=RC_OK)
     assert maybe_offer_grant(app3, kind="run_task") is None
     # 桶隔离:别的桶达标不给这个桶授权
     app4 = make_app(tmp_path / "d")
-    seed_bucket(app4, "crystallize_skill", "", 50, 50, reject_correct=2)
+    seed_bucket(app4, "crystallize_skill", "", 50, 50, reject_correct=RC_OK)
     assert maybe_offer_grant(app4, kind="run_task") is None
 
 
-# ---------------------------------------------------------------- ④ 判别力门杀常数策略
+# ---------------------------------------------------------------- ④ 分向达标门杀常数策略
 def test_discriminative_gate_kills_constant_strategy(tmp_path):
     # 50/50 全中但全是"押 ACCEPT"—— 无脑常数策略的完美战绩 → 不出授权卡
     app = make_app(tmp_path)
     seed_bucket(app, "run_task", "", 50, 50, reject_correct=0)
     assert maybe_offer_grant(app, kind="run_task") is None
-    # 只有 1 条 REJECT 押中(< SILENCE_MIN_REJECT_CORRECT=2)→ 仍拒
+    # 只有 1 条 REJECT 押中(< 计数地板 2)→ 仍拒
     app2 = make_app(tmp_path / "b")
     seed_bucket(app2, "run_task", "", 50, 50, reject_correct=1)
     assert maybe_offer_grant(app2, kind="run_task") is None
-    # 攒到 2 条 → 过(正例在 test_grant_gate_positive)
+    # 2 条全中:过旧计数门,但拒向下界 wilson(2,2)=0.342 < 0.50 → **仍拒**(修正③收紧:
+    # 2 条"押你会拒"全对在统计上分不清是判别力还是运气)
     app3 = make_app(tmp_path / "c")
     seed_bucket(app3, "run_task", "", 50, 50, reject_correct=2)
-    assert maybe_offer_grant(app3, kind="run_task") is not None
+    assert maybe_offer_grant(app3, kind="run_task") is None
+    # 3 条全中:0.4385 仍差一点 → 拒;4 条全中:0.5101 → 过(正例在 test_grant_gate_positive)
+    app4 = make_app(tmp_path / "d")
+    seed_bucket(app4, "run_task", "", 50, 50, reject_correct=3)
+    assert maybe_offer_grant(app4, kind="run_task") is None
+    app5 = make_app(tmp_path / "e")
+    seed_bucket(app5, "run_task", "", 50, 50, reject_correct=RC_OK)
+    assert maybe_offer_grant(app5, kind="run_task") is not None
+
+
+def test_direction_gate_kills_noisy_constant_strategy(tmp_path):
+    """对抗:带噪常数策略 —— 大量押 ACCEPT + 顺手瞎押 10 条 REJECT 碰中 2 条。
+    整体 Wilson 下界达标(0.919)、"押 REJECT 且中 ≥2"的旧判别力门也达标 ——
+    旧门会授权;新分向门在拒向准确率(2/10,下界 0.057)上把它杀掉。"""
+    app = make_app(tmp_path)
+    for i in range(180):                                     # 押批全中(基线策略的主体)
+        seed_outcome(app, "run_task", "", f"a{i}", "ACCEPT", "ACCEPT")
+    for i in range(2):                                       # 瞎押 REJECT 碰中 2 条
+        seed_outcome(app, "run_task", "", f"r{i}", "REJECT", "REJECT")
+    for i in range(8):                                       # 瞎押 REJECT 押错 8 条
+        seed_outcome(app, "run_task", "", f"w{i}", "REJECT", "ACCEPT")
+    st = bucket_stats(app)["run_task"]
+    assert st["n"] == 190 and st["hits"] == 182
+    assert st["wilson_lb"] >= SILENCE_MIN_WILSON_LB          # 旧整体门:放行(0.919)
+    assert st["reject_correct"] >= SILENCE_MIN_REJECT_CORRECT  # 旧判别力门:放行
+    assert st["reject_lb"] < SILENCE_MIN_REJECT_LB           # 新拒向线:2/10 → 0.057,拦
+    assert maybe_offer_grant(app, kind="run_task") is None   # 不出授权卡
+
+
+def test_accept_direction_must_clear_bar_alone(tmp_path):
+    """对抗:靠拒向样本把整体撑过 0.90 —— accept 向自己只有 60/64(下界 0.850)。
+    整体 160/164(下界 0.939)达标,但会被自动执行的方向必须自己扛线 → 拦。"""
+    app = make_app(tmp_path)
+    for i in range(60):
+        seed_outcome(app, "run_task", "", f"a{i}", "ACCEPT", "ACCEPT")
+    for i in range(4):
+        seed_outcome(app, "run_task", "", f"m{i}", "ACCEPT", "REJECT")   # accept 向押错 4
+    for i in range(100):
+        seed_outcome(app, "run_task", "", f"r{i}", "REJECT", "REJECT")   # 拒向全中撑整体
+    st = bucket_stats(app)["run_task"]
+    assert st["wilson_lb"] >= SILENCE_MIN_WILSON_LB          # 整体门:达标(混合幻觉)
+    assert st["reject_lb"] >= SILENCE_MIN_REJECT_LB          # 拒向:达标
+    assert st["accept_lb"] < SILENCE_MIN_WILSON_LB           # accept 向:不达标(0.850)
+    assert maybe_offer_grant(app, kind="run_task") is None   # 分向门拦
 
 
 # ---------------------------------------------------------------- ③ 评估水位治 peeking
@@ -222,7 +298,7 @@ def test_eval_watermark_blocks_peeking(tmp_path):
     app = make_app(tmp_path)
     b = "run_task"
     # 第一批:26 个样本 → 允许评一次(n<35 不过门),水位记在 26
-    seed_bucket(app, "run_task", "", 26, 26, reject_correct=2, prefix="a")
+    seed_bucket(app, "run_task", "", 26, 26, reject_correct=RC_OK, prefix="a")
     assert maybe_offer_grant(app, kind="run_task") is None
     assert get_store(app).eval_mark(b) == 26
     # 水位跨重启持久(治"重启刷评估机会")
@@ -242,7 +318,7 @@ def test_eval_watermark_blocks_peeking(tmp_path):
 
 def test_same_bucket_pending_not_repeated(tmp_path):
     app = make_app(tmp_path)
-    seed_bucket(app, "run_task", "", 50, 50, reject_correct=2)
+    seed_bucket(app, "run_task", "", 50, 50, reject_correct=RC_OK)
     got = maybe_offer_grant(app, kind="run_task")
     assert got is not None
     assert maybe_offer_grant(app, kind="run_task") is None      # 同桶挂着 → 不重复
@@ -259,7 +335,7 @@ def test_high_risk_hard_excluded(tmp_path):
         assert k in HIGH_RISK_KINDS
     for k in ("fs_access", KIND_SILENCE_GRANT, "ops_fix", "inbox_decision"):
         assert k in HIGH_RISK_KINDS
-        seed_bucket(app, k, "", 50, 50, reject_correct=2, prefix=k)
+        seed_bucket(app, k, "", 50, 50, reject_correct=RC_OK, prefix=k)
         assert maybe_offer_grant(app, kind=k) is None            # 授权门层拒
         assert get_store(app).grant(k) is None                   # store 硬地板层拒
     # handler 层:伪造一张高危授权卡,ACCEPT 也授不出权
@@ -281,7 +357,7 @@ def test_irreversible_semantics_unit(tmp_path):
     assert irreversible_semantics("deploy_service") == "prod_write"
     app = make_app(tmp_path)
     assert get_store(app).grant("send_email") is None
-    seed_bucket(app, "send_email", "", 50, 50, reject_correct=2)
+    seed_bucket(app, "send_email", "", 50, 50, reject_correct=RC_OK)
     assert maybe_offer_grant(app, kind="send_email") is None
     # 池内 kind(run_task)的单卡 payload 蕴含不可逆语义 → 单卡命中
     assert irreversible_semantics("run_task", {"intent": "把周报邮件发送给客户"}) == "outbound"
@@ -391,6 +467,10 @@ async def test_silenced_accept_full_trail(tmp_path, monkeypatch):
         notices = [m for m in ws.sent if m["type"] == WS_TYPE_SILENCE_NOTICE]
         assert len(notices) == 1                                     # WS 轻通知
         assert not any(m["type"] == "h2a_proposal" for m in ws.sent)  # 没推卡
+        # 统计诚实(不变量①)+ K5:静音处理不进命中率账本(没有用户拍板 = 没有 ground truth,
+        # "自己办的算自己命中"是自证);也不进 decision_log(不伪造用户决策)
+        assert app.state.taste_predictions.outcomes() == []
+        assert app.state.decision_log.recent(10) == []
     finally:
         register_ledger(None)
 
@@ -649,6 +729,248 @@ async def test_blast_radius_live_requery_and_nonexec_exempt(tmp_path, monkeypatc
     assert calls2 == [c2.proposal_id]
 
 
+# ---------------------------------------------------------------- ⑧-① 单日次数硬顶
+def test_daily_count_cap_unit(tmp_path):
+    app = make_app(tmp_path)
+    now = time.time()
+    for i in range(3):
+        silence.record_silenced(app, {"ts": now - i * 60, "proposal_id": f"d{i}",
+                                      "kind": "run_task", "domain": "", "bucket": "run_task",
+                                      "summary": "x", "predicted": "ACCEPT", "confidence": 0.9,
+                                      "ok": True, "detail": "", "overturned": False})
+    # 窗外的(25h 前)与别的桶的都不计
+    silence.record_silenced(app, {"ts": now - 25 * 3600, "proposal_id": "old",
+                                  "kind": "run_task", "domain": "", "bucket": "run_task",
+                                  "summary": "x", "predicted": "ACCEPT", "confidence": 0.9,
+                                  "ok": True, "detail": "", "overturned": False})
+    silence.record_silenced(app, {"ts": now, "proposal_id": "other",
+                                  "kind": "crystallize_skill", "domain": "",
+                                  "bucket": "crystallize_skill", "summary": "x",
+                                  "predicted": "ACCEPT", "confidence": 0.9,
+                                  "ok": True, "detail": "", "overturned": False})
+    assert bucket_daily_count(app, "run_task", now=now) == 3
+    assert bucket_daily_count(app, "crystallize_skill", now=now) == 1
+    assert bucket_daily_count(app, "route_to_role", now=now) == 0
+
+
+@pytest.mark.asyncio
+async def test_daily_cap_blocks_flood(tmp_path, monkeypatch):
+    """对抗:提案风暴 —— 已授权桶一天塞第 11 张卡,静音不放大爆炸半径,回人工。
+    非执行类 kind 也吃这道顶(成本顶只管执行类,次数顶管所有类)。"""
+    app, _, calls = await _silence_setup(tmp_path, monkeypatch, ("ACCEPT", 0.95),
+                                         grant_kind="crystallize_skill")
+    now = time.time()
+    for i in range(SILENCE_DAILY_MAX):
+        silence.record_silenced(app, {"ts": now - i, "proposal_id": f"f{i}",
+                                      "kind": "crystallize_skill", "domain": "",
+                                      "bucket": "crystallize_skill", "summary": "x",
+                                      "predicted": "ACCEPT", "confidence": 0.9,
+                                      "ok": True, "detail": "", "overturned": False})
+    c = card("crystallize_skill")
+    await broadcast_proposal(app, c)
+    await _drain(app)
+    assert calls == []                                            # 第 11 张:回人工
+    assert app.state.proposal_registry.get(c.proposal_id) is not None
+    # 同样 10 条但都在窗外(昨天以前)→ 今天照常静音
+    app2, _, calls2 = await _silence_setup(tmp_path / "b", monkeypatch, ("ACCEPT", 0.95))
+    for i in range(SILENCE_DAILY_MAX):
+        silence.record_silenced(app2, {"ts": now - 25 * 3600 - i, "proposal_id": f"o{i}",
+                                       "kind": "run_task", "domain": "", "bucket": "run_task",
+                                       "summary": "x", "predicted": "ACCEPT", "confidence": 0.9,
+                                       "ok": True, "detail": "", "overturned": False})
+    c2 = card("run_task")
+    await broadcast_proposal(app2, c2)
+    await _drain(app2)
+    assert calls2 == [c2.proposal_id]
+    # 静音兑现同时进两本账(台账 + 进程内标记,取 max):10 条旧账在窗外,窗内只有刚静音的 1 条
+    assert bucket_daily_count(app2, "run_task", now=time.time()) == 1
+
+
+@pytest.mark.asyncio
+async def test_daily_cap_survives_corrupt_ledger(tmp_path, monkeypatch):
+    """对抗:把静音台账写坏(read_ledger 返空)—— 硬顶不许因此失明放行,
+    进程内标记兜住这半(两本账取 max)。"""
+    app, _, calls = await _silence_setup(tmp_path, monkeypatch, ("ACCEPT", 0.95))
+    for _ in range(SILENCE_DAILY_MAX):
+        silence.note_daily_mark(app, "run_task")
+    (tmp_path / "silenced.json").write_text("{ bad", encoding="utf-8")   # 台账坏文件
+    assert read_ledger(app) == []                                        # 台账这半确实瞎了
+    assert bucket_daily_count(app, "run_task") == SILENCE_DAILY_MAX      # 内存账兜住
+    c = card("run_task")
+    await broadcast_proposal(app, c)
+    await _drain(app)
+    assert calls == []                                                   # 顶仍然拦
+    assert app.state.proposal_registry.get(c.proposal_id) is not None
+
+
+# ---------------------------------------------------------------- ⑩ 红线:高价值 / Cut2
+def _pref_belief(content, *, strength, applies=None):
+    from karvyloop.schemas.cognition import Belief
+    return Belief(content=content,
+                  provenance={"source": "decision_pref", "kind": "constraint",
+                              "strength": strength, "status": "confirmed",
+                              "applies": dict(applies or {})},
+                  freshness_ts=time.time(), scope="personal")
+
+
+def _attach_memory(app, beliefs):
+    app.state.memory = SimpleNamespace(
+        index=SimpleNamespace(all=lambda sc: list(beliefs) if sc == "personal" else []))
+
+
+async def _no_cut2(_app, _proposal):
+    return False
+
+
+@pytest.mark.asyncio
+async def test_high_value_standard_card_never_silenced(tmp_path, monkeypatch):
+    """红线①:桶已授权、预测 ACCEPT 高置信,但卡命中你已结晶的高价值标准(strength≥0.7)
+    → 建卡路径会标 high_value 的卡,静音永不吞,照常出卡问人。"""
+    app, _, calls = await _silence_setup(tmp_path, monkeypatch, ("ACCEPT", 0.99))
+    monkeypatch.setattr(silence, "_cut2_blocks", _no_cut2)   # 隔离:只测红线①
+    _attach_memory(app, [_pref_belief("预算超一万必须人工审批", strength=0.9)])
+    c = card("run_task")
+    await broadcast_proposal(app, c)
+    await _drain(app)
+    assert calls == []
+    assert app.state.proposal_registry.get(c.proposal_id) is not None  # 照常出卡
+    assert read_ledger(app) == []
+    # 只有低强度偏好(未达高价值线)→ 不触发红线①,正常静音
+    _attach_memory(app, [_pref_belief("小事随手办就行", strength=0.3)])
+    c2 = card("run_task")
+    await broadcast_proposal(app, c2)
+    await _drain(app)
+    assert calls == [c2.proposal_id]
+
+
+@pytest.mark.asyncio
+async def test_high_value_check_fails_closed(tmp_path, monkeypatch):
+    """红线① fail-closed:记忆层读挂了(查不出有没有高价值标准)→ 不放行,回人工。"""
+    app, _, calls = await _silence_setup(tmp_path, monkeypatch, ("ACCEPT", 0.99))
+    monkeypatch.setattr(silence, "_cut2_blocks", _no_cut2)
+
+    def _boom(_sc):
+        raise RuntimeError("index down")
+
+    app.state.memory = SimpleNamespace(index=SimpleNamespace(all=_boom))
+    c = card("run_task")
+    await broadcast_proposal(app, c)
+    await _drain(app)
+    assert calls == []
+    assert app.state.proposal_registry.get(c.proposal_id) is not None
+    assert read_ledger(app) == []
+
+
+@pytest.mark.asyncio
+async def test_cut2_violation_blocks_silence(tmp_path, monkeypatch):
+    """红线②:兑现前跑建卡同款守线 —— 有违背 → 回人工;守线炸了(strict)→ 也回人工;
+    干净 → 才静音。守线必须以 strict=True 被调(静音路径没有人兜底,失败=拦)。"""
+    import karvyloop.console.decision_card_wire as dcw
+    seen: list[dict] = []
+
+    async def _violates(_app, _text, _standards, **kw):
+        seen.append(kw)
+        return [{"standard": "预算类必须人工审批", "why": "这条卡直接花预算"}]
+
+    app, _, calls = await _silence_setup(tmp_path, monkeypatch, ("ACCEPT", 0.99))
+    _attach_memory(app, [_pref_belief("预算类必须人工审批", strength=0.3)])  # 低强度:过红线①
+    monkeypatch.setattr(dcw, "check_violations", _violates)
+    c = card("run_task")
+    await broadcast_proposal(app, c)
+    await _drain(app)
+    assert calls == [] and read_ledger(app) == []
+    assert app.state.proposal_registry.get(c.proposal_id) is not None   # 回人工
+    assert seen and seen[0].get("strict") is True                       # strict 口径
+
+    # 守线炸了 → fail-closed 回人工(建卡路径是"失败=放",静音路径方向翻转)
+    async def _boom(_app, _text, _standards, **kw):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(dcw, "check_violations", _boom)
+    c2 = card("run_task")
+    await broadcast_proposal(app, c2)
+    await _drain(app)
+    assert calls == [] and app.state.proposal_registry.get(c2.proposal_id) is not None
+
+    # 干净(无违背)→ 静音
+    async def _clean(_app, _text, _standards, **kw):
+        return []
+
+    monkeypatch.setattr(dcw, "check_violations", _clean)
+    c3 = card("run_task")
+    await broadcast_proposal(app, c3)
+    await _drain(app)
+    assert calls == [c3.proposal_id]
+    # 没有适用标准 → 无线可违背,不调守线(省 token)
+    app2, _, calls2 = await _silence_setup(tmp_path / "b", monkeypatch, ("ACCEPT", 0.95))
+    seen.clear()
+    monkeypatch.setattr(dcw, "check_violations", _violates)
+    c4 = card("run_task")
+    await broadcast_proposal(app2, c4)
+    await _drain(app2)
+    assert calls2 == [c4.proposal_id] and seen == []
+
+
+@pytest.mark.asyncio
+async def test_check_violations_strict_raises():
+    """decision_card_wire.check_violations 双口径:默认失败返 [](人兜底);
+    strict=True 失败上抛(静音路径 fail-closed 的地基)。"""
+    from karvyloop.console.decision_card_wire import check_violations
+
+    class _GW:
+        def resolve_model(self, _scope):
+            return "m"
+
+        async def complete(self, *_a, **_k):
+            raise RuntimeError("down")
+            yield   # pragma: no cover  (async generator 形态)
+
+    app = SimpleNamespace(state=SimpleNamespace(
+        runtime_kwargs={"gateway": _GW(), "model_ref": ""}))
+    assert await check_violations(app, "提案文本", ["标准A"]) == []          # 默认:放
+    with pytest.raises(RuntimeError):
+        await check_violations(app, "提案文本", ["标准A"], strict=True)      # strict:抛
+    # 无标准/无文本:两种口径都是 [](无线可违背,不该抛)
+    assert await check_violations(app, "提案文本", [], strict=True) == []
+    assert await check_violations(app, "", ["标准A"], strict=True) == []
+
+
+# ---------------------------------------------------------------- ⑦-加 复核抽样(修正⑤)
+def test_risk_weighted_review_items(tmp_path):
+    """续期复核抽样:翻案 > 失败 > 成本高 > 新近;只取本期(since 之后);封顶 5 条。"""
+    app = make_app(tmp_path)
+    now = time.time()
+    base = {"kind": "run_task", "domain": "", "bucket": "run_task", "summary": "s",
+            "predicted": "ACCEPT", "confidence": 0.9, "detail": ""}
+    silence.record_silenced(app, {**base, "ts": now - 90 * 86400, "proposal_id": "prev",
+                                  "ok": True, "overturned": True})     # 上上期:不取
+    silence.record_silenced(app, {**base, "ts": now - 5, "proposal_id": "ok-cheap",
+                                  "ok": True, "overturned": False, "cost_tokens": 10})
+    silence.record_silenced(app, {**base, "ts": now - 4, "proposal_id": "ok-costly",
+                                  "ok": True, "overturned": False, "cost_tokens": 9000})
+    silence.record_silenced(app, {**base, "ts": now - 3, "proposal_id": "failed",
+                                  "ok": False, "overturned": False, "cost_tokens": 50})
+    silence.record_silenced(app, {**base, "ts": now - 2, "proposal_id": "overturned",
+                                  "ok": True, "overturned": True, "cost_tokens": 1})
+    silence.record_silenced(app, {**base, "ts": now - 1, "proposal_id": "ok-mid",
+                                  "ok": True, "overturned": False, "cost_tokens": 500})
+    silence.record_silenced(app, {**base, "ts": now - 0.5, "proposal_id": "ok-new",
+                                  "ok": True, "overturned": False, "cost_tokens": 0})
+    got = risk_weighted_review_items(app, "run_task", since=now - 30 * 86400, k=5)
+    assert [g["proposal_id"] for g in got] == [
+        "overturned", "failed", "ok-costly", "ok-mid", "ok-cheap"]   # 风险序 + 封顶 5
+    assert all(g["proposal_id"] != "prev" for g in got)              # 期外不取
+    # 续期卡真带上抽样(payload.review_items),翻案条排最前
+    old = now - SILENCE_GRANT_TTL_S - 3600
+    get_store(app).grant("run_task", "", now=old)
+    # 让台账条目落在授权期内(since=granted_at):上面的条目 ts≈now 都 > old ✓
+    renewal = maybe_offer_renewal(app, kind="run_task")
+    assert renewal is not None
+    items = renewal.payload["review_items"]
+    assert items and items[0]["proposal_id"] == "overturned" and items[0]["overturned"]
+    assert len(items) <= 5
+
+
 # ---------------------------------------------------------------- 押错吊销 + 撤销 + 翻案
 def test_miss_auto_revokes_and_notifies(tmp_path):
     app = make_app(tmp_path)
@@ -668,7 +990,7 @@ def test_miss_auto_revokes_and_notifies(tmp_path):
 def test_revoked_bucket_needs_fresh_evidence(tmp_path):
     """吊销后重挣授权:只认吊销之后的新鲜命中,旧成绩单不算;评估水位同时清零。"""
     app = make_app(tmp_path)
-    seed_bucket(app, "run_task", "", 50, 50, reject_correct=2)
+    seed_bucket(app, "run_task", "", 50, 50, reject_correct=RC_OK)
     st = get_store(app)
     st.grant("run_task", "")
     st.note_eval("run_task", 50)                                  # 曾评估过
@@ -691,7 +1013,7 @@ def test_record_decision_signals_wires_controller(tmp_path):
 
 
 def test_gate_fires_at_eval_watermark_via_real_seam(tmp_path):
-    """真接缝端到端:50 次拍板(48 次押 ACCEPT 全中 + 2 次押 REJECT 且中)——
+    """真接缝端到端:50 次拍板(46 次押 ACCEPT 全中 + 4 次押 REJECT 且中)——
     评估只发生在水位点(n=25 不够 n、n=50 达门),第 50 次拍板出授权卡,含刚开的这一奖;
     传输层的 pydantic 占位默认 domain="dom-1" 不污染桶(卡 payload 权威)。"""
     N = 2 * SILENCE_EVAL_BATCH_N   # 50
@@ -700,7 +1022,7 @@ def test_gate_fires_at_eval_watermark_via_real_seam(tmp_path):
         pid = f"seam-{i}"
         c = card("run_task", pid=pid, summary=f"任务{i}")
         app.state.proposal_registry.register(c)
-        pred = "REJECT" if i < 2 else "ACCEPT"                    # 前 2 次是判别力证据
+        pred = "REJECT" if i < RC_OK else "ACCEPT"                # 前 4 次是判别力证据
         app.state.taste_predictions.record_prediction(pid, pred, 0.9)
         if i == N - 2:   # 第 49 次后:统计已 49/49 但没到水位点 → 门不该开
             grants = [p for p in app.state.proposal_registry.pending()
@@ -712,7 +1034,7 @@ def test_gate_fires_at_eval_watermark_via_real_seam(tmp_path):
               if getattr(p, "kind", "") == KIND_SILENCE_GRANT]
     assert len(grants) == 1                                       # 第 50 次拍板即出卡
     assert grants[0].payload["n"] == N                            # 含触发的这一奖
-    assert grants[0].payload["reject_correct"] == 2
+    assert grants[0].payload["reject_correct"] == RC_OK
     assert grants[0].payload["bucket"] == "run_task"              # 占位假域没污染桶
 
 
@@ -725,7 +1047,7 @@ def test_domain_authority_is_card_payload_not_transport_default(tmp_path):
         pid = f"dom-{i}"
         c = card("route_to_role", domain="biz1", pid=pid, summary=f"委派{i}")
         app.state.proposal_registry.register(c)
-        pred = "REJECT" if i < 2 else "ACCEPT"
+        pred = "REJECT" if i < RC_OK else "ACCEPT"
         app.state.taste_predictions.record_prediction(pid, pred, 0.9)
         record_decision_signals(app, decision=pred, proposal_id=pid, domain="dom-1")
     grants = [p for p in app.state.proposal_registry.pending()

@@ -134,7 +134,8 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
     except Exception as e:
         logger.warning(f"[decision_wire] decision_log 记录失败(proposal_id={proposal_id}): {e}")
     # 段3b:挣来的静音(docs/49②/50 决定1)—— 命中率从仪表变控制器,单一接缝就在开奖处:
-    # 押错且该桶已授权 → 自动吊销 + 出卡告知;押中 → 达门(同桶 n≥20 且 ≥90%)才提授权卡。
+    # 押错且该桶已授权 → 自动吊销 + 出卡告知;押中 → 过六道统计门(Wilson 95% 下界≥0.90 +
+    # n≥35 + 评估水位 + 批/拒分向达标等,见 karvy/silence.py 头注)才提授权卡。
     try:
         if hit is not None:
             from karvyloop.karvy.silence import on_outcome
