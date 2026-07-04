@@ -30,6 +30,13 @@ from pathlib import Path
 from typing import Callable, List, Optional
 from urllib.parse import quote
 
+from karvyloop.channels.common import (  # 选卡/分级语义的单一真理源(与 webhook 通道共用)
+    HIGH_RISK_KIND_MARKERS,
+    HIGH_RISK_TEXT_MARKERS,
+    SUMMARY_MAX,
+    eligible_pending,
+    is_high_risk,
+)
 from karvyloop.config_channels import EmailChannelConfig, load_email_channel_config
 from karvyloop.karvy.proposal_registry import AGING_THRESHOLD_S
 
@@ -40,13 +47,6 @@ CODE_TTL_S = 24 * 3600           # 回批码限时(默认 24h)
 CODE_DIGEST_HEX = 20             # HMAC-SHA256 截 20 hex = 80 bit(邮件主题可读性 × 强度折中)
 SECRET_FILENAME = "channel_secret"
 USED_CODES_FILENAME = "channel_used_codes.json"
-SUMMARY_MAX = 160                # digest 每卡摘要截断(不带 payload 全文)
-
-# 高危分级(docs/43 ⑤a #4):命中任一 → 邮件只通知不可回批(必须回控制台拍板)。
-# - kind 标记:子串匹配 proposal.kind(fs_access = 放行文件系统路径,天然高危)
-# - 文本标记:出现在 summary 里(如"大额"付款/开销类建议)
-HIGH_RISK_KIND_MARKERS = ("fs_access",)
-HIGH_RISK_TEXT_MARKERS = ("大额",)
 
 # 严格主题格式(宁空勿毒):`DECIDE <proposal_id> <ACCEPT|REJECT|DEFER> <expiry>-<hmac hex>`
 # 全行 fullmatch;不匹配 = 不是决策回信,一律忽略(自由文本永不解析)。
@@ -168,19 +168,6 @@ def _code_expiry(code: str) -> float:
 
 
 # =============================================================================
-# 内容分级
-# =============================================================================
-
-def is_high_risk(proposal) -> bool:
-    """高危卡判定(邮件只通知不可回批):kind 含 fs_access 类标记,或摘要含"大额"类标记。"""
-    kind = str(getattr(proposal, "kind", "") or "")
-    if any(mark in kind for mark in HIGH_RISK_KIND_MARKERS):
-        return True
-    summary = str(getattr(proposal, "summary", "") or "")
-    return any(mark in summary for mark in HIGH_RISK_TEXT_MARKERS)
-
-
-# =============================================================================
 # EmailDigestSender — SMTP 出站发 pending 卡摘要
 # =============================================================================
 
@@ -229,19 +216,9 @@ class EmailDigestSender:
         self._aging_threshold_s = float(aging_threshold_s)
         self._last_sent_ts: float = 0.0
 
-    # ---- 卡挑选:pending − 未满老化阈值的 DEFER 卡;按挂龄降序(老卡置顶)----
+    # ---- 卡挑选:共用语义在 channels/common.eligible_pending(与 webhook 通道同一口径)----
     def _eligible(self, now: float) -> List[tuple]:
-        cards: List[tuple] = []
-        for prop in self._registry.pending():
-            pid = getattr(prop, "proposal_id", "") or ""
-            meta = self._registry.proposal_meta(pid) if hasattr(self._registry, "proposal_meta") else {}
-            deferred_at = meta.get("deferred_at")
-            if deferred_at and (now - float(deferred_at)) < self._aging_threshold_s:
-                continue  # DEFER=暂缓:满老化阈值才重新计入(DEFER≠消失)
-            created = meta.get("created_ts") or now
-            cards.append((prop, now - float(created)))
-        cards.sort(key=lambda t: -t[1])
-        return cards
+        return eligible_pending(self._registry, now, self._aging_threshold_s)
 
     def _card_block(self, idx: int, prop, age_s: float, now: float) -> List[str]:
         pid = getattr(prop, "proposal_id", "") or ""

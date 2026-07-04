@@ -415,6 +415,22 @@ def build_console_app(
         app.state.email_channel_task = asyncio.create_task(
             _supervised_bg(app, "email_channel", _email_channel_loop))   # 断⑦ supervisor
 
+        # Webhook 推送通道心跳(channels 广度):与邮件通道**同一分发点**(proposal_registry
+        # 的 pending 卡)、并行推;推送自带 min_interval 节流,60s 拍无妨;
+        # 未配置(webhook_channel=None)时 tick 空转零开销。
+        async def _webhook_channel_loop() -> None:
+            from karvyloop.channels.webhook_channel import webhook_channel_tick
+            while True:
+                try:
+                    await asyncio.sleep(60)
+                    await webhook_channel_tick(getattr(app.state, "webhook_channel", None))
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"[karvyloop console] webhook 通道 tick 异常(下轮再试): {e}")
+        app.state.webhook_channel_task = asyncio.create_task(
+            _supervised_bg(app, "webhook_channel", _webhook_channel_loop))   # 断⑦ supervisor
+
         # 收件箱→决策卡管道心跳(docs/49 ⑲-①,inbox_pipe):出站 IMAP 轮询 UNSEEN → 分诊 →
         # 需拍板/需回复出 H2A 卡(纯通知归档)。**只进不出**:模块结构上发不了信。
         # 未配置(channels.inbox 缺 → build 返 None)→ tick 空转零开销。gateway 从 runtime_kwargs
@@ -550,6 +566,9 @@ def build_console_app(
         _email_task = getattr(app.state, "email_channel_task", None)
         if _email_task is not None:
             _email_task.cancel()
+        _webhook_task = getattr(app.state, "webhook_channel_task", None)
+        if _webhook_task is not None:
+            _webhook_task.cancel()
         _inbox_task = getattr(app.state, "inbox_pipe_task", None)
         if _inbox_task is not None:
             _inbox_task.cancel()

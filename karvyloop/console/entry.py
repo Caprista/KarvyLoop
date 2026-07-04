@@ -319,6 +319,22 @@ def cmd_console(args: argparse.Namespace) -> int:
         app.state.email_channel = None
         logger.warning(f"[karvyloop console] 邮件通道接线失败(不影响启动): {e}")
 
+    # === Webhook 推送通道(channels 广度):决策卡推到你真正在的地方 ===
+    # 与邮件通道同一分发点(proposal_registry 待决卡),多渠道并行推;v1 只出站通知,
+    # 拍板走推送里的回链回 console(token 链接同一条鉴权路)。未配置 → build 返 None,零负担。
+    try:
+        from karvyloop.channels.webhook_channel import build_webhook_channel
+        _wh_reg = getattr(app.state, "proposal_registry", None)
+        app.state.webhook_channel = (
+            build_webhook_channel(registry=_wh_reg,
+                                  config_path=str(config_path) if config_path else None)
+            if _wh_reg is not None else None)
+        if app.state.webhook_channel is not None:
+            logger.info("[karvyloop console] webhook 推送通道已接线(出站通知,拍板回 console)")
+    except Exception as e:
+        app.state.webhook_channel = None
+        logger.warning(f"[karvyloop console] webhook 通道接线失败(不影响启动): {e}")
+
     # === 9.0e:接线小卡 IntentAnalyst → console 推送桥 ===
     # 小卡跟着 console 一起起,每天后台看一次行为,够强的建议弹到 H2A 列。
     # --no-llm 时跳过(无 LLM analyzer 会静默,接了也不出建议,省开销)。

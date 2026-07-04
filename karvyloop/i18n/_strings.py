@@ -191,6 +191,12 @@ _EN = {
     "cli.import.overwrote": "Overwrote {n} existing files (--force)",
     "cli.import.config_kept": "Your local config.yaml was not touched — API keys stay per-machine.",
     "cli.import.next": "Next: add your model API key (`karvyloop init`, or edit ~/.karvyloop/config.yaml), then run `karvyloop console` — your skills, knowledge and history are home.",
+    # channels.webhook(出站推送通知正文;用户在 ntfy/Bark/Slack 等承接端看到)
+    "channels.webhook.title": "[KarvyLoop] {n} decision card(s) waiting for you",
+    "channels.webhook.aging": "⏳{days}d pending ·",
+    "channels.webhook.high_risk": "⚠ high-stakes — confirm at the console",
+    "channels.webhook.more": "…and {n} more card(s)",
+    "channels.webhook.open": "Decide at your console: {url}",
 }
 
 # ---- 中文 ----
@@ -364,6 +370,12 @@ _ZH = {
     "cli.import.overwrote": "覆盖了 {n} 个已有文件(--force)",
     "cli.import.config_kept": "本机 config.yaml 一字未动 —— API 密钥按机器各留各的。",
     "cli.import.next": "下一步:补上模型 API key(`karvyloop init`,或编辑 ~/.karvyloop/config.yaml),然后 `karvyloop console` —— 你的技能、知识和历史都在原位。",
+    # channels.webhook(出站推送通知正文;用户在 ntfy/Bark/Slack 等承接端看到)
+    "channels.webhook.title": "[KarvyLoop] {n} 张决策卡待处理",
+    "channels.webhook.aging": "⏳挂了{days}天 ·",
+    "channels.webhook.high_risk": "⚠ 高危 —— 请回控制台确认",
+    "channels.webhook.more": "…还有 {n} 张",
+    "channels.webhook.open": "回控制台拍板:{url}",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

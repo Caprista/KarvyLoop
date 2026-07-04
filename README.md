@@ -330,6 +330,8 @@ npm run verify   # typecheck + build → ../static + runtime smoke (jsdom)
 >
 > **Away from home? (remote decisions.)** The token link only works on your local network — KarvyLoop deliberately opens no public port. For deciding on the go, use the built-in **email decision loop**: configure `channels.email` (below) and pending decision cards are mailed to you as a digest; each card carries pre-filled reply links (`ACCEPT / REJECT / DEFER` with a single-use, time-limited signed code), and the console polls your inbox — outbound connections only, so it works behind any NAT with **no port-forwarding, no tunnel, no third-party relay**; any mailbox works. High-risk cards (e.g. filesystem grants) are notify-only by design — those you confirm back at the console. For full console access from anywhere, a private mesh VPN such as [Tailscale](https://tailscale.com) or plain WireGuard also works (end-to-end encrypted between your own devices). What we recommend **against**: forwarding port 8766 on your router — the console's token auth is not designed to face the open internet alone.
 >
+> **Prefer push notifications? (webhook channel.)** Next to email there's a generic **outbound webhook channel**: pending decision cards are pushed as one digest (title, per-card summaries, value level, and a link back to your console) to any HTTP endpoint you configure. One channel covers the mainstream receivers via built-in presets — `ntfy`, `bark`, `slack` (Slack-compatible incoming webhooks: Discord's `/slack` endpoint, Mattermost, …) and `generic` (full JSON) — or set a custom `body_template` for anything else (e.g. Feishu/Lark bots). It is deliberately **outbound-only in v1**: the notification carries the link, the deciding itself happens back at the console (email is the channel with inbound reply approval). Same posture as email: outbound connections only, works behind any NAT. Webhook URLs and headers often embed tokens — they live only in `~/.karvyloop/config.yaml` (outside the repo) and are **never written to logs** (log lines keep only the scheme+host of the target).
+>
 > ```yaml
 > # ~/.karvyloop/config.yaml — optional; unconfigured = feature fully off
 > channels:
@@ -338,6 +340,12 @@ npm run verify   # typecheck + build → ../static + runtime smoke (jsdom)
 >     to: you@example.com
 >     smtp: { host: smtp.example.com, port: 465, user: bot@example.com, password: ${MAIL_APP_PASSWORD} }
 >     imap: { host: imap.example.com, port: 993, user: bot@example.com, password: ${MAIL_APP_PASSWORD} }
+>   webhook:
+>     enabled: true
+>     url: https://ntfy.sh/your-private-topic   # may embed a token/topic/key — never logged
+>     preset: ntfy          # generic | ntfy | bark | slack; or set body_template for custom receivers
+>     # headers: { Authorization: "Bearer ..." }   # optional, merged over the preset's headers
+>     # min_interval_s: 3600                       # push throttle (same semantics as the email digest)
 > ```
 >
 > **`karvyloop` not found?** `pip install` puts the `karvyloop` command in your Python's `bin`/`Scripts` dir — which is on `PATH` for a system Python, but **not** if you installed into a non-activated venv or with `pip install --user` on a distro where `~/.local/bin` isn't on `PATH`. Two fixes: **(a)** `python -m karvyloop url` (using the *same* Python you installed with) always works, no `PATH` needed; **(b)** for a clean global `karvyloop` command, install via **pipx**: `pipx install karvyloop && pipx ensurepath` (pipx isolates it and puts it on your `PATH`). pip itself never edits your shell `PATH`.

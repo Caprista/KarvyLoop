@@ -13,11 +13,20 @@
           folder: INBOX               # 盯哪个邮箱文件夹
           poll_interval_s: 300        # 轮询间隔(接线方参考值)
           max_cards_per_tick: 5       # 每轮最多出几张决策卡(其余记 backlog)
+      webhook:                        # 通用出站推送(ntfy / Bark / Slack 兼容 / 任意 JSON 端点)
+        enabled: true
+        url: https://ntfy.sh/your-topic   # 承接方 URL(可能内嵌 token/topic/key → 机密级)
+        preset: ntfy                  # generic | ntfy | bark | slack(默认 generic)
+        headers: {Authorization: "Bearer ..."}   # 可选附加头(覆盖 preset 同名头;机密级)
+        body_template: ""             # 可选自定义 body 模板(设了就不走 preset 成型)
+        min_interval_s: 3600          # 推送节流(默认 1h,与 email digest 同语义)
+        timeout_s: 10                 # 出站 HTTP 超时(秒)
 
 铁律:
 - **默认不配 = 完全不跑**(零负担):块缺失 / enabled 非真 / 必填缺 → 返 None,通道不启动。
-- **邮箱授权码与 API key 同级机密**:password 字段 `repr=False`,绝不打日志、绝不进 export
-  (config.yaml 本来就在 export 排除表)。本模块只读不写,不动别人的 config 读写路径。
+- **邮箱授权码 / webhook URL·headers 与 API key 同级机密**:机密字段一律 `repr=False`,
+  绝不打日志、绝不进 export(config.yaml 本来就在 export 排除表)。校验失败**只报字段名不带值**。
+  本模块只读不写,不动别人的 config 读写路径。
 """
 from __future__ import annotations
 
@@ -186,6 +195,106 @@ def load_inbox_pipe_config(config_path=None) -> Optional[InboxPipeConfig]:
     return inbox_pipe_config_from_dict(cfg)
 
 
+# =============================================================================
+# Webhook 推送通道(channels 广度:决策卡推到你真正在的地方)
+# =============================================================================
+
+DEFAULT_WEBHOOK_PRESET = "generic"
+DEFAULT_WEBHOOK_MIN_INTERVAL_S = 3600
+DEFAULT_WEBHOOK_TIMEOUT_S = 10.0
+
+# 内置 preset(成型函数在 channels/webhook_channel.py;这里只做名字校验)
+WEBHOOK_PRESETS = ("generic", "ntfy", "bark", "slack")
+_WEBHOOK_PRESET_ALIASES = {
+    "generic-json": "generic",
+    "json": "generic",
+    "slack-compatible": "slack",
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class WebhookChannelConfig:
+    """webhook 推送通道配置(enabled 且必填齐才会被 load 返回)。
+
+    url / headers 是机密级(URL 可能内嵌 token/topic/key,headers 可能带 Authorization)
+    → `repr=False`,绝不打日志。
+    """
+    url: str = dataclasses.field(default="", repr=False)       # 机密:不进 repr/日志
+    preset: str = DEFAULT_WEBHOOK_PRESET
+    headers: dict = dataclasses.field(default_factory=dict, repr=False)  # 机密:不进 repr/日志
+    body_template: str = ""
+    min_interval_s: int = DEFAULT_WEBHOOK_MIN_INTERVAL_S
+    timeout_s: float = DEFAULT_WEBHOOK_TIMEOUT_S
+    enabled: bool = True
+
+
+def webhook_channel_config_from_dict(cfg: dict) -> Optional[WebhookChannelConfig]:
+    """从整份 config dict 解析 channels.webhook;不配 / 未启用 / 必填缺 / preset 不认识 → None。
+
+    校验失败只报字段名,**绝不带值**(url/headers 可能含机密)。
+    """
+    channels = (cfg or {}).get("channels") or {}
+    if not isinstance(channels, dict):
+        return None
+    hook = channels.get("webhook") or {}
+    if not isinstance(hook, dict) or not hook:
+        return None
+    if not bool(hook.get("enabled")):
+        return None  # 显式 enabled: true 才跑(零负担默认)
+
+    url = str(hook.get("url") or "").strip()
+    if not url or not (url.startswith("https://") or url.startswith("http://")):
+        # 缺失或不是 http(s) —— 只报字段名,不带值
+        logger.warning("[channels.webhook] 已 enabled 但缺必填字段 ['url'](须为 http(s) URL)—— 通道不启动")
+        return None
+
+    preset = str(hook.get("preset") or DEFAULT_WEBHOOK_PRESET).strip().lower()
+    preset = _WEBHOOK_PRESET_ALIASES.get(preset, preset)
+    if preset not in WEBHOOK_PRESETS:
+        # fail-loud:preset 打错字不如不启动(静默按错格式推等于假通道)
+        logger.warning("[channels.webhook] preset 不认识(可选:%s)—— 通道不启动",
+                       "/".join(WEBHOOK_PRESETS))
+        return None
+
+    raw_headers = hook.get("headers") or {}
+    headers = ({str(k): str(v) for k, v in raw_headers.items()}
+               if isinstance(raw_headers, dict) else {})
+
+    try:
+        interval = int(hook.get("min_interval_s") or DEFAULT_WEBHOOK_MIN_INTERVAL_S)
+    except (TypeError, ValueError):
+        interval = DEFAULT_WEBHOOK_MIN_INTERVAL_S
+    try:
+        timeout = float(hook.get("timeout_s") or DEFAULT_WEBHOOK_TIMEOUT_S)
+    except (TypeError, ValueError):
+        timeout = DEFAULT_WEBHOOK_TIMEOUT_S
+    return WebhookChannelConfig(
+        url=url,
+        preset=preset,
+        headers=headers,
+        body_template=str(hook.get("body_template") or ""),
+        min_interval_s=max(interval, 0),
+        timeout_s=timeout if timeout > 0 else DEFAULT_WEBHOOK_TIMEOUT_S,
+        enabled=True,
+    )
+
+
+def load_webhook_channel_config(config_path=None) -> Optional[WebhookChannelConfig]:
+    """读 config.yaml 的 channels.webhook。文件缺失/读不出/块缺失 → None(完全不跑)。"""
+    p = Path(config_path) if config_path else _default_config_path()
+    if not p.exists():
+        return None
+    try:
+        import yaml
+        cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except Exception:
+        logger.warning("[channels.webhook] config.yaml 读取失败 —— 通道不启动")
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    return webhook_channel_config_from_dict(cfg)
+
+
 def load_email_channel_config(config_path=None) -> Optional[EmailChannelConfig]:
     """读 config.yaml 的 channels.email。文件缺失/读不出/块缺失 → None(完全不跑)。"""
     p = Path(config_path) if config_path else _default_config_path()
@@ -207,12 +316,18 @@ __all__ = [
     "SmtpEndpoint",
     "ImapEndpoint",
     "InboxPipeConfig",
+    "WebhookChannelConfig",
     "email_channel_config_from_dict",
     "load_email_channel_config",
     "inbox_pipe_config_from_dict",
     "load_inbox_pipe_config",
+    "webhook_channel_config_from_dict",
+    "load_webhook_channel_config",
     "DEFAULT_DIGEST_MIN_INTERVAL_S",
     "DEFAULT_INBOX_FOLDER",
     "DEFAULT_INBOX_POLL_INTERVAL_S",
     "DEFAULT_INBOX_MAX_CARDS",
+    "DEFAULT_WEBHOOK_MIN_INTERVAL_S",
+    "DEFAULT_WEBHOOK_TIMEOUT_S",
+    "WEBHOOK_PRESETS",
 ]
