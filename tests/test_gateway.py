@@ -130,9 +130,11 @@ async def test_ac5_secret_not_leaked():
     assert "sk-secret-DO-NOT-LEAK" not in blob
 
 
-# ---- AC6：system 静态段多轮字节稳定 + 静态前缀带 cache_control ----
+# ---- AC6：system 静态段多轮字节稳定 + 够大的静态前缀带 cache_control(带最小门槛) ----
 def test_ac6_system_static_stable_and_cached():
-    sp = SystemPrompt(static=["你是 KarvyLoop 的 coding 原子。", "规则：先读后写。"],
+    # 静态段够大(≥1024 tok 最小可缓存门槛)才打断点 —— 用一段大前缀
+    big = "你是 KarvyLoop 的 coding 原子。" * 200      # 远超 1024 tok
+    sp = SystemPrompt(static=["规则：先读后写。", big],
                       dynamic=["cwd=/tmp", "git=main"])
     b1 = sp.to_blocks()
     b2 = SystemPrompt(static=list(sp.static), dynamic=["cwd=/other"]).to_blocks()
@@ -144,6 +146,24 @@ def test_ac6_system_static_stable_and_cached():
     assert "cache_control" not in b1[2]
 
 
+# ---- AC6b：静态前缀小于最小可缓存门槛 → 不打断点(打了只白付 cache_write) ----
+def test_ac6b_small_static_prefix_not_cached():
+    sp = SystemPrompt(static=["你是 coding 原子。", "先读后写。"],  # 远小于 1024 tok
+                      dynamic=["cwd=/tmp"])
+    blocks = sp.to_blocks()
+    for b in blocks:
+        assert "cache_control" not in b, f"小前缀不该打断点: {b}"
+
+
+# ---- AC6c：cache=False(开关关) → 任何静态段都不打断点 ----
+def test_ac6c_cache_disabled_no_breakpoint():
+    big = "你是 KarvyLoop 的 coding 原子。" * 200
+    sp = SystemPrompt(static=[big], dynamic=["cwd=/tmp"])
+    blocks = sp.to_blocks(cache=False)
+    for b in blocks:
+        assert "cache_control" not in b, f"cache=False 时不该打断点: {b}"
+
+
 # ---- AC7：Usage → cost 正确累加 ----
 @pytest.mark.asyncio
 async def test_ac7_cost_accounting():
@@ -153,3 +173,69 @@ async def test_ac7_cost_accounting():
     _ = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus")]
     # cost: input 15 + output 75 = 90 USD/百万；各 1e6 token → 15 + 75 = 90
     assert g.cost.totals["anthropic/claude-opus"] == pytest.approx(90.0)
+
+
+# ---- AC8：prompt_cache 开关默认 true;config false 关掉;都传到 adapter ----
+def test_ac8_prompt_cache_default_true():
+    reg = ModelRegistry.from_config(_cfg())
+    assert reg.prompt_cache is True
+
+def test_ac8_prompt_cache_config_false():
+    cfg = _cfg()
+    cfg["models"]["prompt_cache"] = False
+    reg = ModelRegistry.from_config(cfg)
+    assert reg.prompt_cache is False
+
+@pytest.mark.asyncio
+async def test_ac8_cache_flag_threaded_to_adapter():
+    """gateway 把 reg.prompt_cache 作为 cache= 传给 adapter.complete。"""
+    reg = ModelRegistry.from_config(_cfg())
+    mock = MockAdapter("anthropic-messages")
+    g = GatewayClient(reg, adapters={"anthropic-messages": mock})
+    _ = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus",
+                                     system=SystemPrompt(static=["s"]))]
+    assert mock.last_request["cache"] is True
+
+@pytest.mark.asyncio
+async def test_ac8_cache_false_threaded_to_adapter():
+    cfg = _cfg()
+    cfg["models"]["prompt_cache"] = False
+    reg = ModelRegistry.from_config(cfg)
+    mock = MockAdapter("anthropic-messages")
+    g = GatewayClient(reg, adapters={"anthropic-messages": mock})
+    _ = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus",
+                                     system=SystemPrompt(static=["s"]))]
+    assert mock.last_request["cache"] is False
+
+
+# ---- AC9：cache 命中(cache_read/write)记账不被搞坏 —— Usage 记录字节数一字不改 ----
+@pytest.mark.asyncio
+async def test_ac9_cache_usage_flows_to_cost_and_ledger():
+    """带 cache_read/cache_write 的 Usage → cost 按 cache 价累加(记账逻辑零改动)。"""
+    cfg = _cfg()
+    # 给模型加 cache 价(USD/百万)
+    cfg["models"]["providers"]["anthropic"]["models"][0]["cost"] = {
+        "input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75}
+    reg = ModelRegistry.from_config(cfg)
+    g = GatewayClient(reg, adapters={"anthropic-messages": MockAdapter(
+        "anthropic-messages", script=[Usage(input_tokens=1_000_000, output_tokens=1_000_000,
+                                             cache_read=1_000_000, cache_write=1_000_000)])})
+    _ = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus")]
+    # 15 + 75 + 1.5 + 18.75 = 110.25
+    assert g.cost.totals["anthropic/claude-opus"] == pytest.approx(110.25)
+
+@pytest.mark.asyncio
+async def test_ac9_graceful_degrade_when_adapter_rejects_cache_kwarg():
+    """不认 cache/extra_body kwarg 的旧 adapter → gateway 剥掉重调,请求照发(不崩)。"""
+    class _OldAdapter:
+        api = "anthropic-messages"
+        async def complete(self, messages, tools, model, provider, *, system=None):
+            yield Usage(input_tokens=5, output_tokens=2)
+            yield Done("end_turn")
+        async def embed(self, *a, **k):
+            return []
+    reg = ModelRegistry.from_config(_cfg())
+    g = GatewayClient(reg, adapters={"anthropic-messages": _OldAdapter()})
+    evs = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus",
+                                       system=SystemPrompt(static=["s"]))]
+    assert any(isinstance(e, Usage) for e in evs) and any(isinstance(e, Done) for e in evs)

@@ -26,12 +26,13 @@ class MockAdapter:
 
     async def complete(self, messages, tools, model: ModelDefinition,
                        provider: ProviderConfig, *, system: Optional[SystemPrompt] = None,
-                       extra_body: Optional[dict] = None
+                       extra_body: Optional[dict] = None, cache: bool = True
                        ) -> AsyncIterator[Event]:
         self.last_request = {
             "messages": messages, "tools": tools, "model": model.id,
-            "system_blocks": system.to_blocks() if system else None,
+            "system_blocks": system.to_blocks(cache=cache) if system else None,
             "extra_body": extra_body,   # 推理档位等注入参数(测试可断言)
+            "cache": cache,             # prompt cache 开关(测试可断言)
         }
         for ev in self.script:
             yield ev

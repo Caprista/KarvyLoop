@@ -25,6 +25,27 @@ from ..system import SystemPrompt
 from .anthropic import provider_timeout
 
 
+def _cached_read_tokens(usage: dict) -> int:
+    """从 OpenAI 系 usage 里读"命中缓存的 prompt token"(自动缓存,无需请求侧标记)。
+
+    字段名各家不同,按实际形态读、读不到就 0(绝不猜):
+    - OpenAI / vLLM / 多数兼容端点:`usage.prompt_tokens_details.cached_tokens`。
+    - DeepSeek:`usage.prompt_cache_hit_tokens`(另有 `prompt_cache_miss_tokens`,不需要)。
+    记进 Usage.cache_read → gateway 唯一咽喉按现有 cache_read 列记账(记账逻辑一字不改)。
+    """
+    if not isinstance(usage, dict):
+        return 0
+    details = usage.get("prompt_tokens_details")
+    if isinstance(details, dict):
+        v = details.get("cached_tokens")
+        if isinstance(v, int):
+            return v
+    v = usage.get("prompt_cache_hit_tokens")   # DeepSeek 方言
+    if isinstance(v, int):
+        return v
+    return 0
+
+
 def _content_to_text(content) -> str:
     """tool_result.content(字符串 / text 块数组)→ 纯文本。"""
     if isinstance(content, str):
@@ -126,9 +147,12 @@ class OpenAICompletionsAdapter:
         return body
 
     async def complete(self, messages, tools, model, provider, *, system=None,
-                       extra_body: Optional[dict] = None) -> AsyncIterator[Event]:
+                       extra_body: Optional[dict] = None,
+                       cache: bool = True) -> AsyncIterator[Event]:
         import httpx  # 延迟导入(测试走 mock 不需要)
 
+        # cache:OpenAI 系是**自动缓存**(命中不需请求侧标记 cache_control)—— 参数只为与
+        # anthropic adapter 签名对齐,此处不影响请求体。命中读在 _normalize 的 usage 里。
         body = self.build_request(messages, tools, model, provider, system, extra_body)
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}   # 流末带 usage
@@ -174,7 +198,8 @@ class OpenAICompletionsAdapter:
             u = chunk.get("usage")
             if u:
                 yield Usage(input_tokens=u.get("prompt_tokens", 0),
-                            output_tokens=u.get("completion_tokens", 0))
+                            output_tokens=u.get("completion_tokens", 0),
+                            cache_read=_cached_read_tokens(u))
             return
         ch = choices[0]
         delta = ch.get("delta") or {}

@@ -381,3 +381,139 @@ async def test_ac6_wire_body_passes_pydantic_string_only_check():
                 ToolResultBlock.model_validate(blk)
                 validated += 1
     assert validated >= 1, "应至少有一个 tool_result block 走完 Pydantic 验证"
+
+
+# ─────────────────────────────────────────────────────────────
+# AC7: prompt cache — 稳定前缀(system 尾 + tools 尾)打 cache_control 断点
+#       动态段/用户消息不打;小于最小门槛不打;cache=False 不打
+# ─────────────────────────────────────────────────────────────
+
+def _big_tools() -> list[dict]:
+    """一组够大(≥1024 tok)的 tools schema —— 达最小可缓存门槛才会打断点。"""
+    return [
+        {"name": f"tool_{i}", "description": "detailed tool " * 40,
+         "input_schema": {"type": "object",
+                          "properties": {f"p{j}": {"type": "string",
+                                                   "description": "field " * 10}
+                                         for j in range(6)}}}
+        for i in range(6)
+    ]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ac7_stable_prefix_gets_cache_control_breakpoint():
+    """**省钱杠杆**:稳定前缀(system 尾块 + tools 尾块)带 cache_control:ephemeral 断点;
+    动态段(会话历史/用户当轮消息)绝不带 —— 那是变的,打了每轮触发 cache_write 白付。"""
+    from karvyloop.gateway.system import SystemPrompt
+
+    route = respx.post("https://api.minimaxi.com/anthropic/v1/messages").mock(
+        return_value=httpx.Response(200, text=_min_sse_response(),
+                                    headers={"content-type": "text/event-stream"})
+    )
+    adapter = AnthropicAdapter()
+    # 静态段够大(超最小门槛)+ 动态段(每会话变)
+    system = SystemPrompt(static=["你是 KarvyLoop 的 coding 原子。规则:先读后写。" * 100],
+                          dynamic=["cwd=/tmp", "git=main HEAD"])
+    async for _ in adapter.complete(
+        [{"role": "user", "content": "hi"}],
+        _big_tools(), _model(), _prov(), system=system, cache=True,
+    ):
+        pass
+
+    body = _extract_request_body(route)
+    # tools 尾块带断点,其余 tool 不带
+    tools = body["tools"]
+    assert tools[-1].get("cache_control") == {"type": "ephemeral"}, \
+        f"tools 尾块应带 cache_control;实际: {tools[-1]}"
+    for t in tools[:-1]:
+        assert "cache_control" not in t, f"非尾 tool 不该带断点: {t}"
+    # system 静态尾块带断点,动态段不带
+    sys_blocks = body["system"]
+    static_blocks = [b for b in sys_blocks if b["text"].startswith("你是")]
+    assert static_blocks and static_blocks[-1].get("cache_control") == {"type": "ephemeral"}, \
+        f"system 静态尾块应带 cache_control;实际: {sys_blocks}"
+    for b in sys_blocks:
+        if b["text"].startswith(("cwd=", "git=")):    # 动态段
+            assert "cache_control" not in b, f"动态 system 段不该带断点: {b}"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ac7b_small_prefix_no_breakpoint():
+    """稳定前缀小于最小可缓存门槛(~1024 tok)→ 不打断点(打了只白付 cache_write)。"""
+    from karvyloop.gateway.system import SystemPrompt
+
+    route = respx.post("https://api.minimaxi.com/anthropic/v1/messages").mock(
+        return_value=httpx.Response(200, text=_min_sse_response(),
+                                    headers={"content-type": "text/event-stream"})
+    )
+    adapter = AnthropicAdapter()
+    small_tools = [{"name": "echo", "description": "echo",
+                    "input_schema": {"type": "object", "properties": {}}}]
+    system = SystemPrompt(static=["你是 coding 原子。"], dynamic=[])
+    async for _ in adapter.complete(
+        [{"role": "user", "content": "hi"}],
+        small_tools, _model(), _prov(), system=system, cache=True,
+    ):
+        pass
+
+    body = _extract_request_body(route)
+    for t in body.get("tools", []):
+        assert "cache_control" not in t, f"小 tools 不该带断点: {t}"
+    for b in body.get("system", []):
+        assert "cache_control" not in b, f"小 system 不该带断点: {b}"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ac7c_cache_false_no_breakpoint():
+    """开关关(cache=False)→ 即便前缀够大也不打任何断点。"""
+    from karvyloop.gateway.system import SystemPrompt
+
+    route = respx.post("https://api.minimaxi.com/anthropic/v1/messages").mock(
+        return_value=httpx.Response(200, text=_min_sse_response(),
+                                    headers={"content-type": "text/event-stream"})
+    )
+    adapter = AnthropicAdapter()
+    system = SystemPrompt(static=["你是 KarvyLoop 的 coding 原子。" * 100], dynamic=[])
+    async for _ in adapter.complete(
+        [{"role": "user", "content": "hi"}],
+        _big_tools(), _model(), _prov(), system=system, cache=False,
+    ):
+        pass
+
+    body = _extract_request_body(route)
+    for t in body.get("tools", []):
+        assert "cache_control" not in t, f"cache=False 时 tools 不该带断点: {t}"
+    for b in body.get("system", []):
+        assert "cache_control" not in b, f"cache=False 时 system 不该带断点: {b}"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ac7d_user_messages_never_get_breakpoint():
+    """用户消息/会话历史绝不打断点(它们是变的,缓存必 miss + 白付 write)。"""
+    from karvyloop.gateway.system import SystemPrompt
+
+    route = respx.post("https://api.minimaxi.com/anthropic/v1/messages").mock(
+        return_value=httpx.Response(200, text=_min_sse_response(),
+                                    headers={"content-type": "text/event-stream"})
+    )
+    adapter = AnthropicAdapter()
+    system = SystemPrompt(static=["你是 KarvyLoop 的 coding 原子。" * 100], dynamic=[])
+    big_user = "帮我分析这段很长的用户输入。" * 200      # 够大但它是变的,绝不打
+    async for _ in adapter.complete(
+        [{"role": "user", "content": big_user}],
+        _big_tools(), _model(), _prov(), system=system, cache=True,
+    ):
+        pass
+
+    body = _extract_request_body(route)
+    for m in body["messages"]:
+        c = m.get("content")
+        assert "cache_control" not in m, f"message 顶层不该带断点: {m}"
+        if isinstance(c, list):
+            for blk in c:
+                if isinstance(blk, dict):
+                    assert "cache_control" not in blk, f"message 块不该带断点: {blk}"

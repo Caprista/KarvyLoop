@@ -195,3 +195,76 @@ async def test_http_error_to_error_event():
     evs = [ev async for ev in OpenAICompletionsAdapter().complete(
         [{"role": "user", "content": "x"}], [], _model(), _provider())]
     assert any(isinstance(e, ErrorEvent) for e in evs)   # 4xx → ErrorEvent,不穿透
+
+
+# ---- prompt cache 命中读进账本(OpenAI 系自动缓存,无需请求侧标记) ----
+
+
+def test_cached_read_tokens_openai_details():
+    """OpenAI / 多数兼容端点:usage.prompt_tokens_details.cached_tokens。"""
+    from karvyloop.gateway.providers.openai_completions import _cached_read_tokens
+    assert _cached_read_tokens({"prompt_tokens": 100,
+                                "prompt_tokens_details": {"cached_tokens": 80}}) == 80
+
+
+def test_cached_read_tokens_deepseek_dialect():
+    """DeepSeek 方言:usage.prompt_cache_hit_tokens。"""
+    from karvyloop.gateway.providers.openai_completions import _cached_read_tokens
+    assert _cached_read_tokens({"prompt_tokens": 100,
+                                "prompt_cache_hit_tokens": 64,
+                                "prompt_cache_miss_tokens": 36}) == 64
+
+
+def test_cached_read_tokens_absent_is_zero():
+    """没有任何缓存字段 → 0(不猜)。"""
+    from karvyloop.gateway.providers.openai_completions import _cached_read_tokens
+    assert _cached_read_tokens({"prompt_tokens": 100, "completion_tokens": 5}) == 0
+    assert _cached_read_tokens({}) == 0
+    assert _cached_read_tokens({"prompt_tokens_details": {}}) == 0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_cached_tokens_flow_into_usage_event():
+    """真走 adapter:usage 带 cached_tokens → Usage.cache_read 非零(gateway 咽喉据此记账)。"""
+    respx.post("https://api.test/v1/chat/completions").mock(return_value=httpx.Response(200, text=_sse(
+        '{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}',
+        '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+        '{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":3,'
+        '"prompt_tokens_details":{"cached_tokens":100}}}',
+    )))
+    evs = [ev async for ev in OpenAICompletionsAdapter().complete(
+        [{"role": "user", "content": "hi"}], [], _model(), _provider())]
+    usages = [e for e in evs if isinstance(e, Usage)]
+    assert usages and usages[-1].input_tokens == 120
+    assert usages[-1].cache_read == 100, "cached_tokens 应读进 Usage.cache_read"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_deepseek_cache_hit_flow_into_usage_event():
+    """DeepSeek 方言的 prompt_cache_hit_tokens 也读进 Usage.cache_read。"""
+    respx.post("https://api.test/v1/chat/completions").mock(return_value=httpx.Response(200, text=_sse(
+        '{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}',
+        '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+        '{"choices":[],"usage":{"prompt_tokens":200,"completion_tokens":4,'
+        '"prompt_cache_hit_tokens":150,"prompt_cache_miss_tokens":50}}',
+    )))
+    evs = [ev async for ev in OpenAICompletionsAdapter().complete(
+        [{"role": "user", "content": "hi"}], [], _model(), _provider())]
+    usages = [e for e in evs if isinstance(e, Usage)]
+    assert usages and usages[-1].cache_read == 150
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_no_cached_field_keeps_cache_read_zero():
+    """没有缓存字段的旧响应 → cache_read 保持 0(回归:原行为不变)。"""
+    respx.post("https://api.test/v1/chat/completions").mock(return_value=httpx.Response(200, text=_sse(
+        '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+        '{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2}}',
+    )))
+    evs = [ev async for ev in OpenAICompletionsAdapter().complete(
+        [{"role": "user", "content": "x"}], [], _model(), _provider())]
+    usages = [e for e in evs if isinstance(e, Usage)]
+    assert usages and usages[-1].cache_read == 0

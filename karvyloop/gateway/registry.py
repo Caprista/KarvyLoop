@@ -34,7 +34,8 @@ class ModelRegistry:
     def __init__(self, providers: dict[str, ProviderConfig],
                  models: dict[str, ModelDefinition],
                  default_chat: str, default_embedding: str,
-                 default_reasoning: str = ""):
+                 default_reasoning: str = "",
+                 prompt_cache: bool = True):
         self.providers = providers
         self.models = models
         self.default_chat = default_chat
@@ -42,6 +43,10 @@ class ModelRegistry:
         # 全局推理强度档(agents.defaults.reasoning,碎碎念⑩):fast|balanced|deep;
         # 空 = 不注入(零回归)。gateway.complete 未传 reasoning 时继承这里。
         self.default_reasoning = default_reasoning or ""
+        # prompt cache 开关(models.prompt_cache,默认 true):给稳定前缀(system 尾 + tools 尾)
+        # 打 Anthropic cache_control:ephemeral 断点,重复调用命中 cache_read 省 ~90% 前缀 input 成本。
+        # 不支持的 provider(OpenAI 系自动缓存,无需请求侧标记)静默忽略。关掉 = 不打任何断点(0 回归)。
+        self.prompt_cache = bool(prompt_cache)
 
     @classmethod
     def from_config(cls, cfg: dict) -> "ModelRegistry":
@@ -67,10 +72,14 @@ class ModelRegistry:
         # 且 readiness 连带永远 must_setup=强制引导死循环)。项目匹配/召回不上向量(既定决策),
         # embed() 无生产调用者 —— 没配就留空,真调 embed 时 fail-closed(UnknownModelError)。
         defaults = (cfg.get("agents") or {}).get("defaults") or {}
+        # prompt cache 开关住 models 块(与 providers 同级);缺省 = 开(true)。
+        # 显式 false 关掉(不支持的 provider 本就静默忽略,关掉只影响 Anthropic 系断点)。
+        prompt_cache = (cfg.get("models") or {}).get("prompt_cache", True)
         reg = cls(providers, models,
                   default_chat=cfg["agents"]["defaults"]["model"],
                   default_embedding=((cfg.get("embedding") or {}).get("model", "") or ""),
-                  default_reasoning=str(defaults.get("reasoning", "") or ""))
+                  default_reasoning=str(defaults.get("reasoning", "") or ""),
+                  prompt_cache=bool(prompt_cache))
         reg._validate()
         return reg
 

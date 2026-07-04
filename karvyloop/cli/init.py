@@ -27,6 +27,10 @@ DEFAULT_CONFIG_YAML = """\
 # lang: en
 
 models:
+  # prompt cache(省钱开关,默认 true):给每次调用基本不变的稳定前缀(system 尾 + tools 尾)
+  # 打缓存断点,重复调用命中 cache_read 省该前缀约 90% input 成本(Anthropic 系)。
+  # OpenAI/DeepSeek 系是自动缓存(无需标记),命中照样记进账本 cache 列。设 false 关掉。
+  # prompt_cache: true
   providers:
     ollama:
       base_url: http://127.0.0.1:11434

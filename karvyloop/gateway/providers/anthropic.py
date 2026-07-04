@@ -41,7 +41,7 @@ from typing import AsyncIterator, Optional
 from karvyloop.schemas import ModelDefinition, ProviderConfig
 
 from ..events import Done, Event, ErrorEvent, TextDelta, ThinkingDelta, ToolUseStart, ToolUseStop, Usage
-from ..system import SystemPrompt
+from ..system import SystemPrompt, _MIN_CACHE_TOKENS, _rough_tokens
 
 
 class AnthropicAdapter:
@@ -49,16 +49,21 @@ class AnthropicAdapter:
 
     def build_request(self, messages, tools, model: ModelDefinition,
                       provider: ProviderConfig, system: Optional[SystemPrompt],
-                      extra_body: Optional[dict] = None) -> dict:
+                      extra_body: Optional[dict] = None, cache: bool = True) -> dict:
         body: dict = {
             "model": model.id.split("/", 1)[-1],
             "max_tokens": model.max_tokens,
             "messages": messages,
         }
         if tools:
-            body["tools"] = tools
+            # prompt cache(HR-9):tools schema 是每次 drive 基本不变的稳定前缀(数 KB),
+            # 给**最后一个** tool 打 ephemeral 断点 → 整个 tools 数组被缓存,重复调用命中 cache_read。
+            # 只在开关开 + tools 总量 ≥ 最小可缓存长度时打(太小写缓存不划算)。断点只落 tools 尾,
+            # 会话历史/用户当轮消息绝不打(那是变的,打了每轮触发 cache_write 白付)。Anthropic 最多
+            # 4 个断点,此处 system 尾 + tools 尾各一个,余量充足。
+            body["tools"] = _tools_with_cache_breakpoint(tools) if cache else tools
         if system is not None:
-            body["system"] = system.to_blocks()     # HR-9：静态前缀带 cache_control
+            body["system"] = system.to_blocks(cache=cache)   # HR-9：静态前缀带 cache_control
         if extra_body:
             # 推理强度等按配置注入的顶层参数(gateway/reasoning.py 产;如 thinking.budget_tokens)。
             # 放最后 merge:配置说了算,但只该带 model/max_tokens/messages 之外的增量键。
@@ -66,11 +71,11 @@ class AnthropicAdapter:
         return body
 
     async def complete(self, messages, tools, model, provider, *, system=None,
-                       extra_body: Optional[dict] = None
+                       extra_body: Optional[dict] = None, cache: bool = True
                        ) -> AsyncIterator[Event]:
         import httpx  # 延迟导入
 
-        body = self.build_request(messages, tools, model, provider, system, extra_body)
+        body = self.build_request(messages, tools, model, provider, system, extra_body, cache)
         body["stream"] = True
         # auth_header 决定鉴权方式:
         #   - x-api-key(默认):原生 Anthropic 习惯
@@ -210,6 +215,22 @@ class AnthropicAdapter:
 
     async def embed(self, text, model, provider):
         raise NotImplementedError("Anthropic 无 embedding；embedding 用本地模型（ollama）")
+
+
+def _tools_with_cache_breakpoint(tools: list[dict]) -> list[dict]:
+    """给 tools 数组最后一个工具打 ephemeral 缓存断点(缓存整个 tools 前缀)。
+
+    只在 tools 总量 ≥ 最小可缓存长度时打(小 schema 写缓存不划算,provider 也会静默不缓存)。
+    不改任何工具的语义字段(name/description/input_schema),只在末块加 cache_control。
+    返回新列表(不原地改调用方传入的 dict —— 记账/其它路径共用同一 tools 引用,不能被污染)。"""
+    if not tools:
+        return tools
+    total = sum(_rough_tokens(str(t)) for t in tools)
+    if total < _MIN_CACHE_TOKENS:
+        return tools
+    out = list(tools)
+    out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
+    return out
 
 
 class _ToolState:

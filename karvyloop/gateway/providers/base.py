@@ -19,11 +19,13 @@ class ProviderAdapter(Protocol):
     api: str
 
     # extra_body:按配置注入请求体顶层的增量参数(如推理强度落参,gateway/reasoning.py)。
-    # 可选能力:不接这个 kwarg 的 adapter 也合法 —— gateway 捕 TypeError 后不带它重调(优雅降级)。
+    # cache:是否给稳定前缀(system 尾 + tools 尾)打 prompt cache 断点(models.prompt_cache)。
+    # 两者都是**可选能力**:不接这些 kwarg 的 adapter 也合法 —— gateway 捕 TypeError 后剥掉重调(优雅降级)。
     async def complete(self, messages: list[dict], tools: list[dict],
                        model: ModelDefinition, provider: ProviderConfig,
                        *, system: Optional[SystemPrompt] = None,
-                       extra_body: Optional[dict] = None) -> AsyncIterator[Event]:
+                       extra_body: Optional[dict] = None,
+                       cache: bool = True) -> AsyncIterator[Event]:
         ...
 
     async def embed(self, text: str, model: ModelDefinition,

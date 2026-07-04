@@ -10,8 +10,10 @@
 - `register_ledger` + 模块级 `record(...)`:provider 出 ChatResponse 后调一次 record,
   从 contextvar 取 source 写账本。未注册 ledger → no-op(测试/无账本场景不崩)。
 
-**诚实标记**:cache_read/write 列已留,但 transport 暂未 surface anthropic 的
-cache_creation/cache_read_input_tokens → 当前 0(P1:transport 补 cache 字段)。
+**cache 列**:cache_read/write 已由 gateway adapter surface —— anthropic 走
+cache_read_input_tokens/cache_creation_input_tokens,openai 系走 usage.prompt_tokens_details
+.cached_tokens(DeepSeek 走 prompt_cache_hit_tokens)。gateway.complete 咽喉据 Usage 记进这两列,
+prompt cache 命中省下的钱在看板/周报按模型 cost 表逐列(input/output/cache_*)可见。
 """
 from __future__ import annotations
 

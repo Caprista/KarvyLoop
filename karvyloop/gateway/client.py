@@ -116,17 +116,28 @@ class GatewayClient:
                     f"上下文超模型「{m.id}」硬窗口:约 {used} tok > {cw - reserve}(窗口 {cw} − 预留 {reserve})"
                     f"——请先 govern()/compact 再调,网关拒发注定失败的请求。"
                 )
+        # prompt cache 开关(models.prompt_cache,默认 true):给稳定前缀(system 尾 + tools 尾)
+        # 打 cache_control 断点,重复调用命中 cache_read 省 ~90% 前缀 input 成本。只改请求体标记,
+        # Usage/记账路径一字不动(咽喉纪律)。cache/extra_body 都是**可选能力**:分层降级 —— 先带全
+        # 两个,adapter 不认再逐个剥(先剥 cache 保 extra_body,再剥 extra_body),第三方旧 adapter
+        # 只支持 extra_body 不支持 cache 时,推理档位不被误伤(缓存断点忽略,不影响正确性)。
+        cache = bool(getattr(self.reg, "prompt_cache", True))
+        base_kwargs: dict = {"system": system}
         if extra_body:
+            base_kwargs["extra_body"] = extra_body
+        try:
+            stream = adapter.complete(messages, tools, m, prov, cache=cache, **base_kwargs)
+        except TypeError:
+            # adapter 不认 cache kwarg → 剥掉 cache 重调(保留 extra_body,推理档位不被误伤)
+            logger.debug("adapter %s 不支持 cache kwarg,缓存断点忽略(cache=%s)",
+                         type(adapter).__name__, cache)
             try:
-                stream = adapter.complete(messages, tools, m, prov, system=system,
-                                          extra_body=extra_body)
+                stream = adapter.complete(messages, tools, m, prov, **base_kwargs)
             except TypeError:
-                # adapter 不认 extra_body(自定义/旧 adapter)→ 优雅忽略档位,请求照发
+                # 连 extra_body 也不认(最老 adapter)→ 全剥,请求照发(推理档位一并忽略)
                 logger.debug("adapter %s 不支持 extra_body,推理档位 %r 忽略",
                              type(adapter).__name__, level)
                 stream = adapter.complete(messages, tools, m, prov, system=system)
-        else:
-            stream = adapter.complete(messages, tools, m, prov, system=system)
         async for ev in stream:
             self.cost.account(ev, m)        # 成本计量（密钥不经手 Event）
             # token 账本:gateway.complete 是**所有直连 LLM 调用**的唯一咽喉(导入拆解/模糊调度/
