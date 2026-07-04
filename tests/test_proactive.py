@@ -60,7 +60,9 @@ def test_run_task_handler_reruns_and_tracks_new_task(monkeypatch):
 
     class _State:
         main_loop = _ML()
-        runtime_kwargs = {"token": 1, "sandbox": 1, "gateway": 1, "workspace_root": "/w", "model_ref": ""}
+        # 验收能力显式声明"无"(None)→ 走诚实退回单跑分支。旧桩拿 int 冒充 gateway,
+        # 靠"checker 崩溃被吞成 infra-dead"才绿 —— e347083 fail-loud 后现形,桩必须诚实。
+        runtime_kwargs = {"token": None, "sandbox": None, "gateway": None, "workspace_root": "/w", "model_ref": ""}
         task_registry = TaskRegistry()
         domain_registry = None
 

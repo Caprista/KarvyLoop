@@ -85,7 +85,7 @@ def test_route_handler_executes(monkeypatch):
     monkeypatch.setattr(ml_mod, "forge_slow_brain_factory",
                         lambda **kw: ("sb", kw.get("governance", "")))
     app = _app(main_loop=_ML(),
-               runtime_kwargs={"token": 1, "sandbox": 2, "gateway": 3, "workspace_root": "/tmp"},
+               runtime_kwargs={"token": None, "sandbox": None, "gateway": None, "workspace_root": "/tmp"},  # None=诚实声明无验收能力(旧 int 桩靠吞异常才绿,e347083 fail-loud 后现形),
                domain_registry=reg)
     handlers = build_proposal_handlers(app)
     assert KIND_ROUTE_TO_ROLE in handlers
@@ -190,7 +190,7 @@ def test_route_handler_injects_your_standards(monkeypatch):
     monkeypatch.setattr(ml_mod, "forge_slow_brain_factory",
                         lambda **kw: ("sb", kw.get("governance", "")))
     app = _app(main_loop=_ML(),
-               runtime_kwargs={"token": 1, "sandbox": 2, "gateway": 3, "workspace_root": "/tmp"},
+               runtime_kwargs={"token": None, "sandbox": None, "gateway": None, "workspace_root": "/tmp"},  # None=诚实声明无验收能力(旧 int 桩靠吞异常才绿,e347083 fail-loud 后现形),
                domain_registry=reg, memory=mem)
     handlers = build_proposal_handlers(app)
     p = proposal_for_route(domain_id=d.id, role="设计师", agent_id="设计师",
