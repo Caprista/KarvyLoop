@@ -164,6 +164,15 @@ class RoleRegistry:
         if self._skills_dir is not None and self._skills_dir.is_dir():
             for p in sorted(self._skills_dir.glob("*/SKILL.md")):
                 names.add(p.parent.name)
+            # 系统技能(包内只读,如 data-analyst / file-butler)在扫盘兜底路径也算"已知"——
+            # skill_index 路径本就把 system_skills 扫进索引(SkillIndex.rebuild_from_disk),
+            # 两条校验路径必须同语义;否则 --no-llm / 无索引时原住民带系统技能入住会被误拒。
+            try:
+                from karvyloop.registry.skills import system_skills_dir
+                for p in sorted(system_skills_dir().glob("*/SKILL.md")):
+                    names.add(p.parent.name)
+            except Exception:
+                pass
             return names
         return None
 

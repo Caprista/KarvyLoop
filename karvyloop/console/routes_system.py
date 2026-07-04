@@ -108,7 +108,7 @@ def api_decisions_audit(request: Request, since: float = 0.0, until: float = 0.0
 
 
 @router.get("/proposals/pending")
-def api_proposals_pending(request: Request) -> dict[str, Any]:
+async def api_proposals_pending(request: Request) -> dict[str, Any]:
     """开机拉取待决提案 —— 让"待你拍的板"跨刷新/切语言存活。
 
     决策 loop 红线:待决提案只靠 WS 实时推、没有开机拉取 → 一刷新就消失,人被迫问"怎么样了"。
@@ -117,6 +117,15 @@ def api_proposals_pending(request: Request) -> dict[str, Any]:
     registry = getattr(request.app.state, "proposal_registry", None)
     if registry is None:
         return {"proposals": []}
+    # 原住民引荐(docs/60 空屋子解法):开机拉取是前端必经的第一口 → 在此做一次幂等检查
+    # (角色库空 + 从没引荐过才出卡;REJECT 后由状态文件保证永不纠缠;卡直接出现在本次
+    # 响应里,不吃 WS 时序、不用等 boot_poll 延迟)。fail-soft:引荐失败绝不影响待决列表。
+    try:
+        from karvyloop.karvy.residents import residents_referral_tick
+        await residents_referral_tick(request.app)
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"[residents] 引荐检查失败(待决列表照常返回): {e}")
     out: list[dict[str, Any]] = []
     for p in registry.pending():
         try:

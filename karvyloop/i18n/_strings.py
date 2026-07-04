@@ -200,6 +200,23 @@ _EN = {
     "channels.webhook.open": "Decide at your console: {url}",
     "channels.webhook.reply_code": "↩ code: {code}",
     "channels.webhook.reply_hint": "Reply \"ACCEPT <code>\" (or REJECT / DEFER) to decide — codes are single-use and time-limited; high-stakes cards: console only.",
+    # residents(原住民引荐入住,docs/60;卡文案在出卡时按当前 locale 定稿)
+    "residents.referral.summary": "🏠 Your Karvy world is still empty — meet your first resident: {names}. Move in?",
+    "residents.referral.basis_footer": (
+        "ACCEPT = the role is actually created: its identity, temperament, verification gates and "
+        "collaboration contract are plain files you can open and edit — a working example of how to "
+        "constrain an agent. Folder access is a hard whitelist recorded in the capability ledger "
+        "(visible and revocable anytime); deleting anything always requires your explicit "
+        "confirmation with a backup made first. REJECT = it never asks again; DEFER = the card just "
+        "waits here."
+    ),
+    "residents.referral.accepted": (
+        "{names} moved in. Folder access granted (revocable in the capability overview): {dirs}. "
+        "Every move shows you a preview first — nothing is deleted without your say-so."
+    ),
+    "residents.referral.no_registry": "Role registry is not wired — cannot move a resident in.",
+    "residents.referral.none_found": "No resident mirror found in this install (packaging issue?) — nothing was created.",
+    "residents.referral.failed": "Moving in \"{name}\" failed: {error}",
 }
 
 # ---- 中文 ----
@@ -382,6 +399,21 @@ _ZH = {
     "channels.webhook.open": "回控制台拍板:{url}",
     "channels.webhook.reply_code": "↩ 回批码:{code}",
     "channels.webhook.reply_hint": "回复「ACCEPT <码>」(或 REJECT / DEFER)即拍板 —— 码单次有效、限时;高危卡请回控制台。",
+    # residents(原住民引荐入住,docs/60;卡文案在出卡时按当前 locale 定稿)
+    "residents.referral.summary": "🏠 你的 Karvy 世界还空着 —— 认识一下第一位原住民:{names}。让 TA 入住吗?",
+    "residents.referral.basis_footer": (
+        "ACCEPT = 真的建出这个角色:TA 的身份、性情、验证门、协作契约全是明文文件,"
+        "你随时能打开看、照着改 —— 这就是「怎么约束一个 agent」的活教材。"
+        "目录权限是记在能力台账上的硬白名单(随时可见、可撤);删除任何东西都必须你亲手确认,"
+        "且先备份。REJECT = 以后绝不再提;DEFER = 卡先挂着。"
+    ),
+    "residents.referral.accepted": (
+        "{names} 已入住。目录权限已授(能力总览里随时可撤):{dirs}。"
+        "TA 动任何文件都先给你看预览 —— 没你点头,什么都不会被删。"
+    ),
+    "residents.referral.no_registry": "角色库未接线 —— 没法安排入住。",
+    "residents.referral.none_found": "这个安装包里找不到原住民镜像(打包问题?)—— 没有建任何东西。",
+    "residents.referral.failed": "「{name}」入住失败:{error}",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}
