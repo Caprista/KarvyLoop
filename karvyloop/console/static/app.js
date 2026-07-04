@@ -2131,6 +2131,14 @@
     if (payload.crystallized && payload.skill_name) {
       pushChatLine("system", t("drive.crystallized", { skill: payload.skill_name }));
     }
+    // 召回回执(Cut1 可见化):skill_name 来自后端真 recall 命中(drive 的 RecallHit),
+    // 不是前端编的 —— stable 命中走 drive.fast_hit,dynamic 命中走 drive.method_reuse(方法重跑)。
+    if (!payload.error && payload.skill_name && !payload.crystallized) {
+      pushChatLine("system", t(payload.fast_brain_hit ? "drive.fast_hit" : "drive.method_reuse",
+        { skill: payload.skill_name }));
+    }
+    // 「第一个 10 分钟」旅程:等的演示任务回来了 → 推进状态机(非旅程消息不动)
+    _journeyOnDriveDone(payload);
     // 刷新 snapshot 拿 last_drive_text
     pollSnapshot();
   }
@@ -3092,6 +3100,122 @@
   }
   function _startPlaceholderRotation() { setInterval(_rotatePlaceholder, 8000); }
 
+  // ============ 「第一个 10 分钟」新手旅程(装完 10 分钟亲眼看到飞轮)============
+  // 剧本:第一步跑一个真演示任务(样例 CSV 附件 + data-analyst 方法召回)→ 第二步再跑一次
+  // 同类任务 → 聊天里出现**方法复用回执**(payload.skill_name 来自后端真 recall 命中)→
+  // 指给用户看成长曲线上的第一批数据点(/api/skills/curve,真数据才指)。
+  // 诚实红线:任务真跑用户配置的模型,绝无罐头输出;没配模型如实引导先配。
+  // 薄状态机:fresh → step1(任务1已发)→ step2(任务2已发)→ done / skipped,后端持久化。
+  let _journey = null;      // GET /api/onboarding/journey 的 {stage, llm_ready, tasks} | null
+  let _journeyAwait = 0;    // 1/2 = 旅程第 n 个任务已发、在等 drive_done;0 = 没在等
+
+  function _journeyActive() {
+    return !!(_journey && ["fresh", "step1", "step2"].indexOf(_journey.stage) >= 0);
+  }
+  async function _initJourney() {
+    const j = await _getJSON("/api/onboarding/journey");
+    if (!j || !j.stage) return false;
+    _journey = j;
+    _renderJourneyBar();
+    if (_journeyActive()) {
+      openChatModal();   // 旅程活跃 → 聊天当主场(对话视图本就常驻;看板/移动端弹起)
+      // 还没配模型:轮询等它配好(配好那刻 CTA 自动换成第一步 chip,不用刷新页面)
+      if (!_journey.llm_ready) setTimeout(_initJourney, 15000);
+    }
+    return _journeyActive();
+  }
+  function _journeySetStage(stage) {
+    if (_journey) _journey.stage = stage;
+    try { _postJSON("/api/onboarding/journey", { stage: stage }); } catch (e) {}
+    _renderJourneyBar();
+  }
+  function _journeyTaskText(n) {
+    const lang = (T.getLang && T.getLang() === "zh") ? "zh" : "en";
+    const tasks = (_journey && _journey.tasks && _journey.tasks[lang]) || {};
+    return tasks["task" + n] || "";
+  }
+  function _journeyChip(labelKey, onClick) {
+    return el("button", { class: "journey-chip", text: t(labelKey), onClick: onClick });
+  }
+  function _renderJourneyBar() {
+    const bar = document.getElementById("journey-bar");
+    if (!bar) return;
+    const active = _journeyActive();
+    bar.innerHTML = "";
+    bar.classList.toggle("hidden", !active);
+    if (!active) return;
+    bar.appendChild(el("div", { class: "journey-head" },
+      el("span", { class: "journey-title", text: t("journey.title") }),
+      el("button", { class: "journey-skip", text: t("journey.skip"),
+        onClick: () => { _journeyAwait = 0; _journeySetStage("skipped"); } })));
+    if (!_journey.llm_ready) {
+      // 诚实引导:没配模型演示跑不了 → 先配模型(不演假戏)
+      bar.appendChild(el("div", { class: "journey-desc", text: t("journey.need_model") }));
+      bar.appendChild(_journeyChip("journey.model_cta", () => window.KarvyModelsPanel.open()));
+      return;
+    }
+    if (_journeyAwait) {
+      bar.appendChild(el("div", { class: "journey-desc",
+        text: t(_journeyAwait === 1 ? "journey.running1" : "journey.running2") }));
+      return;
+    }
+    if (_journey.stage === "fresh") {
+      bar.appendChild(el("div", { class: "journey-desc", text: t("journey.desc") }));
+      bar.appendChild(_journeyChip("journey.chip1", () => _journeyRunTask(1)));
+    } else {   // step1(任务1回来了)/ step2(重进来:任务2没跑完)→ 都给第二步 chip
+      bar.appendChild(el("div", { class: "journey-desc", text: t("journey.step2_hint") }));
+      bar.appendChild(_journeyChip("journey.chip2", () => _journeyRunTask(2)));
+    }
+  }
+  async function _journeyRunTask(n) {
+    if (_journeyAwait) return;
+    const taskText = _journeyTaskText(n);
+    if (!taskText) return;
+    const s = await _getJSON("/api/onboarding/sample");
+    if (!s || !s.ok) { pushChatLine("system", "⚠ " + t("journey.sample_missing")); return; }
+    // 走**真实附件路径**(与人手动 📎 完全同路):文本附件内联进 prompt,真模型真跑
+    _attachments = [{ kind: "text", name: s.name, text: s.text }];
+    _renderAttachments();
+    const ce = _ceInput();
+    if (ce) { ce.textContent = taskText; _ceUpdateEmpty(); }
+    _journeyAwait = n;
+    _journeySetStage(n === 1 ? "step1" : "step2");
+    await _submitChat();
+  }
+  function _journeyOnDriveDone(payload) {
+    if (!_journeyAwait || !_journeyActive()) return;
+    const step = _journeyAwait;
+    _journeyAwait = 0;
+    if (payload && payload.error) { _renderJourneyBar(); return; }   // 失败:留在原步,可重试
+    if (step === 1) { _renderJourneyBar(); return; }                 // 任务1回来 → 亮出第二步
+    _journeyFinale(payload);                                          // 任务2回来 → 收官
+  }
+  async function _journeyFinale(payload) {
+    _journeySetStage("done");
+    const reused = !!(payload && payload.skill_name);
+    // 诚实核数:去 /api/skills/curve 真查一眼,曲线上真有点才指给用户看
+    let hasPoint = false;
+    try {
+      const c = await _getJSON("/api/skills/curve");
+      hasPoint = !!((c && c.skills) || []).some((s) => s.points && s.points.length);
+    } catch (e) {}
+    pushChatLine("system", t(reused ? "journey.done_receipt" : "journey.done_noreuse"));
+    if (hasPoint) {
+      const log = document.getElementById("chat-log");
+      if (log) {
+        const notice = el("div", { class: "chat-notice journey-finale" });
+        notice.appendChild(document.createTextNode(t("journey.done_curve") + " "));
+        notice.appendChild(_journeyChip("journey.curve_btn", () => {
+          const nav = document.querySelector('.nav-item[data-panel="skills"]');
+          if (nav) nav.click();
+        }));
+        log.appendChild(notice);
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+    pushChatLine("system", t("journey.tagline"));
+  }
+
   // ============ 语音输入 v1(Hardy ⑪)============
   // 浏览器 Web Speech API(Chrome/Edge = webkitSpeechRecognition)。零后端改动。纪律:
   // - 识别结果只填输入框,**绝不自动发送** —— 你按 Enter/发送才发(人拍板);
@@ -3302,10 +3426,21 @@
     // docs/46 S4:新手引导 —— 重看入口 + 空态行动链接 + placeholder 轮换 + 首启 tour
     const tourBtn = document.getElementById("tour-replay");
     if (tourBtn) tourBtn.addEventListener("click", () => startTour(true));
+    // 「第一个 10 分钟」旅程重看入口(可重入:重置成 fresh 再拉状态)
+    const journeyBtn = document.getElementById("journey-replay");
+    if (journeyBtn) journeyBtn.addEventListener("click", async () => {
+      _journeyAwait = 0;
+      await _postJSON("/api/onboarding/journey", { stage: "fresh" });
+      await _initJourney();
+      openChatModal();
+    });
     _decorateStaticEmpties();
     _startPlaceholderRotation();
-    // 首启自动起(localStorage 无 tour_done):稍等 checkSetupGate 先判无 Key 锁,有锁就不抢戏
-    setTimeout(() => startTour(false), 1600);
+    // 首启:先看「第一个 10 分钟」旅程是否活跃 —— 活跃就让旅程当主角(tour 随时可从 💡 重看);
+    // 不活跃(老用户/已完成/已跳过)才自动起 6 步 tour(localStorage 无 tour_done 时)。
+    _initJourney().then((active) => {
+      if (!active) setTimeout(() => startTour(false), 1600);
+    }).catch(() => setTimeout(() => startTour(false), 1600));
   }
 
   if (document.readyState === "loading") {

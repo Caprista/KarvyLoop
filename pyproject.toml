@@ -81,6 +81,7 @@ include = ["karvyloop*"]
 [tool.setuptools.package-data]
 karvyloop = [
     "system_skills/**/*",      # 包内只读系统技能/atom 模板(reset 动不到的不可删区)
+    "sample_data/**/*",        # 包内只读样例数据(「第一个 10 分钟」旅程的演示 CSV)
     "system_contracts/**/*",   # 包内只读系统契约(尽责下属默认协作契约;同 reset 动不到)
     "console/static/**/*",     # 本地 HTML 控制台前端(html/js/css/vendor/assets)
 ]

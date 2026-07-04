@@ -881,6 +881,31 @@ html, body {
 .rt-bar-go:hover { filter: brightness(1.08); }
 .rt-bar-go:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* 「第一个 10 分钟」新手旅程条(聊天输入区上方;两步真演示 → 方法复用回执 → 成长曲线) */
+.journey-bar {
+  display: flex; flex-direction: column; gap: 6px;
+  margin: 6px 16px 0; flex-shrink: 0;
+  padding: 10px 12px; border-radius: 10px;
+  background: rgba(122, 165, 201, 0.10); border: 1px solid var(--border);
+}
+.journey-bar.hidden { display: none; }
+.journey-head { display: flex; align-items: center; gap: 8px; }
+.journey-title { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.journey-skip {
+  margin-left: auto; padding: 2px 8px; font-size: 11px; cursor: pointer;
+  color: var(--text-dim); background: transparent; border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.journey-skip:hover { color: var(--text); }
+.journey-desc { font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+.journey-chip {
+  align-self: flex-start; padding: 6px 14px; font-size: 13px; font-weight: 600;
+  cursor: pointer; color: var(--text); border: 1px solid var(--accent);
+  border-radius: 16px; background: rgba(201, 165, 122, 0.14);
+}
+.journey-chip:hover { background: rgba(201, 165, 122, 0.26); }
+.journey-finale .journey-chip { display: inline-block; margin-left: 6px; padding: 3px 10px; font-size: 12px; }
+
 /* ch4 #3:圆桌起桌弹窗(主题 + 勾选参与者)*/
 .rt-setup-label { display: block; font-size: 12px; font-weight: 700; color: var(--text); margin: 12px 0 5px; }
 .rt-topic {

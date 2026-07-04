@@ -777,3 +777,66 @@ def test_j21_self_create_to_confirm_to_sediment_real(app):
     composed = aid in (rreg.get("分析师").atom_ids or [])
     assert (still and composed) or (not still and not composed), \
         f"沉淀不自洽 still={still} composed={composed}(留必入composition、撤必删=无悬空):{detail}"
+
+
+# ---- J22:「第一个 10 分钟」旅程(新用户态 → 任务1 → 任务2 → 方法复用回执 + 曲线第一批点)----
+# 装完 10 分钟的 wow 剧本整条真跑:干净实例(零 Trace = 旅程 fresh)→ 两个演示任务按**前端
+# 真实组装**(样例 CSV 附件内联在前、问题在后)走 drive_in_tui(真模型)→ 两次都必须出
+# 方法复用回执(outcome.skill_name 来自真 recall 命中 data-analyst)→ /api/skills/curve 的
+# 构建函数上真长出第一批点。诚实红线:全程无桩、无罐头 —— 断的全是真机制的真产出。
+def test_j22_first_ten_minutes_journey_real(app):
+    from karvyloop.crystallize.curve import build_curves
+    from karvyloop.onboarding import (
+        JOURNEY_TASKS, compose_task_intent, load_sample, read_stage)
+    from karvyloop.runtime.main_loop import MainLoop
+    from karvyloop.workbench.main_loop_bridge import drive_in_tui
+
+    # 独立 MainLoop = 干净的新用户实例(共享 _RT.main_loop 已被前面 J 步污染 Trace)
+    tmp = Path(tempfile.mkdtemp())
+    ml = MainLoop(skills_dir=tmp / "skills")
+    ml.bootstrap()   # bundled data-analyst 系统技能进索引(J8 已单验)
+    assert not ml.trace.all_tasks(), "干净实例竟有 Trace?"
+    assert read_stage(tmp / "onboarding.json",
+                      has_runs=bool(ml.trace.all_tasks())) == "fresh", "新用户态没判成 fresh"
+
+    name, text = load_sample()
+    assert name and text.strip(), "随包样例数据丢了"
+    rk = dict(app.state.runtime_kwargs)
+
+    # 非 COMPLETED 终局(infra-dead/预算/断路…)会把 ⚠ 兜底提示**拼进 text 且 error=None**——
+    # 光断"text 非空"会被兜底文案骗成假绿(2026-07-04 实捕:CodingPrompt.to_blocks 少 cache
+    # 参数 → 每次调模型 TypeError → 被判 infra-dead,text=兜底提示,旧断言全过)。
+    def _assert_real_output(o, label):
+        assert not o.error, f"{label} 真跑失败: {o.error}"
+        assert (o.text or "").strip(), f"{label} 没有真产出"
+        assert "基础能力暂时不可用" not in o.text and "非正常结束" not in o.text, \
+            f"{label} 拿兜底提示冒充产出(模型根本没真跑通): {o.text[:120]!r}"
+
+    # 任务1(真模型):镜像前端 _submitChat 的组装(附件内联在前、问题在后)
+    intent1 = compose_task_intent(JOURNEY_TASKS["zh"]["task1"],
+                                  sample_name=name, sample_text=text)
+    o1 = asyncio.run(drive_in_tui(intent1, ml, **rk))
+    _assert_real_output(o1, "任务1")
+    assert o1.skill_name == "data-analyst", \
+        f"任务1 没命中 data-analyst 方法召回(skill_name={o1.skill_name!r})→ 聊天里回执出不来"
+
+    # 任务2(真模型,同类任务):第二次跑的召回命中回执 —— 10 分钟 wow 的主菜
+    intent2 = compose_task_intent(JOURNEY_TASKS["zh"]["task2"],
+                                  sample_name=name, sample_text=text)
+    o2 = asyncio.run(drive_in_tui(intent2, ml, **rk))
+    _assert_real_output(o2, "任务2")
+    assert o2.skill_name == "data-analyst", \
+        f"任务2 没命中方法召回(skill_name={o2.skill_name!r})→ 方法复用回执消失"
+
+    # 成长曲线第一批点:/api/skills/curve 同一构建函数(K4 只读,全部从 Trace 推导)
+    curves = build_curves(ml.trace,
+                          name_resolver=lambda s: ml.skill_index.name_for_sig(s) or "")
+    da = [s for s in curves["skills"] if s["sig"] == "system:data-analyst"]
+    assert da and da[0]["points"], \
+        f"曲线上没有 data-analyst 的点(skills={[s['sig'] for s in curves['skills']]!r})"
+    last = da[0]["points"][-1]
+    assert last["usage_count"] >= 1 and last["reruns"] >= 1, \
+        f"重跑没长成曲线点(usage={last['usage_count']} reruns={last['reruns']})"
+    # 成败也从 Trace 真实回放:两次真跑通,曲线点必须有真 success(假绿时这里是 0)
+    assert last["success_count"] >= 1, \
+        f"曲线点 success_count=0 —— 两次'成功'其实都没跑通(eval_fact.success 全 False)"

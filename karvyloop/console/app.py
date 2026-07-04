@@ -38,6 +38,7 @@ from .routes_files import router as files_router
 from .routes_lines import router as lines_router
 from .routes_memory import router as memory_router
 from .routes_models import router as models_router
+from .routes_onboarding import router as onboarding_router
 from .routes_ops import router as ops_router
 from .routes_peers import router as peers_router
 from .routes_roles import router as roles_router
@@ -619,6 +620,7 @@ def build_console_app(
     app.include_router(system_router)      # /api/tasks,/task/*,/decisions/*,/proposals/pending,/setup_status,/health,/lang(P2-② 从 routes.py 拆出)
     app.include_router(conversations_router)  # /api/conversation*,/api/conversations(P2-② 从 routes.py 拆出)
     app.include_router(peers_router)       # /api/peers,/api/peer/switch(P2-② 从 routes.py 拆出)
+    app.include_router(onboarding_router)  # /api/onboarding/*(「第一个 10 分钟」新手旅程)
     app.include_router(ws_router)
 
     # 静态资源禁用浏览器**强缓存**(no-cache = 每次带 ETag 条件请求 → 没变 304、变了 200)。

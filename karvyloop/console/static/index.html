@@ -49,6 +49,8 @@
         <button class="view-toggle hidden" id="view-toggle" aria-hidden="true">⊞</button>
         <!-- docs/46 S4:重看新手引导(首启 tour 可跳过,这里随时唤回) -->
         <button class="tour-replay" id="tour-replay" data-i18n-title="tour.replay.title">💡</button>
+        <!-- 「第一个 10 分钟」旅程重看入口(可跳过、可重入) -->
+        <button class="tour-replay" id="journey-replay" data-i18n-title="journey.replay.title">🎬</button>
         <span class="lang-switcher" id="lang-switcher"></span>
       </div>
     </header>
@@ -123,6 +125,8 @@
               <div class="chat-log" id="chat-log"></div>
               <!-- ch4 圆桌阶段0:对齐目标中 → 你拍板【开始讨论】 -->
               <div class="roundtable-bar hidden" id="roundtable-bar"></div>
+              <!-- 「第一个 10 分钟」新手旅程:两步真演示(真模型跑)→ 亲眼看方法复用回执 + 成长曲线第一批点 -->
+              <div class="journey-bar hidden" id="journey-bar"></div>
               <!-- ch4 #1:群里 @ 角色 —— 行内高亮 @花名(可多个、整体删),输 @ 弹角色选择器 -->
               <div class="chat-input-wrap">
                 <div class="mention-pop hidden" id="mention-pop"></div>
