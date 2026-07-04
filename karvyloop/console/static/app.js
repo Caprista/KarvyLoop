@@ -319,12 +319,14 @@
 
   // 开机拉取待决提案:待你拍的板跨刷新/切语言存活(决策 loop 不让人问"怎么样了")。
   // WS 实时推只覆盖"在线时新来的";本 fetch 覆盖"刷新前就挂着的"(含 DEFER 挂起的)。
+  // replay:这是**状态回放**不是新卡事件 —— 桌面视图的叼卡剧场只回应真事件,
+  // 回放只把卡摆回列表(Hardy 实拍:开屏卡皮巴拉被存量 pending 卡拽去演一趟 = 病根在这)。
   async function fetchPendingProposals() {
     try {
       const r = await fetch("/api/proposals/pending");
       if (!r.ok) return;
       const data = await r.json();
-      (data.proposals || []).forEach((p) => _routeProposal(p));   // 按 kind 分流(拍板/预判)
+      (data.proposals || []).forEach((p) => _routeProposal(p, { replay: true }));   // 按 kind 分流(拍板/预判)
     } catch (e) {
       console.warn("[boot] pending proposals failed", e);
     }
@@ -777,7 +779,7 @@
     }
   }
 
-  function renderProposal(payload) {
+  function renderProposal(payload, opts) {
     const list = document.getElementById("h2a-list");
     if (!list) return;
     if (!payload) {
@@ -788,8 +790,9 @@
     const built = _buildProposalCard(payload);
     _placeCard(list, built.proposalId, built.card);   // 多卡不覆盖:同 id 替换、新 id 追加
     _renderProposalInChat(payload, built.proposalId); // S3:决策卡双面出 —— 同时冒进聊天流
-    // 桌面视图(docs/51 §4.2):⚖便签置顶 + 闪烁 + 卡皮巴拉冒泡(fail-loud,推回决策舱)
-    if (window.KarvyDesktop) window.KarvyDesktop.notifyH2A();
+    // 桌面视图(docs/51 §4.2):⚖便签置顶 + 闪烁 + 卡皮巴拉冒泡(fail-loud,推回决策舱);
+    // replay(开机回放存量卡)只保"在位可瞟",不演叼卡剧场 —— 事件 vs 快照在 desktop.ts 一处区分
+    if (window.KarvyDesktop) window.KarvyDesktop.notifyH2A({ replay: !!(opts && opts.replay) });
     updatePulse();   // step5:拍板数变了 → 刷脉搏
   }
 
@@ -954,10 +957,12 @@
   // confirm_result / crystallize_skill / set_preference / confirm_decision_pref / infeasible_report)
   // 都被误丢进预判列 —— 无拒绝按钮、丢 payload。改成"预判白名单",新 kind 一律进决策列。
   const _PREDICT_KINDS = ["run_task"];
-  function _routeProposal(payload) {
+  // opts.replay = 状态回放(boot fetch 存量卡),非新卡事件 —— 透传给 renderProposal,
+  // 桌面吉祥物剧场(叼卡/闪⚖/冒泡)只回应真事件(WS h2a_proposal / 手动求建议)。
+  function _routeProposal(payload, opts) {
     if (!payload) return;   // null = 沉默/未接,保持空态
     if (_PREDICT_KINDS.indexOf(payload.kind) >= 0) renderPredict(payload);
-    else renderProposal(payload);   // 其余全部(含未来新 kind)→ 决策列
+    else renderProposal(payload, opts);   // 其余全部(含未来新 kind)→ 决策列
   }
 
   // 【你可能想做】预判卡:小卡从你的习惯预判的想做的事 —— 轻提示,你去做 / 忽略。

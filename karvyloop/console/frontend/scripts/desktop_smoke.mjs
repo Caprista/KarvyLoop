@@ -156,7 +156,16 @@ assert.equal(JSON.parse(dom.window.localStorage.getItem("karvyloop_desk.v1")).wi
 document.getElementById("chat-open").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
 assert.ok(!document.getElementById("chat-modal").classList.contains("desk-min"), "点卡皮巴拉应恢复聊天窗");
 
-// ---- ⚖ notifyH2A:置顶 + note-alert 闪烁 + 卡皮巴拉冒泡 ----
+// ---- ⚖ notifyH2A(replay):开机回放存量 pending 卡 = 状态不是事件 ——
+// 置顶/在位可瞟照做,但**零剧场**(不叼卡/不闪/不冒泡;Hardy 实拍"开屏飘上去"回归锁)
+const zReplayBefore = parseInt(decide.style.zIndex, 10);
+KD.notifyH2A({ replay: true });
+assert.ok(parseInt(decide.style.zIndex, 10) > zReplayBefore, "replay 仍应置顶 ⚖(状态保证)");
+assert.ok(!document.getElementById("desk-carry-actor"), "replay 不许起叼卡小演员(开屏稳在窝)");
+assert.ok(!decide.classList.contains("note-alert"), "replay 不闪 ⚖(剧场只回应真事件)");
+assert.ok(document.getElementById("karvy-bubble").classList.contains("hidden"), "replay 不冒泡");
+
+// ---- ⚖ notifyH2A(真事件):置顶 + note-alert 闪烁 + 卡皮巴拉冒泡 ----
 // P1.5:小卡先叼卡走过去(2s 兜底),**到位后**才闪 —— 有小演员就等它到
 const zBefore = parseInt(decide.style.zIndex, 10);
 KD.notifyH2A();
@@ -308,5 +317,5 @@ assert.ok(document.getElementById("desk-presence").classList.contains("hidden") 
 document.body.classList.remove("desk-view");
 KD2.leave();
 
-console.log("✓ desktop smoke OK — dock 12 入口同构 / enter定位+a11y / 拖拽落盘 / ✕最小化+卡皮巴拉恢复 / ⚖告警 / reset / leave清痕");
+console.log("✓ desktop smoke OK — dock 12 入口同构 / enter定位+a11y / 拖拽落盘 / ✕最小化+卡皮巴拉恢复 / ⚖告警(事件演·回放不演) / reset / leave清痕");
 console.log("✓ desk soul OK — 工位区(busy亮灯/idle呼吸/久静睡/无活动不摆) / 只读WS增量 / 工作证✓✗ / 署名便签3张cap / 叼卡→到位闪⚖→回窝 / leave全清 / API不通优雅隐藏");

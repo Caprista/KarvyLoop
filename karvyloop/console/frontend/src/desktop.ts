@@ -900,7 +900,11 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   }
 
   // ---- ⚖便签的"常驻可瞟"保险(docs/51 §4.2;docs/46 铁律的桌面版)----
-  function notifyH2A(): void {
+  // 事件 vs 快照(Hardy 实拍拍到的开屏"飘上去"):叼卡/闪烁/冒泡是**新卡到来事件**的剧场,
+  // 只回应真事件;页面加载/重连把存量 pending 卡回放进列表(replay)是**状态回放**,
+  // 只保状态(展开/置顶/在视口内可瞟),一帧戏都不演。区分只做在这一处:
+  // 调用方(app.js)标注来源 —— WS h2a_proposal / 手动求建议 = 事件;boot fetch = replay。
+  function notifyH2A(opts?: { replay?: boolean }): void {
     if (!deskView()) return;
     const note = document.querySelector<HTMLElement>(".cockpit-grid .col-decide");
     if (!note) return;
@@ -911,6 +915,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     focusEl(note);                                           // 置顶(便签与窗口同一 z 空间)
     const pos = clampPos(note, getPos(note).x, getPos(note).y);
     applyPos(note, pos.x, pos.y);                            // 永远保证在视口内
+    if (opts && opts.replay) return;                         // 快照回放:到此为止(无剧场)
     const flash = () => {
       note.classList.remove("note-alert");
       void note.offsetWidth;                                 // 重触发动画

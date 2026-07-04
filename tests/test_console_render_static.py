@@ -140,7 +140,9 @@ def test_predict_quadrant_wired():
     assert "predict-list" in js                       # 渲进预判列
     # P1-b:改成"预判白名单 + 默认进决策列"(新 kind 不再被误丢进预判)
     assert "_PREDICT_KINDS" in js
-    assert "renderPredict(payload)" in js and "renderProposal(payload)" in js
+    # 2026-07-04:决策列调用带 opts 透传(replay=开机回放存量卡,桌面剧场只回应真事件)
+    assert "renderPredict(payload)" in js and "renderProposal(payload, opts)" in js
+    assert "replay: true" in js, "boot fetch 回放必须标注 replay(开屏叼卡剧场回归锁)"
     css = _read("styles.css")
     assert ".predict-card" in css and ".predict-yes" in css
     i18n = _read("i18n.js")

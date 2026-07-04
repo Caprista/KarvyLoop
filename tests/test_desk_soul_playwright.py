@@ -10,6 +10,10 @@ jsdom smoke 验逻辑,这里验**浏览器运行时**(官方原图真加载没 /
   3. task_status done(契约形状喂灵魂接缝)→ 署名便签浮出(who + 结果摘要);
   4. 全程 0 console error / 0 pageerror。
 
+桌面视图三件套(2026-07-04,Hardy 实拍回归锁):
+  5. 开屏回放存量 pending 卡(≥1 张,复现纪律)→ 前 3 秒吉祥物稳在窝(不叼卡不离席不闪),
+     卡照常摆回列表;**真**新卡(live 事件)→ 叼卡剧场仍触发(功能没修没);
+
 守卫:Playwright(python 包)没装 → skip(老实降级,不假装验过);
       console 起不来(端口/环境)→ fail(这是真回归,不吞)。
 """
@@ -141,4 +145,97 @@ def test_desk_soul_in_real_browser(console_url):
 
         browser.close()
 
+    assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
+
+
+# ============================================================================
+# 桌面视图三件套(2026-07-04):开屏回放不演剧场(Hardy 实拍回归锁)
+# ============================================================================
+
+import json  # noqa: E402
+
+# 真实契约形状(Proposal.to_dict,karvyloop/karvy/atoms.py)——route-mock /api/proposals/pending
+_PENDING_FIXTURE = {
+    "proposals": [
+        {
+            "summary": "把周报整理成模板并沉淀为技能",
+            "options": ["ACCEPT", "DEFER", "REJECT"],
+            "strength": 0.9, "evidence_refs": [1, 2], "habit_id": 7,
+            "model_ref": "test", "ts": 1751600000.0,
+            "kind": "crystallize_skill", "payload": {},
+            "proposal_id": "crystallize_skill-7-abc12345",
+            "basis": "最近 3 次都手工整理了周报", "context_ref": {},
+        },
+        {
+            "summary": "老板付 10 万的单子接不接",
+            "options": ["ACCEPT", "DEFER", "REJECT"],
+            "strength": 0.8, "evidence_refs": [], "habit_id": 8,
+            "model_ref": "test", "ts": 1751600001.0,
+            "kind": "confirm_decision_pref", "payload": {},
+            "proposal_id": "confirm_decision_pref-8-def6789a",
+            "basis": "邮件里出现了新合同", "context_ref": {},
+        },
+    ]
+}
+
+_CARRY_PROBE = """
+    window.__carrySeen = false;
+    (function probe() {
+        if (!document.documentElement) { setTimeout(probe, 5); return; }
+        new MutationObserver(() => {
+            if (document.getElementById('desk-carry-actor')) window.__carrySeen = true;
+            const cv = document.getElementById('desk-karvy-pixel');
+            if (cv && cv.classList.contains('is-away')) window.__carrySeen = true;
+        }).observe(document.documentElement,
+                   {childList: true, subtree: true, attributes: true, attributeFilter: ['class']});
+    })();
+"""
+
+
+def _wire(page, errors, *, desk_boot: bool):
+    """公共接线:tour 跳过 + (可选)以 desk 为首开视图 + console error 收集。"""
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    boot = "try { localStorage.setItem('karvyloop_tour_done', '1');"
+    if desk_boot:
+        boot += " localStorage.setItem('karvyloop_view', 'desk');"
+    boot += " } catch (e) {}"
+    page.add_init_script(boot)
+
+
+def test_desk_boot_replay_mascot_stays_home(console_url):
+    """复现纪律:先造 ≥1 张 pending 决策卡再刷新 —— 开屏前 3 秒吉祥物必须稳在窝里
+    (存量卡 = 状态回放,不是新卡事件);随后真新卡到来,叼卡剧场仍要演(功能别修没)。"""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1600, "height": 900})
+        _wire(page, errors, desk_boot=True)
+        page.route("**/api/proposals/pending",
+                   lambda route: route.fulfill(status=200, content_type="application/json",
+                                               body=json.dumps(_PENDING_FIXTURE)))
+        page.add_init_script(_CARRY_PROBE)
+        page.goto(console_url, wait_until="domcontentloaded")
+        page.wait_for_function("document.body.classList.contains('desk-view')", timeout=10000)
+        page.wait_for_timeout(3000)   # 录开屏前 3 秒(MutationObserver 探针盯全程,不靠轮询碰运气)
+
+        assert not page.evaluate("window.__carrySeen"), \
+            "开屏 3 秒内吉祥物离窝了(叼卡剧场被存量 pending 卡误触发 —— Hardy 实拍 bug 回归)"
+        cards = page.evaluate("document.querySelectorAll('#h2a-list .h2a-card').length")
+        assert cards == 2, f"状态回放本身要照做:2 张存量卡应摆回 ⚖ 列表,实际 {cards}"
+        assert not page.evaluate(
+            "document.querySelector('.col-decide').classList.contains('note-alert')"
+        ), "回放不许闪 ⚖(剧场只回应真事件)"
+        assert page.evaluate(
+            "!document.getElementById('desk-karvy-pixel').classList.contains('is-away')"
+        ), "吉祥物应稳在右下窝里"
+
+        # 真新卡到来(app.js 收 WS h2a_proposal 调的同一钩子,不带 replay)→ 剧场照演
+        page.evaluate("window.KarvyDesktop.notifyH2A()")
+        page.wait_for_selector("#desk-carry-actor", state="attached", timeout=3000)
+        page.wait_for_selector("#desk-carry-actor", state="detached", timeout=4000)
+        assert page.evaluate(
+            "document.querySelector('.col-decide').classList.contains('note-alert')"
+        ), "真新卡到位后 ⚖ 应闪(叼卡剧场不许修没)"
+        browser.close()
     assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"

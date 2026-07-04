@@ -989,7 +989,7 @@
       setTimeout(finish, 2e3);
       return true;
     }
-    function notifyH2A() {
+    function notifyH2A(opts) {
       if (!deskView()) return;
       const note = document.querySelector(".cockpit-grid .col-decide");
       if (!note) return;
@@ -1003,6 +1003,7 @@
       focusEl(note);
       const pos = clampPos(note, getPos(note).x, getPos(note).y);
       applyPos(note, pos.x, pos.y);
+      if (opts && opts.replay) return;
       const flash = () => {
         note.classList.remove("note-alert");
         void note.offsetWidth;
