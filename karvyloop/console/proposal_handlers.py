@@ -91,6 +91,70 @@ def _stash_report_card(app: Any, proposal: Any, checked: Any, *, problem: str, a
         pass
 
 
+def _schedule_role_experience(app: Any, *, role: str, domain: str, requirement: str,
+                              result: str = "", success: bool = False, verified: bool = False,
+                              correction: str = "") -> None:
+    """委派任务收尾 → fire-and-forget 调度角色经验沉淀(docs/54 模块1 Top2)。
+
+    保守门在 `sediment_experience`/`should_distill` 内部把关(无域/l0/纯失败无纠正 → 零 LLM);
+    这里只负责**不阻断决策兑现**地把它丢进事件循环。无 running loop(同步测试上下文)→ 直接
+    同步跑一轮(仍 fail-soft)。fail-loud:后台任务异常上冒 system_error,不静默死。
+    """
+    try:
+        from karvyloop.roles.experience import TaskOutcomeSignal, sediment_experience
+    except Exception:
+        return
+    mem = getattr(app.state, "memory", None)
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    if mem is None or gw is None:
+        return
+    import time as _t
+    sig = TaskOutcomeSignal(role=role, domain=domain or "", requirement=requirement,
+                            result=result or "", success=success, verified=verified,
+                            correction=correction or "", ts=_t.time())
+    # 保守门先零成本判(省得没信号也起 task);不满足 → 直接不动
+    try:
+        from karvyloop.roles.experience import should_distill
+        if not should_distill(sig):
+            return
+    except Exception:
+        return
+    coro = sediment_experience(sig, mem=mem, gateway=gw, model_ref=rk.get("model_ref", ""))
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None:
+        try:
+            asyncio.run(coro)
+        except Exception as e:
+            logger.warning(f"[role_experience] 同步沉淀失败(role={role} domain={domain}): {e}")
+        return
+    tasks = getattr(app.state, "_role_experience_tasks", None)
+    if tasks is None:
+        tasks = app.state._role_experience_tasks = set()
+    task = loop.create_task(coro)
+    tasks.add(task)
+
+    def _on_done(t: Any) -> None:
+        tasks.discard(t)
+        try:
+            exc = t.exception()
+        except Exception:
+            return
+        if exc is not None:
+            logger.error(f"[role_experience] 沉淀后台任务异常: {exc}")
+            try:
+                from karvyloop.console.task_events import schedule_system_error
+                schedule_system_error(app, "role_experience_sediment", str(exc))
+            except Exception:
+                pass
+
+    task.add_done_callback(_on_done)
+
+
 def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     """route_to_role ACCEPT 兑现:让目标 role 在其域治理下执行需求(docs/29 KC-3/KC-5)。
 
@@ -217,6 +281,16 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
         suffix = verdict_suffix(checked)
         _stash_report_card(app, proposal, checked,
                            problem=requirement, approach=f"由「{role}」在域治理下执行")
+        # docs/54 模块1 Top2:角色经验沉淀 —— 委派任务收尾 → 保守门 → 蒸馏 → role-scoped Belief。
+        # 只在**过了独立验收**的成功任务沉(should_distill 内部保守;无域/纯失败不沉)。
+        # fire-and-forget、fail-soft,绝不阻断决策兑现。
+        _v = getattr(checked, "verdict", None)
+        _verified = bool(_v is not None and getattr(_v, "passed", False)
+                         and not getattr(_v, "inconclusive", False))
+        _schedule_role_experience(
+            app, role=str(role), domain=_did, requirement=requirement,
+            result=(getattr(result, "text", "") or ""),
+            success=True, verified=_verified)
         return True, f"已由「{role}」执行:{txt or '(无输出)'}{(' ' + suffix) if suffix else ''}"
 
     return handler
