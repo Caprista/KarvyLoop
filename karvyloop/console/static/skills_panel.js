@@ -10,6 +10,103 @@ var KarvySkillsPanelBundle = (function(exports) {
     const w = window.KarvyI18n;
     return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
   };
+  const _SVG_NS = "http://www.w3.org/2000/svg";
+  function _svgEl(tag, attrs) {
+    const n = document.createElementNS(_SVG_NS, tag);
+    for (const k of Object.keys(attrs)) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+  function _polylinePoints(pts, w, h, pad, yMax) {
+    const t0 = pts[0].ts, t1 = pts[pts.length - 1].ts;
+    const span = t1 - t0 || 1;
+    const ymax = yMax > 0 ? yMax : 1;
+    return pts.map((p) => {
+      const x = pad + (p.ts - t0) / span * (w - 2 * pad);
+      const y = h - pad - Math.min(p.v, ymax) / ymax * (h - 2 * pad);
+      return x.toFixed(1) + "," + y.toFixed(1);
+    }).join(" ");
+  }
+  function _sparkline(points, opts) {
+    const pts = (points || []).map((p) => ({ ts: Number(p.ts) || 0, v: Number(p.usage_score) || 0 }));
+    if (!pts.length) return null;
+    const w = opts && opts.w || 96, h = opts && opts.h || 22, pad = 2;
+    const yMax = opts && opts.yMax || Math.max(1, ...pts.map((p) => p.v));
+    const color = opts && opts.color || "#4f8cc9";
+    const svg = _svgEl("svg", {
+      class: "skill-spark",
+      width: String(w),
+      height: String(h),
+      viewBox: "0 0 " + w + " " + h
+    });
+    if (opts && opts.title) {
+      const ti = _svgEl("title", {});
+      ti.textContent = opts.title;
+      svg.appendChild(ti);
+    }
+    if (pts.length > 1) {
+      svg.appendChild(_svgEl("polyline", {
+        points: _polylinePoints(pts, w, h, pad, yMax),
+        fill: "none",
+        stroke: color,
+        "stroke-width": "1.5",
+        "stroke-linejoin": "round"
+      }));
+    }
+    const last = pts[pts.length - 1];
+    const lastXY = _polylinePoints([last], w, h, pad, yMax).split(",");
+    const cx = pts.length > 1 ? String(w - pad) : lastXY[0];
+    svg.appendChild(_svgEl("circle", { cx, cy: lastXY[1], r: "2", fill: color }));
+    return svg;
+  }
+  function _growthSection(growth) {
+    const wrap = el("div", { class: "mgmt-buysugar skill-growth" });
+    wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("skills.growth_title") }));
+    const pts = growth || [];
+    if (!pts.length) {
+      wrap.appendChild(el("div", { class: "mgmt-hint", text: t("skills.growth_empty") }));
+      return wrap;
+    }
+    const last = pts[pts.length - 1];
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("skills.growth_legend", {
+      skills: last.skills_total || 0,
+      promos: last.promotions || 0,
+      rate: Math.round((Number(last.avg_success_rate) || 0) * 100),
+      hit: Math.round((Number(last.hit_rate) || 0) * 100)
+    }) }));
+    const w = 560, h = 64, pad = 4;
+    const svg = _svgEl("svg", {
+      class: "skill-growth-chart",
+      width: "100%",
+      height: String(h),
+      viewBox: "0 0 " + w + " " + h,
+      preserveAspectRatio: "none"
+    });
+    const skillsPts = pts.map((p) => ({ ts: Number(p.ts) || 0, v: Number(p.skills_total) || 0 }));
+    const hitPts = pts.map((p) => ({ ts: Number(p.ts) || 0, v: Number(p.hit_rate) || 0 }));
+    const yMax = Math.max(1, ...skillsPts.map((p) => p.v));
+    if (pts.length > 1) {
+      svg.appendChild(_svgEl("polyline", {
+        points: _polylinePoints(skillsPts, w, h, pad, yMax),
+        fill: "none",
+        stroke: "#4f8cc9",
+        "stroke-width": "2",
+        "stroke-linejoin": "round"
+      }));
+      svg.appendChild(_svgEl("polyline", {
+        points: _polylinePoints(hitPts, w, h, pad, 1),
+        fill: "none",
+        stroke: "#7bbf7b",
+        "stroke-width": "1.5",
+        "stroke-dasharray": "4 3",
+        "stroke-linejoin": "round"
+      }));
+    } else {
+      const only = _polylinePoints(skillsPts, w, h, pad, yMax).split(",");
+      svg.appendChild(_svgEl("circle", { cx: only[0], cy: only[1], r: "3", fill: "#4f8cc9" }));
+    }
+    wrap.appendChild(svg);
+    return wrap;
+  }
   function _skillImportForm() {
     const srcIn = el("input", { type: "text", placeholder: t("skills.import_ph") });
     srcIn.style.flex = "1";
@@ -214,6 +311,10 @@ var KarvySkillsPanelBundle = (function(exports) {
       body.appendChild(el("div", { class: "mgmt-empty", text: t("skills.no_llm") }));
       return;
     }
+    const curves = await _getJSON("/api/skills/curve");
+    const curveBySig = {};
+    for (const c of curves && curves.skills || []) curveBySig[c.sig] = c.points || [];
+    body.appendChild(_growthSection(curves && curves.growth && curves.growth.points || []));
     await _renderCodingCapability(body);
     _renderCapabilityOverviewCard(body);
     body.appendChild(_skillImportForm());
@@ -238,6 +339,13 @@ var KarvySkillsPanelBundle = (function(exports) {
         text: "🌐 " + t("skills.third_party_badge")
       }) : null;
       const stats = t("skills.stats", { recall: s.recall_count || 0, use: s.usage_count || 0, ok: s.success_count || 0 });
+      const cpts = curveBySig[s.sig] || [];
+      const lastPt = cpts.length ? cpts[cpts.length - 1] : null;
+      const spark = lastPt ? _sparkline(cpts, { title: t("skills.spark_title", {
+        score: (Number(lastPt.usage_score) || 0).toFixed(1),
+        rate: Math.round((Number(lastPt.success_rate) || 0) * 100),
+        prog: Math.round((Number(lastPt.promote_progress) || 0) * 100)
+      }) }) : null;
       const actions = el("div", { class: "dpref-actions" });
       if (archived) {
         actions.appendChild(el("button", {
@@ -272,7 +380,7 @@ var KarvySkillsPanelBundle = (function(exports) {
             tpBadge
           ),
           el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
-          el("div", { class: "mc-meta", text: stats })
+          spark ? el("div", { class: "mc-meta skill-spark-row" }, spark, el("span", { text: " " + stats })) : el("div", { class: "mc-meta", text: stats })
         ),
         actions
       ));
