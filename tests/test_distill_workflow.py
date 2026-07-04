@@ -131,11 +131,13 @@ def test_persist_supersedes_same_source(app, monkeypatch):
     """同一 URL 喂两遍:第二次沉淀**替换**第一次的旧 belief(按 source_ref + before_ts),不重复堆积。"""
     from karvyloop.cognition.ingest import IngestResult
     import karvyloop.cognition.ingest as ing_mod
-    import karvyloop.console.routes as routes_mod
+    # P2-② routes 拆分:memory 端点(含 _source_ref)搬到 routes_memory;patch 目标改指新家,
+    # 否则 patch routes.py 的 re-export 穿不过生产端点在 routes_memory 里的本地引用(monkeypatch 陷阱)。
+    import karvyloop.console.routes_memory as routes_mem_mod
 
     mem = app.state.memory
     # 第一次:该源写 2 条(带 source_ref + 旧 ts)
-    monkeypatch.setattr(routes_mod, "_source_ref", lambda url, mat: "http://x")
+    monkeypatch.setattr(routes_mem_mod, "_source_ref", lambda url, mat: "http://x")
     calls = {"n": 0}
 
     async def fake_ingest(material, *, source_ref="", now=None, **kw):

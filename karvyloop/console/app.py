@@ -28,6 +28,22 @@ from karvyloop.runtime.main_loop import MainLoop
 from karvyloop.karvy.observer import WorkbenchObserver
 
 from .routes import router as api_router
+from .routes_atoms import router as atoms_router
+from .routes_budget import router as budget_router
+from .routes_capability import router as capability_router
+from .routes_conversations import router as conversations_router
+from .routes_decision_prefs import router as decision_prefs_router
+from .routes_domain import router as domain_router
+from .routes_files import router as files_router
+from .routes_lines import router as lines_router
+from .routes_memory import router as memory_router
+from .routes_models import router as models_router
+from .routes_ops import router as ops_router
+from .routes_peers import router as peers_router
+from .routes_roles import router as roles_router
+from .routes_schedules import router as schedules_router
+from .routes_system import router as system_router
+from .routes_tokens import router as tokens_router
 from .ws import router as ws_router
 
 logger = logging.getLogger(__name__)
@@ -568,6 +584,22 @@ def build_console_app(
 
     # mount routers
     app.include_router(api_router)
+    app.include_router(files_router)       # /api/files/*(P2-② 从 routes.py 拆出)
+    app.include_router(budget_router)      # /api/budget(P2-② 从 routes.py 拆出)
+    app.include_router(schedules_router)   # /api/schedule*(P2-② 从 routes.py 拆出)
+    app.include_router(models_router)      # /api/model/* + /api/providers/*(P2-② 从 routes.py 拆出)
+    app.include_router(ops_router)         # /api/update* + /api/ops/* + /api/search/config + /api/doctor/fix(P2-② 从 routes.py 拆出)
+    app.include_router(tokens_router)      # /api/tokens*(P2-② 从 routes.py 拆出)
+    app.include_router(decision_prefs_router)  # /api/decision_prefs*(P2-② 从 routes.py 拆出)
+    app.include_router(atoms_router)       # /api/atoms* + /api/atom/*(P2-② 从 routes.py 拆出)
+    app.include_router(memory_router)      # /api/memory*(P2-② 从 routes.py 拆出)
+    app.include_router(capability_router)  # /skills,/capability,/fs_grants,/silence,/mcp,/skill,/domains 等(P2-② 从 routes.py 拆出)
+    app.include_router(roles_router)       # /roles,/models,/role/*,/agent/import(P2-② 从 routes.py 拆出)
+    app.include_router(domain_router)      # /api/domain/*(建域/归档/编辑/恢复)(P2-② 从 routes.py 拆出)
+    app.include_router(lines_router)       # /api/line*,/api/lines(P2-② 从 routes.py 拆出)
+    app.include_router(system_router)      # /api/tasks,/task/*,/decisions/*,/proposals/pending,/setup_status,/health,/lang(P2-② 从 routes.py 拆出)
+    app.include_router(conversations_router)  # /api/conversation*,/api/conversations(P2-② 从 routes.py 拆出)
+    app.include_router(peers_router)       # /api/peers,/api/peer/switch(P2-② 从 routes.py 拆出)
     app.include_router(ws_router)
 
     # 静态资源禁用浏览器**强缓存**(no-cache = 每次带 ETag 条件请求 → 没变 304、变了 200)。

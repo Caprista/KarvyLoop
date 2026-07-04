@@ -31,10 +31,14 @@ API_ONLY = {
 
 
 def _backend_routes() -> set:
-    txt = (ROOT / "karvyloop" / "console" / "routes.py").read_text(encoding="utf-8")
+    # routes.py 被按领域拆成 routes_<domain>.py(P2-② god-module 拆分);端点分散在多个
+    # routes*.py 文件里,这里全扫,否则"搬出 routes.py 的端点"会被误判成不存在(断头前端)。
+    console_dir = ROOT / "karvyloop" / "console"
     out = set()
-    for m in re.finditer(r'@router\.(get|post|websocket)\("([^"]+)"', txt):
-        out.add("/api" + m.group(2))
+    for py in sorted(console_dir.glob("routes*.py")):
+        txt = py.read_text(encoding="utf-8")
+        for m in re.finditer(r'@router\.(get|post|websocket)\("([^"]+)"', txt):
+            out.add("/api" + m.group(2))
     return out
 
 
