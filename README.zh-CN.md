@@ -330,7 +330,7 @@ npm run verify   # 类型检查 + 构建 → ../static + 运行时 smoke(jsdom)
 >
 > **出门在外怎么拍板?(远程决策。)** token 链接只在你的局域网内有效 —— KarvyLoop 刻意不开任何公网端口。出门拍板用内置的**邮件决策闭环**:配好 `channels.email`(见下),待拍的决策卡会打包成摘要发进你的邮箱;每张卡带预填好的回批链接(`同意 / 拒绝 / 搁置`,附单次有效、限时的签名码),console 出站轮询你的收件箱 —— **全程只有出站连接**,任何 NAT 后面都能用,**不用端口转发、不用穿透、不依赖任何第三方服务**;任何邮箱都行。高危卡(如文件系统授权)刻意只通知不可回批 —— 那些回控制台确认。想在外面用完整控制台,私有组网(如 [Tailscale](https://tailscale.com) 或纯 WireGuard,你自己设备间端到端加密)也可以。**不建议**:在路由器上直接转发 8766 端口 —— console 的 token 鉴权不是为独自面对公网设计的。
 >
-> **更习惯手机推送?(webhook 通道。)** 邮件之外还有一条通用的**出站 webhook 通道**:待拍的决策卡打包成一条推送(标题、每卡摘要、价值等级、回链 console 的链接)发到你配置的任意 HTTP 端点。一条通道通吃主流承接方 —— 内置 `ntfy`、`bark`、`slack`(Slack 兼容 incoming webhook:Discord 的 `/slack` 端点、Mattermost 等)和 `generic`(完整 JSON)四个 preset;其他承接方(如飞书机器人)用自定义 `body_template`。v1 刻意**只出站**:通知带回链,拍板本身回 console 完成(带入站回批的通道是邮件)。姿态与邮件一致:全程只有出站连接,任何 NAT 后面都能用。webhook URL 和 headers 常内嵌 token —— 只存在 `~/.karvyloop/config.yaml`(仓库外),**绝不进日志**(日志里只留目标的 scheme+host)。
+> **更习惯手机推送?(webhook 通道。)** 邮件之外还有一条通用的**出站 webhook 通道**:待拍的决策卡打包成一条推送(标题、每卡摘要、价值等级、回链 console 的链接)发到你配置的任意 HTTP 端点。一条通道通吃主流承接方 —— 内置 `ntfy`、`bark`、`slack`(Slack 兼容 incoming webhook:Discord 的 `/slack` 端点、Mattermost 等)和 `generic`(完整 JSON)四个 preset;其他承接方(如飞书机器人)用自定义 `body_template`。这条通道也能把你的拍板带回来:把 `reply_url` 配成一个可轮询的回执源(如私有 ntfy topic 的 `/json?poll=1` 端点),手机上回一条 `ACCEPT <码>`(或 `REJECT` / `DEFER`)即拍板 —— 与邮件通道同一套单次有效、限时的签名码、同一条决策落地路;只认严格格式(回执源里的其他内容一律当数据、绝不当指令),高危卡照旧只通知不可回批;不配 `reply_url` 就还是纯出站。姿态与邮件一致:全程只有出站连接(console 主动**轮询**回执源 —— 依旧不开任何监听端口),任何 NAT 后面都能用。webhook URL 和 headers 常内嵌 token —— 只存在 `~/.karvyloop/config.yaml`(仓库外),**绝不进日志**(日志里只留目标的 scheme+host)。
 >
 > ```yaml
 > # ~/.karvyloop/config.yaml —— 可选;不配 = 功能完全关闭
@@ -346,6 +346,7 @@ npm run verify   # 类型检查 + 构建 → ../static + 运行时 smoke(jsdom)
 >     preset: ntfy          # generic | ntfy | bark | slack;其他承接方用 body_template 自定义
 >     # headers: { Authorization: "Bearer ..." }   # 可选,覆盖 preset 的同名头
 >     # min_interval_s: 3600                       # 推送节流(与邮件 digest 同语义)
+>     # reply_url: https://ntfy.sh/your-private-reply-topic/json?poll=1   # 可选:入站回批(轮询拉取;不配 = 纯出站)
 > ```
 >
 > **`karvyloop` 命令找不到?** `pip install` 会把 `karvyloop` 命令装进你那个 Python 的 `bin`/`Scripts` 目录 —— 系统 Python 通常已在 `PATH` 上,但**若你装进了没激活的 venv、或 `pip install --user` 而 `~/.local/bin` 不在 `PATH`(不少发行版如此),就找不到**。两个办法:**(a)** 用**装它时那个 Python** 跑 `python -m karvyloop url`,不依赖 `PATH`,永远可用;**(b)** 想要干净的全局 `karvyloop` 命令,用 **pipx**:`pipx install karvyloop && pipx ensurepath`(pipx 隔离安装并把它加进 `PATH`)。pip 自己从不改你的 shell `PATH`。

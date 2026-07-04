@@ -21,6 +21,9 @@
         body_template: ""             # 可选自定义 body 模板(设了就不走 preset 成型)
         min_interval_s: 3600          # 推送节流(默认 1h,与 email digest 同语义)
         timeout_s: 10                 # 出站 HTTP 超时(秒)
+        reply_url: https://ntfy.sh/your-topic/json?poll=1   # 可选:入站回批的**轮询拉取**源
+                                      # (返回 JSON 消息数组/NDJSON 的端点;不配 = 纯出站 v1)
+        reply_headers: {}             # 可选:轮询拉取的附加头(机密级,同 headers 纪律)
 
 铁律:
 - **默认不配 = 完全不跑**(零负担):块缺失 / enabled 非真 / 必填缺 → 返 None,通道不启动。
@@ -225,6 +228,10 @@ class WebhookChannelConfig:
     body_template: str = ""
     min_interval_s: int = DEFAULT_WEBHOOK_MIN_INTERVAL_S
     timeout_s: float = DEFAULT_WEBHOOK_TIMEOUT_S
+    # 入站回批(v2,可选):轮询拉取的 reply source(如 ntfy 的 /json?poll=1 端点)。
+    # URL 内嵌私有 topic = 机密级;不配(空)= 纯出站 v1 行为零变化。
+    reply_url: str = dataclasses.field(default="", repr=False)  # 机密:不进 repr/日志
+    reply_headers: dict = dataclasses.field(default_factory=dict, repr=False)  # 机密
     enabled: bool = True
 
 
@@ -260,6 +267,16 @@ def webhook_channel_config_from_dict(cfg: dict) -> Optional[WebhookChannelConfig
     headers = ({str(k): str(v) for k, v in raw_headers.items()}
                if isinstance(raw_headers, dict) else {})
 
+    # 入站回批(v2,可选):reply_url 配了就必须是 http(s) —— 配错 fail-loud 不启动
+    # (静默降级成"只出站"= 用户以为能手机回批实际黑洞,比不启动更糟)。
+    reply_url = str(hook.get("reply_url") or "").strip()
+    if reply_url and not (reply_url.startswith("https://") or reply_url.startswith("http://")):
+        logger.warning("[channels.webhook] reply_url 不是 http(s) URL —— 通道不启动")
+        return None
+    raw_reply_headers = hook.get("reply_headers") or {}
+    reply_headers = ({str(k): str(v) for k, v in raw_reply_headers.items()}
+                     if isinstance(raw_reply_headers, dict) else {})
+
     try:
         interval = int(hook.get("min_interval_s") or DEFAULT_WEBHOOK_MIN_INTERVAL_S)
     except (TypeError, ValueError):
@@ -275,6 +292,8 @@ def webhook_channel_config_from_dict(cfg: dict) -> Optional[WebhookChannelConfig
         body_template=str(hook.get("body_template") or ""),
         min_interval_s=max(interval, 0),
         timeout_s=timeout if timeout > 0 else DEFAULT_WEBHOOK_TIMEOUT_S,
+        reply_url=reply_url,
+        reply_headers=reply_headers,
         enabled=True,
     )
 

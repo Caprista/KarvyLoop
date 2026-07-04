@@ -197,6 +197,8 @@ _EN = {
     "channels.webhook.high_risk": "⚠ high-stakes — confirm at the console",
     "channels.webhook.more": "…and {n} more card(s)",
     "channels.webhook.open": "Decide at your console: {url}",
+    "channels.webhook.reply_code": "↩ code: {code}",
+    "channels.webhook.reply_hint": "Reply \"ACCEPT <code>\" (or REJECT / DEFER) to decide — codes are single-use and time-limited; high-stakes cards: console only.",
 }
 
 # ---- 中文 ----
@@ -376,6 +378,8 @@ _ZH = {
     "channels.webhook.high_risk": "⚠ 高危 —— 请回控制台确认",
     "channels.webhook.more": "…还有 {n} 张",
     "channels.webhook.open": "回控制台拍板:{url}",
+    "channels.webhook.reply_code": "↩ 回批码:{code}",
+    "channels.webhook.reply_hint": "回复「ACCEPT <码>」(或 REJECT / DEFER)即拍板 —— 码单次有效、限时;高危卡请回控制台。",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

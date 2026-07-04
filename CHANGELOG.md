@@ -11,6 +11,18 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **Webhook inbound approval (v2).** The webhook channel can now carry your decision back:
+  set `channels.webhook.reply_url` to a polled reply source (e.g. a private ntfy topic's
+  `/json?poll=1` endpoint — the console *polls* it outbound, still no listening port) and reply
+  `ACCEPT <code>` / `REJECT <code>` / `DEFER <code>` from your phone. Codes reuse the email
+  channel's HMAC single-use, time-limited mechanism (same secret, same mint/verify) and land on
+  the same decide path as the console and email; strict-parse only — anything else in the reply
+  source is data, never instructions; high-risk cards remain notify-only (no code is ever minted
+  for them, and the poller rejects them again as a second fence); a persisted watermark plus a
+  processed-id ring prevents re-consumption across restarts. Unset `reply_url` = v1
+  outbound-only behavior, unchanged.
+
 ### Planned
 - **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
   near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the

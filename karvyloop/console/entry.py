@@ -320,17 +320,28 @@ def cmd_console(args: argparse.Namespace) -> int:
         logger.warning(f"[karvyloop console] 邮件通道接线失败(不影响启动): {e}")
 
     # === Webhook 推送通道(channels 广度):决策卡推到你真正在的地方 ===
-    # 与邮件通道同一分发点(proposal_registry 待决卡),多渠道并行推;v1 只出站通知,
-    # 拍板走推送里的回链回 console(token 链接同一条鉴权路)。未配置 → build 返 None,零负担。
+    # 与邮件通道同一分发点(proposal_registry 待决卡),多渠道并行推;出站通知 + 可选
+    # 入站回批(配 reply_url 后手机回一条 `ACCEPT <code>` 即拍板 —— 轮询拉取,不开监听口;
+    # 决策落地与 REST /api/h2a_decide、邮件回批同一条路)。未配置 → build 返 None,零负担。
     try:
         from karvyloop.channels.webhook_channel import build_webhook_channel
         _wh_reg = getattr(app.state, "proposal_registry", None)
+
+        def _webhook_decide(pid: str, decision: str, _app=app, _reg=_wh_reg):
+            from karvyloop.console.decision_wire import record_decision_signals
+            record_decision_signals(_app, decision=decision, proposal_id=pid,
+                                    reason="(via webhook)", domain="", role="")
+            return _reg.decide(pid, decision,
+                               handlers=getattr(_app.state, "proposal_handlers", None) or {})
+
         app.state.webhook_channel = (
-            build_webhook_channel(registry=_wh_reg,
+            build_webhook_channel(registry=_wh_reg, decide=_webhook_decide,
                                   config_path=str(config_path) if config_path else None)
             if _wh_reg is not None else None)
         if app.state.webhook_channel is not None:
-            logger.info("[karvyloop console] webhook 推送通道已接线(出站通知,拍板回 console)")
+            _wh_inbound = getattr(app.state.webhook_channel, "poller", None) is not None
+            logger.info("[karvyloop console] webhook 推送通道已接线(出站通知%s)",
+                        "+入站回批" if _wh_inbound else ",拍板回 console")
     except Exception as e:
         app.state.webhook_channel = None
         logger.warning(f"[karvyloop console] webhook 通道接线失败(不影响启动): {e}")

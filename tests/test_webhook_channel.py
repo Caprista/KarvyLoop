@@ -349,7 +349,7 @@ class TestHttpTransport:
 
 class TestTickAndHelpers:
     async def test_tick_none_is_noop(self):
-        assert await webhook_channel_tick(None, now=T0) == {"push": None}
+        assert await webhook_channel_tick(None, now=T0) == {"push": None, "poll": None}
 
     async def test_tick_runs_pusher(self):
         registry = PendingProposalRegistry()
@@ -357,8 +357,10 @@ class TestTickAndHelpers:
         cap = CaptureTransport()
         pusher = WebhookPusher(make_config(), registry, transport=cap,
                                console_link=lambda: "")
+        # 兼容裸 pusher(纯出站,历史接口):poll 腿为 None
         out = await webhook_channel_tick(pusher, now=T0)
         assert out["push"] == {"sent": True, "cards": 1} and len(cap.sent) == 1
+        assert out["poll"] is None
 
     def test_redact_url_keeps_only_scheme_host(self):
         assert redact_url(FAKE_HOOK_URL) == "https://hooks.example.test/…"
@@ -383,5 +385,6 @@ class TestTickAndHelpers:
         from karvyloop.i18n._strings import TABLES
         for key in ("channels.webhook.title", "channels.webhook.aging",
                     "channels.webhook.high_risk", "channels.webhook.more",
-                    "channels.webhook.open"):
+                    "channels.webhook.open", "channels.webhook.reply_code",
+                    "channels.webhook.reply_hint"):
             assert key in TABLES["en"] and key in TABLES["zh"]
