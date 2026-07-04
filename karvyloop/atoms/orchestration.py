@@ -164,6 +164,8 @@ class _UnknownTool:
 # ---- 顶层入口 ----
 
 # capability 判定回调类型:tool_name, tool_input → True/False
+# 也接受返回 (ok, reason) 二元组 —— reason 在拒绝时上浮进 tool_result(诚实 reason,
+# 模型看得见"为什么被拦"才能重规划,不是干瞪一个 capability_denied)。
 CapabilityGate = Optional[Callable[[str, dict], Awaitable[bool]]]
 
 
@@ -187,12 +189,18 @@ async def run_tools(
     denied_results: dict[str, ToolResult] = {}
     if capability_check is not None:
         for b in blocks:
-            ok = await capability_check(b.name, b.input)
+            verdict = await capability_check(b.name, b.input)
+            # 兼容两种返回:bool(旧)/ (ok, reason)(新;reason 在拒绝时上浮,诚实说清为何拦)
+            if isinstance(verdict, tuple):
+                ok, _reason = bool(verdict[0]), str(verdict[1] or "")
+            else:
+                ok, _reason = bool(verdict), ""
             if not ok:
                 denied_results[b.id] = ToolResult(
                     tool_use_id=b.id, name=b.name,
                     content=None, is_error=True,
-                    error_reason="capability_denied",
+                    error_reason=("capability_denied: " + _reason) if _reason
+                                 else "capability_denied",
                 )
             else:
                 authorized.append(b)

@@ -38,3 +38,9 @@ from .fs_grants import (  # noqa: E402
     FsGrantsStore, is_sensitive_path, path_allowed, register_store as register_fs_grants,
     get_store as get_fs_grants,
 )
+
+# deontic 确定性硬闸(docs/54 B1):域 forbid 的工具/命令级真拦(authorize step 6.5)
+from .deontic_gate import (  # noqa: E402
+    DeonticScope, DeonticHit, build_scope, classify_forbid,
+    deontic_scope, scope_from_system, check_active as check_deontic,
+)

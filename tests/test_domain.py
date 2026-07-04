@@ -386,10 +386,14 @@ class TestAC7Deontic:
 
     def test_enforce_mode_raises(self):
         deontic = Deontic(forbid=("x",), oblige=(), permit=())
-        # enforce 模式抛(M3+ 启用,M3 v0 仅占位接口)
-        # 本拍 v0: enforce 和 report 行为一致(不强抛),留给 M3+ 拍 5 Auditor 接入
-        result = apply_deontic(deontic, "x", mode="enforce")
-        assert result.forbidden is True
+        # enforce 模式**真抛**(docs/54 B1:此前"留给 M3+ = 不强抛"是假接线,已修;
+        # 执行路径的工具级硬闸另见 capability/deontic_gate + tests/test_deontic_gate.py)
+        import pytest as _pytest
+        from karvyloop.domain.deontic import DeonticViolationError
+        with _pytest.raises(DeonticViolationError):
+            apply_deontic(deontic, "x", mode="enforce")
+        # 未违规不抛,照常返回结果
+        assert apply_deontic(deontic, "y", mode="enforce").forbidden is False
 
 
 # ---------- AC8: 协议不变量 ----------

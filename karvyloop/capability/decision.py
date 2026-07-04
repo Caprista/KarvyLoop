@@ -9,6 +9,7 @@
   4. ask 规则
   5. 工具自检 tool_self_check
   6. 安全检查（`.git`/`.claude`/`rm -rf /` 等）→ **免疫 bypass/Full 模式**
+  6.5. 域 deontic 确定性硬闸（scope 武装时;交易/删除/外发类 forbid 真拦）→ **免疫 Full**
   7. bypass/Full 模式 → Allow
   8. allow 规则 / 模式 ≥ 工具下限 → Allow
   9. 默认 → Ask（fail-closed）
@@ -172,6 +173,20 @@ def authorize(ctx: PermissionContext) -> Decision:
     s = _safety_check(ctx)
     if s is not None:
         return s
+
+    # 6.5) 域 deontic 确定性硬闸(docs/54 B1 Top1)—— 与 fs_grants 敏感地板同层,**免疫 FULL**。
+    # scope 由 forge 在 run 前从 persona 的 deontic_forbid 武装(contextvar,run 完复位);
+    # 未武装(私聊/CLI/无域)= no-op。只拦确定性匹配到的高危类别(交易/删除/外发),
+    # 纯语义 forbid 仍走 prompt 软护栏(分层诚实,见 deontic_gate 模块头)。
+    from .deontic_gate import check_active as _deontic_check
+    hit = _deontic_check(ctx.tool, ctx.input or {})   # 传原始名:camelCase 切分需要大小写信息
+    if hit is not None:
+        _dom = f"「{hit.domain}」" if hit.domain else ""
+        return Deny(
+            message=(f"业务域{_dom}治理禁止:「{hit.source}」—— 本次调用确定性命中"
+                     f"({hit.detail}),已拦截。这是域的 deontic 硬规则,不是模型自觉。"),
+            reason=f"deontic:forbid:{hit.category}",
+        )
 
     # 7) bypass/Full 模式
     if ctx.mode == Mode.FULL:

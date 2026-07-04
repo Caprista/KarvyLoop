@@ -388,10 +388,14 @@ async def run(
 
             # 6) 跑工具(含 capability gate)
             # 默认 mode 由调用方传(原子执行多写少读,默认 WORKSPACE_WRITE)
-            async def _cap_check(name: str, inp: dict) -> bool:
+            # 返回 (ok, reason):拒绝时把 Deny.message 上浮进 tool_result(诚实 reason,
+            # deontic 硬闸/敏感地板拦了什么、为什么,模型看得见才能改道,不是干瞪 capability_denied)。
+            async def _cap_check(name: str, inp: dict):
                 d = _authorize(_PC(tool=name, input=inp, mode=default_mode,
                                    workspace_root=None))
-                return isinstance(d, _Allow)
+                if isinstance(d, _Allow):
+                    return True, ""
+                return False, (getattr(d, "message", "") or getattr(d, "reason", ""))
 
             results = await run_tools(assistant_tool_uses, tools, token,
                                        capability_check=_cap_check)

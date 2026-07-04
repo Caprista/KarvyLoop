@@ -86,11 +86,13 @@ def derive_soul_subset(deontic: Deontic) -> tuple[str, ...]:
 def deontic_guardrail_text(deontic: Deontic) -> str:
     """把域的 deontic(forbid/oblige/permit)渲染成**运行时护栏文本**,前置进慢脑 system 指令。
 
-    **为什么是文本护栏而非确定性工具闸**:forbid/oblige 是自然语言"行为"(如"对外发邮件前必须复核"),
-    不是工具名 —— 确定性 `tool in forbid` 匹配对它们基本不命中(=假接线)。NL 规则的正确 enforcement
-    是①**运行时软护栏**(本函数:把规则摆进慢脑 system,让模型受约束)+ ②**建时** skill×域冲突检测
-    (rules_from_domain + LLM judge)。真确定性硬闸只在 capability 链(denied_tools/deny 规则/安全检查)
-    + 网关预算地板,那些是工具/命令级的、可确定判定的。
+    **分层 enforcement**(docs/54 B1;别声称软的变硬了,也别把能硬的留软):
+    ① 本函数 = 运行时软护栏(把规则摆进慢脑 system,让模型受约束)——对**纯语义** forbid/oblige
+      (如"隐瞒下行风险只报收益""对外发邮件前必须复核")这是正确且唯一的 enforcement;
+    ② `capability/deontic_gate.py` = 确定性硬闸(authorize step 6.5,与 fs_grants 敏感地板同层)
+      ——对**能映射到工具/命令模式**的 forbid(交易/转账、删除、对外发送)真拦,不靠模型自觉;
+    ③ **建时** skill×域冲突检测(rules_from_domain + LLM judge)。
+    同一条 forbid 可同时受①②约束(软的说给模型听,硬的模型说了也不算)。
 
     此前的洞:`governance_text` 只注入 value.md,forbid/oblige 从不进运行时护栏 —— 域的硬规则
     在执行路径上形同虚设。本函数补上;空 deontic → 空串(0 回归)。
@@ -110,6 +112,15 @@ def deontic_guardrail_text(deontic: Deontic) -> str:
     return "\n".join(lines)
 
 
+class DeonticViolationError(Exception):
+    """mode="enforce" 下,行为命中 forbid 时抛出(apply_deontic 的硬闸语义)。"""
+
+    def __init__(self, action: str, forbid_entry: str = "") -> None:
+        self.action = action
+        self.forbid_entry = forbid_entry or action
+        super().__init__(f"deontic forbid 违规:行为「{action}」命中「{self.forbid_entry}」")
+
+
 def apply_deontic(
     deontic: Deontic,
     action: str,
@@ -121,9 +132,15 @@ def apply_deontic(
 
     模式:
       - mode="report": 仅返回结果(不抛),用于审计报告
-      - mode="enforce": 违反时抛 DeonticViolationError(M3+ 才会真的 enforce)
+      - mode="enforce": 违反(action 命中 forbid)时抛 DeonticViolationError。
+        此前只有 docstring 声称会抛、代码从不抛(假接线);现已真实现。
 
-    auditor: 拍 5 Auditor 注入(M3+ 接入)。M3 拍 1 v0 不接,传 None。
+    注:本函数是**精确字符串匹配**(action == forbid 条目),适合审计/编程式校验。
+    执行路径上的确定性硬闸(工具/命令级模糊到类别的匹配)在
+    `capability/deontic_gate.py`(authorize step 6.5),两者分工:
+    这里管"显式声明的行为标签",那里管"工具调用的确定性拦截"。
+
+    auditor: 拍 5 Auditor 注入(M3+ 接入)。v0 不接,传 None。
     """
     is_forbidden = action in deontic.forbid
     is_required = action in deontic.oblige
@@ -136,6 +153,8 @@ def apply_deontic(
         permitted=is_permitted,
         allowed=(not is_forbidden) and (not is_required or is_permitted),
     )
+    if mode == "enforce" and is_forbidden:
+        raise DeonticViolationError(action)
     return result
 
 

@@ -232,69 +232,77 @@ async def generate_and_run(
     _has_web = ("web_search" in tools) or ("web_fetch" in tools)
     run_intent = _annotate_freshness(intent, has_web=_has_web)
 
-    async for ev in atom_run(atom, {"intent": run_intent}, token,
+    # 域 deontic 确定性硬闸(docs/54 B1):persona 带 deontic_forbid(paradigm_prompt 挂的
+    # 机器可读属性)→ 本次 run 期间武装工具闸(authorize step 6.5 真拦交易/删除/外发类 forbid)。
+    # forge 是所有 drive/委派/圆桌慢脑的唯一咽喉,一处武装全覆盖;scope 随 with 退出复位,
+    # 绝不泄漏到下一次 run。没挂(私聊/CLI/默认 coding 提示)= None → no-op,0 回归。
+    from karvyloop.capability.deontic_gate import deontic_scope as _deontic_scope
+    from karvyloop.capability.deontic_gate import scope_from_system as _deontic_from_system
+
+    with _deontic_scope(_deontic_from_system(sys_prompt)):
+        async for ev in atom_run(atom, {"intent": run_intent}, token,
                               gateway=gateway, tools=tools,
                               max_turns=max_turns, system=sys_prompt,
                               gov_config=gov_config, gov_state=gov_state,
                               summarize=summarize, context_window=ctx_window,
                               images=images):
-        # 透传渲染: emitter(--json/NDJSON)优先,renderer(人读)次之,都没有就静默累文本
-        if emitter is not None:
-            pass  # 下面按类型分发
-        elif renderer is not None:
-            renderer.render(ev)
-        if isinstance(ev, TextEvent):
-            accumulated_text += ev.text
+            # 透传渲染: emitter(--json/NDJSON)优先,renderer(人读)次之,都没有就静默累文本
             if emitter is not None:
-                emitter.assistant_text_delta(ev.text)
-        elif isinstance(ev, ThinkingEvent):
-            # P4:推理增量 —— 不进答案正文(accumulated_text);emitter 有 thinking 钩子则折叠展示,
-            # 否则回退 [thinking] 内联(0 回归:旧 emitter/renderer 仍看得到模型在思考)。
-            if emitter is not None:
-                _think = getattr(emitter, "assistant_thinking_delta", None)
-                if callable(_think):
-                    _think(ev.text)
-                else:
-                    emitter.assistant_text_delta(f"[thinking] {ev.text}")
-        elif isinstance(ev, ToolCallEvent):
-            if emitter is not None:
-                emitter.turn_start()
-                # 9.4:把工具调用详情(名/输入)发给 emitter —— 渲染层据此出 tool 卡。
-                # 原来只 turn_start(),工具名/输入丢了。duck-type:emitter 无 tool_call 则跳过(0 回归)。
-                _tc = getattr(emitter, "tool_call", None)
-                if callable(_tc):
-                    _b = ev.block
-                    _tc(id=getattr(_b, "id", ""), name=getattr(_b, "name", ""),
-                        input=getattr(_b, "input", {}) or {})
-        elif isinstance(ev, ToolResultEvent):
-            r: ToolResult = ev.result
-            # CodingResult → 序列化(若 payload 里有 CodingResult 实例,转)
-            content = r.content
-            if isinstance(content, CodingResult):
-                content = _coding_result_to_payload(content)
-            if emitter is not None:
-                emitter.tool_result(
-                    tool_use_id=r.tool_use_id,
-                    is_error=r.is_error,
-                    output=content,
-                    truncated=False,
-                )
-            # 会话落盘(若有)— 内存态保真(spec §2.6)
-            if session is not None and not r.is_error:
-                # 内存态保真:此处只记 tool 名 + 摘要,不做脱敏
-                session.append_record({
-                    "kind": "tool_call",
-                    "tool_use_id": r.tool_use_id,
-                    "name": r.name,
-                    "ok": True,
-                    "output": content,  # 内存态——append_record 内部会脱敏落盘
-                })
-        elif isinstance(ev, TerminalEvent):
-            final_terminal = ev.reason
-            final_run = ev.run
-            if emitter is not None:
-                emitter.run_end(ok=(ev.reason == Terminal.COMPLETED),
-                                reason=ev.reason.value)
+                pass  # 下面按类型分发
+            elif renderer is not None:
+                renderer.render(ev)
+            if isinstance(ev, TextEvent):
+                accumulated_text += ev.text
+                if emitter is not None:
+                    emitter.assistant_text_delta(ev.text)
+            elif isinstance(ev, ThinkingEvent):
+                # P4:推理增量 —— 不进答案正文(accumulated_text);emitter 有 thinking 钩子则折叠展示,
+                # 否则回退 [thinking] 内联(0 回归:旧 emitter/renderer 仍看得到模型在思考)。
+                if emitter is not None:
+                    _think = getattr(emitter, "assistant_thinking_delta", None)
+                    if callable(_think):
+                        _think(ev.text)
+                    else:
+                        emitter.assistant_text_delta(f"[thinking] {ev.text}")
+            elif isinstance(ev, ToolCallEvent):
+                if emitter is not None:
+                    emitter.turn_start()
+                    # 9.4:把工具调用详情(名/输入)发给 emitter —— 渲染层据此出 tool 卡。
+                    # 原来只 turn_start(),工具名/输入丢了。duck-type:emitter 无 tool_call 则跳过(0 回归)。
+                    _tc = getattr(emitter, "tool_call", None)
+                    if callable(_tc):
+                        _b = ev.block
+                        _tc(id=getattr(_b, "id", ""), name=getattr(_b, "name", ""),
+                            input=getattr(_b, "input", {}) or {})
+            elif isinstance(ev, ToolResultEvent):
+                r: ToolResult = ev.result
+                # CodingResult → 序列化(若 payload 里有 CodingResult 实例,转)
+                content = r.content
+                if isinstance(content, CodingResult):
+                    content = _coding_result_to_payload(content)
+                if emitter is not None:
+                    emitter.tool_result(
+                        tool_use_id=r.tool_use_id,
+                        is_error=r.is_error,
+                        output=content,
+                        truncated=False,
+                    )
+                # 会话落盘(若有)— 内存态保真(spec §2.6)
+                if session is not None and not r.is_error:
+                    # 内存态保真:此处只记 tool 名 + 摘要,不做脱敏
+                    session.append_record({
+                        "kind": "tool_call",
+                        "tool_use_id": r.tool_use_id,
+                        "name": r.name,
+                        "ok": True,
+                        "output": content,  # 内存态——append_record 内部会脱敏落盘
+                    })
+            elif isinstance(ev, TerminalEvent):
+                final_terminal = ev.reason
+                final_run = ev.run
+                if emitter is not None:
+                    emitter.run_end(ok=(ev.reason == Terminal.COMPLETED),
+                                    reason=ev.reason.value)
 
     assert final_terminal is not None and final_run is not None
     # 末事件再落盘一条

@@ -91,6 +91,16 @@ def build_role_paradigm_prompt(
         # 本 prompt 已编入域治理(value.md + deontic forbid/oblige)—— 调用方据此**不再**把
         # governance_text 的域块重复注入 user 前缀(对抗验收:直聊路径曾双注入,浪费 token)。
         cp.covers_domain_governance = True
+        # deontic 硬闸接线(docs/54 B1):把域 forbid **原文**挂成机器可读属性(不进 prompt 文本,
+        # 零双注入)。forge 在 run 前据此武装 capability/deontic_gate 的确定性工具闸 ——
+        # 能映射到工具/命令模式的 forbid(交易/删除/外发)在 authorize step 6.5 真拦,
+        # 纯语义条目仍由上面编进 prompt 的软护栏管(分层诚实)。
+        if domain is not None:
+            deo = getattr(domain, "deontic", None)
+            forbid = tuple(getattr(deo, "forbid", ()) or ()) if deo is not None else ()
+            if forbid:
+                cp.deontic_forbid = forbid
+                cp.deontic_domain = getattr(domain, "name", "") or domain_id
         return cp
     except Exception:
         # 真异常(非"无目录"那种 explicit return None)→ 记一笔,别静默吞掉
