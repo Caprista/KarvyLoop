@@ -30,6 +30,14 @@ mcp = [
 redis = [
     "redis>=5.0",
 ]
+# 附件真解析(files 面板预览 + read_file 工具):PDF/Word(.docx)/Excel(.xlsx)→ 文本,
+# 与 CSV 走同一条预览/截断/交办产线(karvyloop/file_extract.py)。通用基建必借,不自造解析器。
+# 没装 → 预览/读取时诚实提示 `pip install "karvyloop[files]"`,绝不吐二进制垃圾、绝不崩。
+files = [
+    "pypdf>=4.0",         # BSD;纯 Python PDF 文本提取
+    "python-docx>=1.1",   # MIT;Word .docx(zip 容器)段落+表格
+    "openpyxl>=3.1",      # MIT;Excel .xlsx(zip 容器)按行铺成 CSV 形状
+]
 # Windows Tier 3 沙箱(RestrictedToken 写隔离 + Job 资源上限)——**零额外依赖**:
 # 全用 stdlib ctypes 手绑 Win32,不引 pywin32(避免给非 Windows 用户加基础重量)。
 # 此 extra 故意留空,只作显式声明:装不装都一样,Windows 上探测到即启用 Tier 3,

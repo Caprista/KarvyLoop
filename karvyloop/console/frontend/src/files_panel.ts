@@ -121,13 +121,22 @@ async function _viewFile(rel: string): Promise<void> {
   const body = mgmtBody(); if (!body) return;
   const old = body.querySelector(".files-preview-wrap"); if (old) old.remove();
   const pre = el("pre", { class: "files-preview" });
+  const notes: string[] = [];   // 提取来源/截断的明示行(附件真解析:PDF/docx/xlsx → 文本)
   if (!d || !d.ok) pre.textContent = t("files.bad_path");
   else if (d.too_big) pre.textContent = t("files.too_big");
+  else if (d.extract_error === "missing_dependency") pre.textContent = t("files.extract_missing_dep");
+  else if (d.extract_error) pre.textContent = t("files.extract_bad_file");
   else if (d.binary) pre.textContent = t("files.binary");
-  else pre.textContent = d.text || "";
+  else if (d.extract && !d.text) pre.textContent = t("files.extract_empty");
+  else {
+    pre.textContent = d.text || "";
+    if (d.extract) notes.push(t("files.extract_note", { kind: String(d.extract).toUpperCase() }));
+    if (d.truncated) notes.push(t("files.extract_truncated", { n: d.limit || 100000 }));
+  }
   const wrap = el("div", { class: "files-preview-wrap" },
     el("div", { class: "files-preview-head" }, el("span", { text: "📄 " + rel }),
       el("button", { class: "files-preview-close", text: "✕", onClick: () => wrap.remove() })),
+    notes.length ? el("div", { class: "files-preview-note files-hint", text: notes.join(" ") }) : null,
     pre);
   body.appendChild(wrap);
   wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });

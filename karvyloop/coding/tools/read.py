@@ -67,11 +67,34 @@ class ReadTool:
             return CodingResult(ok=True,
                                 payload={"system_reminder": "文件为空"},
                                 truncated=False)
-        # sandbox 返回 bytes,统一 decode 为 str 再分行
-        text = content.decode("utf-8", errors="replace")
+        # 附件真解析:PDF/docx/xlsx → 文本,之后与 CSV 走同一条产线(行号/offset/limit/truncated)。
+        # 解析器纪律(宁空勿毒):坏文件/缺依赖 → 明确报错,绝不把二进制垃圾灌进上下文。
+        from karvyloop.file_extract import INSTALL_HINT, extract_kind, extract_text
+        kind = extract_kind(path)
+        extract_truncated = False
+        if kind:
+            res = extract_text(content, kind)
+            if not res.ok:
+                if res.error == "missing_dependency":
+                    return CodingResult(ok=False, payload=None, error_code=7,
+                                        error_message=(f"无法解析 {kind} 附件:缺可选依赖 —— "
+                                                       f"{INSTALL_HINT} 后重试"))
+                return CodingResult(ok=False, payload=None, error_code=7,
+                                    error_message=(f"无法解析 {kind} 附件:文件损坏或与扩展名不符"
+                                                   f"({res.hint})—— 拒绝注入二进制垃圾"))
+            if not res.text:
+                return CodingResult(ok=True,
+                                    payload={"system_reminder":
+                                             f"{kind} 解析成功但无可提取文本(可能是扫描件/纯图像)"},
+                                    truncated=False)
+            text = res.text
+            extract_truncated = res.truncated
+        else:
+            # sandbox 返回 bytes,统一 decode 为 str 再分行
+            text = content.decode("utf-8", errors="replace")
         lines = text.splitlines()
         sliced = lines[offset:offset + limit]
         body = "\n".join(sliced)
-        truncated = (offset + limit) < len(lines)
+        truncated = extract_truncated or (offset + limit) < len(lines)
         out = "\n".join(f"{i+1+offset:>6}\t{line}" for i, line in enumerate(body.splitlines()))
         return CodingResult(ok=True, payload=out, truncated=truncated)

@@ -64,15 +64,37 @@ def api_files_list(request: Request, path: str = "") -> dict[str, Any]:
     return {"ok": True, "path": rel, "entries": entries, "workspace": str(root)}
 
 
+#: 纯文本预览上限(bytes)= 提取文本上限(chars)—— PDF/docx/xlsx 解析后走同一条截断线。
+_PREVIEW_CAP = 100_000
+#: 可解析二进制附件的原始体积上限:容器(PDF/zip)天然比其中文本大,给到 20MB;超了同样提示下载。
+_EXTRACT_RAW_CAP = 20 * 1024 * 1024
+
+
 @router.get("/files/view")
 def api_files_view(request: Request, path: str) -> dict[str, Any]:
-    """看文本文件(预览;封顶 100KB;非文本/过大 → 提示下载)。"""
+    """看文件(预览)。文本封顶 100KB;PDF/docx/xlsx 解析成文本走**同一条**截断线;
+    非文本且不可解析 / 过大 → 提示下载。坏文件/缺依赖 → 明确错误,绝不吐二进制垃圾(宁空勿毒)。"""
+    from karvyloop.file_extract import extract_kind, extract_text
     root = _files_root(request)
     target = _files_safe(root, path) if root else None
     if target is None or not target.is_file():
         return {"ok": False, "reason": "bad_path"}
     try:
-        if target.stat().st_size > 100_000:
+        kind = extract_kind(target.name)
+        if kind:
+            if target.stat().st_size > _EXTRACT_RAW_CAP:
+                return {"ok": True, "too_big": True}
+            res = extract_text(target.read_bytes(), kind, max_chars=_PREVIEW_CAP)
+            if not res.ok:
+                # 与旧前端兼容:仍给 binary(显示"下载来看");新前端按 extract_error 给具体话
+                return {"ok": True, "binary": True, "extract": kind,
+                        "extract_error": res.error, "hint": res.hint}
+            out: dict[str, Any] = {"ok": True, "text": res.text, "extract": kind}
+            if res.truncated:
+                out["truncated"] = True
+                out["limit"] = _PREVIEW_CAP
+            return out
+        if target.stat().st_size > _PREVIEW_CAP:
             return {"ok": True, "too_big": True}
         text = target.read_bytes().decode("utf-8")
         return {"ok": True, "text": text}
