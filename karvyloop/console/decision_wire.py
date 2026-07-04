@@ -387,6 +387,16 @@ def assemble_governance(app: Any, *, intent: str = "", domain: str = "", role: s
             gov = (block + "\n\n" + gov).strip()
     except Exception:
         pass
+    # 角色经验(docs/54 模块1 Top2):角色在**同(域,角色)**积累的可召回经验(方法/偏好/踩坑)。
+    # (域,角色)隔离 —— A 域角色经验绝不漏到 B(recall_block 只按域过滤,role-experience 双过滤)。
+    # 仅域+角色都在时注入(通用层/私聊不掺角色私有经验),放在决策标准与知识召回之间。
+    try:
+        from karvyloop.roles.experience import collect_role_experiences
+        exp = collect_role_experiences(mem, domain=(domain or ""), role=(role or ""), query=intent)
+        if exp:
+            gov = (exp + "\n\n" + gov).strip()
+    except Exception:
+        pass
     try:
         pa = prealign_governance(app, mem, query=intent, domain=domain, role=role)
         if pa:
