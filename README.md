@@ -18,6 +18,10 @@ KarvyLoop is a runtime for **AI agents that run on your own machine**. You assem
 
 ![The KarvyLoop console — chatting with Karvy on the left, a decision card waiting for your call on the right](docs/assets/console-overview.png)
 
+![The console in motion — accepting a decision card, a glance at the 2×2 board, the desk where your team works day and night, and the skill library's growth curve](docs/assets/console-tour.gif)
+
+*One 23-second loop: you accept a decision card, glance the 2×2 board, drop by the desk where your team works (day and night), and check the skill library's growth curve — more like you with every use.*
+
 Where most agent frameworks make a *single* LLM call more reliable, KarvyLoop is **loop-native**: the unit of design is the whole self-running cycle — *discover work → run it → verify → compound → (you decide) → repeat*. The companion chat surface is **KarvyChat**.
 
 > Most AI tools sideline you, burn tokens, and feel the same for everyone. KarvyLoop keeps you in the driver's seat, stays affordable, and turns every use into a version of *you* that can't be copied.
