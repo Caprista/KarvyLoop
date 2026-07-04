@@ -132,7 +132,12 @@ def _fmt_ts(now) -> str:
 
 
 def _bullet(c: ClassifiedCorrection, ts: str) -> str:
-    return f"- ({ts}) [{c.kind.value}] {c.text}"
+    # 防御性消毒:纠正原文进技能库前压成**安全单行**(与 write_critiques_to_skill_md 同纪律)。
+    # 否则 steered_by_user 里一条含换行 + `## Steps` / `---\nname: hijacked\n---` 的恶意纠正
+    # 会结构性投毒 SKILL.md(注入假步骤/假 frontmatter)—— 对抗验收:宁空勿毒。
+    from .atom_critic import sanitize_critique
+    safe = sanitize_critique(c.text)
+    return f"- ({ts}) [{c.kind.value}] {safe}"
 
 
 def _insert_into_section(text: str, section_header: str, bullets: list[str]) -> str:

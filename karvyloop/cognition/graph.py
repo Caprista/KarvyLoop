@@ -4,11 +4,13 @@
 (Hardy #7:"一个知识点能和多个维度的知识点形成网状关联,我得有地方看")。本模块把
 长期库里的 Belief 算成「节点 + 关联边」,给认知图谱视图用。
 
-两种边:
-- `belief_graph`(旧/回退):**词面重叠**(中文 bigram + 英文词,共享 ≥min_shared 个显著 token)。
-- `concept_graph`(语义版,Hardy 选 B):**共享概念** —— LLM 抽每条的核心概念/实体(`concepts.py`,
-  沉淀/查图时抽、缓存),共享概念 = 一条**语义边**(带 via 标注)。没概念的 belief 回退词面。
-  这是卡帕西 LLM Wiki 式互链(编译概念页 + 互联),非 embedding/向量调参(已否决方向)。
+边(`concept_graph`,语义版,Hardy 选 B):**共享概念** —— LLM 抽每条的核心概念/实体(`concepts.py`,
+沉淀/查图时抽、缓存),共享概念 = 一条**语义边**(带 via 标注)。没概念的 belief 回退**词面重叠**
+(中文 bigram + 英文词,共享 ≥2 个显著 token)。这是卡帕西 LLM Wiki 式互链(编译概念页 + 互联),
+非 embedding/向量调参(已否决方向)。
+
+(注:旧的纯词面版 `belief_graph` 已删 —— 零生产调用方,生产图谱一律走 concept_graph,
+词面只作 concept_graph 内的回退;`_tokens` 仍被 conflict/spread/workflow_store 复用。)
 """
 from __future__ import annotations
 
@@ -32,36 +34,6 @@ def _tokens(s: str) -> set:
                if cjk[i] not in _STOP and cjk[i + 1] not in _STOP}
     bigrams = {b for b in bigrams if b not in _STOP}
     return words | bigrams
-
-
-def belief_graph(beliefs: list, *, min_shared: int = 2) -> dict:
-    """Belief 列表 → {nodes, edges}。边 = 两节点共享 ≥min_shared 个显著 token(词面关联)。"""
-    nodes = []
-    toks = []
-    for i, b in enumerate(beliefs):
-        prov = getattr(b, "provenance", {}) or {}
-        nodes.append({
-            "id": i,
-            "content": getattr(b, "content", ""),
-            "kind": prov.get("kind", "fact"),
-            "source": prov.get("source", ""),
-        })
-        toks.append(_tokens(getattr(b, "content", "")))
-    edges = []
-    for i in range(len(beliefs)):
-        for j in range(i + 1, len(beliefs)):
-            shared = toks[i] & toks[j]
-            if len(shared) >= min_shared:
-                edges.append({"source": i, "target": j, "weight": len(shared),
-                              "via": sorted(shared)[:4]})
-    # 每个节点的度(给视图标"枢纽"用)
-    deg = [0] * len(beliefs)
-    for e in edges:
-        deg[e["source"]] += 1
-        deg[e["target"]] += 1
-    for i, n in enumerate(nodes):
-        n["degree"] = deg[i]
-    return {"nodes": nodes, "edges": edges}
 
 
 def concept_graph(beliefs: list, concepts: list) -> dict:
@@ -102,4 +74,4 @@ def concept_graph(beliefs: list, concepts: list) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
-__all__ = ["belief_graph", "concept_graph"]
+__all__ = ["concept_graph"]
