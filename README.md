@@ -351,6 +351,13 @@ npm run verify   # typecheck + build → ../static + runtime smoke (jsdom)
 >
 > **`karvyloop` not found?** `pip install` puts the `karvyloop` command in your Python's `bin`/`Scripts` dir — which is on `PATH` for a system Python, but **not** if you installed into a non-activated venv or with `pip install --user` on a distro where `~/.local/bin` isn't on `PATH`. Two fixes: **(a)** `python -m karvyloop url` (using the *same* Python you installed with) always works, no `PATH` needed; **(b)** for a clean global `karvyloop` command, install via **pipx**: `pipx install karvyloop && pipx ensurepath` (pipx isolates it and puts it on your `PATH`). pip itself never edits your shell `PATH`.
 
+## Docs
+
+- **[Quickstart](docs/QUICKSTART.md)** — install to your first crystallized skill, in about 10 minutes (what you need, honest platform limits included).
+- **[Architecture](docs/ARCHITECTURE.md)** — how it works: the two loops, the L0–L4 entity ladder, crystallization gates, H2A decision cards, earned silence, Trace, the gateway, and the three-platform sandbox — with the real thresholds from the code.
+- **[Concepts](docs/CONCEPTS.md)** — the vocabulary in one page: role, atom, skill, domain, decision card, image vs instance, … each with the *why*, not just the *what*.
+- **[Philosophy](docs/PHILOSOPHY.md)** — why "loop-native" at all: the argument, the failure modes, the receipts.
+
 ## Contributing
 
 Pull requests welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full contributor loop (clone → `pip install -e ".[dev]"` → `pytest` → `ruff check`). In short: every PR runs [CI](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml) (Ubuntu, Python 3.11 + 3.12) which must be green — that's `ruff check` (lint gate, no autofix) plus the full test suite. User-facing strings go through the bilingual i18n tables. Real API keys never go in the repo — only `~/.karvyloop/config.yaml` (outside the repo); test fixtures use obviously-fake keys.

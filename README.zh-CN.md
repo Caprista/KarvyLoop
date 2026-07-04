@@ -350,6 +350,13 @@ npm run verify   # 类型检查 + 构建 → ../static + 运行时 smoke(jsdom)
 >
 > **`karvyloop` 命令找不到?** `pip install` 会把 `karvyloop` 命令装进你那个 Python 的 `bin`/`Scripts` 目录 —— 系统 Python 通常已在 `PATH` 上,但**若你装进了没激活的 venv、或 `pip install --user` 而 `~/.local/bin` 不在 `PATH`(不少发行版如此),就找不到**。两个办法:**(a)** 用**装它时那个 Python** 跑 `python -m karvyloop url`,不依赖 `PATH`,永远可用;**(b)** 想要干净的全局 `karvyloop` 命令,用 **pipx**:`pipx install karvyloop && pipx ensurepath`(pipx 隔离安装并把它加进 `PATH`)。pip 自己从不改你的 shell `PATH`。
 
+## 文档
+
+- **[快速上手](docs/QUICKSTART.zh-CN.md)** —— 从安装到第一个结晶技能,大约 10 分钟(需要什么、各平台的诚实边界,都写明)。
+- **[架构](docs/ARCHITECTURE.zh-CN.md)** —— 它怎么运转:双循环、L0–L4 实体阶梯、结晶两道关、H2A 决策卡、挣来的静音、Trace、网关、三平台沙箱 —— 带代码里的真实阈值。
+- **[概念](docs/CONCEPTS.zh-CN.md)** —— 一页纸词汇表:角色、原子、技能、域、决策卡、镜像 vs 实例……每个都给*为什么*,不只*是什么*。
+- **[理念](docs/PHILOSOPHY.zh-CN.md)** —— 为什么非要"loop 原生":论证、失败模式、依据。
+
 ## 贡献
 
 欢迎 PR —— 完整贡献流程见 **[CONTRIBUTING.md](CONTRIBUTING.md)**(clone → `pip install -e ".[dev]"` → `pytest` → `ruff check`)。简言之:每个 PR 都会跑 [CI](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml)(Ubuntu,Python 3.11 + 3.12),必须全绿——即 `ruff check`(lint 门,不自动改码)加完整测试套件。用户可见字符串走双语 i18n 表。真实 API key 永不入库——只放 `~/.karvyloop/config.yaml`(仓库外);测试 fixture 用明显的假 key。
