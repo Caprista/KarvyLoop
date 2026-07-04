@@ -48,6 +48,7 @@ from karvyloop.crystallize import (
     UsageStore,
     VerifyStore,
     crystallize as crystallize_skill,
+    load_bound_skills,
     maybe_promote,
     observe,
     recall,
@@ -196,6 +197,9 @@ class MainLoop:
         # §13.3:结果可缓存性的语义判定器(intent, answer, tool_calls)→ "stable"|"dynamic"。
         # 控制台注入(它有 gateway);无注入(测试/--no-llm)→ 默认 dynamic(宁重跑不投毒)。
         self._result_classifier = result_classifier
+        # 命名可读性(S):可读技能名生成器(intent)->kebab 短名。与 result_classifier 同一套注入
+        # (console 有 gateway 时接);None=确定性 kebab(intent)兜底,再空退 skill_<hash>(0 回归)。
+        self._skill_namer = None
         # docs/40 §1:重启后从 Trace 的 satisfaction 结果重建满意度水位 + 样本,
         # 否则持久 Trace 里的历史 eval_fact 会被重复评(对抗验收 CRITICAL #1 重启双计)。
         try:
@@ -216,6 +220,10 @@ class MainLoop:
     def set_atom_quality_judge(self, judge) -> None:
         """接线 atom 质量裁判(慢侧;§14.2)。judge: (intent, output_text) → (quality, critique)。"""
         self._atom_quality_judge = judge
+
+    def set_skill_namer(self, namer) -> None:
+        """接线可读技能名生成器(命名可读性 S)。namer: (intent) → kebab 短名;None=确定性 kebab 兜底。"""
+        self._skill_namer = namer
 
     def quality_review(self) -> int:
         """**慢侧**(daily_poll 节奏,docs/40 §3)质量评:读 Trace 里已确定性评、做对站住的 run →
@@ -358,6 +366,30 @@ class MainLoop:
         except Exception:
             logger.warning("[evict] 技能重跑 usage 记账失败(sig=%s);drive 继续", sig[:8], exc_info=True)
 
+    def _fold_bound_supports(self, hit: object, prefer: "list[str]") -> None:
+        """把角色**绑定**但未成主命中/未被 overlap 选中的技能,并进 hit.supports(保证在场)。
+
+        绑定 = 显式声明,优先级高于 overlap 碰出来的支持:绑定占位在前、overlap 支持补足到组合上限。
+        绑定技能名查不到(归档/删)静默跳过(load_bound_skills 已处理),不阻断 drive。失败不阻断。
+        """
+        try:
+            from karvyloop.crystallize.recall import _MAX_SUPPORTS
+            bound = load_bound_skills(list(prefer or []), skills_dir=self.skills_dir,
+                                      skill_index=self.skill_index)
+            if not bound:
+                return
+            existing = getattr(hit, "supports", None) or []
+            seen_names = {hit.name} | {s.name for s in existing}
+            # 绑定技能里排除:已是主命中 / 已在 overlap supports 里的(去重)
+            fresh_bound = [b for b in bound if b.name not in seen_names]
+            if not fresh_bound:
+                return
+            # 绑定占位在前,overlap 支持补足;整体裁到组合上限(保守有界)
+            merged = fresh_bound + list(existing)
+            hit.supports = merged[:_MAX_SUPPORTS]
+        except Exception:
+            logger.warning("[recall] 折叠角色绑定支持技能失败;drive 继续", exc_info=True)
+
     # ---- 启动:从磁盘重建索引 ----
 
     def bootstrap(self) -> int:
@@ -376,6 +408,7 @@ class MainLoop:
         ctx: object = None,
         scope: "Optional[str]" = None,   # brick3+:场-scoped 召回/结晶(None=用 self.scope,0 回归)
         fresh: bool = False,   # True=一次性步骤(workflow/圆桌):跳过 recall+observe+结晶,纯跑慢脑
+        prefer: "Optional[list[str]]" = None,   # 角色**绑定**技能名(COMPOSITION.yaml skills:)→ 召回优先
     ) -> DriveResult:
         """跑一次主循环。返回 DriveResult。
 
@@ -414,6 +447,7 @@ class MainLoop:
             store=self.store,
             skill_index=self.skill_index,
             satisfaction=self.satisfaction,   # docs/40:飞轮产物回到行为(满意度影响召回排序)
+            prefer=prefer,   # 角色绑定技能(COMPOSITION.yaml skills:)→ 弱匹配也加权胜出(绑定优先于碰运气)
         )
         # docs/44 断⑧(evict 误杀):**任何**召回命中都是"用进" —— 两条命中路径(stable 回放 /
         # dynamic 重跑)都早返回跳过 observe,usage 冻结在结晶时刻,天天用的技能 30 天照样被
@@ -422,6 +456,13 @@ class MainLoop:
         # 时间戳归 drive 记,与 observe/evict 同一时钟)。
         if hit is not None and hit.sig:
             self._touch_usage(hit.sig, now)
+        # 角色绑定技能接通(load_bound_skills 真接进 drive):绑定 = 随身声明、不靠模糊召回碰运气。
+        # dynamic 命中时,把角色**绑定**但**未成为主命中/未被 overlap 选中**的技能,作为**保证在场**的
+        # 支持技能并进 supports(绑定优先于 overlap 挑出的支持:显式声明 > 碰匹配)。总量仍受组合上限约束
+        # (保守:绑定占位在前,overlap 支持补足到上限)。stable 回放路径不组合(回放缓存正文,§13.6)。
+        if (hit is not None and prefer
+                and (hit.result_reuse or "dynamic").lower() != "stable"):
+            self._fold_bound_supports(hit, prefer)
         # #2 §13.6:命中后分两条路 —— stable 才回放缓存结果;dynamic(默认)**不回放**,拿当前输入重跑。
         guided_skill = None   # 非 None = 命中了 dynamic 技能 → 重跑(产出新鲜),且不再 observe/结晶
         if hit is not None and (hit.result_reuse or "dynamic").lower() == "stable":
@@ -603,10 +644,23 @@ class MainLoop:
                                      thresholds=self.thresholds,
                                      satisfaction=self.satisfaction)
             if decision.kind.value == "ready":
-                # 自动结晶(用 intent 当 name/when_to_use 兜底,实战由访谈填)
-                name = f"skill_{sig[:8]}"
-                # 已有同 name 不重写(register 会覆盖,但 SKILL.md 写盘要看存在否)
-                if name not in self.skill_index:
+                # 命名可读性(S):不再裸 `skill_<hash>` —— 用**已在调的那次 LLM**(判 stable/dynamic 的
+                # namer,注入才用;无注入→确定性 kebab(intent))顺手起个人类可读名,进匹配 token + 面板可读。
+                # 幂等键是 **sig 不是 name**:同 sig 已结晶过 → 复用旧名(否则 LLM 每次出不同名 = 重复结晶)。
+                # 无注入 namer → 保持确定性 `skill_<hash>` 兜底(0 回归);注入了才用 LLM 起 kebab 可读名。
+                existing_name = self.skill_index.name_for_sig(sig)
+                if existing_name is not None:
+                    name = existing_name
+                elif self._skill_namer is not None:
+                    from karvyloop.crystallize import readable_skill_name
+                    name = readable_skill_name(
+                        intent, sig, namer=self._skill_namer,
+                        taken={e.name for e in self.skill_index.all()},
+                    )
+                else:
+                    name = f"skill_{sig[:8]}"
+                # 同 sig 未结晶过才写盘(register 会覆盖,但 SKILL.md 写盘要看存在否)
+                if existing_name is None:
                     try:
                         # §13.3:语义判可缓存性(模型判;无判定器→默认 dynamic,宁重跑不投毒)。
                         reuse = "dynamic"

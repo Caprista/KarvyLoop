@@ -22,9 +22,11 @@ from .crystallize import (
     PromoteDecision,
     build_skill_md,
     crystallize,
+    is_hash_skill_name,
     mark_skill_verified,
     maybe_promote,
     read_crystallized_ts,
+    readable_skill_name,
     success_rate,
     usage_score,
     write_skill_md,
@@ -62,7 +64,7 @@ from .lessons import (
     validate_lessons,
 )
 from .observe import observe
-from .recall import RecallHit, compose_rerun_context, recall, split_body_guidance
+from .recall import RecallHit, compose_rerun_context, load_bound_skills, recall, split_body_guidance
 from .revision import (
     CHANGELOG_HEADER,
     KIND_REVISE_SKILL,
@@ -117,12 +119,13 @@ __all__ = [
     # crystallize
     "DecisionKind", "PromoteDecision", "maybe_promote", "crystallize",
     "build_skill_md", "write_skill_md", "mark_skill_verified", "read_crystallized_ts",
+    "readable_skill_name", "is_hash_skill_name",
     "usage_score", "success_rate",
     "PROMOTE_SCORE", "MIN_SUCCESS_RATE", "HALFLIFE_DAYS",
     "MIN_RECENCY_FACTOR", "EVICT_SCORE", "STALE_DAYS",
     "HIGH_FREQ", "GENERALIZED_DISTINCT",
     # recall
-    "RecallHit", "recall", "split_body_guidance", "compose_rerun_context",
+    "RecallHit", "recall", "split_body_guidance", "compose_rerun_context", "load_bound_skills",
     # revision (Trace-conditioned 技能修订:客观信号差 → LLM 修 Steps;小改自动落+Changelog,大改 H2A 卡)
     "REVISION_KIND", "KIND_REVISE_SKILL", "REVISION_SYSTEM", "CHANGELOG_HEADER",
     "parse_revision", "judge_revision", "needs_revision", "is_major_revision",

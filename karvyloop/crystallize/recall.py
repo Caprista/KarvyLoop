@@ -16,7 +16,7 @@ M1.5 升级:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -152,6 +152,29 @@ class RecallHit:
     result_reuse: str = "dynamic"
     # improve.py 写回的偏好/纠正/评语段(split_body_guidance 抽出;重跑组装必须带上并标注遵守)
     guidance: str = ""
+    # Top-K 有界组合(GoSkills Start/Support 契约):**主命中**随身携带的 ≤2 个**支持技能** ——
+    # 与主技能/意图 overlap 达阈值、且**语义标签互补**(补新覆盖面,不是重复覆盖同一意图)的次命中。
+    # 重跑组装时作"另外你还可以参考这些方法"附加(预算内);拿不准就空 → 退回纯 Top-1(零回归)。
+    # 只有**主命中**填这个字段;support 自身的 supports 恒空(不做递归组合,避免包爆炸)。
+    supports: list["RecallHit"] = field(default_factory=list)
+
+
+# ---- Top-K 有界组合(支持技能挑选)----
+#
+# 保守优先(错误组合比不组合更伤,Voyager/AWM/GoSkills 一致证据:组合是复利来源,但错配是投毒):
+#  - 支持技能与**当前意图**的 overlap 覆盖度必须 ≥ _SUPPORT_MIN_INTENT_OVERLAP(与意图真相关);
+#  - 且必须**语义互补**:它带来主技能标签集之外的**新单元** ≥ _SUPPORT_MIN_NOVEL 个
+#    (否则只是重复覆盖同一意图 = 冗余,不带);
+#  - 且不能是主技能本身(同 name/同 sig 去重)。
+#  - 最多 _MAX_SUPPORTS 个(有界)。任一条不满足 → 不带该技能(宁空勿滥)。
+_MAX_SUPPORTS = 2
+_SUPPORT_MIN_INTENT_OVERLAP = 0.34   # 支持技能与意图的覆盖度门(保守:约 1/3 意图 token 命中才够格)
+# 语义互补门:支持技能必须补上主技能**未覆盖**的意图面 ≥ 这么多个新匹配单元。
+# 意图 token 被 _intent_cluster 归一后**上限 5 个**(signature.py:116),主命中常吃掉 3-4 个 →
+# 剩给支持的互补面很窄;故门设 1(补≥1 个新面即算互补,退回冗余=novel 0 才排除)。**保守仍在**:
+# ① 还要过 _SUPPORT_MIN_INTENT_OVERLAP 覆盖度门(与意图真相关);② novel=0(纯重复覆盖同一意图)一律排除。
+_SUPPORT_MIN_NOVEL = 1
+_SUPPORT_METHOD_CLIP = 1200          # 单个支持技能方法段喂进重跑上下文的字符上限(预算内,防挤爆主技能)
 
 
 def compose_rerun_context(hit: "RecallHit", intent: str) -> str:
@@ -182,6 +205,21 @@ def compose_rerun_context(hit: "RecallHit", intent: str) -> str:
             "[使用中沉淀的偏好/纠正/评语 —— 重跑时**必须遵守**;"
             "与上面步骤冲突时,以这里为准]\n"
             f"{guidance}"
+        )
+    # Top-K 有界组合:主技能之外的**支持技能方法**作"你还可以参考"附加(GoSkills Support 契约)。
+    # 只带方法段(不带各自的指导段:那是它们自己场景的纠正,混进来会串味),clip 进预算内。
+    supports = getattr(hit, "supports", None) or [] if hit is not None else []
+    for i, sup in enumerate(supports[:_MAX_SUPPORTS], 1):
+        sup_method, _sup_guidance = split_body_guidance(sup.body or "")
+        sup_method = (sup_method or "").strip()
+        if not sup_method:
+            continue
+        clipped = sup_method if len(sup_method) <= _SUPPORT_METHOD_CLIP else (
+            sup_method[:_SUPPORT_METHOD_CLIP].rstrip() + " …")
+        parts.append(
+            f"[另外你还可以参考这个相关技能的方法(支持技能 {i}:{sup.name}) —— "
+            "非必须,只在对当前任务有帮助时借鉴,别硬套]\n"
+            f"{clipped}"
         )
     parts.append(f"[当前任务]\n{intent}")
     return "\n\n".join(parts)
@@ -232,6 +270,47 @@ def load_bound_skills(
                              result_reuse=fm.result_reuse or "dynamic",
                              guidance=split_body_guidance(body)[1]))
     return out
+
+
+def _select_supports(
+    main: "RecallHit",
+    main_overlap: set[str],
+    scored: list[dict],
+) -> list["RecallHit"]:
+    """从过门候选池里挑主命中的**支持技能**(Top-K 有界组合;GoSkills Start/Support 契约)。
+
+    保守判据(错误组合比不组合更伤 → 阈值宁高勿滥,拿不准就不带 → 退回纯 Top-1):
+      ① 不是主技能本身(同 name / 同 sig 去重);
+      ② 与**当前意图**的覆盖度 ≥ _SUPPORT_MIN_INTENT_OVERLAP(与意图真相关,不是碰巧一个词);
+      ③ **语义互补**:它与意图的交集里,落在**主技能未覆盖**面(main_overlap 之外)的新单元
+         ≥ _SUPPORT_MIN_NOVEL —— 只重复覆盖主技能已覆盖的那部分意图 = 冗余,不带
+         (这正是"覆盖重复的不带、退 Top-1"的判据)。
+    命中面大的支持技能优先(novel 多 → intent_cov 高),最多 _MAX_SUPPORTS 个。
+    """
+    main_name = main.name
+    main_sig = main.sig or ""
+    picked: list[tuple[float, int, RecallHit]] = []
+    for order, s in enumerate(scored):
+        c = s["cand"]
+        if c["name"] == main_name:
+            continue
+        if main_sig and c.get("sig", "") == main_sig:   # 同一技能不同索引路径去重
+            continue
+        if s["intent_cov"] < _SUPPORT_MIN_INTENT_OVERLAP:
+            continue
+        # 语义互补:该候选命中意图、但落在主技能**没覆盖**的意图面上的新单元数
+        novel = len(s["overlap"] - main_overlap)
+        if novel < _SUPPORT_MIN_NOVEL:
+            continue   # 只重复覆盖主技能已覆盖的意图 → 冗余,不带(保守)
+        # 排序键:新覆盖面越大越优先(novel),打平看意图覆盖度(intent_cov),再退回稳定顺序。
+        picked.append(((-float(novel), -s["intent_cov"], order), order, RecallHit(
+            name=c["name"], body=c["body"], path=c["path"],
+            score=s["intent_cov"], manifest=c.get("raw", {}), sig=c.get("sig", ""),
+            result_reuse=c.get("result_reuse", "dynamic"),
+            guidance=split_body_guidance(c["body"])[1],
+        )))
+    picked.sort(key=lambda t: t[0])
+    return [h for _k, _o, h in picked[:_MAX_SUPPORTS]]
 
 
 def recall(
@@ -308,6 +387,8 @@ def recall(
     # 断⑭):frontmatter `verified: true`(独立验收 PASS 过)> false/缺标 —— 只在前两键全平
     # 时破平,Trace 派生的真实使用信号(满意度)仍优先于出生标。
     best_key: tuple[float, float, float] = (-1.0, -1.0, -1.0)
+    best_overlap: set[str] = set()   # 主命中的意图交集(支持技能语义互补判据的参照)
+    scored: list[dict] = []          # 通过门槛的候选(带 overlap/覆盖度),Top-K 组合从这里挑支持技能
     for c in candidates:
         overlap = intent_tokens & c["all_tokens"]
         if not overlap:
@@ -336,6 +417,11 @@ def recall(
         # 缺标(老技能/未验)与 false 同级 —— 都是"没有独立验据",不追溯惩罚也不伪造资历。
         verified_rank = 1.0 if str((c.get("raw") or {}).get("verified", "")).strip().lower() == "true" else 0.0
         key = (primary, secondary, verified_rank)
+        # Top-K 组合候选池:记下每个过门候选的 overlap 与"意图覆盖度"(len(overlap)/len(intent)),
+        # 供选主命中后挑支持技能(不含 prefer 加权 —— 覆盖度看的是与意图的真实相关,别被绑定加权虚高)。
+        intent_cov = len(overlap) / max(1, len(intent_tokens))
+        scored.append({"cand": c, "overlap": overlap, "intent_cov": intent_cov,
+                       "all_tokens": c["all_tokens"], "key": key})
         if key > best_key:
             best = RecallHit(
                 name=c["name"],
@@ -348,6 +434,11 @@ def recall(
                 guidance=split_body_guidance(c["body"])[1],
             )
             best_key = key
+            best_overlap = overlap
+
+    # Top-K 有界组合:选完主命中后,从其余过门候选里挑 ≤2 个**语义互补**的支持技能(保守,宁空勿滥)。
+    if best is not None:
+        best.supports = _select_supports(best, best_overlap, scored)
 
     # auto-restore:命中项若在 store 归档集合里 → 翻出来
     if best is not None and store is not None and best.sig:

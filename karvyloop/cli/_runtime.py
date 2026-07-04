@@ -88,12 +88,17 @@ def resolve_runtime(
             # §13.3:gateway 到位后给 MainLoop 接上**语义可缓存性判定器** —— 让真正稳定的任务能回放
             # 省 token;判不出/无 gateway 时 MainLoop 默认 dynamic(宁重跑不投毒)。
             try:
-                from karvyloop.crystallize.result_classifier import make_result_classifier
+                from karvyloop.crystallize.result_classifier import (
+                    make_result_classifier, make_skill_namer)
                 clf = make_result_classifier(gateway, default_model or "")
                 if clf is not None and main_loop is not None:
                     main_loop._result_classifier = clf
+                # 命名可读性(S):结晶落盘时用同一 gateway 顺手起 kebab 可读名;无 gateway → 确定性兜底。
+                namer = make_skill_namer(gateway, default_model or "")
+                if namer is not None and main_loop is not None:
+                    main_loop.set_skill_namer(namer)
             except Exception as e:
-                logger.warning(f"result_classifier 接线失败(默认 dynamic,不影响): {e}")
+                logger.warning(f"result_classifier/skill_namer 接线失败(默认兜底,不影响): {e}")
     except Exception as e:
         logger.warning(f"runtime_kwargs 注入失败(不影响启动): {e}")
 

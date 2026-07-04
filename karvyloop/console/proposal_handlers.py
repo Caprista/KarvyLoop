@@ -118,12 +118,14 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
             # 路径也一致下沉(此前只在"跟角色聊天"路径编译,委派路径只软前缀 value.md 文本)。
             _did = payload.get("domain_id", "")
             persona = None
+            _bound_skills: list = []   # 委派角色 COMPOSITION.yaml 声明的绑定技能名(→ pursue prefer,召回优先)
             try:
                 _rreg = getattr(app.state, "role_registry", None)
                 _dreg = getattr(app.state, "domain_registry", None)
                 _rv = _rreg.get(str(role)) if _rreg is not None else None
                 _dom = _dreg.get(_did) if (_dreg is not None and _did) else None
                 if _rv is not None:
+                    _bound_skills = list(getattr(_rv, "skill_ids", None) or [])
                     from karvyloop.coding.paradigm_prompt import build_role_paradigm_prompt
                     persona = build_role_paradigm_prompt(_rv, _dom, intent=requirement,
                                                          cwd=rk.get("workspace_root", "/"))
@@ -149,7 +151,9 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
             # per-task token 归因:委派烧的 token 记到该提案名下(成本预估的样本单元)
             from karvyloop.llm.token_ledger import token_task
             with token_task(getattr(proposal, "proposal_id", "") or ""):
-                outcome = pursue(requirement, ml=ml, slow_brain=slow_brain, rk=rk)
+                # 角色绑定技能透传:COMPOSITION.yaml skills: → recall 优先(绑定优先于模糊召回)
+                outcome = pursue(requirement, ml=ml, slow_brain=slow_brain, rk=rk,
+                                 prefer=(_bound_skills or None))
             checked = outcome.checked
             result = checked.result
         except Exception as e:

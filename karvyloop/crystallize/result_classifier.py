@@ -61,4 +61,46 @@ def make_result_classifier(gateway: Any, model_ref: str = "") -> Optional[Callab
     return classify
 
 
-__all__ = ["make_result_classifier"]
+_NAME_SYS = (
+    "你给一个任务起一个**英文短名**,便于日后在技能库里辨认。\n"
+    "要求:2-5 个英文单词、kebab-case(小写、连字符连接)、只含 a-z0-9 和连字符,"
+    "概括任务**做什么**(动词+对象),不含标点/中文/空格。\n"
+    "**只输出这个短名一行,别的都不要。** 例:summarize-weekly-report / convert-csv-to-json"
+)
+
+
+def make_skill_namer(gateway: Any, model_ref: str = "") -> Optional[Callable[[str], str]]:
+    """造一个同步可读命名闭包 (intent) → kebab 短名(命名可读性 S)。
+
+    与 make_result_classifier 同一套路(小 LLM 调用 + 极短提示 + 兜底):仅在**结晶时**调一次
+    (结晶稀疏,成本可忽略)。gateway 为空 → None(MainLoop 收到 None 即用确定性 kebab 兜底)。
+    异常/空输出 → 返空串(readable_skill_name 会回退确定性 kebab,再退 skill_<hash>,永不裸奔)。
+    """
+    if gateway is None:
+        return None
+
+    def name(intent: str) -> str:
+        import asyncio
+        from karvyloop.gateway import ResolveScope
+        from karvyloop.gateway.system import SystemPrompt
+        usr = f"任务:{(intent or '')[:300]}"
+        out = ""
+
+        async def _go():
+            nonlocal out
+            ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
+            async for ev in gateway.complete([{"role": "user", "content": usr}], [], ref,
+                                             system=SystemPrompt(static=[_NAME_SYS])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
+        try:
+            asyncio.run(_go())
+        except Exception as e:
+            logger.warning(f"[skill_namer] 命名失败,回退确定性 kebab: {e}")
+            return ""
+        return (out or "").strip().splitlines()[0].strip() if (out or "").strip() else ""
+
+    return name
+
+
+__all__ = ["make_result_classifier", "make_skill_namer"]

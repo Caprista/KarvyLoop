@@ -82,11 +82,15 @@ def pursue(
     slow_brain: Any,
     rk: dict,
     budget: Optional[ReplanBudget] = None,
+    prefer: Optional[List[str]] = None,
 ) -> PursuitOutcome:
     """让 role 在预算内尽责追求 goal —— drive + 验收,失败 replan / 修,infra-dead 停,耗尽标 infeasible。
 
     同步(供 handler 在线程内调);`asyncio.run(independent_check)` 与 `ml.drive` 顺序执行、
     不嵌套事件循环(同 `verify_and_fix` 的约定)。
+
+    `prefer`:委派角色 COMPOSITION.yaml 声明的**绑定技能名** —— 透传给 drive→recall,让角色随身
+      技能在召回时优先(绑定优先于模糊召回)。None=不偏好(0 回归)。
     """
     budget = budget or ReplanBudget()
     ck = _check_kwargs(rk)
@@ -96,7 +100,9 @@ def pursue(
     last_verdict = Verdict(passed=False, feedback="(未执行)")
 
     for i in range(1, budget.max_attempts + 1):
-        result = ml.drive(intent, slow_brain=slow_brain)
+        # 只在**有绑定技能**时传 prefer:老 ml/测试桩的 drive 未必接 prefer kwarg;无偏好不传 → 0 回归。
+        result = (ml.drive(intent, slow_brain=slow_brain, prefer=prefer)
+                  if prefer else ml.drive(intent, slow_brain=slow_brain))
         last_result = result
         terminal = (getattr(result, "terminal", "") or "")
         is_last = i >= budget.max_attempts

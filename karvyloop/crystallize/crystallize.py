@@ -361,6 +361,64 @@ def write_skill_md(skill_dir: Path, skill_md_text: str) -> Path:
     return p
 
 
+# ---- 命名可读性(S):hash 串 → kebab 人类可读名 ----
+
+_KEBAB_RE = re.compile(r"[^a-z0-9]+")
+_HASH_NAME_RE = re.compile(r"^skill_[0-9a-f]{6,}$")   # 自动结晶的兜底名(skill_<sig 前 8 位>)
+
+
+def _kebabize(text: str, *, max_words: int = 5) -> str:
+    """把一段自由文本压成 kebab-case 短名(纯确定性,无 LLM):小写、非字母数字→连字符、去空段。"""
+    s = _KEBAB_RE.sub("-", (text or "").strip().lower()).strip("-")
+    if not s:
+        return ""
+    words = [w for w in s.split("-") if w][:max_words]
+    return "-".join(words)
+
+
+def is_hash_skill_name(name: str) -> bool:
+    """判断一个技能名是否是不可读的 `skill_<hash>` 兜底串(可读名生成只针对这类,老可读名不动)。"""
+    return bool(_HASH_NAME_RE.match((name or "").strip()))
+
+
+def readable_skill_name(
+    hint: str,
+    sig: str,
+    *,
+    namer: Optional[object] = None,
+    taken: Optional[set] = None,
+) -> str:
+    """给一个**将要结晶**的技能起人类可读名(kebab-case)。
+
+    - `namer`(可选,同 result_classifier 那次 LLM 一个套路的注入闭包 `(hint)->str`):有就用它出短名;
+      异常/空/不合法 → 回退确定性 `_kebabize(hint)`;两者都空 → 回退 `skill_<sig 前 8 位>`(永不裸奔)。
+    - 结果只保留 ASCII kebab(纯中文意图 kebab 化后可能为空 → 回退 hash 名),与 skill_index name/
+      COMPOSITION `skill:` 引用正则(\\w\\-)一致,进匹配 token + 面板可读。
+    - `taken`:已占用名集合(同名加 -2/-3 后缀避冲突,不覆盖已有技能)。**加性**:老技能不改。
+    """
+    fallback = f"skill_{sig[:8]}"
+    cand = ""
+    if namer is not None:
+        try:
+            raw = namer(hint)
+            cand = _kebabize(str(raw or ""))
+        except Exception:
+            cand = ""
+    if not cand:
+        cand = _kebabize(hint)
+    if not cand:
+        return fallback
+    # 与目录/引用约定对齐:kebab 名不能撞已占用名(加数字后缀,保加性)
+    taken = taken or set()
+    if cand not in taken:
+        return cand
+    for i in range(2, 100):
+        alt = f"{cand}-{i}"
+        if alt not in taken:
+            return alt
+    return fallback
+
+
 def crystallize(
     sig: str,
     *,
@@ -461,4 +519,6 @@ __all__ = [
     # 结晶
     "build_skill_md", "write_skill_md", "crystallize", "mark_skill_verified",
     "read_crystallized_ts",
+    # 命名可读性(S):hash 串 → kebab 可读名
+    "readable_skill_name", "is_hash_skill_name",
 ]
