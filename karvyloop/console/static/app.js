@@ -2604,11 +2604,11 @@
     _busyEl = null;
   }
 
-  // ============ 聊天双形态(docs/46 S1):对话视图=常驻中央(docked);看板视图/移动端=弹层 ============
+  // ============ 聊天双形态(docs/46 S1):对话视图=常驻中央(docked);rail 放大态/移动端=弹层 ============
   function _isMobile() {
     return !!(window.matchMedia && window.matchMedia("(max-width: 720px)").matches);
   }
-  // 聊天是否"常驻中央"(docked):桌面 + 对话视图。此时 open 退化为聚焦输入框、close 无操作。
+  // 聊天是否"常驻中央"(docked):桌面 + 对话视图(非 rail 放大态)。此时 open 退化为聚焦输入框、close 无操作。
   function _chatDocked() {
     return !_isMobile() && !document.body.classList.contains("board-view");
   }
@@ -2627,11 +2627,12 @@
     document.body.classList.remove("chat-open");
   }
 
-  // ============ 对话⇄看板⇄桌面 视图切换(docs/46 §4.2 + docs/51):body class 一行换挡 ============
+  // ============ 对话⇄桌面 视图切换(docs/46 §4.2 + docs/51 + docs/59 方案A):body class 一行换挡 ============
+  // 一主一副:对话=唯一的家(默认、永远回得来);桌面=唯一可切的第二形态(旁观你的团队上班)。
+  // 旧"看板视图"退位成 rail 的 ⛶ 临时放大态(_setBoardZoom):功能一个不删,只是不再冒充一个"家"。
   function _applyView(mode) {
-    const board = mode === "board";
     const desk = mode === "desk" && !_isMobile();   // docs/51 §3.1:≤720px 桌面隐喻不存在 → 降级 chat
-    document.body.classList.toggle("board-view", board);
+    document.body.classList.remove("board-view");   // 放大是临时态:切视图先收(不跨视图残留)
     document.body.classList.toggle("desk-view", desk);
     // 桌面壳(desktop.js)的进出:enter 摆便签/窗口/dock,leave 清干净内联痕迹(老视图像素级不动)
     if (window.KarvyDesktop) { if (desk) window.KarvyDesktop.enter(); else window.KarvyDesktop.leave(); }
@@ -2641,18 +2642,47 @@
       else m.classList.add("hidden");                    // 弹层态:起始收起(FAB/入口再弹)
     }
     document.body.classList.remove("chat-open");   // 切视图 = 回到干净弹层态
-    // switch 三态明示(Hardy:别让用户猜):active 落在**当前**视图上
+    // switch 两态明示(Hardy:别让用户猜):active 落在**当前**视图上
     const optChat = document.getElementById("view-opt-chat");
-    const optBoard = document.getElementById("view-opt-board");
     const optDesk = document.getElementById("view-opt-desk");
-    if (optChat) optChat.classList.toggle("active", !board && !desk);
-    if (optBoard) optBoard.classList.toggle("active", board);
+    if (optChat) optChat.classList.toggle("active", !desk);
     if (optDesk) optDesk.classList.toggle("active", desk);
+    _updateZoomBtn();
     _updateDockYield();
   }
   function _setView(mode) {
+    if (mode !== "desk") mode = "chat";   // 只有两个家:chat|desk(board 已退位成放大态,不再是档位)
     try { localStorage.setItem("karvyloop_view", mode); } catch (e) {}
     _applyView(mode);
+  }
+
+  // ============ rail ⛶ 放大(docs/59 方案A):四象限临时全屏,复用 body.board-view 的 2×2 CSS ============
+  // 临时形态,不是家:**不写** karvyloop_view(刷新回对话);⛶/✕ 或 Esc 回对话;
+  // 只在对话视图存在(桌面视图/移动端无此形态)。放大态下聊天收进弹层(FAB 再弹)= 原看板行为原样复用。
+  function _boardZoomed() { return document.body.classList.contains("board-view"); }
+  function _setBoardZoom(on) {
+    on = !!on && !document.body.classList.contains("desk-view") && !_isMobile();
+    if (on !== _boardZoomed()) {
+      document.body.classList.toggle("board-view", on);
+      const m = document.getElementById("chat-modal");
+      if (m) {
+        if (_chatDocked()) m.classList.remove("hidden");   // 回对话:聊天回中央常驻
+        else m.classList.add("hidden");                    // 放大态:聊天起始收起(FAB/入口再弹)
+      }
+      document.body.classList.remove("chat-open");
+      _updateDockYield();
+    }
+    _updateZoomBtn();
+  }
+  // ⛶ 钮双态:rail 态=⛶(放大);放大态=✕(回对话)。data-i18n-title 同步换 key,语言切换后 title 不错位。
+  function _updateZoomBtn() {
+    const btn = document.getElementById("rail-zoom-btn");
+    if (!btn) return;
+    const zoomed = _boardZoomed();
+    btn.textContent = zoomed ? "✕" : "⛶";
+    btn.dataset.i18nTitle = zoomed ? "rail.zoom.exit_title" : "rail.zoom.title";
+    btn.title = t(zoomed ? "rail.zoom.exit_title" : "rail.zoom.title");
+    btn.classList.toggle("active", zoomed);
   }
 
   // 卡皮巴拉让位(S1):对话视图下,料区(📥)有内容时右下吉祥物自动让位,不压 rail。
@@ -2714,7 +2744,7 @@
     setInterval(show, 30000);      // 放 15s + 歇 15s = 每 30s 冒一次
   }
   // docs/46 §5:顶栏副驾按钮 —— 点击 = 切到与小卡的私聊并聚焦输入框
-  // (对话视图下 = switchPeer(小卡)+focus;看板视图/移动端下 openChatModal 先弹层)。
+  // (对话视图下 = switchPeer(小卡)+focus;rail 放大态/移动端下 openChatModal 先弹层)。
   function _talkToKarvy() {
     openChatModal();
     const list = document.getElementById("peer-list");
@@ -3007,7 +3037,7 @@
   }
 
   const _TOUR_DONE_KEY = "karvyloop_tour_done";
-  // 元素"当前视图下是否真可见"(非"存在"):三视图藏锚方式不同(看板 hidden 聊天/桌面
+  // 元素"当前形态下是否真可见"(非"存在"):各形态藏锚方式不同(rail 放大态 hidden 聊天/桌面
   // display:none 侧栏/聊天窗最小化),隐藏元素 rect 全 0 → driver.js 把 popover 钉左上角
   // 0×0 压 logo = UI 错乱。offsetParent 判 display 链;dock 是 fixed(offsetParent 恒 null
   // 但可见)→ rect 面积兜底。
@@ -3031,8 +3061,8 @@
       document.querySelectorAll(".col-decide.col-collapsed").forEach((c) => c.classList.remove("col-collapsed"));
     } catch (e) { /* 某视图无此列不挡 */ }
   }
-  // 6 步 spotlight(docs/46 §6 脚本):锚点用**候选链**,三视图各取当前可见者;全不可见 → 跳过该步
-  // (绝不 0×0 钉左上角)。修 UI 自查 6 BLOCKER(对话折叠列/看板藏聊天/桌面侧栏与最小化)。
+  // 6 步 spotlight(docs/46 §6 脚本):锚点用**候选链**,两视图+放大态各取当前可见者;全不可见 → 跳过该步
+  // (绝不 0×0 钉左上角)。修 UI 自查 6 BLOCKER(对话折叠列/放大态藏聊天/桌面侧栏与最小化)。
   function _tourSteps() {
     const CAND = {
       1: ["#pulse-text"],                                                          // 脉搏(顶栏,三视图都在)
@@ -3118,7 +3148,10 @@
     _journey = j;
     _renderJourneyBar();
     if (_journeyActive()) {
-      openChatModal();   // 旅程活跃 → 聊天当主场(对话视图本就常驻;看板/移动端弹起)
+      // docs/59 方案A:旅程永远落在对话视图(桌面/放大偏好不许截胡第一个 10 分钟;
+      // 只回放视图不改写 karvyloop_view 偏好,旅程结束后下次开机仍回用户自己的家)
+      if (document.body.classList.contains("desk-view") || _boardZoomed()) _applyView("chat");
+      openChatModal();   // 旅程活跃 → 聊天当主场(对话视图本就常驻;移动端弹起)
       // 还没配模型:轮询等它配好(配好那刻 CTA 自动换成第一步 chip,不用刷新页面)
       if (!_journey.llm_ready) setTimeout(_initJourney, 15000);
     }
@@ -3214,6 +3247,18 @@
       }
     }
     pushChatLine("system", t("journey.tagline"));
+    // docs/59 方案A:桌面视图不再是冷启动三选一,由旅程收官当"奖励时刻"介绍
+    // (🖥 去看看你的团队上班;≤720px 无桌面隐喻 → 不提)
+    if (!_isMobile()) {
+      const log = document.getElementById("chat-log");
+      if (log) {
+        const deskNotice = el("div", { class: "chat-notice journey-desk" });
+        deskNotice.appendChild(document.createTextNode(t("journey.desk_moment") + " "));
+        deskNotice.appendChild(_journeyChip("journey.desk_btn", () => _setView("desk")));
+        log.appendChild(deskNotice);
+        log.scrollTop = log.scrollHeight;
+      }
+    }
   }
 
   // ============ 语音输入 v1(Hardy ⑪)============
@@ -3354,30 +3399,41 @@
     setupChatForm();
     setupVoiceInput();  // 语音输入 v1:🎤 听写 + 免按键唤醒(实验开关)
     setupChatModal();   // step5:对话弹窗
-    // docs/46 S1:视图初始化(默认对话视图,记住上次选择)+ 切换钮 + 移动端聊天入口 + rail 折叠
+    // docs/46 S1 + docs/59 方案A:视图初始化(默认对话视图,记住上次选择,只有 chat|desk 两个家)
+    // 存量 karvyloop_view=board 平滑迁移回 chat:老用户开机不落进一个已退位的视图(放大态一键 ⛶ 即达)。
     let _viewPref = "chat";
     try { _viewPref = localStorage.getItem("karvyloop_view") || "chat"; } catch (e) {}
-    _applyView(_viewPref === "board" ? "board" : _viewPref === "desk" ? "desk" : "chat");
+    if (_viewPref !== "chat" && _viewPref !== "desk") {
+      _viewPref = "chat";
+      try { localStorage.setItem("karvyloop_view", "chat"); } catch (e) {}
+    }
+    _applyView(_viewPref);
     const optChat = document.getElementById("view-opt-chat");
-    const optBoard = document.getElementById("view-opt-board");
     const optDesk = document.getElementById("view-opt-desk");
     if (optChat) optChat.addEventListener("click", () => _setView("chat"));
-    if (optBoard) optBoard.addEventListener("click", () => _setView("board"));
     if (optDesk) optDesk.addEventListener("click", () => _setView("desk"));
-    const viewBtn = document.getElementById("view-toggle");   // 兼容留存的隐藏钮(老测试/脚本)
-    if (viewBtn) viewBtn.addEventListener("click", () =>
-      _setView(document.body.classList.contains("board-view") ? "chat" : "board"));
+    // rail ⛶:四象限临时放大(点 ⛶/✕ 或 Esc 回对话;临时态不写 karvyloop_view)
+    const zoomBtn = document.getElementById("rail-zoom-btn");
+    if (zoomBtn) zoomBtn.addEventListener("click", () => _setBoardZoom(!_boardZoomed()));
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented || !_boardZoomed()) return;   // defaultPrevented:@提及下拉的 Esc 归它
+      const mgmt = document.getElementById("mgmt-modal");
+      if (mgmt && !mgmt.classList.contains("hidden")) return;                    // 管理面开着:Esc 归它
+      const chat = document.getElementById("chat-modal");
+      if (chat && !chat.classList.contains("hidden") && !_chatDocked()) { closeChatModal(); return; }  // 先收聊天弹层
+      _setBoardZoom(false);   // Esc 回家:回对话视图
+    });
     const mobileChat = document.getElementById("mobile-chat-open");
     if (mobileChat) mobileChat.addEventListener("click", openChatModal);
     _setupRailCollapse();
     // 跨过 720px 断点(旋转/拖窗):按偏好重放当前视图,保证聊天 docked/弹层形态一致
-    // (桌面偏好保留:窄屏降级 chat,回到宽屏自动还原 desk —— docs/51 §3.1)
+    // (桌面偏好保留:窄屏降级 chat,回到宽屏自动还原 desk —— docs/51 §3.1;放大态是临时形态,跨断点即收)
     if (window.matchMedia) {
       const mq = window.matchMedia("(max-width: 720px)");
       const onMq = () => {
         let v = "chat";
         try { v = localStorage.getItem("karvyloop_view") || "chat"; } catch (e) {}
-        _applyView(v === "board" ? "board" : v === "desk" ? "desk" : "chat");
+        _applyView(v === "desk" ? "desk" : "chat");
       };
       if (mq.addEventListener) mq.addEventListener("change", onMq);
       else if (mq.addListener) mq.addListener(onMq);

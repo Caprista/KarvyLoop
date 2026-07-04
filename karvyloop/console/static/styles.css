@@ -2007,16 +2007,17 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .busy-guide-btn:hover { border-color: var(--accent); }
 
 /* ============================================================================
-   docs/46 S1 — 聊天升主位:「对话视图」(默认)+「看板视图」(body.board-view)
+   docs/46 S1 + docs/59 方案A — 聊天升主位:「对话视图」(默认的家)+ rail ⛶ 放大态(body.board-view)
    对话视图(桌面):chat-panel 出狱常驻中央,四象限压成右侧 ~350px rail 竖排
    (⚖拍板永远第一 → 🔄谁在忙 → 📥料 → 🔮预判,CSS order,DOM 不动)。
-   看板视图:一行 body class 切换回今天的 2×2 全屏四象限 + 聊天弹层 + FAB。
+   rail 放大态:一行 body class 临时放大成 2×2 全屏四象限 + 聊天弹层 + FAB
+   (原"看板视图"CSS 原样复用;docs/59:它是集合级放大手势,不是并列的"家")。
    移动端(≤720px):保持单列流(脉搏→拍板→聊天入口大按钮→其余),聊天仍全屏弹层。
    注意:本段必须留在 720px 媒体查询**之后**(test_mobile_responsive 锁了
    ".col-decide 的 order 不得出现在移动块之前";本段桌面规则全部包在 min-width:721px 里)。
    ========================================================================= */
 
-/* 顶栏 对话⇄看板:两态明示 switch(Hardy:别让用户猜)。active=当前视图。 */
+/* 顶栏 对话⇄桌面:一主一副两态 switch(Hardy:别让用户猜)。active=当前视图。 */
 .view-switch {
   display: inline-flex; border: 1px solid var(--border-strong); border-radius: 999px;
   background: var(--surface); overflow: hidden;
@@ -2029,12 +2030,14 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
   background: var(--accent-light); color: var(--accent-deep);
 }
 .view-switch-opt:not(.active):hover { color: var(--accent-deep); }
-/* 旧切换钮退役为隐藏兼容锚点 */
-.view-toggle { display: none; }
+/* 列头动作簇(🔮 + ⛶):不散在 space-between 两端 */
+.col-acts { display: inline-flex; gap: 4px; align-items: center; }
+/* rail ⛶ 放大钮:放大态下变 ✕(回对话),active 高亮 */
+.col-act.active { border-color: var(--accent); color: var(--accent-deep); }
 /* 副驾按钮撤下后的隐形锚点:只承载 karvy-bubble 定位,不占布局 */
 .topbar-karvy-anchor { position: relative; width: 0; height: 0; }
 
-/* 移动端聊天入口大按钮:桌面永不显示(聊天常驻/看板走 FAB) */
+/* 移动端聊天入口大按钮:桌面永不显示(聊天常驻/放大态走 FAB) */
 .mobile-chat-entry { display: none; }
 
 /* 卡皮巴拉让位动效(料区有内容时自动让位,S1;仅对话视图 JS 加 .dock-yield) */
@@ -2086,14 +2089,14 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
   body:not(.board-view) .karvy-dock .karvy-dock-label { display: none; }
   body:not(.board-view) .karvy-dock.dock-yield { opacity: 0; pointer-events: none; }
 
-  /* —— 看板视图:就是今天的界面(chat-host 走原 modal-overlay 规则)。
+  /* —— rail ⛶ 放大态(原"看板视图"CSS 原样复用):2×2 全屏,chat-host 走原 modal-overlay 规则。
         聊天弹层开着时收起 FAB(原兄弟选择器因 DOM 移动失效,改 body class 由 JS 维护) —— */
   body.board-view.chat-open .karvy-dock { display: none; }
 }
 
 @media (max-width: 720px) {
-  /* 移动端没有"视图切换"概念(单列流即看板流) */
-  .view-toggle { display: none; }
+  /* 移动端没有"视图切换/放大"概念(单列流):rail ⛶ 藏掉(JS 侧 _setBoardZoom 也有 _isMobile 守卫) */
+  #rail-zoom-btn { display: none; }
   /* 顺序:脉搏(顶栏)→ ⚖拍板(order:-1 已有)→ 聊天入口大按钮(DOM 紧随拍板)→ 其余 */
   .mobile-chat-entry {
     display: block; width: 100%; min-height: 48px;

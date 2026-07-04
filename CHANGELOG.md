@@ -11,6 +11,16 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Changed
+- **Console IA converges to one home + one mode.** The top-bar view switch is now two options —
+  💬 Chat (the home: talk + decide, always one click back) ⇄ 🖥 Desk (watch your team at work).
+  The former Board view stepped down from a top-level "home" to a rail gesture: a ⛶ button on the
+  decision column temporarily expands the four quadrants into the familiar 2×2 full-screen
+  (every panel kept, nothing removed); Esc or ✕ returns to chat. The zoom is a transient state —
+  never remembered as a startup view — and a stored "board" startup preference migrates smoothly
+  back to chat. The first-10-minutes journey always lands in the chat view and introduces the Desk
+  as a reward moment at the finale instead of a cold-start three-way choice.
+
 ### Planned
 - **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
   near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the

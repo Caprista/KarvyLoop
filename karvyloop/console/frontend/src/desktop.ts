@@ -1,4 +1,4 @@
-/* desktop.ts — 桌面视图(第三视图,docs/51 P1 骨架)。
+/* desktop.ts — 桌面视图(对话之外唯一可切的第二形态,docs/51 P1 骨架 + docs/59 方案A)。
  *
  * body.desk-view 下,console 变成一张桌面:
  *   - dock(底部,兼任务栏):左段 = 左导航 12 入口的同构复用(dock 图标就是

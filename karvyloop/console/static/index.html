@@ -40,13 +40,12 @@
         <div class="karvy-bubble hidden" id="karvy-bubble"><span class="karvy-bubble-dots">·</span></div>
       </div>
       <div class="top-actions">
-        <!-- 对话⇄看板:明示两态的 switch(不让用户猜),active 态高亮;偏好记 localStorage -->
+        <!-- 一主一副(docs/59 方案A):💬 对话=唯一的家(默认、永远回得来)⇄ 🖥 桌面=旁观你的团队上班。
+             看板不再是并列的"家":四象限 2×2 全屏降级为右栏 rail 的 ⛶ 临时放大态(Esc/✕ 回对话)。 -->
         <div class="view-switch" id="view-switch" role="tablist">
-          <button class="view-switch-opt active" id="view-opt-chat" data-i18n="view.chat">💬 对话</button>
-          <button class="view-switch-opt" id="view-opt-board" data-i18n="view.board">⊞ 看板</button>
+          <button class="view-switch-opt active" id="view-opt-chat" data-i18n="view.chat" data-i18n-title="view.chat.title">💬 对话</button>
           <button class="view-switch-opt" id="view-opt-desk" data-i18n="view.desk" data-i18n-title="view.desk.title">🖥 桌面</button>
         </div>
-        <button class="view-toggle hidden" id="view-toggle" aria-hidden="true">⊞</button>
         <!-- docs/46 S4:重看新手引导(首启 tour 可跳过,这里随时唤回) -->
         <button class="tour-replay" id="tour-replay" data-i18n-title="tour.replay.title">💡</button>
         <!-- 「第一个 10 分钟」旅程重看入口(可跳过、可重入) -->
@@ -100,10 +99,10 @@
 
     <!-- 中央:决策者的指挥台(docs/46 裁决:对话+驾驶舱同屏)。
          默认「对话视图」= 聊天常驻中央 + 四象限压成右侧 rail;
-         body.board-view = 完整 2×2 看板视图(今天的界面,一键切换)。-->
+         body.board-view = rail 的 ⛶ 临时放大态(2×2 全屏,docs/59:临时形态不是家)。-->
     <main class="cockpit">
       <!-- 全局聊天(chat-panel 出狱,docs/46 S1):对话视图下常驻中央;
-           看板视图 / 移动端(≤720px)下保持原 modal-overlay 弹层行为。
+           rail 放大态 / 移动端(≤720px)下保持原 modal-overlay 弹层行为。
            所有功能性 id(chat-log/chat-form/peer-list/roundtable-bar/…)原样保留。 -->
       <div class="modal-overlay chat-overlay chat-host hidden" id="chat-modal">
         <div class="chat-panel">
@@ -165,11 +164,14 @@
         </div>
       </div>
 
-      <!-- 四象限:对话视图=右侧 rail 竖排(⚖永远第一→🔄→📥→🔮);看板视图=2×2 全屏 -->
+      <!-- 四象限:对话视图=右侧 rail 竖排(⚖永远第一→🔄→📥→🔮);⛶=临时放大成 2×2 全屏(Esc/✕ 回对话) -->
       <div class="cockpit-grid">
         <section class="cockpit-col col-decide">
           <h2 class="col-head"><span data-i18n="cockpit.decide">⚖ 要我拍什么板</span>
-            <button id="propose-btn" class="col-act" data-i18n="btn.propose" data-i18n-title="btn.propose.title">🔮</button></h2>
+            <span class="col-acts">
+              <button id="propose-btn" class="col-act" data-i18n="btn.propose" data-i18n-title="btn.propose.title">🔮</button>
+              <button id="rail-zoom-btn" class="col-act" data-i18n-title="rail.zoom.title" aria-label="zoom quadrants">⛶</button>
+            </span></h2>
           <div class="col-scroll">
             <div id="h2a-list"><div class="h2a-empty" data-i18n="empty.h2a">no proposals</div></div>
             <div class="recent-head" data-i18n="decisions.recent_head">🗳 最近拍板</div>
@@ -177,7 +179,7 @@
           </div>
         </section>
         <!-- 移动端顺序(docs/46 §4.3):脉搏(顶栏)→ ⚖拍板 → 聊天入口大按钮 → 其余象限。
-             桌面端 display:none(聊天已常驻/看板视图走 FAB)。 -->
+             桌面端 display:none(聊天已常驻/rail 放大态走 FAB)。 -->
         <button class="mobile-chat-entry" id="mobile-chat-open" data-i18n="chat.open">💬 跟小卡说…</button>
         <section class="cockpit-col col-intel">
           <h2 class="col-head" data-i18n="cockpit.intel">📥 流进来的料</h2>

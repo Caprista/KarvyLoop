@@ -98,6 +98,101 @@ def test_console_loads_in_real_browser(console_url):
 
 
 @pytest.fixture
+def console_no_llm(tmp_path):
+    """真 console(no_llm 只读:不弹"强制配模型"锁死引导,好点按钮)。yield base_url。"""
+    import uvicorn
+
+    from karvyloop.cognition.conversation import ConversationManager, ConversationStore
+    from karvyloop.console import build_console_app
+    from karvyloop.karvy.observer import WorkbenchObserver
+
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    mgr = ConversationManager(ConversationStore(tmp_path / "conv"))
+    mgr.start()
+    app.state.conversation_manager = mgr
+    app.state.no_llm = True
+
+    port = _free_port()
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="off")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if getattr(server, "started", False):
+            break
+        time.sleep(0.1)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_view_ia_two_homes_and_rail_zoom(console_no_llm):
+    """三视图收敛(docs/59 方案A)真浏览器验收:一主(对话)一副(桌面)两钮 + rail ⛶ 放大 +
+    Esc 回家 + 存量"看板"开机偏好平滑迁移 + tour 在新 IA 下不断链(曾爆 6 BLOCKER 的雷区)。"""
+    from playwright.sync_api import sync_playwright
+
+    errors: list[str] = []
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.on("console", lambda m: errors.append(f"console.error: {m.text}") if m.type == "error" else None)
+        page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+        # 老用户存量偏好 karvyloop_view=board:开机必须平滑迁移回对话(不落进已退位的视图);
+        # tour_done 先标上,首启 tour 的全屏遮罩别拦点击(⑥ 再显式重看验 tour)。
+        page.add_init_script(
+            "try { localStorage.setItem('karvyloop_view', 'board');"
+            " localStorage.setItem('karvyloop_tour_done', '1'); } catch (e) {}")
+        page.goto(console_no_llm, wait_until="commit", timeout=10000)
+        page.wait_for_selector("#view-switch", timeout=10000)
+
+        # ① 顶栏只剩两个家:💬 对话 + 🖥 桌面;看板钮与遗留 #view-toggle 退场
+        opts = page.eval_on_selector_all("#view-switch .view-switch-opt", "els => els.map(e => e.id)")
+        assert opts == ["view-opt-chat", "view-opt-desk"], f"顶栏 switch 应恰为两钮,实际 {opts}"
+        assert page.query_selector("#view-opt-board") is None, "看板钮应退场"
+        assert page.query_selector("#view-toggle") is None, "遗留隐藏钮应删除"
+
+        # ② 存量 board 偏好迁移:落在对话视图,localStorage 改写为 chat,对话钮 active
+        page.wait_for_function("localStorage.getItem('karvyloop_view') === 'chat'", timeout=5000)
+        assert page.evaluate("!document.body.classList.contains('board-view')"), "开机不许落进已退位的看板"
+        assert page.evaluate("document.getElementById('view-opt-chat').classList.contains('active')")
+
+        # ③ rail ⛶ 放大:2×2 全屏(body.board-view),钮变 ✕;临时态**不写**开机偏好;聊天收进弹层
+        page.click("#rail-zoom-btn")
+        page.wait_for_function("document.body.classList.contains('board-view')", timeout=3000)
+        assert page.inner_text("#rail-zoom-btn").strip() == "✕", "放大态 ⛶ 应变 ✕(回对话)"
+        assert page.evaluate("localStorage.getItem('karvyloop_view')") == "chat", "放大是临时态,不许写开机偏好"
+        assert page.evaluate("document.getElementById('chat-modal').classList.contains('hidden')"), \
+            "放大态聊天应收进弹层(FAB 再弹,原看板行为原样复用)"
+
+        # ④ Esc 回家:回对话视图,聊天回中央常驻,钮复位 ⛶
+        page.keyboard.press("Escape")
+        page.wait_for_function("!document.body.classList.contains('board-view')", timeout=3000)
+        assert page.evaluate("!document.getElementById('chat-modal').classList.contains('hidden')"), \
+            "回家后聊天应回中央常驻"
+        assert page.inner_text("#rail-zoom-btn").strip() == "⛶"
+
+        # ⑤ 两个家互切:🖥 进桌面(放大态不许跨视图残留),💬 永远回得来
+        page.click("#rail-zoom-btn")
+        page.wait_for_function("document.body.classList.contains('board-view')", timeout=3000)
+        page.click("#view-opt-desk")
+        page.wait_for_function("document.body.classList.contains('desk-view')", timeout=5000)
+        assert page.evaluate("!document.body.classList.contains('board-view')"), "切桌面必须先收掉放大态"
+        page.click("#view-opt-chat")
+        page.wait_for_function("!document.body.classList.contains('desk-view')", timeout=5000)
+        assert page.evaluate("localStorage.getItem('karvyloop_view')") == "chat"
+
+        # ⑥ tour 在两钮 IA 下不断链:💡 重看 → driver.js popover 真弹出(不许 0×0 钉左上角)
+        page.click("#tour-replay")
+        page.wait_for_selector(".driver-popover", timeout=8000)
+
+        browser.close()
+
+    assert not errors, "两钮 IA 下真浏览器必须 0 JS 报错:\n" + "\n".join(errors)
+
+
+@pytest.fixture
 def console_with_feed(tmp_path):
     """真 console + 一条"料"(done 任务)挂到一条有 TRACE 标记轮次的对话 → 验"去聊天"定位。"""
     import uvicorn

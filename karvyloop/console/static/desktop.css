@@ -56,6 +56,8 @@ body.desk-view .col-decide {
   background: var(--accent-light);
   border-color: var(--accent-line);
 }
+/* rail ⛶ 放大是对话视图的手势(docs/59):桌面便签上不摆(JS 侧 _setBoardZoom 也有 desk 守卫) */
+body.desk-view #rail-zoom-btn { display: none; }
 /* 顶部一条"胶带"伪元素(便签在画布上贴着的感觉) */
 body.desk-view .cockpit-col::after {
   content: "";
