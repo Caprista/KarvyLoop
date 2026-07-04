@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -32,6 +31,7 @@ from karvyloop.karvy.observer import WorkbenchObserver  # noqa: E402
 from karvyloop.workbench.app import WorkbenchApp  # noqa: E402
 from karvyloop.workbench.snapshot import WidgetSnapshot  # noqa: E402
 from karvyloop.workbench.widgets.h2a_input import H2AInput, IntentSubmitted  # noqa: E402
+from tests._scan import grep_py  # noqa: E402  (OS-portable source scan; needs ROOT on path)
 
 
 # ---------- helpers ----------
@@ -278,43 +278,31 @@ class TestAC7R3AsyncNestedBridge:
         assert outcome.text.startswith("ok-x-")
 
 
-# ---------- AC8: 灵魂铁律 grep 锁 ----------
+# ---------- AC8: 灵魂铁律源码扫描锁 ----------
+# 用 tests/_scan.grep_py(OS 无关)代替 shell grep:grep 不在 Windows PATH 上会
+# FileNotFoundError 假红(CI windows job / 本机全量都踩过),Python 原生扫描三平台一致。
 
 class TestAC8KLawScan:
-    """AC8: 5 个 grep 全锁 0 命中(本批新文件 + workbench 全包)。"""
+    """AC8: 源码扫描全锁 0 命中(本批新文件 + workbench 全包)。"""
 
     def test_main_loop_bridge_no_apply_or_courier(self):
-        result = subprocess.run(
-            ["grep", "-nE", r"(apply_deontic\(|domain\.apply_\w+\(|Courier\.send\()",
-             str(ROOT / "karvyloop" / "workbench" / "main_loop_bridge.py")],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        lines = grep_py(r"(apply_deontic\(|domain\.apply_\w+\(|Courier\.send\()",
+                        ROOT / "karvyloop" / "workbench" / "main_loop_bridge.py")
         assert not lines, f"K 铁律违规\n{chr(10).join(lines)}"
 
     def test_main_loop_bridge_no_cloud_endpoint(self):
-        result = subprocess.run(
-            ["grep", "-nE", r"(api\.minimax\.chat|api\.anthropic\.com|api\.openai\.com)",
-             str(ROOT / "karvyloop" / "workbench" / "main_loop_bridge.py")],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        # URL 字面量(base_url="...")是真违规 → 扫原始文本,别把字符串抹掉漏了
+        lines = grep_py(r"(api\.minimax\.chat|api\.anthropic\.com|api\.openai\.com)",
+                        ROOT / "karvyloop" / "workbench" / "main_loop_bridge.py",
+                        skip_comments=False)
         assert not lines, f"0 LLM 违规\n{chr(10).join(lines)}"
 
     def test_h2a_input_no_apply_or_courier(self):
-        result = subprocess.run(
-            ["grep", "-nE", r"(apply_deontic\(|domain\.apply_\w+\(|Courier\.send\()",
-             str(ROOT / "karvyloop" / "workbench" / "widgets" / "h2a_input.py")],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        lines = grep_py(r"(apply_deontic\(|domain\.apply_\w+\(|Courier\.send\()",
+                        ROOT / "karvyloop" / "workbench" / "widgets" / "h2a_input.py")
         assert not lines, f"K 铁律违规\n{chr(10).join(lines)}"
 
     def test_app_no_direct_envelope_construct(self):
         """A1 复检:app.py 不直接构造 Envelope(只走 decision_to_envelope)。"""
-        result = subprocess.run(
-            ["grep", "-nE", r"^\s*Envelope\(", str(ROOT / "karvyloop" / "workbench" / "app.py")],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        lines = grep_py(r"^\s*Envelope\(", ROOT / "karvyloop" / "workbench" / "app.py")
         assert not lines, f"A1 违规:app.py 直接构造 Envelope\n{chr(10).join(lines)}"

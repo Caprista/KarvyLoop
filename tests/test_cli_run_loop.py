@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import pathlib
 import re
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -29,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 
 from karvyloop.runtime.main_loop import MainLoop  # noqa: E402
 from karvyloop.cli.run_loop import build_main_loop, run_intent_via_loop  # noqa: E402
+from tests._scan import grep_py  # noqa: E402  (OS-portable source scan; needs ROOT on path)
 
 
 # ---------- helpers ----------
@@ -352,27 +352,22 @@ class TestAC8StatsLineOnStderr:
         assert "drive_calls=" in captured.err
 
 
-# ---------- 工具:K 铁律 grep 锁 (拍 4c 也要跑,本拍 4a 末先验) ----------
+# ---------- 工具:K 铁律源码扫描锁 (拍 4c 也要跑,本拍 4a 末先验) ----------
+# 用 tests/_scan.grep_py(OS 无关)代替 shell grep:grep 不在 Windows PATH 上会
+# FileNotFoundError 假红(CI windows job / 本机全量都踩过),Python 原生扫描三平台一致。
 
 class TestAKLawScan:
     """拍 4a 末 K 锁预检(拍 4c 全量再验)。"""
 
     def test_run_loop_no_apply_or_courier(self):
         """run_loop.py 不应出现 apply_* 或 Courier.send(K4 + K5)。"""
-        result = subprocess.run(
-            ["grep", "-nE", r"(apply_deontic\(|domain\.apply_\w+\(|Courier\.send\()",
-             str(ROOT / "karvyloop" / "cli" / "run_loop.py")],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        lines = grep_py(r"(apply_deontic\(|domain\.apply_\w+\(|Courier\.send\()",
+                        ROOT / "karvyloop" / "cli" / "run_loop.py")
         assert not lines, f"K 铁律违规\n{chr(10).join(lines)}"
 
     def test_run_loop_no_cloud_endpoint(self):
         """run_loop.py 不应拼 LLM cloud endpoint。"""
-        result = subprocess.run(
-            ["grep", "-nE", r"(api\.minimax\.chat|api\.anthropic\.com|api\.openai\.com)",
-             str(ROOT / "karvyloop" / "cli" / "run_loop.py")],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        lines = [l for l in result.stdout.splitlines() if l.strip()]
+        # URL 字面量(base_url="...")是真违规 → 扫原始文本,别把字符串抹掉漏了
+        lines = grep_py(r"(api\.minimax\.chat|api\.anthropic\.com|api\.openai\.com)",
+                        ROOT / "karvyloop" / "cli" / "run_loop.py", skip_comments=False)
         assert not lines, f"0 LLM 违规\n{chr(10).join(lines)}"
