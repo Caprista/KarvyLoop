@@ -45,17 +45,24 @@ Built-in presets (each with a "get a key" link): **Anthropic (Claude)** · **Ope
 
 Your key is written to `~/.karvyloop/config.yaml` — **on your disk, outside any repo, never uploaded**. Terminal person? `karvyloop init` runs the same wizard in your shell, and hand-editing the YAML is documented in the [README](../README.md#quickstart).
 
-## Minute 5–7 — Run your first task
+## Minute 5–7 — Your first task: one click on the journey bar
 
-You land in a private chat with **Karvy 🦫**, the built-in assistant. Say something small and concrete:
+You land in a private chat with **Karvy 🦫**, the built-in assistant — and on a fresh install, a **"✨ Your first 10 minutes"** journey bar sits right above the input with two demo chips. It's the fastest honest way to *see* the flywheel, and nothing in it is pre-recorded: both tasks really run on the model you just configured. (No model yet? The bar says so and sends you to setup first.)
 
-> *"list the 5 largest files in my workspace"*
+Click the first chip — **📊 Try: analyze quarterly_sales.csv**. It attaches a small bundled sample CSV (exactly the way you would with 📎) and runs it for real.
 
-**What you should see:** it runs — actually runs, in a sandbox, with the tool calls visible — and streams the result back. That's the **execution loop**: discover → run → verify → return. Behind the scenes the run was recorded in **Trace**, the append-only log every later judgment is derived from.
+**What you should see:** it runs — actually runs, in a sandbox, with the tool calls visible — and streams a per-category analysis back. That's the **execution loop**: discover → run → verify → return. Behind the scenes the run was recorded in **Trace**, the append-only log every later judgment is derived from.
 
-## Minute 7–9 — Run it again, and watch it compound
+## Minute 7–9 — The second chip, and the receipt that matters
 
-Do the same *kind* of task again — same ask, or a variation ("…in my Downloads folder"). This is where KarvyLoop differs from tools that forget you overnight:
+The bar now offers step 2 — **🔁 Once more: fastest-growing category** — a *similar* task on the same data. This is where KarvyLoop differs from tools that forget you overnight:
+
+- Watch the chat for the **♻ method-reuse receipt**: the second run didn't start from zero. The method used on run 1 (the bundled `data-analyst` skill) was recalled and guided your new question through the same steps — that receipt is the proof, not a claim.
+- The finale message points at your **growth curve**, which just got its first data points — every use accumulates. The **🧩 See my growth curve** chip takes you straight there.
+
+The journey is skippable, and replayable anytime from 🎬 in the top bar.
+
+**Skipped the journey (or upgraded an existing install)?** The manual path shows the same loop. Say something small and concrete — *"list the 5 largest files in my workspace"* — then do the same *kind* of task again ("…in my Downloads folder"):
 
 - **As you type**, related skills and knowledge surface unprompted in a **🧲 Related** panel — pure local matching, zero extra LLM calls.
 - **After enough repeats** — as early as the third run for a simple task, once it clears the promotion gates (a verify gate passed, ≥80% success rate, used enough or generalized across variants) — you'll see **🔔 Crystallized: {skill}**. Your repeated ask is now a written-down *method* in a readable `SKILL.md`.
