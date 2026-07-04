@@ -92,7 +92,11 @@ _ALL_CODES = [
     "config_missing", "config_unreadable", "no_default_model", "no_key", "model_not_ready",
     "model_ready", "deps_ok", "dep_missing", "dep_optional_missing", "data_fresh", "data_ok",
     "data_corrupt", "version_current", "version_newer", "port_busy", "port_free", "check_error",
-    "repaired_data_corrupt",
+    "repaired_data_corrupt", "repaired_config_missing", "repaired_config_unreadable",
+    # 活性检查 + 确认/日志
+    "endpoint_reachable", "endpoint_unreachable", "local_endpoint_down", "liveness_skipped",
+    "disk_writable", "disk_not_writable", "sandbox_ok", "sandbox_degraded", "sandbox_stub",
+    "sandbox_error",
 ]
 
 
@@ -107,3 +111,166 @@ def test_every_code_has_bilingual_message():
     for loc in ("en", "zh"):
         for code in _FIX_CODES:
             assert "doctor.fix." + code in TABLES[loc], f"[{loc}] 缺 doctor.fix.{code}"
+
+
+# ---- --fix 建缺失骨架(config_missing → 创建,幂等,不覆盖)----
+def test_repair_config_missing_creates_skeleton(tmp_path):
+    cfg = tmp_path / "sub" / "config.yaml"
+    finding = D.check_config(cfg)
+    assert finding[0].code == "config_missing"
+    r = D.repair_finding(finding[0])
+    assert r is not None and r.code == "repaired_config_missing"
+    assert cfg.exists() and "models:" in cfg.read_text(encoding="utf-8")
+
+
+def test_repair_config_missing_idempotent_no_overwrite(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("USER-CONTENT", encoding="utf-8")
+    # 已存在 → repair 返回 None(幂等,不踩用户已配)
+    assert D.repair_finding(D.Finding(D.FAIL, "config_missing", {"path": str(cfg)})) is None
+    assert cfg.read_text(encoding="utf-8") == "USER-CONTENT"
+
+
+def test_apply_fixes_config_missing_is_auto(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    findings = D.check_config(cfg)
+    repaired = D.apply_fixes(findings)   # 默认 include_confirmed=False,config_missing 属 AUTO
+    assert any(r.code == "repaired_config_missing" for r in repaired)
+    assert cfg.exists()
+
+
+# ---- config_unreadable 是危险修:默认 --fix 不碰,确认后才修(备份后重写)----
+def test_config_unreadable_not_auto_fixed(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("{ this is: not: valid: yaml", encoding="utf-8")
+    findings = [D.Finding(D.FAIL, "config_unreadable", {"path": str(cfg)})]
+    # 默认(不确认)→ 不动
+    assert D.apply_fixes(findings, include_confirmed=False) == []
+    assert cfg.read_text(encoding="utf-8").startswith("{ this")
+
+
+def test_config_unreadable_repaired_after_confirm(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("BROKEN", encoding="utf-8")
+    r = D.repair_finding(D.Finding(D.FAIL, "config_unreadable", {"path": str(cfg)}))
+    assert r is not None and r.code == "repaired_config_unreadable"
+    # 坏的被备份(可逆),新骨架就位
+    bak = tmp_path / "config.yaml.bak"
+    assert bak.exists() and bak.read_text(encoding="utf-8") == "BROKEN"
+    assert "models:" in cfg.read_text(encoding="utf-8")
+    assert D.CONFIRM_FIXABLE == {"config_unreadable"}
+
+
+# ---- 活性检查:endpoint 连不上被检出 / 装了没配 vs 配了连不上 ----
+def _write_cloud_cfg(p, key="sk-FAKE-DO-NOT-LEAK"):
+    import textwrap
+    p.write_text(textwrap.dedent(f"""\
+        models:
+          providers:
+            anthropic:
+              base_url: https://api.anthropic.com
+              auth: api-key
+              api_key: {key}
+              models:
+                - id: anthropic/claude-x
+                  name: X
+                  api: anthropic-messages
+                  context_window: 200000
+                  max_tokens: 8192
+        agents:
+          defaults:
+            model: anthropic/claude-x
+        """), encoding="utf-8")
+
+
+def test_liveness_endpoint_unreachable_detected(tmp_path):
+    from karvyloop import doctor_liveness as L
+    cfg = tmp_path / "config.yaml"
+    _write_cloud_cfg(cfg)
+    # 配好了(有 key)但网络探测失败 → endpoint_unreachable(FAIL)
+    f = L.check_endpoint(cfg, connect_probe=lambda h, p: False)
+    assert f[0].level == "fail" and f[0].code == "endpoint_unreachable"
+    assert "host" in f[0].params
+    # 探通 → reachable
+    f2 = L.check_endpoint(cfg, connect_probe=lambda h, p: True)
+    assert f2[0].code == "endpoint_reachable"
+
+
+def test_liveness_distinguishes_unconfigured_from_unreachable(tmp_path):
+    from karvyloop import doctor_liveness as L
+    cfg = tmp_path / "config.yaml"
+    _write_cloud_cfg(cfg, key="")   # 没配 key
+    # 没配 → skipped(不冒充"连不上"),区分"装了没配" vs "配了连不上"
+    f = L.check_endpoint(cfg, connect_probe=lambda h, p: False)
+    assert f[0].code == "liveness_skipped"
+    # 没 config 文件 → 也 skipped
+    assert L.check_endpoint(tmp_path / "none.yaml")[0].code == "liveness_skipped"
+
+
+def test_liveness_probe_never_sends_key(tmp_path, monkeypatch):
+    """活性探测只做 TCP connect,不发任何字节 → 不可能泄 key。"""
+    from karvyloop import doctor_liveness as L
+    cfg = tmp_path / "config.yaml"
+    _write_cloud_cfg(cfg, key="sk-FAKE-DO-NOT-LEAK-SECRET")
+    seen = {}
+    def spy(host, port):
+        seen["host"] = host
+        seen["port"] = port
+        return True
+    f = L.check_endpoint(cfg, connect_probe=spy)
+    assert f[0].code == "endpoint_reachable"
+    # probe 只拿到 host/port,拿不到 key(签名里根本没 key)
+    assert seen == {"host": "api.anthropic.com", "port": 443}
+
+
+def test_liveness_disk_and_sandbox(tmp_path, monkeypatch):
+    from karvyloop import doctor_liveness as L
+    monkeypatch.setattr(L, "_data_dir", lambda: tmp_path)
+    assert L.check_disk_writable()[0].code == "disk_writable"
+    # 沙箱:任一实现,永不抛,产 ok/warn
+    sf = L.check_sandbox()[0]
+    assert sf.level in ("ok", "warn")
+
+
+def test_run_liveness_never_raises(tmp_path):
+    from karvyloop import doctor_liveness as L
+    out = L.run_liveness(config_path=tmp_path / "none.yaml", connect_probe=lambda h, p: True)
+    assert isinstance(out, list) and out
+
+
+# ---- 日志固定落盘 ----
+def test_log_findings_writes_to_fixed_path(tmp_path, monkeypatch):
+    import karvyloop.doctor_log as LOG
+    monkeypatch.setattr(LOG, "logs_dir", lambda: tmp_path / "logs")
+    monkeypatch.setattr(LOG, "_configured", False)
+    import logging
+    logging.getLogger("karvyloop.doctor").handlers = []
+    p = LOG.log_findings([D.Finding(D.WARN, "port_busy", {"port": 8766})], phase="test")
+    assert p is not None and p.exists()
+    text = p.read_text(encoding="utf-8")
+    assert "port_busy" in text
+
+
+def test_log_never_contains_key(tmp_path, monkeypatch):
+    """落盘只写 finding code+params(从不含 key);断言日志里没有任何 FAKE key 痕迹。"""
+    import karvyloop.doctor_log as LOG
+    monkeypatch.setattr(LOG, "logs_dir", lambda: tmp_path / "logs")
+    monkeypatch.setattr(LOG, "_configured", False)
+    import logging
+    logging.getLogger("karvyloop.doctor").handlers = []
+    LOG.log_findings([D.Finding(D.OK, "endpoint_reachable",
+                                {"host": "api.anthropic.com", "provider": "anthropic"})])
+    text = LOG.log_path().read_text(encoding="utf-8")
+    assert "FAKE" not in text and "sk-" not in text and "api_key" not in text
+
+
+# ---- health_summary(给 /api/health)----
+def test_health_summary_shape(tmp_path):
+    from karvyloop.cli.doctor_cmd import health_summary
+    s = health_summary(config_path=tmp_path / "none.yaml")
+    assert s["overall"] in ("ok", "warn", "fail")
+    assert isinstance(s["findings"], list)
+    for item in s["findings"]:
+        assert item["fixable"] in ("auto", "confirm", "no")
+    # config_missing 应标 auto-fixable
+    assert any(f["code"] == "config_missing" and f["fixable"] == "auto" for f in s["findings"])

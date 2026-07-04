@@ -149,16 +149,35 @@ def overall(findings: list[Finding]) -> str:
     return FAIL if FAIL in levels else (WARN if WARN in levels else OK)
 
 
-# ---- L1 自愈(确定性):只自动修**可逆/低风险**的;其余一律留给人拍(propose-only)----
-# 升级铁律的对偶在修复上同样成立:"自动修"绝不等于"悄悄改你系统"。
-AUTO_FIXABLE = {"data_corrupt"}
+# ---- L1 自愈(确定性)----
+# 升级铁律的对偶在修复上同样成立:"自动修"绝不等于"悄悄改你系统"。修复分两级:
+#   AUTO_FIXABLE          —— 确定性 + 可逆 + **不覆盖用户已有内容** → --fix 直接修(幂等)。
+#   CONFIRM_FIXABLE       —— 会动到用户可能在意的东西(重写 config)→ 必须先问 y/N 才修(仍备份可逆)。
+# 每个 fix:改前备份、幂等(重复跑不出错也不叠加破坏)、fail-loud(修不了返回 None,不假装成功)。
+
+# 自动可修:坏数据文件备份重置(已有)、缺目录/骨架从无到有创建(纯创建,不覆盖)。
+AUTO_FIXABLE = {"data_corrupt", "config_missing"}
+# 需确认才修:配置读不了 —— 修 = 备份旧的 + 写默认骨架,会动用户手写的 yaml,危险,先问。
+CONFIRM_FIXABLE = {"config_unreadable"}
+
+
+def _write_config_skeleton(cfg_path: Path) -> Path:
+    """把默认 config 骨架写到 cfg_path(父目录一并建)。返回写入路径。"""
+    from karvyloop.cli.init import DEFAULT_CONFIG_YAML
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(DEFAULT_CONFIG_YAML, encoding="utf-8")
+    return cfg_path
 
 
 def repair_finding(finding: Finding) -> Optional[Finding]:
-    """对可自动修的 finding 执行**可逆**修复。返回一条描述"修了什么"的 ok Finding;不可自动修 → None。
+    """对可自动修的 finding 执行**可逆/幂等**修复。返回描述"修了什么"的 ok Finding;修不了 → None。
 
     data_corrupt:把解析不了的 JSON **备份**成 `<name>.corrupt.bak`(原子 rename),原文件移走
-    → 系统下次从空重建那一个文件(其余数据不动)。可逆:用户能从 .bak 找回。
+        → 系统下次从空重建那一个文件(其余数据不动)。可逆:用户能从 .bak 找回。
+    config_missing:config 根本不存在 → 建 ~/.karvyloop/ + 写默认骨架(**纯创建、不覆盖**,
+        幂等:文件已存在则不动,避免踩掉用户已配)。安全:没有任何已有内容被改。
+    config_unreadable(CONFIRM 级,仅在调用方确认后走这里):**先备份**坏的成
+        `config.yaml.bak.<n>`(不覆盖历史备份 → 可逆),再写默认骨架。
     """
     if finding.code == "data_corrupt":
         d = _data_dir()
@@ -174,14 +193,51 @@ def repair_finding(finding: Finding) -> Optional[Finding]:
                 pass
         if moved:
             return Finding(OK, "repaired_data_corrupt", {"files": ", ".join(moved)})
+        return None
+
+    if finding.code == "config_missing":
+        from karvyloop.cli.init import default_config_path
+        raw = finding.params.get("path", "")
+        cfg = Path(raw) if raw else default_config_path()
+        if cfg.exists():
+            return None                                   # 幂等:已存在就别覆盖(别踩用户已配)
+        try:
+            _write_config_skeleton(cfg)
+            return Finding(OK, "repaired_config_missing", {"path": str(cfg)})
+        except Exception:
+            return None                                   # fail-loud:写不了不假装修好
+
+    if finding.code == "config_unreadable":
+        from karvyloop.cli.init import default_config_path
+        raw = finding.params.get("path", "")
+        cfg = Path(raw) if raw else default_config_path()
+        if not cfg.exists():
+            return None
+        try:
+            # 备份坏 config(不覆盖历史备份 → 可逆),再写默认骨架
+            n = 1
+            bak = cfg.with_suffix(cfg.suffix + ".bak")
+            while bak.exists():
+                bak = cfg.with_suffix(cfg.suffix + f".bak.{n}")
+                n += 1
+            cfg.replace(bak)                              # 原子:把坏的挪到备份名
+            _write_config_skeleton(cfg)
+            return Finding(OK, "repaired_config_unreadable", {"path": str(cfg), "backup": str(bak)})
+        except Exception:
+            return None
     return None
 
 
-def apply_fixes(findings: list[Finding]) -> list[Finding]:
-    """对所有可自动修的 finding 执行修复,返回"修了什么"的 Finding 列表。永不抛。"""
+def apply_fixes(findings: list[Finding], *, include_confirmed: bool = False) -> list[Finding]:
+    """对可自动修的 finding 执行修复,返回"修了什么"的 Finding 列表。永不抛。
+
+    include_confirmed=False → 只修 AUTO_FIXABLE(--fix 默认:安全那批)。
+    include_confirmed=True  → 额外也修 CONFIRM_FIXABLE(调用方已拿到用户 y/N 确认才传 True)。
+    """
+    fixable = AUTO_FIXABLE | (CONFIRM_FIXABLE if include_confirmed else set())
     out: list[Finding] = []
     for f in findings:
-        if f.code in AUTO_FIXABLE:
+        if f.code in fixable:
             try:
                 r = repair_finding(f)
             except Exception:
@@ -193,4 +249,4 @@ def apply_fixes(findings: list[Finding]) -> list[Finding]:
 
 __all__ = ["Finding", "run_doctor", "overall", "OK", "WARN", "FAIL",
            "check_config", "check_deps", "check_data_dir", "check_version", "check_console_port",
-           "AUTO_FIXABLE", "repair_finding", "apply_fixes"]
+           "AUTO_FIXABLE", "CONFIRM_FIXABLE", "repair_finding", "apply_fixes"]

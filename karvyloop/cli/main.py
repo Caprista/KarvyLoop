@@ -63,6 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # doctor / status(确定性自检 — 零模型,无门槛"修"的 Layer 0)
     p_doctor = sub.add_parser("doctor", help=t("cli.help.doctor"))
     p_doctor.add_argument("--fix", action="store_true", help=t("cli.help.doctor.fix"))
+    p_doctor.add_argument("--online", action="store_true", help=t("cli.help.doctor.online"))
     sub.add_parser("status", help=t("cli.help.status"))
 
     # replay(M3+ 批 6 — Trace 重放子命令)
@@ -223,7 +224,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.cmd == "doctor":
         from .doctor_cmd import cmd_doctor
-        return cmd_doctor(fix=getattr(args, "fix", False))
+        return cmd_doctor(fix=getattr(args, "fix", False), online=getattr(args, "online", False))
 
     if args.cmd == "status":
         from .doctor_cmd import cmd_status
