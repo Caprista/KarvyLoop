@@ -1,12 +1,12 @@
 """desk 灵魂层 P1.5 的真浏览器验收(Playwright,docs/53)。
 
-jsdom smoke 验逻辑,这里验**浏览器运行时**(canvas 真画了没 / CSS transition 真跑没 /
+jsdom smoke 验逻辑,这里验**浏览器运行时**(官方原图真加载没 / CSS transition 真跑没 /
 0 console error)——"看着写完了"≠"真能跑"(web_verify 同一教训)。
 
 覆盖(全部走真实契约形状,没有假戏):
-  1. desk 视图进场 → 右下像素小卡 canvas 渲染出来(getImageData 非空);
+  1. desk 视图进场 → 右下小卡 sprite 渲染出来(官方原图 img 真加载,naturalWidth>0);
   2. h2a 卡到达(app.js 收 h2a_proposal 调的同一个钩子 KarvyDesktop.notifyH2A)
-     → 叼卡小演员出现 → 到位撤掉 → ⚖ 便签闪;
+     → 叼卡小演员出现(carry 态 + 小白卡 overlay 真显示)→ 到位撤掉 → ⚖ 便签闪;
   3. task_status done(契约形状喂灵魂接缝)→ 署名便签浮出(who + 结果摘要);
   4. 全程 0 console error / 0 pageerror。
 
@@ -84,30 +84,30 @@ def test_desk_soul_in_real_browser(console_url):
         page.click("#view-opt-desk")
         page.wait_for_function("document.body.classList.contains('desk-view')", timeout=5000)
 
-        # 1) 像素小卡真渲染:canvas 存在、可见、且有非透明像素(不是空 canvas)
+        # 1) 小卡 sprite 真渲染:根可见、官方原图 <img> 真加载(不是 404/占位)
         page.wait_for_selector("#desk-karvy-pixel", state="visible", timeout=5000)
-        painted = page.evaluate("""() => {
-            const cv = document.getElementById('desk-karvy-pixel');
-            const ctx = cv.getContext('2d');
-            const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
-            let n = 0;
-            for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
-            return n;
+        loaded = page.evaluate("""() => {
+            const img = document.querySelector('#desk-karvy-pixel img.karvy-sprite-img');
+            if (!img || !/karvy-capybara\\.png/.test(img.src)) return 0;
+            return img.complete && img.naturalWidth > 0 ? img.naturalWidth : 0;
         }""")
-        assert painted > 80, f"像素小卡 canvas 应画了实像素,实际非透明像素 {painted}"
+        assert loaded > 0, f"小卡 sprite 应真加载官方原图(naturalWidth>0),实际 {loaded}"
+        assert page.evaluate(
+            "document.getElementById('desk-karvy-pixel').getAttribute('data-state') !== null"
+        ), "sprite 根应带 data-state(CSS 状态动画钩子)"
 
         # 2) h2a 到达(app.js 收 h2a_proposal 调的就是这个钩子)→ 叼卡动画元素出现
         page.evaluate("window.KarvyDesktop.notifyH2A()")
         page.wait_for_selector("#desk-carry-actor", state="attached", timeout=3000)
-        carry_painted = page.evaluate("""() => {
-            const cv = document.querySelector('#desk-carry-actor canvas');
-            if (!cv) return -1;
-            const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-            let n = 0;
-            for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
-            return n;
+        carry = page.evaluate("""() => {
+            const sp = document.querySelector('#desk-carry-actor .karvy-sprite');
+            if (!sp) return {state: '', card: 'none'};
+            const card = sp.querySelector('.karvy-sprite-card');
+            return {state: sp.getAttribute('data-state') || '',
+                    card: card ? getComputedStyle(card).display : 'none'};
         }""")
-        assert carry_painted > 80, f"叼卡小演员 canvas 应画了实像素,实际 {carry_painted}"
+        assert carry["state"] == "carry", f"叼卡小演员应进 carry 态,实际 {carry}"
+        assert carry["card"] != "none", f"carry 态应真显示小白卡 overlay,实际 {carry}"
         # 到位:小演员撤掉、⚖ 便签闪(真 transition,transitionend/2s 兜底双保险)
         page.wait_for_selector("#desk-carry-actor", state="detached", timeout=4000)
         assert page.evaluate(
@@ -133,10 +133,10 @@ def test_desk_soul_in_real_browser(console_url):
         }""")
         assert presence_state in ("hidden", "populated"), f"工位栏不许空壳: {presence_state}"
 
-        # 老视图零回归:切回对话视图,像素替身移除(PNG 回归)、灵魂 DOM 不漏
+        # 老视图零回归:切回对话视图,sprite 替身移除(fab 静态 PNG 回归)、灵魂 DOM 不漏
         page.click("#view-opt-chat")
         page.wait_for_function("!document.body.classList.contains('desk-view')", timeout=5000)
-        assert page.evaluate("!document.getElementById('desk-karvy-pixel')"), "离开 desk 应移除像素替身"
+        assert page.evaluate("!document.getElementById('desk-karvy-pixel')"), "离开 desk 应移除 sprite 替身"
         assert page.evaluate("document.querySelectorAll('.desk-signed-note').length === 0"), "离开 desk 应清署名便签"
 
         browser.close()

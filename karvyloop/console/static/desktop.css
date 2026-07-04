@@ -323,10 +323,134 @@ body.desk-view .desk-presence {
 }
 body.desk-view .desk-presence.hidden { display: none; }
 
-/* 像素画通用:nearest-neighbor 放大,保锐利 */
-body.desk-view .pixelpet-canvas {
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+/* ---- 卡皮巴拉 sprite 通用(pixelpet.ts v2):官方原图 + 状态 CSS 动画 ----
+   手绘像素帧已废;状态由 [data-state](只有真实事件消费方 setState)驱动,
+   引擎零定时器 —— idle 呼吸/working 颠动/carry 摇摆/sleep 变暗+Zzz/happy 一跳全在这。 */
+body.desk-view .karvy-sprite {
+  position: relative;
+  display: block;
+  line-height: 0;
+  pointer-events: none;          /* 可点的是宿主(工位按钮/fab),sprite 纯装饰 */
+}
+body.desk-view .karvy-sprite .karvy-sprite-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+/* 彩色工牌(accent 区分角色,colorForRole 确定性映射):贴在左胸,不压∞ */
+body.desk-view .karvy-sprite .karvy-sprite-badge {
+  position: absolute;
+  left: 21%;
+  top: 54%;
+  width: 15%;
+  height: 8%;
+  border-radius: 2px;
+  background: var(--pet-accent, #8fc7e8);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 3px rgba(58, 43, 31, 0.28);
+}
+/* 状态 overlay 基座:默认全隐藏,进对应状态才出现 */
+body.desk-view .karvy-sprite .karvy-sprite-keys,
+body.desk-view .karvy-sprite .karvy-sprite-card,
+body.desk-view .karvy-sprite .karvy-sprite-zzz { display: none; position: absolute; }
+
+/* idle:缓慢呼吸浮动("在场",不是戏) */
+body.desk-view .karvy-sprite[data-state="idle"] .karvy-sprite-img {
+  transform-origin: 50% 100%;
+  animation: karvy-breathe 3.4s ease-in-out infinite;
+}
+@keyframes karvy-breathe {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(1px) scaleY(0.982); }
+}
+
+/* working:快节奏打字颠动 + 身前键盘微光条 */
+body.desk-view .karvy-sprite[data-state="working"] .karvy-sprite-img {
+  transform-origin: 50% 100%;
+  animation: karvy-type 0.42s ease-in-out infinite;
+}
+@keyframes karvy-type {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(-2px) scaleY(0.99); }
+}
+body.desk-view .karvy-sprite[data-state="working"] .karvy-sprite-keys {
+  display: block;
+  left: 18%;
+  bottom: -3%;
+  width: 64%;
+  height: 6%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #cfe8ff, #9ed1f7, #cfe8ff);
+  box-shadow: 0 0 8px 2px rgba(158, 209, 247, 0.55);
+  animation: karvy-keys 0.84s linear infinite;
+}
+@keyframes karvy-keys {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* carry:左右摇摆 + 嘴边叼一张小白卡 */
+body.desk-view .karvy-sprite[data-state="carry"] .karvy-sprite-img {
+  transform-origin: 50% 88%;
+  animation: karvy-waddle 0.6s ease-in-out infinite;
+}
+@keyframes karvy-waddle {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+body.desk-view .karvy-sprite[data-state="carry"] .karvy-sprite-card {
+  display: block;
+  left: 3%;
+  top: 41%;
+  width: 32%;
+  height: 22%;
+  background: repeating-linear-gradient(#fffdf5 0 4px, #efe6d2 4px 5px);
+  border: 1px solid #d9cbb2;
+  border-radius: 2px;
+  box-shadow: 0 3px 6px rgba(58, 43, 31, 0.22);
+  transform: rotate(-10deg);
+}
+
+/* sleep:整体变暗 + 头顶 Zzz(慢呼吸) */
+body.desk-view .karvy-sprite[data-state="sleep"] .karvy-sprite-img {
+  filter: brightness(0.72) saturate(0.85);
+  transform-origin: 50% 100%;
+  animation: karvy-doze 4.6s ease-in-out infinite;
+}
+@keyframes karvy-doze {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(1px) scaleY(0.975); }
+}
+body.desk-view .karvy-sprite[data-state="sleep"] .karvy-sprite-zzz {
+  display: block;
+  right: -8%;
+  top: -14%;
+  font-size: var(--fs-12);
+  line-height: 1;
+  font-weight: 700;
+  color: #8fa8c0;
+  animation: karvy-zzz 2.6s ease-in-out infinite;
+}
+body.desk-view .karvy-sprite[data-state="sleep"] .karvy-sprite-zzz::after {
+  content: "z Z z";              /* 拟声装饰(aria-hidden),不是文案 */
+}
+@keyframes karvy-zzz {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* happy:跳一下级别的欢快(拍板闭环 h2a_envelope 真实事件,2.2s 后 JS 回真实态) */
+body.desk-view .karvy-sprite[data-state="happy"] .karvy-sprite-img {
+  transform-origin: 50% 100%;
+  animation: karvy-hop 0.55s var(--ease-out) 3;
+}
+@keyframes karvy-hop {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  35% { transform: translateY(-12%) rotate(-3deg); }
+  65% { transform: translateY(-4%) rotate(2deg); }
 }
 
 /* ---- 工位(原则二:干活亮灯,空闲呼吸,可旁观不打扰)---- */
@@ -351,7 +475,7 @@ body.desk-view .desk-station {
 }
 body.desk-view .desk-station:hover { transform: translateY(-3px); }
 body.desk-view .desk-station:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
-body.desk-view .desk-station .pixelpet-canvas { width: 72px; height: 54px; display: block; }
+body.desk-view .desk-station .karvy-sprite { width: 54px; height: 63px; }   /* 原图 441×512 等比 */
 body.desk-view .desk-station .station-name {
   max-width: 84px;
   overflow: hidden;
@@ -397,19 +521,17 @@ body.desk-view .desk-station[data-tip]:hover::after {
   z-index: 3;
 }
 
-/* ---- 小卡像素替身(右下常驻;PNG 在对话/看板视图原样保留)---- */
+/* ---- 小卡 sprite 替身(右下常驻;fab 原静态 PNG 在对话/看板视图原样保留)---- */
 #desk-karvy-pixel { display: none; }
-body.desk-view .karvy-fab img { display: none; }
+body.desk-view .karvy-fab > img { display: none; }   /* 只藏 fab 直属静态图,sprite 内的原图不受累 */
 body.desk-view .karvy-fab #desk-karvy-pixel {
   display: block;
-  width: 96px;
-  height: 72px;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+  width: 82px;
+  height: 95px;              /* 原图 441×512 等比 */
 }
 body.desk-view .karvy-fab #desk-karvy-pixel.is-away { visibility: hidden; }  /* 起身叼卡去了 */
 
-/* ---- 叼卡走(vignette ③):固定层小演员,transform 位移 + sprite carry 帧 ---- */
+/* ---- 叼卡走(vignette ③):固定层小演员,transform 位移 + sprite carry 态 ---- */
 .desk-carry { display: none; }
 body.desk-view .desk-carry {
   position: fixed;
@@ -418,11 +540,9 @@ body.desk-view .desk-carry {
   pointer-events: none;
   will-change: transform;
 }
-body.desk-view .desk-carry canvas {
-  width: 80px;
-  height: 60px;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+body.desk-view .desk-carry .karvy-sprite {
+  width: 64px;
+  height: 74px;              /* 原图 441×512 等比 */
 }
 body.desk-view .desk-carry.is-walking { transition: transform 1.7s cubic-bezier(0.45, 0.08, 0.4, 1); }
 
@@ -609,8 +729,11 @@ body.desk-view .desk-memento .desk-memento-chip {
 }
 /* prefers-reduced-motion:无位移动画;⚖ 提醒只变色不呼吸;
    灵魂层同罪同罚:便签不滑入、工位不浮动、叼卡不走(JS 侧也跳过,直接闪便签)、
-   sprite 帧轮换由 pixelpet 自身停(静止首帧)。 */
+   sprite 状态动画全停(静止首帧;sleep 的变暗/Zzz 是状态不是动效,保留但不飘)。 */
 @media (prefers-reduced-motion: reduce) {
+  body.desk-view .karvy-sprite .karvy-sprite-img,
+  body.desk-view .karvy-sprite .karvy-sprite-keys,
+  body.desk-view .karvy-sprite .karvy-sprite-zzz { animation: none; }
   body.desk-view .desk-dock .dock-item,
   body.desk-view .desk-dock .dock-item:hover { transform: none; transition: none; }
   body.desk-view .cockpit-col.note-alert {

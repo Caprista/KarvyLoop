@@ -216,14 +216,20 @@ assert.ok(stR, "researcher 工位缺失");
 assert.ok(stR.classList.contains("is-busy"), "busy 角色工位灯应亮(is-busy)");
 assert.equal(stR.dataset.petState, "working", "busy → working 动画(真实状态驱动)");
 assert.ok((stR.getAttribute("data-tip") || "").indexOf("整理季度周报") >= 0, "hover 应出「正在:<intent>」");
-assert.ok(stR.querySelector("canvas.pixelpet-canvas"), "工位应有像素卡皮巴拉 canvas");
+const stSprite = stR.querySelector(".karvy-sprite");
+assert.ok(stSprite, "工位应有卡皮巴拉 sprite(官方原图)");
+assert.ok(stSprite.querySelector("img.karvy-sprite-img"), "工位 sprite 应内含官方原图 <img>");
+assert.equal(stSprite.getAttribute("data-state"), "working", "工位 sprite data-state 应随真实状态");
 assert.equal(stR.querySelector(".station-name").textContent, "研究员");
 const stZ = document.querySelector('.desk-station[data-role-id="resty"]');
 assert.equal(stZ.dataset.petState, "sleep", "2 小时没活动 → sleep(真实状态,不是 flavor)");
 assert.ok(!document.querySelector('.desk-station[data-role-id="karvy"]'), "小卡不该占工位(它常驻右下)");
 assert.ok(!document.querySelector('.desk-station[data-role-id="idler"]'), "零活动记录的角色不摆空工位");
-// 小卡像素替身住进 .karvy-fab
-assert.ok(document.querySelector("#chat-open #desk-karvy-pixel"), "小卡像素替身应住进右下 fab");
+// 小卡 sprite 替身住进 .karvy-fab(占位 canvas 已被 sprite 根原位替换,id 保留)
+const mascotRoot = document.querySelector("#chat-open #desk-karvy-pixel");
+assert.ok(mascotRoot, "小卡 sprite 替身应住进右下 fab");
+assert.ok(mascotRoot.classList.contains("karvy-sprite"), "替身应是 .karvy-sprite 根(原图版)");
+assert.ok(mascotRoot.querySelector("img.karvy-sprite-img"), "替身应内含官方原图 <img>");
 
 // ---- 只读 WS:进场即连;role_presence 增量翻状态 ----
 assert.ok(FakeWS.instances.length >= 1, "desk 进场应自开一条只读 WS");
@@ -267,7 +273,9 @@ assert.equal(notes.length, 3, "署名便签 3 张上限(旧的淡出)");
 KD2.notifyH2A();
 const actor = document.getElementById("desk-carry-actor");
 assert.ok(actor, "h2a 到达应出现叼卡小演员(.desk-carry)");
-assert.ok(actor.querySelector("canvas"), "小演员应是像素 canvas");
+const actorSprite = actor.querySelector(".karvy-sprite");
+assert.ok(actorSprite, "小演员应是原图 sprite");
+assert.equal(actorSprite.getAttribute("data-state"), "carry", "小演员应进 carry 态(叼小白卡 overlay)");
 assert.ok(document.getElementById("desk-karvy-pixel").classList.contains("is-away"),
   "叼卡途中常驻小卡应离席(is-away)");
 const decide2 = document.querySelector(".col-decide");

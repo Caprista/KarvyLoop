@@ -1,8 +1,9 @@
-/* pixelpet_smoke.mjs — 像素 sprite 引擎单元(docs/53 P1.5)。
+/* pixelpet_smoke.mjs — 卡皮巴拉 sprite 引擎单元(docs/53 P1.5,v2 原图版)。
  * jsdom 里加载构建产物 static/desktop.js(pixelpet 打包在内,import 副作用挂
- * window.KarvyPixelPet)。断言:帧数据合法 / palette 换色 / 状态机只认真实状态
- * (红线:引擎没有任何"闲逛/假装干活"的戏剧状态可进)。
- * jsdom canvas 无 2d context → createPet 走"不画只跑状态机"分支,正好测纯逻辑。
+ * window.KarvyPixelPet)。断言:官方原图 sprite 挂载(占位 canvas 原位替换)/
+ * accent 工牌换色 / 状态机只认真实状态(红线:引擎没有任何"闲逛/假装干活"的
+ * 戏剧状态可进,且引擎自己零定时器,状态只能被 setState 翻)。
+ * FRAMES/validateFrames 是兼容桩(手绘像素帧已废):恒空、恒合法。
  */
 import { JSDOM, VirtualConsole } from "jsdom";
 import { readFileSync } from "node:fs";
@@ -10,7 +11,6 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import assert from "node:assert/strict";
 
-// jsdom 无 canvas 2d 是已知环境事实(引擎走"不画只跑状态机"分支),吞掉这条噪音
 const vc = new VirtualConsole();
 vc.on("jsdomError", (e) => {
   if (!/Not implemented/.test(String(e && e.message))) console.error(e);
@@ -31,32 +31,23 @@ for (const fn of ["createPet", "validateFrames", "buildPalette", "colorForRole"]
   assert.equal(typeof P[fn], "function", `KarvyPixelPet.${fn} 缺失`);
 }
 
-// ---- 1) 帧数据合法:全部帧 32×24、字符都在 palette 里 ----
-assert.deepEqual(P.validateFrames(), [], "帧数据不合法(尺寸/字符越界)");
-assert.equal(P.WIDTH, 32);
-assert.equal(P.HEIGHT, 24);
+// ---- 1) 兼容桩:手绘帧已废 —— validateFrames 恒 [],FRAMES 恒空对象 ----
+assert.deepEqual(P.validateFrames(), [], "validateFrames 兼容桩应恒返回 []");
+assert.equal(typeof P.FRAMES, "object");
+assert.deepEqual(Object.keys(P.FRAMES), [], "FRAMES 兼容桩应为空(帧数据已废,别再往里塞)");
+assert.equal(typeof P.WIDTH, "number");
+assert.equal(typeof P.HEIGHT, "number");
+assert.ok(/karvy-capybara\.png$/.test(P.SPRITE_URL), "sprite 应指向官方原图 karvy-capybara.png");
 
 // ---- 2) 状态机只认真实状态:idle/working/carry/sleep/happy,一个戏剧状态都没有 ----
-// (红线锁:业界虚拟办公室产品的 idle 假戏被用户嘲讽过;这里连"闲逛/上厕所"的帧都不存在)
+// (红线锁:业界虚拟办公室产品的 idle 假戏被用户嘲讽过;这里连"闲逛/上厕所"的状态都不存在)
 assert.deepEqual([...P.STATES].sort(), ["carry", "happy", "idle", "sleep", "working"].sort(),
   "STATES 必须只有 5 个真实驱动态");
-assert.ok(P.FRAMES.idle.length >= 2, "idle 应有呼吸 2 帧");
-assert.ok(P.FRAMES.working.length >= 2 && P.FRAMES.working.length <= 3, "working 应为打字 2-3 帧");
-assert.ok(P.FRAMES.carry.length >= 2, "carry 应有叼卡走 2 帧");
-assert.ok(P.FRAMES.sleep.length >= 1, "sleep 帧缺失");
-assert.ok(P.FRAMES.blink && P.FRAMES.blink.length >= 1, "blink 插帧缺失(眨眼是'在场'允许项)");
-// carry 帧必须真的叼着白卡(W 像素),sleep 帧必须有 Zzz(Z 像素)
-assert.ok(P.FRAMES.carry[0].some((row) => row.indexOf("W") >= 0), "carry 帧没有白卡(W)");
-assert.ok(P.FRAMES.sleep[0].some((row) => row.indexOf("Z") >= 0), "sleep 帧没有 Zzz(Z)");
-// 围巾(accent A)在基础帧上,palette 换色才有意义
-assert.ok(P.FRAMES.idle[0].some((row) => row.indexOf("A") >= 0), "idle 帧没有围巾(A)");
 
-// ---- 3) palette 换色:同一形状,accent 换主色;非法输入回退品牌浅蓝 ----
+// ---- 3) accent 换色(工牌):合法 accent 生效 + 暗部推导;非法输入回退品牌浅蓝 ----
 const pal1 = P.buildPalette("#e07a5f");
 assert.equal(pal1.A, "#e07a5f", "accent 未生效");
 assert.notEqual(pal1.a, pal1.A, "accent 暗部应从主色推导(更深)");
-const pal2 = P.buildPalette("#6a994e");
-assert.equal(pal1.B, pal2.B, "身体主色不随 accent 变(同形状换围巾色)");
 assert.equal(P.buildPalette("garbage").A, P.KARVY_ACCENT, "非法 accent 应回退品牌浅蓝");
 
 // ---- 4) 角色配色确定性:同 id 永远同色;小卡恒品牌浅蓝 ----
@@ -64,20 +55,47 @@ assert.equal(P.colorForRole("researcher"), P.colorForRole("researcher"), "同角
 assert.equal(P.colorForRole("karvy"), P.KARVY_ACCENT, "小卡应恒品牌浅蓝");
 assert.equal(P.colorForRole(""), P.KARVY_ACCENT);
 
-// ---- 5) createPet 状态机:未知状态被拒(不瞎演),destroy 停表 ----
+// ---- 5) 挂载:占位 canvas 原位替换成 sprite 根(id 保留),原图 + overlay 齐全 ----
+const host = dom.window.document.createElement("div");
+dom.window.document.body.appendChild(host);
 const cv = dom.window.document.createElement("canvas");
+cv.id = "pet-under-test";
+host.appendChild(cv);
 const pet = P.createPet({ canvas: cv, accent: "#e07a5f" });
+const root = host.querySelector(".karvy-sprite");
+assert.ok(root, "占位 canvas 应被 .karvy-sprite 根原位替换");
+assert.ok(!host.querySelector("canvas"), "替换后不该残留占位 canvas");
+assert.equal(root.id, "pet-under-test", "id 应随 sprite 根保留(#desk-karvy-pixel 等选择器契约)");
+const img = root.querySelector("img.karvy-sprite-img");
+assert.ok(img, "sprite 应内含官方原图 <img>");
+assert.ok(img.src.indexOf("karvy-capybara.png") >= 0, "img 必须指向官方原图(不是手绘像素)");
+assert.equal(img.getAttribute("aria-hidden"), "true", "装饰图应 aria-hidden(可达名称归宿主)");
+for (const part of ["badge", "keys", "card", "zzz"]) {
+  assert.ok(root.querySelector(".karvy-sprite-" + part), `overlay .karvy-sprite-${part} 缺失`);
+}
+assert.equal(root.style.getPropertyValue("--pet-accent"), "#e07a5f", "accent 应落到 --pet-accent(工牌换色)");
+
+// ---- 6) createPet 状态机:data-state 只由 setState 翻;未知状态被拒;destroy 封机 ----
 assert.equal(pet.state(), "idle", "初始应 idle");
+assert.equal(root.getAttribute("data-state"), "idle", "初始 data-state 应 idle(CSS 动画钩子)");
 assert.equal(pet.setState("working"), true);
 assert.equal(pet.state(), "working");
+assert.equal(root.getAttribute("data-state"), "working", "setState 应同步 data-state");
 assert.equal(pet.setState("procrastinate"), false, "未知状态必须被拒");
 assert.equal(pet.state(), "working", "被拒后状态不该变");
 assert.equal(pet.setState("sleep"), true);
 assert.equal(pet.state(), "sleep");
+assert.equal(root.getAttribute("data-state"), "sleep");
+// 引擎零定时器:等一拍,状态纹丝不动(呼吸等在场感全在 CSS,不在 JS)
+await new Promise((r) => setTimeout(r, 60));
+assert.equal(root.getAttribute("data-state"), "sleep", "引擎不许自己换状态(docs/53 红线)");
 pet.destroy();
 assert.equal(pet.setState("idle"), false, "destroy 后 setState 应拒绝");
-assert.ok(cv.classList.contains("pixelpet-canvas"), "canvas 应挂 pixelpet-canvas 类(CSS 像素锐利)");
-assert.equal(cv.width, 32);
-assert.equal(cv.height, 24);
+assert.equal(root.getAttribute("data-state"), "sleep", "destroy 后 data-state 不许再动");
 
-console.log("✓ pixelpet smoke OK — 帧合法 / 5 真实状态(0 戏剧态) / palette 换色 / 确定性配色 / 状态机拒瞎演");
+// ---- 7) 未挂载占位(无 parent)也不炸:状态机照常工作 ----
+const loose = P.createPet({ canvas: dom.window.document.createElement("canvas") });
+assert.equal(loose.setState("happy"), true, "未挂载 sprite 状态机也应工作");
+loose.destroy();
+
+console.log("✓ pixelpet smoke OK — 官方原图挂载(占位替换/id保留/overlay齐) / 5 真实状态(0 戏剧态·零定时器) / accent 工牌换色 / 确定性配色 / 兼容桩恒空");

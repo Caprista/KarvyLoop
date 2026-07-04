@@ -14,11 +14,11 @@
  * taskbar 指示),零新依赖;位置持久化 localStorage("karvyloop_desk.v1")。
  * 对外契约:window.KarvyDesktop = { enter, leave, notifyH2A, resetLayout }。
  *
- * P1.5 灵魂(docs/53):像素卡皮巴拉工位区 + 小卡壁炉化/叼卡 + 署名便签 + 工作证摊桌。
+ * P1.5 灵魂(docs/53):卡皮巴拉工位区 + 小卡壁炉化/叼卡 + 署名便签 + 工作证摊桌。
  *   - 全部渲染只由真实事件驱动(task_status/task_step/role_presence/h2a_*),没有一帧假戏
  *     (§0 红线);数据源 = GET /api/roles/presence(契约冻结,调不通则工位栏优雅隐藏)
  *     + 本视图自开的一条**只读** WS(不动 app.js:desk 进场才连、离场即断、绝不发消息)。
- *   - 像素形象来自 ./pixelpet(帧数据 + palette 换色 + 状态机)。
+ *   - 形象来自 ./pixelpet(官方 IP 原图 sprite + CSS 状态动画 + 状态机;手绘像素帧已废)。
  */
 
 import * as PixelPet from "./pixelpet";
@@ -418,7 +418,8 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
       bar.appendChild(stations);
       desk.appendChild(bar);
     }
-    // 小卡像素替身:住进右下 .karvy-fab(PNG 在对话/看板视图保留;desk 下 CSS 换成像素版)
+    // 小卡 sprite 替身:住进右下 .karvy-fab(fab 静态 PNG 在对话/看板视图保留;
+    // desk 下 CSS 藏静态图、显 sprite)。canvas 只是挂载占位,createPet 原位换成 sprite 根。
     const fab = document.getElementById("chat-open");
     if (fab && !document.getElementById("desk-karvy-pixel")) {
       const cv = document.createElement("canvas");

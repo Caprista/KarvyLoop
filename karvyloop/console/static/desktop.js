@@ -1,17 +1,8 @@
 (function() {
   "use strict";
-  const WIDTH = 32;
-  const HEIGHT = 24;
-  const BASE_COLORS = {
-    B: "#b98a5e",
-    S: "#9c6f47",
-    O: "#6b4a2f",
-    M: "#d7b58c",
-    D: "#3a2b1f",
-    W: "#fffdf5",
-    G: "#cfe8ff",
-    Z: "#8fa8c0"
-  };
+  const SPRITE_URL = "/static/assets/karvy-capybara.png";
+  const WIDTH = 441;
+  const HEIGHT = 512;
   function shade(hex, f) {
     const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
     if (!m) return "#777777";
@@ -21,14 +12,14 @@
     const b = Math.max(0, Math.min(255, Math.round((n & 255) * f)));
     return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1);
   }
+  function normalizeAccent(accent) {
+    const a = accent || "";
+    if (!/^#?[0-9a-f]{6}$/i.test(a)) return KARVY_ACCENT;
+    return a[0] === "#" ? a : "#" + a;
+  }
   function buildPalette(accent) {
-    const p = {};
-    Object.keys(BASE_COLORS).forEach((k) => {
-      p[k] = BASE_COLORS[k];
-    });
-    p["A"] = /^#?[0-9a-f]{6}$/i.test(accent || "") ? accent[0] === "#" ? accent : "#" + accent : "#8fc7e8";
-    p["a"] = shade(p["A"], 0.72);
-    return p;
+    const A = normalizeAccent(accent);
+    return { A, a: shade(A, 0.72) };
   }
   const KARVY_ACCENT = "#8fc7e8";
   const ROLE_ACCENTS = [
@@ -47,234 +38,55 @@
     for (let i = 0; i < roleId.length; i++) h = (h << 5) - h + roleId.charCodeAt(i) | 0;
     return ROLE_ACCENTS[Math.abs(h) % ROLE_ACCENTS.length];
   }
-  const BASE = [
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    ".....OO....OO...................",
-    "....OSSO..OSSO..................",
-    "...OBBBBBBBBBBOO................",
-    "..OBBBBBBBBBBBBBOOOOOOOOO.......",
-    ".ODDMBBBBBBBBBBBBBBBBBBBBOOO....",
-    ".ODDMBBBBDDBBBBBBBBBBBBBBBBOO...",
-    ".OMMMBBBBBBBBBBBBBBBBBBBBBBBO...",
-    ".ODMMBBBBBBBBBBBBBBBBBBBBBBBO...",
-    ".OMMMBBBBBAAAAAABBBBBBBBBBBBO...",
-    "..OBBBBBBBaAAAAaBBBBBBBBBBBBO...",
-    "..OBBBBBBBBAAAaBBBBBBBBBBBBBO...",
-    "...OBBBBBBBAAaBBBBBBBBBBBBBO....",
-    "...OBBBBBBBAAaBBBBBBBBBBBBBO....",
-    "...OBBBBBBBaaBBSBBBBBBBBBBBO....",
-    "...OBSBBBBBBBBSSBBBBBBBBBSBO....",
-    "...OBSSBBBBBBSSSBBBBBBBBSSO.....",
-    "....OBBBBBBBBBBBBBBBBBBBBO......",
-    "......OBBO.........OBBO.........",
-    "......OBBO.........OBBO.........",
-    "................................"
-  ];
-  function norm(rows) {
-    const out = [];
-    for (let y = 0; y < HEIGHT; y++) {
-      let r = rows[y] || "";
-      if (r.length < WIDTH) r = r + ".".repeat(WIDTH - r.length);
-      out.push(r.slice(0, WIDTH));
-    }
-    return out;
-  }
-  function clone(rows) {
-    return rows.slice();
-  }
-  function put(rows, x, y, ch) {
-    if (x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) return;
-    rows[y] = rows[y].slice(0, x) + ch + rows[y].slice(x + 1);
-  }
-  function putRun(rows, x, y, run) {
-    for (let i = 0; i < run.length; i++) put(rows, x + i, y, run[i]);
-  }
-  function sag(rows, x0, x1, yMax) {
-    for (let y = yMax; y >= 1; y--) {
-      for (let x = x0; x <= x1; x++) {
-        const above = rows[y - 1][x];
-        put(rows, x, y, above);
-      }
-    }
-    for (let x = x0; x <= x1; x++) put(rows, x, 0, ".");
-  }
-  function buildFrames() {
-    const base = norm(BASE);
-    const idleB = clone(base);
-    sag(idleB, 15, 29, 20);
-    const blink = clone(base);
-    putRun(blink, 9, 9, "BB");
-    putRun(blink, 9, 10, "DD");
-    function laptop(rows, glowRows) {
-      const r = clone(rows);
-      for (let y = 13; y <= 19; y++) putRun(r, 0, y, "DDG");
-      glowRows.forEach((y) => put(r, 3, y, "G"));
-      putRun(r, 0, 20, "DDDDDDDD");
-      return r;
-    }
-    const workA = laptop(base, [14, 16, 18]);
-    putRun(workA, 5, 19, "OBO");
-    const workB = laptop(base, [15, 17]);
-    putRun(workB, 5, 18, "OBO");
-    const workC = laptop(base, [14, 15, 16, 17, 18]);
-    putRun(workC, 7, 19, "OBO");
-    function withCard(rows) {
-      const r = clone(rows);
-      putRun(r, 0, 10, "DDDDD");
-      for (let y = 11; y <= 15; y++) putRun(r, 0, y, "DWWWD");
-      putRun(r, 0, 16, "DDDDD");
-      return r;
-    }
-    const carryA = withCard(base);
-    const carryB = withCard(base);
-    putRun(carryB, 6, 21, "....");
-    putRun(carryB, 6, 22, "....");
-    putRun(carryB, 4, 21, "OBO");
-    putRun(carryB, 4, 22, "OBO");
-    putRun(carryB, 19, 21, "....");
-    putRun(carryB, 19, 22, "....");
-    putRun(carryB, 22, 21, "OBO");
-    putRun(carryB, 22, 22, "OBO");
-    const sleepBase = clone(blink);
-    sag(sleepBase, 2, 29, 20);
-    const sleepA = clone(sleepBase);
-    putRun(sleepA, 25, 2, "ZZZ");
-    put(sleepA, 26, 3, "Z");
-    putRun(sleepA, 25, 4, "ZZZ");
-    const sleepZ = clone(sleepBase);
-    putRun(sleepZ, 22, 5, "ZZ");
-    putRun(sleepZ, 22, 6, "ZZ");
-    const happyA = clone(base);
-    happyA[4] = "....OO......OO..................";
-    happyA[5] = "...OSSO....OSSO.................";
-    putRun(happyA, 2, 11, "DD");
-    const happyB = clone(base);
-    putRun(happyB, 2, 11, "DD");
-    return {
-      idle: [base, idleB],
-      blink: [blink],
-      working: [workA, workB, workC],
-      carry: [carryA, carryB],
-      sleep: [sleepA, sleepZ],
-      happy: [happyA, happyB]
-    };
-  }
-  const FRAMES = buildFrames();
+  const FRAMES = {};
   const STATES = ["idle", "working", "carry", "sleep", "happy"];
   function validateFrames() {
-    const errs = [];
-    const legal = new Set(Object.keys(BASE_COLORS).concat(["A", "a", "."]));
-    Object.keys(FRAMES).forEach((state) => {
-      FRAMES[state].forEach((frame, fi) => {
-        if (frame.length !== HEIGHT) errs.push(`${state}[${fi}]: ${frame.length} rows (want ${HEIGHT})`);
-        frame.forEach((row, y) => {
-          if (row.length !== WIDTH) errs.push(`${state}[${fi}] row${y}: ${row.length} cols (want ${WIDTH})`);
-          for (let x = 0; x < row.length; x++) {
-            if (!legal.has(row[x])) errs.push(`${state}[${fi}] (${x},${y}): bad char "${row[x]}"`);
-          }
-        });
-      });
-    });
-    return errs;
+    return [];
   }
-  const TICK_MS = {
-    idle: 900,
-    working: 280,
-    carry: 300,
-    sleep: 1200,
-    happy: 260
-  };
-  const BLINK_MIN_GAP_MS = 4e3;
-  const BLINK_CHANCE = 0.3;
-  function drawFrame(ctx, frame, palette) {
-    ctx.clearRect(0, 0, WIDTH, HEIGHT);
-    for (let y = 0; y < frame.length; y++) {
-      const row = frame[y];
-      for (let x = 0; x < row.length; x++) {
-        const ch = row[x];
-        if (ch === ".") continue;
-        ctx.fillStyle = palette[ch] || "#f0f";
-        ctx.fillRect(x, y, 1, 1);
-      }
-    }
-  }
+  const OVERLAY_PARTS = ["badge", "keys", "card", "zzz"];
   function createPet(opts) {
-    const canvas = opts.canvas;
-    canvas.width = WIDTH;
-    canvas.height = HEIGHT;
-    canvas.classList.add("pixelpet-canvas");
-    let ctx = null;
-    try {
-      ctx = canvas.getContext("2d");
-    } catch {
-      ctx = null;
-    }
-    if (ctx) ctx.imageSmoothingEnabled = false;
-    const palette = buildPalette(opts.accent || KARVY_ACCENT);
+    const mount = opts.canvas;
+    const accent = normalizeAccent(opts.accent);
+    const root = document.createElement("span");
+    root.className = "karvy-sprite";
+    if (mount.id) root.id = mount.id;
+    root.style.setProperty("--pet-accent", accent);
+    root.style.setProperty("--pet-accent-dim", shade(accent, 0.72));
+    const img = document.createElement("img");
+    img.className = "karvy-sprite-img";
+    img.src = SPRITE_URL;
+    img.alt = "";
+    img.setAttribute("aria-hidden", "true");
+    img.draggable = false;
+    root.appendChild(img);
+    OVERLAY_PARTS.forEach((part) => {
+      const el = document.createElement("span");
+      el.className = "karvy-sprite-" + part;
+      el.setAttribute("aria-hidden", "true");
+      root.appendChild(el);
+    });
+    if (mount.parentNode) mount.parentNode.replaceChild(root, mount);
     let state = "idle";
-    let frameIdx = 0;
-    let timer = null;
-    let lastBlink = 0;
     let destroyed = false;
-    function reducedMotion() {
-      try {
-        return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-      } catch {
-        return false;
-      }
-    }
-    function currentFrame() {
-      const frames = FRAMES[state];
-      return frames[frameIdx % frames.length];
-    }
-    function render(frame) {
-      if (ctx) drawFrame(ctx, frame || currentFrame(), palette);
-    }
-    function tick() {
-      frameIdx = (frameIdx + 1) % FRAMES[state].length;
-      if (state === "idle" && Date.now() - lastBlink > BLINK_MIN_GAP_MS && Math.random() < BLINK_CHANCE) {
-        lastBlink = Date.now();
-        render(FRAMES.blink[0]);
-        return;
-      }
-      render();
-    }
-    function schedule() {
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
-      if (reducedMotion()) {
-        render(FRAMES[state][0]);
-        return;
-      }
-      timer = setInterval(tick, TICK_MS[state]);
+    function render() {
+      root.setAttribute("data-state", state);
     }
     function setState(s) {
       if (destroyed) return false;
       if (STATES.indexOf(s) < 0) return false;
       if (s === state) return true;
       state = s;
-      frameIdx = 0;
       render();
-      schedule();
       return true;
     }
     render();
-    schedule();
     return {
       setState,
       state: () => state,
-      render: () => render(),
+      render,
+      // destroy 只封状态机(和旧引擎"只停表不拆 DOM"同语义);DOM 的去留归调用方管
       destroy: () => {
         destroyed = true;
-        if (timer !== null) {
-          clearInterval(timer);
-          timer = null;
-        }
       }
     };
   }
@@ -287,7 +99,8 @@
     FRAMES,
     WIDTH,
     HEIGHT,
-    KARVY_ACCENT
+    KARVY_ACCENT,
+    SPRITE_URL
   };
   if (typeof window !== "undefined") {
     window.KarvyPixelPet = KarvyPixelPet;
