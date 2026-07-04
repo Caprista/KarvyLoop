@@ -33,12 +33,30 @@ var KarvyDiagnosePanelBundle = (function(exports) {
     log.scrollTop = log.scrollHeight;
   }
   const _ICON = { ok: "✓", warn: "⚠", fail: "✗" };
-  async function renderHealthCard(body) {
+  async function _runDoctorFix(confirm, host) {
+    const r = await _postJSON("/api/doctor/fix", { confirm });
+    if (r.ok && r.data && r.data.ok) {
+      _deps.pushChatLine("system", t("health.fix_done", {
+        n: (r.data.repaired || []).length,
+        before: t("health.overall." + (r.data.overall_before || "ok")),
+        after: t("health.overall." + (r.data.overall_after || "ok"))
+      }));
+      await renderHealthCard(host, true);
+    } else {
+      alert(t("health.fix_failed"));
+    }
+  }
+  async function renderHealthCard(body, rerender = false) {
+    if (rerender) {
+      const old = body.querySelector(".health-card");
+      if (old) old.remove();
+    }
     const card = el("div", { class: "health-card" });
     card.appendChild(el("div", { class: "mgmt-section-title", text: t("health.title") }));
     const loading = el("div", { class: "diag-status", text: t("health.running") });
     card.appendChild(loading);
-    body.appendChild(card);
+    if (rerender && body.firstChild) body.insertBefore(card, body.firstChild);
+    else body.appendChild(card);
     const h = await _getJSON("/api/health?online=true");
     loading.remove();
     if (!h || !h.overall) {
@@ -50,7 +68,7 @@ var KarvyDiagnosePanelBundle = (function(exports) {
       text: t("health.overall." + h.overall)
     }));
     const findings = Array.isArray(h.findings) ? h.findings : [];
-    let anyFixable = false;
+    let anyAuto = false, anyConfirm = false;
     for (const f of findings) {
       const row = el("div", { class: "health-row health-row-" + (f.level || "ok") });
       row.appendChild(el("span", { class: "health-icon", text: (_ICON[f.level] || "·") + " " }));
@@ -59,7 +77,8 @@ var KarvyDiagnosePanelBundle = (function(exports) {
         text: t("doctor.msg." + f.code, f.params || {})
       }));
       if (f.fixable === "auto" || f.fixable === "confirm") {
-        anyFixable = true;
+        if (f.fixable === "auto") anyAuto = true;
+        else anyConfirm = true;
         row.appendChild(el("span", {
           class: "health-fixable health-fixable-" + f.fixable,
           text: " · " + t("health.fixable_" + f.fixable)
@@ -67,7 +86,32 @@ var KarvyDiagnosePanelBundle = (function(exports) {
       }
       card.appendChild(row);
     }
-    if (anyFixable) {
+    if (anyAuto || anyConfirm) {
+      const actions = el("div", { class: "health-fix-actions" });
+      if (anyAuto) {
+        const fixBtn = el("button", {
+          class: "mgmt-submit",
+          text: t("health.fix_auto"),
+          onClick: async () => {
+            fixBtn.disabled = true;
+            await _runDoctorFix(false, body);
+          }
+        });
+        actions.appendChild(fixBtn);
+      }
+      if (anyConfirm) {
+        const confirmBtn = el("button", {
+          class: "mgmt-submit health-fix-danger",
+          text: t("health.fix_confirm"),
+          onClick: async () => {
+            if (!window.confirm(t("health.fix_confirm_prompt"))) return;
+            confirmBtn.disabled = true;
+            await _runDoctorFix(true, body);
+          }
+        });
+        actions.appendChild(confirmBtn);
+      }
+      card.appendChild(actions);
       card.appendChild(el("div", { class: "health-fix-hint", text: t("health.fix_hint") }));
     }
   }

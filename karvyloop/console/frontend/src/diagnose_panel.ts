@@ -49,34 +49,73 @@ function renderOpsDiagnosis(log: HTMLElement, x: any): void {
 
 // 系统健康卡(doctor 环的可视面):调 /api/health 显 overall + 逐条 finding。
 // 后端 finding 是 {level, code, params, fixable};逐条走 doctor.msg.<code> i18n 渲染人话。
-// fixable=auto/confirm 的项给徽标 + CLI 修法提示(`karvyloop doctor --fix`)——**只展示不硬造修复端点**。
+// fixable=auto/confirm 的项给徽标 + 「一键修/确认修」按钮(POST /api/doctor/fix)——
+// docs/56 ②:后端 doctor 自愈有了但 UI 里够不着,补 UI 触发。confirm(危险,重写 config)前端二次确认。
 const _ICON: Record<string, string> = { ok: "✓", warn: "⚠", fail: "✗" };
-async function renderHealthCard(body: HTMLElement): Promise<void> {
+
+// 一键跑 doctor 自愈。confirm=true → 一并修危险项(需已二次确认)。修完刷新健康卡。
+async function _runDoctorFix(confirm: boolean, host: HTMLElement): Promise<void> {
+  const r = await _postJSON("/api/doctor/fix", { confirm });
+  if (r.ok && r.data && r.data.ok) {
+    _deps.pushChatLine("system", t("health.fix_done", {
+      n: (r.data.repaired || []).length,
+      before: t("health.overall." + (r.data.overall_before || "ok")),
+      after: t("health.overall." + (r.data.overall_after || "ok")) }));
+    await renderHealthCard(host, true);   // 修完重画健康卡(状态即时刷新)
+  } else {
+    alert(t("health.fix_failed"));
+  }
+}
+
+// rerender=true → 清掉已有健康卡再画(fix 后刷新用)。
+async function renderHealthCard(body: HTMLElement, rerender = false): Promise<void> {
+  if (rerender) { const old = body.querySelector(".health-card"); if (old) old.remove(); }
   const card = el("div", { class: "health-card" });
   card.appendChild(el("div", { class: "mgmt-section-title", text: t("health.title") }));
   const loading = el("div", { class: "diag-status", text: t("health.running") });
-  card.appendChild(loading); body.appendChild(card);
+  card.appendChild(loading);
+  // 刷新时插回原位(健康卡本是 body 第一张);首次直接 append。
+  if (rerender && body.firstChild) body.insertBefore(card, body.firstChild);
+  else body.appendChild(card);
   const h: any = await _getJSON("/api/health?online=true");
   loading.remove();
   if (!h || !h.overall) { card.appendChild(el("div", { class: "mgmt-empty", text: t("health.failed") })); return; }
   card.appendChild(el("div", { class: "health-overall health-overall-" + h.overall,
     text: t("health.overall." + h.overall) }));
   const findings: any[] = Array.isArray(h.findings) ? h.findings : [];
-  let anyFixable = false;
+  let anyAuto = false, anyConfirm = false;
   for (const f of findings) {
     const row = el("div", { class: "health-row health-row-" + (f.level || "ok") });
     row.appendChild(el("span", { class: "health-icon", text: (_ICON[f.level] || "·") + " " }));
     row.appendChild(el("span", { class: "health-msg",
       text: t("doctor.msg." + f.code, f.params || {}) }));
     if (f.fixable === "auto" || f.fixable === "confirm") {
-      anyFixable = true;
+      if (f.fixable === "auto") anyAuto = true; else anyConfirm = true;
       row.appendChild(el("span", { class: "health-fixable health-fixable-" + f.fixable,
         text: " · " + t("health.fixable_" + f.fixable) }));
     }
     card.appendChild(row);
   }
-  // 有可修项 → 提示 CLI 修法(不硬造 fix 端点;展示为主,把用户引到确定性自愈命令)。
-  if (anyFixable) {
+  // 有可修项 → 「一键修」按钮(auto 那批;confirm 危险项另给「确认修」并二次确认)。
+  if (anyAuto || anyConfirm) {
+    const actions = el("div", { class: "health-fix-actions" });
+    if (anyAuto) {
+      const fixBtn = el("button", { class: "mgmt-submit", text: t("health.fix_auto"),
+        onClick: async () => { (fixBtn as HTMLButtonElement).disabled = true; await _runDoctorFix(false, body); } });
+      actions.appendChild(fixBtn);
+    }
+    if (anyConfirm) {
+      // 危险项(重写 config):前端**二次确认**,同意才带 confirm=true 调后端。
+      const confirmBtn = el("button", { class: "mgmt-submit health-fix-danger", text: t("health.fix_confirm"),
+        onClick: async () => {
+          if (!window.confirm(t("health.fix_confirm_prompt"))) return;
+          (confirmBtn as HTMLButtonElement).disabled = true;
+          await _runDoctorFix(true, body);
+        } });
+      actions.appendChild(confirmBtn);
+    }
+    card.appendChild(actions);
+    // 保留 CLI 提示作补充(有些环境更愿在终端修)。
     card.appendChild(el("div", { class: "health-fix-hint", text: t("health.fix_hint") }));
   }
 }

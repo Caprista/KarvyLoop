@@ -5049,4 +5049,101 @@ def api_lang_set(req: LangRequest, request: Request) -> dict[str, Any]:
     return {"ok": True, "lang": req.lang, "persisted": persisted}
 
 
+# ============================================================================
+# docs/56 audit ② MED — "后端有能力没 UI 入口" 补三个入口(隔离区,可整块被拆分工人搬走)
+#   1. /api/budget       花费预算上限 UI(GET 当前用量/上限,POST 改上限)
+#   2. /api/doctor/fix   doctor 确定性自愈的 UI 触发(auto 直接修,confirm 需二次确认)
+#   3. workflow 续/丢    端点已在(resume|discard|pending_resume),此批把它们接进前端
+# 三者都复用既有后端(config_budget / doctor_cmd / workflow_engine),不重写业务逻辑。
+# ============================================================================
+
+
+def _budget_model_cost(app):
+    """从 gateway 注册表取"每模型 cost 表"(USD/百万 token);无 gateway → None(按 token 计,不算钱)。
+
+    与 llm/spend_budget.wire_spend_budget 的 _model_cost 同口径,只是这里给只读 status 用。
+    """
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    reg = getattr(gw, "reg", None) if gw is not None else None
+    if reg is None:
+        return None
+
+    def _cost(model_id: str):
+        try:
+            m = reg.get(model_id)
+            return dict(getattr(m, "cost", None) or {})
+        except Exception:
+            return None
+    return _cost
+
+
+@router.get("/budget")
+def api_budget(request: Request) -> dict[str, Any]:
+    """花费预算现状:今日/本月已用 vs 上限 + on_limit 开关(K4 只读 — 读 config + token 账本,不写)。
+
+    预算未配(disabled)也返真实用量(上限=null)→ 用户先看花多少再设限。**绝不含 key**。
+    """
+    from karvyloop.llm.config_budget import budget_status, load_spend_budget_config
+    cfg_path = getattr(request.app.state, "config_path", "") or None
+    cfg = load_spend_budget_config(cfg_path)
+    led = getattr(request.app.state, "token_ledger", None)
+    status = budget_status(cfg, ledger=led, model_cost=_budget_model_cost(request.app))
+    from karvyloop.llm.config_budget import VALID_ON_LIMIT
+    return {**status, "valid_on_limit": list(VALID_ON_LIMIT)}
+
+
+class BudgetSaveRequest(BaseModel):
+    daily_usd: float = Field(default=0.0, ge=0)
+    daily_tokens: int = Field(default=0, ge=0)
+    monthly_usd: float = Field(default=0.0, ge=0)
+    monthly_tokens: int = Field(default=0, ge=0)
+    on_limit: str = Field(default="warn", max_length=16)   # warn | pause
+
+
+@router.post("/budget")
+def api_budget_save(req: BudgetSaveRequest, request: Request) -> dict[str, Any]:
+    """改花费预算上限(写 config.yaml `budget:` 块;四维全 0 = 关刹车 = 无限)+ 热重载全局刹车。
+
+    写后立刻 wire_spend_budget 让新上限即时在 gateway 咽喉生效(不必重启)。emit_card 复用启动期
+    接的 broadcast 桥(达阈值出卡);拿不到 → 只日志。**只碰 budget 块,不动 models/keys**。
+    """
+    cfg_path = getattr(request.app.state, "config_path", "") or None
+    if not cfg_path:
+        return {"ok": False, "reason": "未接 config(--no-llm?)"}
+    from karvyloop.llm.config_budget import save_spend_budget_config
+    ok, reason = save_spend_budget_config(req.model_dump(), cfg_path)
+    if not ok:
+        return {"ok": False, "reason": reason}
+    # 热重载全局刹车(即时生效,不必重启)。拿 gateway 注册表算钱、启动期存的 emit_card 出卡。
+    reloaded = False
+    try:
+        from karvyloop.llm.spend_budget import wire_spend_budget
+        rk = getattr(request.app.state, "runtime_kwargs", None) or {}
+        gw = rk.get("gateway")
+        reg = getattr(gw, "reg", None) if gw is not None else None
+        emit = getattr(request.app.state, "budget_emit_card", None)
+        wire_spend_budget(registry=reg, config_path=cfg_path, emit_card=emit)
+        reloaded = True
+    except Exception:
+        logger.debug("[budget] 热重载刹车失败(改已落盘,重启生效)", exc_info=True)
+    return {"ok": True, "reloaded": reloaded}
+
+
+class DoctorFixRequest(BaseModel):
+    confirm: bool = False   # True = 已二次确认,一并修 confirm 级危险项(重写 config)
+
+
+@router.post("/doctor/fix")
+def api_doctor_fix(req: DoctorFixRequest, request: Request) -> dict[str, Any]:
+    """一键跑 doctor 确定性自愈(auto 直接修;confirm 级危险项需 body confirm=true 才修)。
+
+    复用 cli/doctor_cmd.apply_health_fixes(= --fix 那批逻辑,不重写)。confirm=false 且有危险项 →
+    不修、回 needs_confirm 让前端弹二次确认。永不含 key。config_path 取自 app.state。
+    """
+    from karvyloop.cli.doctor_cmd import apply_health_fixes
+    cfg_path = getattr(request.app.state, "config_path", "") or None
+    return apply_health_fixes(confirm=bool(req.confirm), config_path=cfg_path)
+
+
 __all__ = ["router"]

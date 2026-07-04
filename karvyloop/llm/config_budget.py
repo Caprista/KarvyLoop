@@ -130,10 +130,100 @@ def load_spend_budget_config(config_path=None) -> SpendBudgetConfig:
     return spend_budget_config_from_dict(cfg)
 
 
+# ---- 写 `budget:` 块(config_models 同款 load/save 骨架;只碰 budget,别人的键不动)----
+
+
+def save_spend_budget_config(spec: dict, config_path=None) -> tuple[bool, str]:
+    """把 UI 提交的预算改写进 config.yaml 的 `budget:` 块(其余配置一字不动)。
+
+    spec 字段(全可选;None/空/<=0 → 清掉该维度上限):daily_usd / daily_tokens /
+    monthly_usd / monthly_tokens / on_limit(warn|pause)。
+    - 四个维度全空 → 删掉整个 `budget:` 块(= 关刹车 = 无限,零回归)。
+    - on_limit 非法 → 回落 DEFAULT_ON_LIMIT(不 4xx,fail-soft;与解析侧同口径)。
+    返回 (ok, reason)。绝不 log/print 任何密钥(本模块只碰 budget 块,不碰 models)。
+    """
+    p = Path(config_path) if config_path else _default_config_path()
+    try:
+        import yaml
+        if p.exists():
+            cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        else:
+            cfg = {}
+    except Exception as e:
+        return False, f"config.yaml 读取失败:{type(e).__name__}"
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    du = _pos_float(spec.get("daily_usd"))
+    dt = _pos_int(spec.get("daily_tokens"))
+    mu = _pos_float(spec.get("monthly_usd"))
+    mt = _pos_int(spec.get("monthly_tokens"))
+    on_limit = str(spec.get("on_limit") or DEFAULT_ON_LIMIT).strip().lower()
+    if on_limit not in VALID_ON_LIMIT:
+        on_limit = DEFAULT_ON_LIMIT
+
+    if not any(v is not None for v in (du, dt, mu, mt)):
+        cfg.pop("budget", None)   # 全清 = 无刹车(无限,零回归)
+    else:
+        block: dict = {}
+        if du is not None:
+            block["daily_usd"] = du
+        if dt is not None:
+            block["daily_tokens"] = dt
+        if mu is not None:
+            block["monthly_usd"] = mu
+        if mt is not None:
+            block["monthly_tokens"] = mt
+        block["on_limit"] = on_limit
+        cfg["budget"] = block
+
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    except Exception as e:
+        return False, f"config.yaml 写入失败:{type(e).__name__}"
+    return True, ""
+
+
+def budget_status(cfg: SpendBudgetConfig, *, ledger=None, model_cost=None, clock=None) -> dict:
+    """今日/本月已用 vs 上限(给 GET /api/budget)。**纯只读**,不出卡、不拦、不改记账。
+
+    即使 budget 未配置(disabled)也返回真实用量(上限=None)→ 用户能先看花了多少再设限。
+    复用 spend_budget.SpendBudget 的成本换算(_window_spend),不重写钱的算法。
+
+    返回 {enabled, on_limit, dimensions:[{key,unit,used,limit,ratio}], asof}。
+    ledger=None → 用量全 0(优雅空,与 /api/tokens 同口径)。
+    """
+    import time as _time
+    from .spend_budget import SpendBudget, _day_start, _month_start
+
+    now = (clock or _time.time)()
+    probe = SpendBudget(cfg, ledger_getter=(lambda: ledger),
+                        model_cost=model_cost, clock=(clock or _time.time))
+    day_usd, day_tok = probe._window_spend(_day_start(now), now)
+    mon_usd, mon_tok = probe._window_spend(_month_start(now), now)
+
+    def _dim(key: str, unit: str, used, limit):
+        used_v = float(used) if unit == "usd" else int(used)
+        ratio = (used_v / limit) if (limit and limit > 0) else 0.0
+        return {"key": key, "unit": unit, "used": used_v, "limit": limit, "ratio": ratio}
+
+    dims = [
+        _dim("daily_usd", "usd", day_usd, cfg.daily_usd),
+        _dim("daily_tokens", "tokens", day_tok, cfg.daily_tokens),
+        _dim("monthly_usd", "usd", mon_usd, cfg.monthly_usd),
+        _dim("monthly_tokens", "tokens", mon_tok, cfg.monthly_tokens),
+    ]
+    return {"enabled": cfg.enabled, "on_limit": cfg.on_limit,
+            "dimensions": dims, "asof": now}
+
+
 __all__ = [
     "SpendBudgetConfig",
     "spend_budget_config_from_dict",
     "load_spend_budget_config",
+    "save_spend_budget_config",
+    "budget_status",
     "ON_LIMIT_WARN",
     "ON_LIMIT_PAUSE",
     "VALID_ON_LIMIT",

@@ -2,7 +2,7 @@ var KarvyTokensBundle = (function(exports) {
   "use strict";
   const _KD = window.KarvyDom;
   const _KM = window.KarvyModal;
-  const el = _KD.el, _getJSON = _KD.getJSON;
+  const el = _KD.el, _getJSON = _KD.getJSON, _postJSON = _KD.postJSON;
   const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
   function _fmtTok(n) {
@@ -154,6 +154,119 @@ var KarvyTokensBundle = (function(exports) {
     body.appendChild(host);
     _redraw();
   }
+  function _fmtUsed(unit, v) {
+    return unit === "usd" ? "$" + (v || 0).toFixed(2) : _fmtTok(v || 0) + " tok";
+  }
+  function _fmtLimit(unit, v) {
+    if (v == null) return t("budget.no_limit");
+    return unit === "usd" ? "$" + Number(v).toFixed(2) : _fmtTok(Number(v)) + " tok";
+  }
+  async function _renderBudgetInto(host) {
+    host.innerHTML = "";
+    host.appendChild(el("div", { class: "muted", text: t("tokens.loading") }));
+    const data = await _getJSON("/api/budget");
+    host.innerHTML = "";
+    if (!data) {
+      host.appendChild(el("div", { class: "muted", text: t("tokens.none") }));
+      return;
+    }
+    const dims = Array.isArray(data.dimensions) ? data.dimensions : [];
+    if (!data.enabled) {
+      host.appendChild(el("div", { class: "muted budget-off", text: t("budget.disabled_hint") }));
+    }
+    for (const d of dims) {
+      const row = el("div", { class: "budget-row" });
+      row.appendChild(el("div", {
+        class: "budget-row-label",
+        text: t("budget.dim_" + d.key) + ": " + _fmtUsed(d.unit, d.used) + " / " + _fmtLimit(d.unit, d.limit)
+      }));
+      if (d.limit != null && d.limit > 0) {
+        const pct = Math.min(100, Math.round((d.ratio || 0) * 100));
+        const tier = pct >= 100 ? "over" : pct >= 90 ? "hi" : pct >= 75 ? "mid" : "ok";
+        const track = el("div", { class: "budget-track" });
+        track.appendChild(el("div", { class: "budget-bar budget-bar-" + tier, style: "width:" + pct + "%" }));
+        row.appendChild(track);
+      }
+      host.appendChild(row);
+    }
+    const cur = {};
+    for (const d of dims) cur[d.key] = d.limit;
+    const form = el("div", { class: "budget-form" });
+    const inDaily = el("input", {
+      class: "budget-in",
+      type: "number",
+      min: "0",
+      step: "any",
+      placeholder: t("budget.ph_no_limit"),
+      value: cur.daily_usd != null ? String(cur.daily_usd) : ""
+    });
+    const inMonthly = el("input", {
+      class: "budget-in",
+      type: "number",
+      min: "0",
+      step: "any",
+      placeholder: t("budget.ph_no_limit"),
+      value: cur.monthly_usd != null ? String(cur.monthly_usd) : ""
+    });
+    form.appendChild(el(
+      "label",
+      { class: "budget-fld" },
+      el("span", { text: t("budget.set_daily_usd") }),
+      inDaily
+    ));
+    form.appendChild(el(
+      "label",
+      { class: "budget-fld" },
+      el("span", { text: t("budget.set_monthly_usd") }),
+      inMonthly
+    ));
+    const onLimit = el("select", { class: "budget-in" });
+    for (const v of data.valid_on_limit || ["warn", "pause"]) {
+      const opt = el("option", { value: v, text: t("budget.on_limit_" + v) });
+      if (v === data.on_limit) opt.selected = true;
+      onLimit.appendChild(opt);
+    }
+    form.appendChild(el(
+      "label",
+      { class: "budget-fld" },
+      el("span", { text: t("budget.on_limit_label") }),
+      onLimit
+    ));
+    const msg = el("div", { class: "budget-msg" });
+    const save = el("button", {
+      class: "mgmt-submit",
+      text: t("budget.save"),
+      onClick: async () => {
+        save.disabled = true;
+        msg.textContent = "";
+        const payload = {
+          daily_usd: Number(inDaily.value) || 0,
+          monthly_usd: Number(inMonthly.value) || 0,
+          daily_tokens: 0,
+          monthly_tokens: 0,
+          // token 维度先只留 USD 表单(常用);token 上限走 config
+          on_limit: onLimit.value
+        };
+        const r = await _postJSON("/api/budget", payload);
+        if (r.ok && r.data && r.data.ok) {
+          msg.textContent = t("budget.saved");
+          await _renderBudgetInto(host);
+        } else {
+          save.disabled = false;
+          msg.textContent = r.data && r.data.reason || t("budget.save_failed");
+        }
+      }
+    });
+    form.appendChild(save);
+    host.appendChild(form);
+    host.appendChild(msg);
+  }
+  async function _renderBudgetSection(body) {
+    body.appendChild(el("h3", { class: "tok-h", text: t("budget.title") }));
+    const host = el("div", { class: "budget-body" });
+    body.appendChild(host);
+    await _renderBudgetInto(host);
+  }
   async function open() {
     openMgmtModal(t("tokens.title"));
     const body = mgmtBody();
@@ -175,6 +288,7 @@ var KarvyTokensBundle = (function(exports) {
       sum.appendChild(el("div", { class: "tok-sub", text: t("tokens.cache", { r: _fmtTok(tot.cache_read || 0), w: _fmtTok(tot.cache_write || 0) }) }));
     }
     body.appendChild(sum);
+    await _renderBudgetSection(body);
     _renderRangeSection(body);
     body.appendChild(el("h3", { class: "tok-h", text: t("tokens.by_model") }));
     body.appendChild(_tokTable(data.by_model || [], "model"));

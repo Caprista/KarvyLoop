@@ -25,12 +25,8 @@ API_ONLY = {
     "/api/atoms/consolidate/apply",    # 原子语义合并·兑现(经 H2A);同上
     "/api/decisions/audit",     # 决策审计流水查询(dev-report #6);程序化/审计面按需查,非 UI 按钮
     "/api/skill_lifecycle",     # 技能事件时间线(契约面先行;前端时间线视图由并行工人在接,接上后本行可删)
-    # #54 逃生门:重启后中断 workflow 不自动复活。挂起清单经 WS system_error 主动冒泡通知,
-    # 用户经这三个 REST 拍板续/丢/查。中止(/workflow/cancel、/roundtable/cancel)已接前端"中止"按钮;
-    # 续/丢的专用决策卡 UI 是自然后续(pending 清单本身已可查),故此三个先登记 API_ONLY。
-    "/api/workflow/pending_resume",  # 查挂起待拍板的中断流程(WS 通知后拉取)
-    "/api/workflow/resume",          # 人显式续跑一条中断流程
-    "/api/workflow/discard",         # 人显式丢弃一条中断流程(重启杀掉跑歪的)
+    # #54 逃生门 workflow 续/丢/查(pending_resume/resume/discard)已接前端 app.js 顶部横幅
+    # (fetchPendingResume + 续跑/丢弃按钮,docs/56 ②)→ 不再是 API_ONLY,已从白名单移除。
 }
 
 

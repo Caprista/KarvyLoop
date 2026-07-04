@@ -244,6 +244,9 @@
   }
   function onSystemError(p) {
     if (!p) return;
+    // #54 逃生门:重启挂起的中断流程经 system_error(source=workflow_resume)冒泡 →
+    // 拉挂起清单渲染成顶部可操作横幅(续跑/丢弃),不当普通后台错。
+    if (p.source === "workflow_resume") { fetchPendingResume(); return; }
     pushChatLine("system", t("system.bg_error", { source: p.source || "?", err: p.message || "" }));
     // L1 自愈:出错就给一个"🩺 诊断"入口 —— 用活着的模型把问题翻成人话 + 提修法(只提议不执行)
     const log = document.getElementById("chat-log");
@@ -384,6 +387,59 @@
     } }));
     document.body.insertBefore(bar, document.body.firstChild);
   }
+  // #54 逃生门(docs/56 ②):重启后没自动复活的中断 workflow → 顶部横幅让人「续跑/丢弃」。
+  // 后端 GET /api/workflow/pending_resume 返挂起清单;/resume|/discard 逐条处置。
+  // 不自动烧 token(逃生门本意):人不点就一直挂着,点了才动。
+  async function fetchPendingResume() {
+    try {
+      const r = await fetch("/api/workflow/pending_resume");
+      if (!r.ok) return;
+      const d = await r.json();
+      const pending = (d && d.pending) || [];
+      _showPendingResumeBanner(pending);
+    } catch (e) { /* 查失败静默(本地优先,不打扰) */ }
+  }
+  function _showPendingResumeBanner(pending) {
+    const bar0 = document.getElementById("resume-banner");
+    if (bar0) bar0.remove();                 // 每次重画(处置一条后刷新剩余数)
+    if (!pending || !pending.length) return;
+    const bar = el("div", { class: "update-banner resume-banner", id: "resume-banner" });
+    bar.appendChild(el("span", { class: "update-banner-msg",
+      text: t("resume.banner", { n: pending.length }) }));
+    // 逐条:标题 + 「续跑」「丢弃」
+    const list = el("div", { class: "resume-list" });
+    for (const p of pending) {
+      const rid = p.run_id || "";
+      const row = el("div", { class: "resume-row" });
+      row.appendChild(el("span", { class: "resume-title", text: p.title || p.goal || rid || "?" }));
+      const resumeBtn = el("button", { class: "update-go", text: t("resume.resume_btn"),
+        onClick: async (e) => {
+          e.target.disabled = true;
+          const rr = await _postJSON("/api/workflow/resume", { run_id: rid });
+          if (rr.ok && rr.data && rr.data.ok !== false) {
+            pushChatLine("system", t("resume.resumed", { title: p.title || rid }));
+          } else { pushChatLine("system", t("resume.failed")); e.target.disabled = false; return; }
+          fetchPendingResume();              // 刷新剩余
+          pollTasks();
+        } });
+      const discardBtn = el("button", { class: "update-rollback", text: t("resume.discard_btn"),
+        onClick: async (e) => {
+          if (!confirm(t("resume.discard_confirm"))) return;
+          e.target.disabled = true;
+          const rr = await _postJSON("/api/workflow/discard", { run_id: rid });
+          if (rr.ok && rr.data && rr.data.ok !== false) {
+            pushChatLine("system", t("resume.discarded", { title: p.title || rid }));
+          } else { pushChatLine("system", t("resume.failed")); e.target.disabled = false; return; }
+          fetchPendingResume();
+        } });
+      row.appendChild(resumeBtn); row.appendChild(discardBtn);
+      list.appendChild(row);
+    }
+    bar.appendChild(list);
+    bar.appendChild(el("button", { class: "update-x", text: "✕", onClick: () => bar.remove() }));
+    document.body.insertBefore(bar, document.body.firstChild);
+  }
+
   async function _doUpgrade(u, btn) {
     if (!confirm(t("update.upgrade_confirm", { current: u.current, latest: u.latest }))) return;
     btn.disabled = true;
@@ -3241,6 +3297,7 @@
     fetchPendingProposals();   // 待你拍的板跨刷新存活(不靠 WS 在线推)
     fetchRecentDecisions();    // 最近拍板流水(只读回看)
     fetchUpdateStatus();       // 有新版 → 顶部横幅(绝不自动升级)
+    fetchPendingResume();      // #54 逃生门:重启后中断的流程 → 顶部横幅让人续跑/丢弃
     window.KarvyModelsPanel.checkSetupGate({ pollSnapshot });   // 无 Key → 强制引导录入模型(进系统就判)
     // docs/46 S4:新手引导 —— 重看入口 + 空态行动链接 + placeholder 轮换 + 首启 tour
     const tourBtn = document.getElementById("tour-replay");

@@ -153,3 +153,46 @@ def health_summary(*, online: bool = False, check_port: bool = False,
         "findings": [{**f.to_dict(), "fixable": _fixable(f.code)} for f in findings],
         "log_path": lp,
     }
+
+
+def apply_health_fixes(*, confirm: bool = False,
+                       config_path: Optional[object] = None) -> dict:
+    """给 console `POST /api/doctor/fix` 用:跑一遍确定性自愈,返回结构化结果(零渲染)。
+
+    复用 doctor 本体的 apply_fixes/repair_finding(**不重写**修复逻辑,同 --fix 那批):
+    - 永远修 AUTO_FIXABLE(可逆/幂等/不覆盖用户内容)。
+    - CONFIRM_FIXABLE(会重写用户 config,危险)**仅当 confirm=True** 才修 —— 前端已二次确认。
+      confirm=False + 有 confirm 级项 → 不修、回 needs_confirm 让前端弹二次确认。
+
+    返回 {ok, repaired:[{code,params}], needs_confirm:[{code,params}],
+          overall_before, overall_after}。永不抛、不含 key。"""
+    from karvyloop.doctor import apply_fixes, overall, run_doctor
+    from karvyloop.doctor import CONFIRM_FIXABLE
+
+    findings = run_doctor(config_path=config_path, check_port=False)
+    before = overall(findings)
+
+    # 安全那批(auto)始终修;危险那批(confirm)只在 confirm=True 时一并修。
+    repaired = apply_fixes(findings, include_confirmed=bool(confirm))
+
+    # 未确认时,列出还需二次确认的危险项(前端据此弹确认框)。
+    pending = [] if confirm else [
+        {"code": f.code, "params": dict(f.params or {})}
+        for f in findings if f.code in CONFIRM_FIXABLE
+    ]
+
+    try:
+        from karvyloop.doctor_log import log_findings
+        if repaired:
+            log_findings(repaired, phase="fix")
+    except Exception:
+        pass
+
+    after_findings = run_doctor(config_path=config_path, check_port=False)
+    return {
+        "ok": True,
+        "repaired": [{"code": r.code, "params": dict(r.params or {})} for r in repaired],
+        "needs_confirm": pending,
+        "overall_before": before,
+        "overall_after": overall(after_findings),
+    }

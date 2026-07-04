@@ -266,6 +266,8 @@ def cmd_console(args: argparse.Namespace) -> int:
             _budget_reg = getattr(_gw_for_budget, "reg", None)   # ModelRegistry(取每模型 cost 算真钱)
         _budget_cfg_path = getattr(app.state, "config_path", "") or None
         _emit_spend_card = _make_spend_card_emitter(app)
+        # 存 emitter 供 POST /api/budget 改上限后热重载刹车时复用(出卡桥不必重建)。
+        app.state.budget_emit_card = _emit_spend_card
         from karvyloop.llm.spend_budget import wire_spend_budget
         _budget = wire_spend_budget(
             registry=_budget_reg, config_path=_budget_cfg_path, emit_card=_emit_spend_card)
