@@ -26,6 +26,8 @@ import pytest
 
 from karvyloop.relay import MAX_FRAME_BYTES
 
+pytestmark = pytest.mark.security   # 安全套件:信使 relay 重放/篡改/明文泄露/盲转发对抗
+
 
 def _free_port() -> int:
     s = socket.socket()

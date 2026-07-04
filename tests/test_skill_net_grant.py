@@ -6,6 +6,9 @@ from karvyloop.capability.skill_grants import capability_for_skill, token_for_sk
 from karvyloop.registry.skills import parse_frontmatter  # noqa: E402
 from karvyloop.registry.skill_user_grants import SkillUserGrants  # noqa: E402
 from karvyloop.sandbox.mounts import has_net  # noqa: E402
+import pytest  # noqa: E402
+
+pytestmark = pytest.mark.security   # 安全套件:第三方技能默认拒网,需用户显式授权
 
 
 def _third_party(tmp):

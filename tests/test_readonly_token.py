@@ -11,9 +11,13 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import pytest  # noqa: E402
+
 from karvyloop.sandbox.mounts import mounts_from_token, read_only_token  # noqa: E402
 from karvyloop.schemas import CapabilityToken  # noqa: E402
 from karvyloop.schemas.capability import Capability  # noqa: E402
+
+pytestmark = pytest.mark.security   # 安全套件:独立验收者只读硬化(checker 不能写盘)
 
 
 def _tok(grants):

@@ -23,6 +23,9 @@ from karvyloop.platform._stub import StubSandbox
 from karvyloop.schemas import Capability, CapabilityToken
 
 
+pytestmark = pytest.mark.security   # 安全套件:macOS Seatbelt fail-closed profile / 越界拒
+
+
 def _tok(fs_specs, net=False):
     grants = [Capability(resource=f"fs:{p}", ops=[o]) for p, o in fs_specs]
     if net:

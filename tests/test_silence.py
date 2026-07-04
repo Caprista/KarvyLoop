@@ -50,6 +50,8 @@ from karvyloop.karvy.silence import (  # noqa: E402
 from karvyloop.llm.token_ledger import TokenLedger, register_ledger  # noqa: E402
 from karvyloop.llm.token_ledger import record as record_tokens  # noqa: E402
 
+pytestmark = pytest.mark.security   # 安全套件:「挣来的静音」绕过防护(序贯凑连击/不可逆排除)
+
 
 def make_app(tmp_path):
     """真部件拼的 app(不是 mock 数据形态):taste/decision_log/registry 全真实例。"""

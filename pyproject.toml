@@ -80,6 +80,12 @@ karvyloop = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# 安全套件标记:给散落各处的攻防测试打 `@pytest.mark.security`,`pytest -m security`
+# 一键跑全部安全对抗测试(SSRF/deontic 绕闸/沙箱逃逸/relay 攻防/MCP 注入/敏感地板/
+# 凭证泄露…)。清单与向量对照见 tests/security/README.md。
+markers = [
+    "security: 安全攻防测试(deontic gate / sandbox escape / relay / MCP injection / SSRF / fs sensitive floor / credential leak)",
+]
 
 # ---------------------------------------------------------------------------
 # ruff — lint 门(dev-time infra,不进运行时,不违背「少脚手架多信模型」铁律)。

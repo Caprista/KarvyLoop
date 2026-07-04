@@ -34,6 +34,8 @@ from karvyloop.capability.deontic_gate import (
 )
 from karvyloop.capability.policy import Mode, PermissionContext
 
+pytestmark = pytest.mark.security   # 安全套件:域 deontic 硬闸绕闸对抗(pytest -m security)
+
 # finance 模板的真实 forbid(domain/templates.py finance-research)
 FINANCE_FORBID = ("直接执行任何交易或转账操作", "隐瞒下行风险只报收益")
 

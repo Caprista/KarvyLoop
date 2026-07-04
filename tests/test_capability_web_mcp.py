@@ -13,6 +13,9 @@ sys.path.insert(0, str(ROOT))
 
 from karvyloop.capability import authorize, PermissionContext as PC, Mode, Allow, Deny  # noqa: E402
 from karvyloop.capability.policy import required_mode  # noqa: E402
+import pytest  # noqa: E402
+
+pytestmark = pytest.mark.security   # 安全套件:web 只读地板 + MCP maker/checker 权限分离
 
 
 def _ok(tool, mode):

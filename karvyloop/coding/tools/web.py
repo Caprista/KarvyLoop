@@ -20,10 +20,12 @@ from __future__ import annotations
 import html as _html
 import re
 from typing import Any
+from urllib.parse import urljoin
 
 from karvyloop.schemas import CapabilityToken
 
 from ._result import CodingResult
+from .urlguard import SsrfBlocked, check_url
 
 _UA = "Mozilla/5.0 (compatible; KarvyLoop/1.0; +https://github.com/Caprista/KarvyLoop)"
 _TIMEOUT = 15.0
@@ -156,19 +158,40 @@ async def _search_tavily(query: str, key: str, limit: int) -> list[dict]:
 
 
 async def _http_get(url: str) -> tuple[bool, str]:
-    """GET url → (ok, text_or_error)。无 httpx / 网络失败 → (False, 人话原因)。"""
+    """GET url → (ok, text_or_error)。无 httpx / 网络失败 → (False, 人话原因)。
+
+    SSRF 地板:抓取前(以及**每一次重定向后**)都过 urlguard.check_url —— URL 来自
+    模型/用户/被抓网页,不能被当跳板打云元数据(169.254.169.254)或内网。因此关掉 httpx
+    的自动跟随,改**手动逐跳**:每跳先校验目标 IP 段,再 GET,不给"重定向到内网"留缝。
+    """
     try:
         import httpx
     except Exception:
         return False, "httpx 未安装,无法联网"
     try:
+        check_url(url)   # 首个 URL 先过 SSRF 闸
+    except SsrfBlocked as e:
+        return False, f"SSRF 拦截:{e}"
+    try:
         async with httpx.AsyncClient(
-            timeout=_TIMEOUT, follow_redirects=True, max_redirects=5,
+            timeout=_TIMEOUT, follow_redirects=False,   # 自己跟,才能逐跳校验
             headers={"User-Agent": _UA},
         ) as client:
-            r = await client.get(url)
-            r.raise_for_status()
-            return True, r.text
+            cur = url
+            for _hop in range(6):   # 上限 5 次重定向(和旧 max_redirects 一致)
+                r = await client.get(cur)
+                if r.is_redirect and r.headers.get("location"):
+                    nxt = str(r.next_request.url) if r.next_request else \
+                        urljoin(cur, r.headers["location"])
+                    try:
+                        check_url(nxt)   # 重定向目标同样过闸(挡 redirect→内网)
+                    except SsrfBlocked as e:
+                        return False, f"SSRF 拦截(重定向):{e}"
+                    cur = nxt
+                    continue
+                r.raise_for_status()
+                return True, r.text
+            return False, "重定向次数过多"
     except Exception as e:  # 网络/超时/4xx/5xx 一律降级
         return False, f"{type(e).__name__}: {e}"
 

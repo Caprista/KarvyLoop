@@ -31,6 +31,17 @@ def _no_search_key(request, monkeypatch):
     monkeypatch.setattr(W, "_search_config", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def _pin_ssrf_dns_to_public(monkeypatch):
+    """这些是 **响应处理** 测试(respx 拦 HTTP),不是 SSRF 测试。SSRF 地板(urlguard)会对
+    host 做**真实** DNS 解析,respx 拦不到这步 —— 某些跑测环境把公网域名解析到 198.18/15
+    基准测试段(ipaddress 判为 private)→ 误拦。这里把 urlguard 的解析 pin 到一个固定**公网**
+    IP,让地板逻辑照常跑(不削弱防护),只是不依赖真实 DNS。SSRF 拦截本身由
+    tests/security/test_ssrf.py 用字面内网 IP 独立验收。"""
+    import karvyloop.coding.tools.urlguard as UG
+    monkeypatch.setattr(UG, "_resolve_all_ips", lambda host: ["93.184.216.34"])
+
+
 def test_strip_html_basic():
     html = "<html><head><style>x{}</style></head><body><h1>Hi</h1><script>bad()</script><p>a&amp;b</p></body></html>"
     text = _strip_html(html)

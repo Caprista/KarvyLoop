@@ -26,6 +26,8 @@ from karvyloop.sandbox import ExecResult, default_sandbox
 from karvyloop.sandbox.selector import default_sandbox as sel
 from karvyloop.schemas import Capability, CapabilityToken
 
+pytestmark = pytest.mark.security   # 安全套件:沙箱逃逸对抗(写越界/无外网/进程炸弹)
+
 
 def _tok(fs_specs, net=False):
     """fs_specs: list[(path, op)]; net: bool"""

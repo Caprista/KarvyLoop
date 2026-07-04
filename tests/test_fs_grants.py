@@ -15,8 +15,12 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import pytest  # noqa: E402
+
 from karvyloop.capability.fs_grants import (  # noqa: E402
     FsGrantsStore, is_sensitive_path, path_allowed, register_store)
+
+pytestmark = pytest.mark.security   # 安全套件:敏感路径硬地板(密钥/ssh/凭据永不放行)
 
 
 def teardown_function(_fn):

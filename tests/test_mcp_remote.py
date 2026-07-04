@@ -53,6 +53,8 @@ from karvyloop.mcp_client import (  # noqa: E402
 
 FAKE_TOKEN = "sk-FAKE-DO-NOT-LEAK-remote-mcp-0123456789abcdef"
 
+pytestmark = pytest.mark.security   # 安全套件:MCP remote 注入当数据/bearer 拒/明文 token 泄露
+
 
 @pytest.fixture(autouse=True)
 def _bypass_system_proxy(monkeypatch):
