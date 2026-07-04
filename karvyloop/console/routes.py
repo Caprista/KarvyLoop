@@ -1881,8 +1881,11 @@ class McpPresetApplyRequest(BaseModel):
 @router.get("/mcp/presets")
 def api_mcp_presets(request: Request) -> dict[str, Any]:
     """渠道预设目录 + 哪些已在 config.yaml 配好(只比对名字,**绝不回显 env/密钥**)。
+    另带已配置的 remote(http)server 列表(只有 name / 去 query 的 url / 有没有凭证
+    这个 bool,**绝不含 token/headers 值**)。
     诚实:MCP server 只在 console 启动时连(app.py lifespan),无热加载 → requires_restart。"""
-    from karvyloop.console.mcp_presets import configured_names, list_presets
+    from karvyloop.console.mcp_presets import (
+        configured_names, configured_remote_servers, list_presets)
     cfgp = getattr(request.app.state, "config_path", "") or ""
     ws = None
     try:
@@ -1892,6 +1895,7 @@ def api_mcp_presets(request: Request) -> dict[str, Any]:
         pass
     names = configured_names(cfgp)
     return {"presets": [{**p, "configured": p["id"] in names} for p in list_presets(ws)],
+            "remote_servers": configured_remote_servers(cfgp),
             "requires_restart": True}
 
 
@@ -1908,6 +1912,30 @@ def api_mcp_preset_apply(req: McpPresetApplyRequest, request: Request) -> dict[s
     if not ok:
         return {"ok": False, "reason": reason}
     return {"ok": True, "requires_restart": True, "preset_id": req.preset_id}
+
+
+class McpRemoteAddRequest(BaseModel):
+    """贴 URL 加 remote MCP server(streamable HTTP)。token 可选(bearer);
+    请求体里的 token 只落 config.yaml,**绝不回显、绝不 log**。"""
+    url: str = Field(..., min_length=8, max_length=2048)
+    name: str = Field(default="", max_length=64)     # 不填 → 从 host 推导(mcp.notion.com → notion)
+    token: str = Field(default="", max_length=4096)  # 可选 bearer token / API key
+
+
+@router.post("/mcp/server/add")
+def api_mcp_server_add(req: McpRemoteAddRequest, request: Request) -> dict[str, Any]:
+    """"贴个 URL + 可选 token"加 remote MCP server(vendor 托管,streamable HTTP)。
+    upsert 进 config.yaml 的 mcp.servers(`{name, url, transport: http, [token]}`)。
+    凭证只落 config.yaml(仓外,export 排除);响应**绝不回显 token**;
+    校验失败的 reason 只含参数名/URL host,不含 token 值。无热加载 → requires_restart。"""
+    from karvyloop.console.mcp_presets import add_remote_server
+    cfgp = getattr(request.app.state, "config_path", "") or ""
+    if not cfgp:
+        return {"ok": False, "reason": "未接 config(--no-llm?)"}
+    ok, reason, name = add_remote_server(req.url, req.name, req.token, cfgp)
+    if not ok:
+        return {"ok": False, "reason": reason}
+    return {"ok": True, "requires_restart": True, "name": name}
 
 
 def _skill_status(body: str) -> str:

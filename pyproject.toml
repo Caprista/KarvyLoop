@@ -24,7 +24,7 @@ web = [
 ]
 # 接 MCP server(它的工具注入给每个 agent);没装 → 用到时友好报错"pip install karvyloop[mcp]"。
 mcp = [
-    "mcp>=1.0",           # 还需 PATH 有 uvx(`pip install uv`)才能起 stdio MCP server
+    "mcp>=1.9",           # ≥1.9:remote server(streamable HTTP)要求;stdio 另需 PATH 有 uvx(`pip install uv`)
 ]
 # 跨进程 A2A transport(多进程/多机协作);没装 → 自动降级到 in-process(单进程够用)。
 redis = [

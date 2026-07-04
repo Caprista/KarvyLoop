@@ -200,23 +200,12 @@ def configured_names(config_path: str) -> set[str]:
         return set()
 
 
-def apply_preset(preset_id: str, params: dict[str, str], config_path: str) -> tuple[bool, str]:
-    """把一个预设 upsert 进 config.yaml 的 `mcp.servers`(同名替换,不重复)。
+def _upsert_server(entry: dict[str, Any], config_path: str) -> tuple[bool, str]:
+    """把一个 server 条目 upsert 进 config.yaml 的 `mcp.servers`(同名替换,不重复)。
 
     写法跟 gateway/config_models._save 同款(safe_load/safe_dump,保留其余键)。
     密钥只落盘,**不 log、不出现在返回值里**。返回 (ok, reason)。
     """
-    if not config_path:
-        return False, "no config path"
-    try:
-        from karvyloop.config_workspace import resolve_workspace
-        ws: Optional[str] = resolve_workspace(config_path, ensure=False)
-    except Exception:
-        ws = None
-    try:
-        entry = build_server_config(preset_id, params, workspace=ws)
-    except ValueError as e:
-        return False, str(e)
     import yaml
     pth = Path(config_path)
     cfg: dict[str, Any] = {}
@@ -236,4 +225,115 @@ def apply_preset(preset_id: str, params: dict[str, str], config_path: str) -> tu
     return True, ""
 
 
-__all__ = ["PRESETS", "list_presets", "build_server_config", "configured_names", "apply_preset"]
+def apply_preset(preset_id: str, params: dict[str, str], config_path: str) -> tuple[bool, str]:
+    """把一个预设 upsert 进 config.yaml 的 `mcp.servers`。返回 (ok, reason)。"""
+    if not config_path:
+        return False, "no config path"
+    try:
+        from karvyloop.config_workspace import resolve_workspace
+        ws: Optional[str] = resolve_workspace(config_path, ensure=False)
+    except Exception:
+        ws = None
+    try:
+        entry = build_server_config(preset_id, params, workspace=ws)
+    except ValueError as e:
+        return False, str(e)
+    return _upsert_server(entry, config_path)
+
+
+# ---- remote MCP server(streamable HTTP):贴个 URL + 可选 token 就能加 ----------
+
+_NAME_OK = "abcdefghijklmnopqrstuvwxyz0123456789_-"
+# host 前缀里没信息量的 label(推导默认名时剥掉):mcp.notion.com → notion
+_BORING_LABELS = ("mcp", "api", "www", "server", "remote")
+
+
+def _derive_name(url: str) -> str:
+    """从 URL 推一个默认 server 名(用户没起名时):取 host、剥无信息 label、拿第一段。"""
+    import urllib.parse as _up
+    host = (_up.urlsplit(url).hostname or "").lower()
+    labels = [l for l in host.split(".") if l]
+    while len(labels) > 1 and labels[0] in _BORING_LABELS:
+        labels = labels[1:]
+    return _sanitize_name(labels[0] if labels else "")
+
+
+def _sanitize_name(name: str) -> str:
+    s = "".join(ch if ch in _NAME_OK else "-" for ch in str(name or "").strip().lower())
+    return s.strip("-_")[:64]
+
+
+def build_remote_server_config(url: str, *, name: str = "",
+                               token: str = "") -> dict[str, Any]:
+    """贴 URL + 可选 bearer token → config.yaml `mcp.servers` 的 remote 形状
+    `{name, url, transport: "http", [token]}`(read_mcp_server_configs 真实消费;
+    token 落盘后由它转成 Authorization: Bearer header)。
+
+    校验(错误信息只含参数名/URL 的 host,**绝不含 token 值**):
+    - url 必须 http(s)://…;
+    - **token 不许走明文 http**(凭证裸奔),localhost 回环除外(本地调试);
+    - name 允许 [a-z0-9_-],没给就从 host 推导(mcp.notion.com → notion)。
+    """
+    import urllib.parse as _up
+    u = str(url or "").strip()
+    if not u.lower().startswith(("http://", "https://")):
+        raise ValueError("url must start with http:// or https://")
+    parts = _up.urlsplit(u)
+    if not parts.hostname:
+        raise ValueError("url has no host")
+    tok = str(token or "").strip()
+    is_loopback = parts.hostname in ("localhost", "127.0.0.1", "::1")
+    if tok and parts.scheme == "http" and not is_loopback:
+        raise ValueError("refusing to send a token over plain http — use https")
+    nm = _sanitize_name(name) or _derive_name(u)
+    if not nm:
+        raise ValueError("could not derive a server name — pass one explicitly")
+    entry: dict[str, Any] = {"name": nm, "url": u, "transport": "http"}
+    if tok:
+        entry["token"] = tok
+    return entry
+
+
+def add_remote_server(url: str, name: str, token: str, config_path: str) -> tuple[bool, str, str]:
+    """贴 URL 加 remote MCP server:校验 → upsert config.yaml。返回 (ok, reason, name)。
+    token 只落 config.yaml(密钥之家,仓外);**不 log、不进返回值**。"""
+    if not config_path:
+        return False, "no config path", ""
+    try:
+        entry = build_remote_server_config(url, name=name, token=token)
+    except ValueError as e:
+        return False, str(e), ""
+    ok, reason = _upsert_server(entry, config_path)
+    return ok, reason, (entry["name"] if ok else "")
+
+
+def configured_remote_servers(config_path: str) -> list[dict[str, Any]]:
+    """config.yaml 里已配置的 remote(http)server —— 只回 name + 去 query 的 url +
+    有没有配凭证(bool),**绝不回 token/headers 的值**(展示用)。"""
+    out: list[dict[str, Any]] = []
+    try:
+        if not config_path:
+            return []
+        pth = Path(config_path)
+        if not pth.exists():
+            return []
+        import yaml
+        cfg = yaml.safe_load(pth.read_text(encoding="utf-8")) or {}
+        for s in ((cfg.get("mcp") or {}).get("servers") or []):
+            if not isinstance(s, dict):
+                continue
+            url = str(s.get("url", "") or "").strip()
+            name = str(s.get("name", "") or "").strip()
+            if not url or not name:
+                continue
+            out.append({"name": name,
+                        "url": url.split("?", 1)[0].split("#", 1)[0],
+                        "has_token": bool(s.get("token") or s.get("headers"))})
+    except Exception:
+        return []
+    return out
+
+
+__all__ = ["PRESETS", "list_presets", "build_server_config", "configured_names",
+           "apply_preset", "build_remote_server_config", "add_remote_server",
+           "configured_remote_servers"]

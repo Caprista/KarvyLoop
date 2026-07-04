@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Optional
 
+from karvyloop.mcp_client import sanitize_untrusted_text
+
 from ._result import CodingResult
 
 
@@ -49,7 +51,11 @@ class McpAgentTool:
     def __init__(self, *, server_name: str, mcp_tool_name: str, description: str,
                  parameters: dict, session: Any, loop: Optional[asyncio.AbstractEventLoop] = None):
         self.name = f"mcp_{server_name}_{mcp_tool_name}"
-        self.description = description or f"MCP tool {mcp_tool_name} from {server_name}"
+        # 描述来自 server(untrusted,remote 尤甚)→ 只当数据:去控制字符+封长。
+        # 它改不了权限:capability 下限由工具名 `mcp_` 前缀定(policy.required_mode),
+        # server 自称 "read-only"/"safe" 之类的元数据一概不参与授权。
+        self.description = sanitize_untrusted_text(description) \
+            or f"MCP tool {mcp_tool_name} from {server_name}"
         self.parameters = parameters or {"type": "object", "properties": {}}
         self._server_name = server_name
         self._mcp_tool_name = mcp_tool_name
@@ -100,44 +106,41 @@ def mcp_tools_from_session(session: Any, tools_list: list, server_name: str,
 
 
 async def connect_mcp_agent_tools(configs: list) -> tuple:
-    """连一组 MCP server(stdio),返回 `(group_ctx, {tool_name: McpAgentTool})`。
+    """连一组 MCP server(stdio 本地 / streamable HTTP 远端),返回
+    `(group_ctx, {tool_name: McpAgentTool})`。
 
     在**当前事件循环**(应是 console 主循环)上连;把该 loop 记进每个工具,调用时跨线程桥回。
     `group_ctx` 由调用方保活:`await group_ctx.__aenter__()` 连上后**别退出**,直到 console 关闭再
-    `await group_ctx.__aexit__(...)`(否则子进程会被回收、会话断)。configs 里每项需有
-    `.name/.command/.args/.env`(McpServerConfig)。任一 server 连失败 → 抛 McpConnectError(全或无)。
+    `await group_ctx.__aexit__(...)`(否则子进程会被回收、会话断;连接/关闭须同一 task,
+    console lifespan 天然满足)。configs 里每项是 `McpServerConfig`
+    (stdio 用 `.command/.args/.env`;http 用 `.url/.headers`)。
+    任一 server 连失败 → 抛 McpConnectError(全或无);错误文本**绝不含 headers/env 值**。
     """
-    from karvyloop.mcp_client import McpConnectError
+    import contextlib
+
+    from karvyloop.mcp_client import McpConnectError, _fail_connect, _open_session
     try:
-        from mcp import StdioServerParameters
-        from mcp.client.session_group import ClientSessionGroup
+        import mcp  # noqa: F401
     except ImportError as e:
         raise McpConnectError(f"需要 `pip install mcp` 才能接 MCP server: {e}") from e
 
     loop = asyncio.get_running_loop()
-    group = ClientSessionGroup()
-
-    async def _cleanup():
-        await group.__aexit__(None, None, None)
+    stack = contextlib.AsyncExitStack()
 
     class _GroupCtx:
         async def __aenter__(self):
-            return group
+            return stack
         async def __aexit__(self, *exc):
-            await _cleanup()
+            await stack.aclose()
 
     tools: dict = {}
-    try:
-        for cfg in configs:
-            params = StdioServerParameters(command=cfg.command, args=list(cfg.args or []), env=cfg.env)
-            session = await group.connect_to_server(params)
+    for cfg in configs:
+        try:
+            session = await _open_session(stack, cfg)
             resp = await session.list_tools()
-            tools.update(mcp_tools_from_session(session, resp.tools, cfg.name, loop=loop))
-    except McpConnectError:
-        await _cleanup(); raise
-    except Exception as e:
-        await _cleanup()
-        raise McpConnectError(f"连 MCP server 失败: {type(e).__name__}: {e}") from e
+        except BaseException as e:  # noqa: BLE001 —— _fail_connect 同 task 收栈后必抛
+            await _fail_connect(stack, e, cfg)
+        tools.update(mcp_tools_from_session(session, resp.tools, cfg.name, loop=loop))
     return _GroupCtx(), tools
 
 
@@ -163,19 +166,29 @@ def _resolve_env_value(v: str, data: dict) -> str:
 
 
 def read_mcp_server_configs(config_path: str) -> list:
-    """从 config.yaml 的 `mcp.servers` 读 MCP server 配置(stdio)。没配 → [](不连、0 影响)。
+    """从 config.yaml 的 `mcp.servers` 读 MCP server 配置。没配 → [](不连、0 影响)。
+
+    两种形状,按有没有 `url`/`command` 区分 transport(也可显式 `transport:`):
 
         mcp:
           servers:
+            # ① stdio(本地子进程)—— 原有形状,不变
             - name: minimax
               command: uvx                                  # 需 PATH 有 uvx(pip install uv),或填绝对路径
               args: ["minimax-coding-plan-mcp", "-y"]
               env:
                 MINIMAX_API_KEY: "@provider:minimax"        # 复用你已配的 minimax key,不用再填
                 MINIMAX_API_HOST: "@provider_host:minimax"  # 自动用你 minimax 的区域 host
+            # ② streamable HTTP(remote/vendor 托管)—— 贴 URL + 可选 token
+            - name: notion
+              url: https://mcp.notion.com/mcp
+              token: "${NOTION_MCP_TOKEN}"                  # 糖:→ Authorization: Bearer <token>
+              # 或自定义 header(API-key 风格):
+              # headers: { X-API-Key: "${SOME_KEY}" }
 
-    env 值支持 `${VAR}`(环境变量)/ `@provider:<name>`(复用某 provider 的 key)/
-    `@provider_host:<name>`(该 provider 的 host)。
+    env/headers/token 的值都支持 `${VAR}`(环境变量)/ `@provider:<name>`(复用某
+    provider 的 key)/ `@provider_host:<name>`(该 provider 的 host)。
+    凭证只住 config.yaml(仓外,export 排除),这里读进内存后**绝不 log**。
     """
     from karvyloop.mcp_client import McpServerConfig
     out: list = []
@@ -189,9 +202,26 @@ def read_mcp_server_configs(config_path: str) -> list:
             return []
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         for s in ((data.get("mcp") or {}).get("servers") or []):
+            if not isinstance(s, dict):
+                continue
             name = str(s.get("name", "") or "").strip()
             command = str(s.get("command", "") or "").strip()
-            if not name or not command:
+            url = str(s.get("url", "") or "").strip()
+            transport = str(s.get("transport", "") or "").strip().lower()
+            if not name or (not command and not url):
+                continue
+            # remote(streamable HTTP):有 url(或显式 transport: http)
+            if url and transport != "stdio":
+                headers = {str(k): _resolve_env_value(v, data)
+                           for k, v in (s.get("headers") or {}).items()}
+                token = _resolve_env_value(s.get("token", "") or "", data).strip()
+                if token and "authorization" not in {k.lower() for k in headers}:
+                    headers["Authorization"] = f"Bearer {token}"
+                out.append(McpServerConfig(name=name, url=url, transport="http",
+                                           headers=headers))
+                continue
+            # local(stdio):原有形状
+            if not command:
                 continue
             env = None
             if s.get("env"):
@@ -204,4 +234,4 @@ def read_mcp_server_configs(config_path: str) -> list:
 
 
 __all__ = ["McpAgentTool", "mcp_tools_from_session", "connect_mcp_agent_tools",
-           "read_mcp_server_configs"]
+           "read_mcp_server_configs", "sanitize_untrusted_text"]

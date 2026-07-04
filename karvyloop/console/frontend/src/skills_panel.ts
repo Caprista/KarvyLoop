@@ -285,12 +285,57 @@ function _mcpPresetsSection(): HTMLElement {
   wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.hint") }));
   const list = el("div", { class: "mgmt-list" });
   wrap.appendChild(list);
+  const remote = el("div");
+  wrap.appendChild(remote);
   (async () => {
     const data = await _getJSON("/api/mcp/presets");
     const presets = (data && data.presets) || [];
-    if (!presets.length) { list.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") })); return; }
-    for (const p of presets) list.appendChild(_mcpPresetRow(p));
+    if (presets.length) { for (const p of presets) list.appendChild(_mcpPresetRow(p)); }
+    else list.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") }));
+    // remote(vendor 托管)server:贴 URL + 可选 token 就能加(streamable HTTP)
+    remote.appendChild(_mcpRemoteAddSection((data && data.remote_servers) || []));
   })();
+  return wrap;
+}
+
+// remote MCP server(vendor 托管,streamable HTTP):贴 URL + 可选 token。
+// token 走 password 输入、只发一次;后端只落 config.yaml,响应绝不回显。
+function _mcpRemoteAddSection(existing: any[]): HTMLElement {
+  const wrap = el("div", { class: "mgmt-buysugar" });
+  wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("mcpp.remote_title") }));
+  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.remote_hint") }));
+  if (existing.length) {
+    const names = existing.map((s: any) =>
+      s.name + " (" + s.url + (s.has_token ? " · " + t("mcpp.remote_has_token") : "") + ")").join(", ");
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.remote_configured") + " " + names }));
+  }
+  const urlInput = el("input", { type: "text", placeholder: t("mcpp.remote_url_ph") }) as HTMLInputElement;
+  const nameInput = el("input", { type: "text", placeholder: t("mcpp.remote_name_ph") }) as HTMLInputElement;
+  const tokenInput = el("input", { type: "password", placeholder: t("mcpp.remote_token_ph") }) as HTMLInputElement;
+  urlInput.style.flex = "2"; nameInput.style.flex = "1"; tokenInput.style.flex = "1";
+  const msg = el("div", { class: "mgmt-hint" });
+  const btn = el("button", { class: "dpref-confirm", text: t("mcpp.remote_add"),
+    onclick: async () => {
+      const url = urlInput.value.trim();
+      if (!url) { urlInput.focus(); return; }
+      (btn as HTMLButtonElement).disabled = true; btn.textContent = t("mcpp.applying");
+      const r = await _postJSON("/api/mcp/server/add",
+        { url: url, name: nameInput.value.trim(), token: tokenInput.value });
+      tokenInput.value = "";   // token 只发一次,不留在输入框
+      if (r.ok && r.data && r.data.ok) {
+        btn.textContent = t("mcpp.remote_added") + " · " + (r.data.name || "");
+        msg.textContent = t("mcpp.restart_note");   // 诚实:启动时才连,要重启才装上
+      } else {
+        (btn as HTMLButtonElement).disabled = false;
+        btn.textContent = t("mcpp.remote_add");
+        msg.textContent = t("mgmt.failed", { err: (r.data && (r.data.reason || r.data.detail)) || r.status });
+      }
+    } });
+  wrap.appendChild(el("div", { class: "mgmt-card" },
+    el("div", { class: "mc-main" },
+      el("div", { class: "mgmt-row" }, urlInput, nameInput, tokenInput),
+      el("div", { class: "dpref-actions" }, btn),
+      msg)));
   return wrap;
 }
 

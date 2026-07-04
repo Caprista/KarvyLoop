@@ -88,8 +88,10 @@ crystallize:
 #   api_key: "BSA..."
 
 # MCP server(可选):接任意 MCP server,它的工具会注入给每个 agent(键带 mcp_<server>_ 前缀)。
+# 两种:① 本地 stdio(command/args,需 PATH 有 uvx:`pip install uv`);② remote streamable
+# HTTP(url + 可选 token,vendor 托管 server 都是这种)。按有没有 url/command 自动区分。
 # 复用你已配的 LLM key 的搜索(无需再办新 key):MiniMax Token-Plan 自带 web_search,只用你的
-# minimax key(消耗你的 Token Plan 额度)。需 PATH 有 uvx(`pip install uv`)或填 uvx 绝对路径。
+# minimax key(消耗你的 Token Plan 额度)。
 # mcp:
 #   servers:
 #     - name: minimax
@@ -98,6 +100,9 @@ crystallize:
 #       env:
 #         MINIMAX_API_KEY: "@provider:minimax"        # 复用上面 minimax provider 的 key
 #         MINIMAX_API_HOST: "@provider_host:minimax"  # 自动用你 minimax 的区域 host
+#     - name: notion                                  # remote 例:贴 URL + 可选 token
+#       url: https://mcp.notion.com/mcp
+#       token: "${NOTION_MCP_TOKEN}"                  # → Authorization: Bearer …(只住本文件,绝不入 repo/日志)
 """
 
 

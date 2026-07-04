@@ -121,7 +121,7 @@ The base install runs the whole product. A few capabilities need an extra packag
 
 | Extra | Install | Unlocks | Without it |
 |---|---|---|---|
-| **mcp** | `pip install -e ".[mcp]"` (+ `pip install uv` for `uvx`) | Connect any [MCP](https://modelcontextprotocol.io) server; its tools are injected into every agent (keys prefixed `mcp_<server>_`) | MCP tools unavailable; using one returns a clear "install mcp" error |
+| **mcp** | `pip install -e ".[mcp]"` (+ `pip install uv` for `uvx`) | Connect any [MCP](https://modelcontextprotocol.io) server — local stdio (`command`) **or vendor-hosted remote over streamable HTTP** (`url` + optional bearer token); tools are injected into every agent (keys prefixed `mcp_<server>_`) | MCP tools unavailable; using one returns a clear "install mcp" error |
 | **web** | `pip install -e ".[web]"` then `playwright install chromium` | Real **runtime** verification of web output (`karvyloop verify-web`) — actually loads the page | Falls back to syntax-only checks; honestly tells you runtime wasn't verified |
 | **redis** | `pip install -e ".[redis]"` | Cross-process / cross-machine agent collaboration (Redis A2A transport) | Auto-falls back to in-process transport — fine for a single process |
 | **relay** | `pip install -e ".[relay]"` | End-to-end encryption for the Karvy messenger relay: reach your console from anywhere via `karvyloop console --relay` + `karvyloop relay-pair` (the relay itself — `karvyloop relay-serve` — is stateless, blind-forwarding, and needs no extra) | `--relay` / `relay-pair` refuse with a clear "pip install karvyloop[relay]" message |
@@ -251,7 +251,7 @@ Every call is checked against the task's capability token (`karvyloop/capability
 | **Role** | instantiate a domain template, create one by hand, or import an existing agent — imports are LLM-decomposed into a role + reusable atoms, not flattened into a file | console → domains (`POST /api/domain/templates/instantiate`, `/api/role/create`, `/api/agent/import`) |
 | **Atom** | usually you don't — roles mint them via `create_atom` when needed; you can also add one by hand or get them from an agent import; cross-role near-duplicates surface as merge proposals you confirm | console → atoms (`POST /api/atom/create`, `/api/atoms/consolidate/*`) |
 | **Skill** | let it crystallize out of use (the default), or import an Agent Skills–standard `SKILL.md` folder / zip / git repo — imports are marked untrusted, integrity-locked, and sandboxed | console → skills (`POST /api/skill/import`, `/api/skill/sources`) |
-| **Tool** | connect an MCP server: pick a one-click preset (filesystem, fetch, github, memory, time, sqlite) or add your own under `mcp.servers` in `~/.karvyloop/config.yaml`; built-ins are code — PRs welcome | console → models → MCP (`GET /api/mcp/presets`, `POST /api/mcp/preset/apply`) |
+| **Tool** | connect an MCP server: pick a one-click preset (filesystem, fetch, github, memory, time, sqlite), **paste a hosted server's URL + optional token** (streamable HTTP; token lives only in config.yaml, never echoed or logged), or hand-edit `mcp.servers` in `~/.karvyloop/config.yaml`; built-ins are code — PRs welcome | console → models → MCP (`GET /api/mcp/presets`, `POST /api/mcp/preset/apply`, `POST /api/mcp/server/add`) |
 
 For the full picture, read the source — it's documented. The map below tells you where to look.
 

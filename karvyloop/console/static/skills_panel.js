@@ -403,15 +403,70 @@ var KarvySkillsPanelBundle = (function(exports) {
     wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.hint") }));
     const list = el("div", { class: "mgmt-list" });
     wrap.appendChild(list);
+    const remote = el("div");
+    wrap.appendChild(remote);
     (async () => {
       const data = await _getJSON("/api/mcp/presets");
       const presets = data && data.presets || [];
-      if (!presets.length) {
-        list.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") }));
-        return;
-      }
-      for (const p of presets) list.appendChild(_mcpPresetRow(p));
+      if (presets.length) {
+        for (const p of presets) list.appendChild(_mcpPresetRow(p));
+      } else list.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") }));
+      remote.appendChild(_mcpRemoteAddSection(data && data.remote_servers || []));
     })();
+    return wrap;
+  }
+  function _mcpRemoteAddSection(existing) {
+    const wrap = el("div", { class: "mgmt-buysugar" });
+    wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("mcpp.remote_title") }));
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.remote_hint") }));
+    if (existing.length) {
+      const names = existing.map((s) => s.name + " (" + s.url + (s.has_token ? " · " + t("mcpp.remote_has_token") : "") + ")").join(", ");
+      wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.remote_configured") + " " + names }));
+    }
+    const urlInput = el("input", { type: "text", placeholder: t("mcpp.remote_url_ph") });
+    const nameInput = el("input", { type: "text", placeholder: t("mcpp.remote_name_ph") });
+    const tokenInput = el("input", { type: "password", placeholder: t("mcpp.remote_token_ph") });
+    urlInput.style.flex = "2";
+    nameInput.style.flex = "1";
+    tokenInput.style.flex = "1";
+    const msg = el("div", { class: "mgmt-hint" });
+    const btn = el("button", {
+      class: "dpref-confirm",
+      text: t("mcpp.remote_add"),
+      onclick: async () => {
+        const url = urlInput.value.trim();
+        if (!url) {
+          urlInput.focus();
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = t("mcpp.applying");
+        const r = await _postJSON(
+          "/api/mcp/server/add",
+          { url, name: nameInput.value.trim(), token: tokenInput.value }
+        );
+        tokenInput.value = "";
+        if (r.ok && r.data && r.data.ok) {
+          btn.textContent = t("mcpp.remote_added") + " · " + (r.data.name || "");
+          msg.textContent = t("mcpp.restart_note");
+        } else {
+          btn.disabled = false;
+          btn.textContent = t("mcpp.remote_add");
+          msg.textContent = t("mgmt.failed", { err: r.data && (r.data.reason || r.data.detail) || r.status });
+        }
+      }
+    });
+    wrap.appendChild(el(
+      "div",
+      { class: "mgmt-card" },
+      el(
+        "div",
+        { class: "mc-main" },
+        el("div", { class: "mgmt-row" }, urlInput, nameInput, tokenInput),
+        el("div", { class: "dpref-actions" }, btn),
+        msg
+      )
+    ));
     return wrap;
   }
   function _mcpPresetRow(p) {
