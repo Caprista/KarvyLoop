@@ -2208,3 +2208,20 @@ button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outl
   font-style: normal;   /* 空态本体是斜体,按钮回正 */
 }
 .empty-act:hover { border-color: var(--accent); }
+/* 能力解锁面板(unlock_panel.ts):可复制命令 / config.yaml 片段 / 生态目录链接 */
+.unlock-cmd {
+  display: inline-block; padding: 2px 8px; border-radius: 6px;
+  background: var(--bg); border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-12); user-select: all;   /* 一点全选,clipboard 不可用也好复制 */
+  overflow-wrap: anywhere;
+}
+.unlock-snippet {
+  margin: 6px 0 2px; padding: 8px 10px; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-12); line-height: 1.5;
+  white-space: pre; overflow-x: auto; user-select: all;
+}
+.unlock-links a { color: var(--accent-deep); text-decoration: underline; }
+.unlock-links a:hover { color: var(--accent); }

@@ -122,9 +122,15 @@ async function _viewFile(rel: string): Promise<void> {
   const old = body.querySelector(".files-preview-wrap"); if (old) old.remove();
   const pre = el("pre", { class: "files-preview" });
   const notes: string[] = [];   // 提取来源/截断的明示行(附件真解析:PDF/docx/xlsx → 文本)
+  let unlockBtn: HTMLElement | null = null;   // 缺依赖时的就近引导(Hardy:碰壁处给"去解锁"的路)
   if (!d || !d.ok) pre.textContent = t("files.bad_path");
   else if (d.too_big) pre.textContent = t("files.too_big");
-  else if (d.extract_error === "missing_dependency") pre.textContent = t("files.extract_missing_dep");
+  else if (d.extract_error === "missing_dependency") {
+    pre.textContent = t("files.extract_missing_dep");
+    const unlock = (window as unknown as { KarvyUnlockPanel?: { open: () => void } }).KarvyUnlockPanel;
+    if (unlock) unlockBtn = el("button", { class: "mgmt-inline-link", text: t("unlock.open_from_here"),
+      onClick: () => unlock.open() });
+  }
   else if (d.extract_error) pre.textContent = t("files.extract_bad_file");
   else if (d.binary) pre.textContent = t("files.binary");
   else if (d.extract && !d.text) pre.textContent = t("files.extract_empty");
@@ -137,7 +143,8 @@ async function _viewFile(rel: string): Promise<void> {
     el("div", { class: "files-preview-head" }, el("span", { text: "📄 " + rel }),
       el("button", { class: "files-preview-close", text: "✕", onClick: () => wrap.remove() })),
     notes.length ? el("div", { class: "files-preview-note files-hint", text: notes.join(" ") }) : null,
-    pre);
+    pre,
+    unlockBtn);
   body.appendChild(wrap);
   wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }

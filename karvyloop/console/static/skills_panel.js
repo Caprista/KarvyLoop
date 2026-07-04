@@ -317,6 +317,7 @@ var KarvySkillsPanelBundle = (function(exports) {
     body.appendChild(_growthSection(curves && curves.growth && curves.growth.points || []));
     await _renderCodingCapability(body);
     _renderCapabilityOverviewCard(body);
+    _renderUnlockCard(body);
     body.appendChild(_skillImportForm());
     const skills = data && data.skills || [];
     if (!skills.length) {
@@ -814,6 +815,31 @@ var KarvySkillsPanelBundle = (function(exports) {
     }
     b.appendChild(sgl);
   }
+  function _renderUnlockCard(body) {
+    const unlock = window.KarvyUnlockPanel;
+    if (!unlock) return;
+    const actions = el("div", { class: "dpref-actions" });
+    actions.appendChild(el("button", {
+      class: "dpref-edit",
+      text: t("skills.view"),
+      onclick: () => unlock.open()
+    }));
+    body.appendChild(el(
+      "div",
+      { class: "mgmt-list" },
+      el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el("div", { class: "mc-name" }, el("span", { text: t("unlock.name") })),
+          el("div", { class: "mc-meta", text: t("unlock.subtitle") })
+        ),
+        actions
+      )
+    ));
+  }
   function _openSkillDetail(s) {
     openMgmtModal(s.name);
     const b = mgmtBody();
@@ -873,7 +899,11 @@ var KarvySkillsPanelBundle = (function(exports) {
     openMgmtModal(t("skills.title"));
     await renderSkillsPanel();
   }
-  const KarvySkillsPanel = { open };
+  async function openCoding() {
+    const cap = await _getJSON("/api/coding/capability");
+    if (cap && cap.tools) _openCodingDetail(cap);
+  }
+  const KarvySkillsPanel = { open, openCoding };
   window.KarvySkillsPanel = KarvySkillsPanel;
   exports.KarvySkillsPanel = KarvySkillsPanel;
   Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });

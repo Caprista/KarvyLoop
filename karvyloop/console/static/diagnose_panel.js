@@ -120,6 +120,18 @@ var KarvyDiagnosePanelBundle = (function(exports) {
     if (!body) return;
     body.innerHTML = "";
     await renderHealthCard(body);
+    const unlock = window.KarvyUnlockPanel;
+    if (unlock) {
+      body.appendChild(el(
+        "div",
+        { class: "mgmt-hint" },
+        el("button", {
+          class: "mgmt-inline-link",
+          text: t("unlock.name"),
+          onClick: () => unlock.open()
+        })
+      ));
+    }
     body.appendChild(el("div", { class: "mgmt-section-title", text: t("diag.title") }));
     const status = el("div", { class: "diag-status", text: t("diag.running") });
     body.appendChild(status);

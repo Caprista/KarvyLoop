@@ -12,6 +12,20 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **"Unlock more capabilities" panel — degraded features now guide instead of hiding.** Graceful
+  degradation had a blind spot: if you never configure MCP, push channels or attachment parsing,
+  nothing ever tells you they exist ("if you don't guide users, they genuinely don't know the
+  config is there"). A new deterministic endpoint (`GET /api/capability/unlocks`, zero LLM, never
+  echoes a secret) reports each optional capability's live status — ready / not set up / needs
+  install — and the console renders it as a checklist: one line of value, the exact command or
+  `config.yaml` snippet (copyable), a one-click jump to the MCP presets / paste-URL screen, and
+  where to *find* MCP servers (the official registry at registry.modelcontextprotocol.io plus
+  community directories PulseMCP and Glama — links verified live). Voice input is probed
+  browser-side, so the silent "no 🎤 in this browser" case now explains itself. Entrances where
+  you'd actually look: a Skill Library card, the Diagnose panel (the health card says what's
+  broken; this says what's dormant), the end of the first-10-minutes journey, and right where a
+  PDF preview fails for the missing `[files]` extra. i18n en+zh; pattern: setup-checklist /
+  connectors-directory, one clear action per row.
 - **Webhook inbound approval (v2).** The webhook channel can now carry your decision back:
   set `channels.webhook.reply_url` to a polled reply source (e.g. a private ntfy topic's
   `/json?poll=1` endpoint — the console *polls* it outbound, still no listening port) and reply

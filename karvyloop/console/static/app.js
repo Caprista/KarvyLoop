@@ -3324,6 +3324,19 @@
         log.scrollTop = log.scrollHeight;
       }
     }
+    // 收官 next-steps:解锁更多能力(MCP 工具/推送渠道/附件解析…)—— 不配置就降级的
+    // 可选能力,旅程结束顺手给一条"去解锁"的路(Hardy 2026-07-04:你不引导,用户
+    // 就真的不知道有这个配置)。面板脚本没装上则优雅缺席,不给死按钮。
+    if (window.KarvyUnlockPanel) {
+      const log = document.getElementById("chat-log");
+      if (log) {
+        const unlockNotice = el("div", { class: "chat-notice journey-unlock" });
+        unlockNotice.appendChild(document.createTextNode(t("journey.unlock_moment") + " "));
+        unlockNotice.appendChild(_journeyChip("journey.unlock_btn", () => window.KarvyUnlockPanel.open()));
+        log.appendChild(unlockNotice);
+        log.scrollTop = log.scrollHeight;
+      }
+    }
     // 引导时刻③:方法复用回执 = 10 分钟 wow 的主菜,同一套蒙版聚光。
     // 诚实红线:真 recall 命中(reused)才聚 —— 没命中不拿蒙版庆祝空气。
     if (reused && receipt) _spotlightEl(receipt);

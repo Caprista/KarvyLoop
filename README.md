@@ -136,6 +136,8 @@ The base install runs the whole product. A few capabilities need an extra packag
 
 Combine them: `pip install -e ".[mcp,web]"`. None of these gate the core loop — chat, domains/roles, decisions, skills, and token accounting all work on the base install.
 
+You don't need to memorize this table: the console has an **"Unlock more capabilities"** panel (Skill Library → 🔓, also linked from Diagnose and at the end of the first-10-minutes journey) that detects each capability's live status — ready / not set up / needs install — and shows exactly what each one is worth and how to get it, including where to find MCP servers (the [official registry](https://registry.modelcontextprotocol.io/) and community directories like [PulseMCP](https://www.pulsemcp.com/servers) and [Glama](https://glama.ai/mcp/servers)).
+
 <a id="your-first-15-minutes-guided"></a>
 ## Your first 15 minutes (guided)
 

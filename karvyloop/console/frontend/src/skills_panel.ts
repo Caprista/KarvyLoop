@@ -253,6 +253,7 @@ async function renderSkillsPanel(): Promise<void> {
   body.appendChild(_growthSection((curves && curves.growth && curves.growth.points) || []));
   await _renderCodingCapability(body);    // #1:内建「Coding」技能 —— 编码能力露在技能库里
   _renderCapabilityOverviewCard(body);    // P3-d:能力合一清单 —— 工具下限 + 技能授予一张表
+  _renderUnlockCard(body);                // Hardy:降级能力给引导 —— 「能力解锁」清单入口
   body.appendChild(_skillImportForm());   // 导入入口常驻顶部(空库时也能先导)
   const skills = (data && data.skills) || [];
   if (!skills.length) { body.appendChild(el("div", { class: "mgmt-empty", text: t("skills.empty") })); return; }
@@ -597,6 +598,22 @@ async function _openCapabilityOverview(): Promise<void> {
   b.appendChild(sgl);
 }
 
+// Hardy 2026-07-04:「能力解锁」清单入口 —— 不配置就降级的可选能力(MCP/附件解析/渠道…)
+// 从这里一张表看全 + 每行一个明确动作(面板本体在 unlock_panel.ts,点开时才在场即可)。
+function _renderUnlockCard(body: HTMLElement): void {
+  const unlock = (window as unknown as { KarvyUnlockPanel?: { open: () => void } }).KarvyUnlockPanel;
+  if (!unlock) return;   // 面板脚本没装上(异常序)→ 卡片优雅缺席,不给死按钮
+  const actions = el("div", { class: "dpref-actions" });
+  actions.appendChild(el("button", { class: "dpref-edit", text: t("skills.view"),
+    onclick: () => unlock.open() }));
+  body.appendChild(el("div", { class: "mgmt-list" },
+    el("div", { class: "mgmt-card" },
+      el("div", { class: "mc-main" },
+        el("div", { class: "mc-name" }, el("span", { text: t("unlock.name") })),
+        el("div", { class: "mc-meta", text: t("unlock.subtitle") })),
+      actions)));
+}
+
 // 技能详情 + 沙箱试跑(P0-c:让第三方脚本在笼子里跑给你看)
 function _openSkillDetail(s: any): void {
   openMgmtModal(s.name); const b = mgmtBody(); if (!b) return; b.innerHTML = "";
@@ -650,6 +667,12 @@ async function open(): Promise<void> {
   openMgmtModal(t("skills.title")); await renderSkillsPanel();
 }
 
-const KarvySkillsPanel = { open };
+// 直达「Coding」详情(内含 MCP 预设/贴 URL 区)—— 能力解锁面板的"一键到配置入口"。
+async function openCoding(): Promise<void> {
+  const cap = await _getJSON("/api/coding/capability");
+  if (cap && cap.tools) _openCodingDetail(cap);
+}
+
+const KarvySkillsPanel = { open, openCoding };
 (window as unknown as { KarvySkillsPanel: typeof KarvySkillsPanel }).KarvySkillsPanel = KarvySkillsPanel;
 export { KarvySkillsPanel };

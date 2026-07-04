@@ -290,6 +290,19 @@ def api_capability_overview(request: Request) -> dict[str, Any]:
             "no_llm": bool(sk.get("no_llm"))}
 
 
+@router.get("/capability/unlocks")
+def api_capability_unlocks(request: Request) -> dict[str, Any]:
+    """「能力解锁」清单(Hardy 2026-07-04:不配置就降级的功能,给用户引导和选择)。
+
+    确定性探测(零 LLM):每项可选能力当前 已就绪(on)/ 未配置(off)/ 缺依赖
+    (missing_dep)+ 安装命令 + 非机密事实。价值文案 / 怎么做 / 生态链接全在前端
+    i18n(en+zh);**绝不读、绝不回显任何密钥值**(detail 只有个数/包名级事实)。
+    """
+    from karvyloop.console.unlocks import list_unlocks
+    cfgp = getattr(request.app.state, "config_path", "") or ""
+    return {"unlocks": list_unlocks(cfgp)}
+
+
 class FsGrantRequest(BaseModel):
     path: str = Field(..., min_length=1, max_length=1024)
     ops: list = Field(default_factory=lambda: ["read"])

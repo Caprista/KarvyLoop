@@ -123,6 +123,13 @@ async function renderHealthCard(body: HTMLElement, rerender = false): Promise<vo
 async function renderDiagnosePanel(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
   await renderHealthCard(body);   // doctor 环:系统健康卡先行(确定性 + 活性)
+  // Hardy:健康卡只报"坏了什么";没坏但一直关着的可选能力从这里进「解锁清单」。
+  const unlock = (window as unknown as { KarvyUnlockPanel?: { open: () => void } }).KarvyUnlockPanel;
+  if (unlock) {
+    body.appendChild(el("div", { class: "mgmt-hint" },
+      el("button", { class: "mgmt-inline-link", text: t("unlock.name"),
+        onClick: () => unlock.open() })));
+  }
   body.appendChild(el("div", { class: "mgmt-section-title", text: t("diag.title") }));
   const status = el("div", { class: "diag-status", text: t("diag.running") });
   body.appendChild(status);

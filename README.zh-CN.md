@@ -137,6 +137,8 @@ embedding:
 
 可组合:`pip install -e ".[mcp,web]"`。这些都不卡核心 loop——聊天、业务域/角色、决策、技能、token 账本在基础安装上全都能用。
 
+这张表不用背:console 里有一个**「解锁更多能力」**面板(技能库 → 🔓,诊断面和「第一个 10 分钟」旅程收官处也有入口),实时探测每项能力的状态——已就绪 / 未配置 / 缺依赖——并告诉你每项值什么、怎么打开,包括去哪找 MCP server([官方 registry](https://registry.modelcontextprotocol.io/),以及 [PulseMCP](https://www.pulsemcp.com/servers)、[Glama](https://glama.ai/mcp/servers) 这些社区目录站)。
+
 ## 头 15 分钟(引导版)
 
 与[「头 5 分钟」](#头-5-分钟)是同一条 loop,放慢了走 —— 不用懂 agent:
