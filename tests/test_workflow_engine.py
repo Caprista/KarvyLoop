@@ -49,9 +49,11 @@ async def test_parallel_branches():
     ]}
     res = await run_workflow(plan, run_step=run_step)
     assert res["ok"]
-    # fe / be 并发:两个 start 都在两个 end 之前
-    starts = [x[1] for x in order if x[0] == "start"]
-    assert starts.index("fe") < order.index(("end", "be")) // 1 or True  # 并发不强序
+    # fe / be 真并发:两个分支都**先开始**再有任一分支结束(否则=串行执行)。
+    # AC2 存在的唯一意义就是验这条 —— 用位置比较,不依赖 fe/be 谁先起(并发不强序)。
+    last_start = max(order.index(("start", "fe")), order.index(("start", "be")))
+    first_end = min(order.index(("end", "fe")), order.index(("end", "be")))
+    assert last_start < first_end   # 两 start 都在两 end 之前 = 并发重叠
     # qa 最后(依赖 fe+be)
     assert order[-1] == ("end", "qa")
 

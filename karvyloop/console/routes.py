@@ -1001,6 +1001,20 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
             pass
         # loop step4b:轮后自动蒸馏(攒够 N 轮→批量编译进知识库;fire-and-forget 不阻塞)
         schedule_auto_distill(request.app, mgr)
+        # W1(docs/56 审计 HIGH):角色经验沉淀补**直聊路径**(REST api_intent 同 ws 镜像)。
+        # 只对能归属到某业务域某角色的成功轮触发;无域/l0/纯失败在内部保守门兜底。
+        # 直聊无独立 checker → 干净完成(无 error)即最强成功信号,当 verified。fail-soft 不阻断。
+        try:
+            from .ws import _direct_chat_role_domain
+            from .proposal_handlers import _schedule_role_experience
+            _exp_domain, _exp_role = _direct_chat_role_domain(
+                request.app, mgr, mention=req.mention, mention_domain=req.mention_domain)
+            if _exp_domain and _exp_role:
+                _schedule_role_experience(
+                    request.app, role=_exp_role, domain=_exp_domain, requirement=req.intent,
+                    result=(outcome.text or ""), success=True, verified=True)
+        except Exception:
+            logger.debug("[api_intent] 直聊角色经验沉淀触发失败(静默,不阻断)", exc_info=True)
 
     payload = drive_outcome_to_dict(outcome)
     payload["speaker"] = _turn_speaker  # @ 命中 → 被 @ 角色署名(与历史 push 同一值)

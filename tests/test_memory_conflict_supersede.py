@@ -100,7 +100,8 @@ def test_find_candidates_overlap_no_vectors():
     olds = [belief("用户是素食主义者,平时吃素"), belief("用户住在杭州"), belief("Rust 是系统语言")]
     idx = find_supersede_candidates("用户现在开始吃肉了,不再吃素", olds)
     assert idx and idx[0] == 0            # 词面最像的旧条排第一
-    assert find_supersede_candidates("全是英文 tokens nothing matches", olds) in ([], [1], [0], [2]) or True
+    # 与三条中文旧信念零词面/bigram 重叠的英文查询 → 无候选(零 LLM),不误判相似
+    assert find_supersede_candidates("全是英文 tokens nothing matches", olds) == []
     # 零命中 → [](零 LLM)
     assert find_supersede_candidates("kubernetes operator", [belief("完全无关的一条")]) == []
 

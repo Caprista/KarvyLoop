@@ -98,6 +98,73 @@ def resolve_config_state_path(config_path: Optional[Path], no_llm: bool) -> str:
     return str(_default_cfg)
 
 
+def _spend_card_to_proposal(card: dict):
+    """把 spend_budget.build_card 产的**纯 dict 提醒卡** → Proposal(broadcast_proposal 要 duck type)。
+
+    card = {kind, summary, proposal_id, payload}。补齐 Proposal 必填字段(options 三选一 / strength
+    由 ratio 折算 / ts)。**纯提醒**:kind=spend_budget_alert 无兑现 handler(登记在 ALL_KINDS),
+    用户 ACCEPT/REJECT 都只关卡。basis 用 summary(决策卡"为什么"区不空)。"""
+    import time as _t
+    from karvyloop.karvy.atoms import Proposal
+    payload = dict(card.get("payload") or {})
+    ratio = payload.get("ratio")
+    try:
+        strength = float(ratio) if ratio is not None else 0.9
+    except (TypeError, ValueError):
+        strength = 0.9
+    return Proposal(
+        summary=str(card.get("summary") or "花费提醒"),
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=max(0.0, min(1.0, strength)),
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=_t.time(),
+        kind=str(card.get("kind") or "spend_budget_alert"),
+        payload=payload,
+        proposal_id=str(card.get("proposal_id") or ""),
+        basis=str(card.get("summary") or ""),
+    )
+
+
+def _make_spend_card_emitter(app):
+    """构造 spend_budget 的 emit_card 回调:sync(card dict)→ 异步 broadcast_proposal(线程安全)。
+
+    gateway 咽喉 check 可能跑在**主事件循环**(后台自动 tick)或 drive 的 **worker 线程**
+    (asyncio.to_thread)。镜像 ws.py P4 的 run_coroutine_threadsafe 桥法:
+    - 当前线程有 running loop → 直接 create_task(顺手缓存该 loop 供 worker 线程复用)。
+    - 无 running loop(worker 线程)→ 用缓存的主 loop run_coroutine_threadsafe 桥回。
+    fire-and-forget、fail-soft:桥不通只吞掉(预算是软护栏,出卡失败绝不拖垮真调用;block
+    仍靠 gateway 抛 SpendBudgetExceeded fail-loud,不依赖这张卡)。spend_budget_alert 走
+    allow_silence=False(提醒卡本身不该被"挣来的静音"再接管一层)。"""
+    import asyncio as _asyncio
+
+    def _emit(card: dict) -> None:
+        try:
+            from karvyloop.console.proposals import broadcast_proposal
+            prop = _spend_card_to_proposal(card)
+
+            async def _go():
+                try:
+                    await broadcast_proposal(app, prop, allow_silence=False)
+                except Exception:
+                    logger.debug("[budget] 出卡 broadcast 失败(不影响判定)", exc_info=True)
+
+            try:
+                loop = _asyncio.get_running_loop()
+                app.state._spend_card_loop = loop   # 缓存供 worker 线程回桥
+                loop.create_task(_go())
+            except RuntimeError:
+                loop = getattr(app.state, "_spend_card_loop", None)
+                if loop is not None:
+                    _asyncio.run_coroutine_threadsafe(_go(), loop)
+                # else:主 loop 尚未起过任何异步广播 → 本次静默(极早期,罕见);下次有 loop 即恢复
+        except Exception:
+            logger.debug("[budget] emit_card 桥异常(静默)", exc_info=True)
+
+    return _emit
+
+
 def cmd_console(args: argparse.Namespace) -> int:
     """`karvyloop console` 入口(8.5-C-frontend 实做)。
 
@@ -185,6 +252,28 @@ def cmd_console(args: argparse.Namespace) -> int:
         app.state.token_ledger = token_ledger
     except Exception as e:
         logger.warning(f"[karvyloop console] token 账本接线失败(不影响启动): {e}")
+
+    # === docs/56 审计 HIGH:花费预算刹车(spend brake)接进 console 启动路径 ===
+    # 病根:`wire_spend_budget` 只在 CLI `_bootstrap_runtime` 挂且 emit_card=None —— 用户真跑的
+    # web console 里预算达阈值只落日志、**永不出卡**(承诺的"能自刹的信任"在发布线不可见)。
+    # 修:在 console 启动(gateway/ledger 接线后)显式 wire,并把 emit_card 接到 broadcast_proposal
+    # → 达 75/90/100% 阈值真出一张 H2A 提醒卡。gateway 咽喉(client.complete 调用前)真 check
+    # (前台永不拦,只拦达 100% 的后台自动烧钱路径,fail-loud)。未配 budget → 无刹车(0 回归)。
+    try:
+        _budget_reg = None
+        _gw_for_budget = (resolved.runtime_kwargs or {}).get("gateway") if not no_llm else None
+        if _gw_for_budget is not None:
+            _budget_reg = getattr(_gw_for_budget, "reg", None)   # ModelRegistry(取每模型 cost 算真钱)
+        _budget_cfg_path = getattr(app.state, "config_path", "") or None
+        _emit_spend_card = _make_spend_card_emitter(app)
+        from karvyloop.llm.spend_budget import wire_spend_budget
+        _budget = wire_spend_budget(
+            registry=_budget_reg, config_path=_budget_cfg_path, emit_card=_emit_spend_card)
+        app.state.spend_budget = _budget
+        if _budget is not None:
+            logger.info("[karvyloop console] 花费预算刹车已接线(gateway 咽喉生效 + 达阈值出卡)")
+    except Exception as e:
+        logger.warning(f"[karvyloop console] 花费预算刹车接线失败(不影响启动,降级为无刹车): {e}")
 
     # === 9.4-B3a(D5):接线 PROPOSE 待决议表 ===
     # 小卡推建议前先登记(broadcast_proposal 内);用户 ACCEPT 凭 proposal_id 查回按 kind 兑现。

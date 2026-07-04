@@ -101,6 +101,49 @@ async def _send_snapshot(websocket: WebSocket, app) -> None:
     await websocket.send_json({"type": "snapshot", "payload": widget_snapshot(snap)})
 
 
+def _direct_chat_role_domain(app, mgr, *, mention: str, mention_domain: str) -> tuple[str, str]:
+    """直聊路径下,这轮 drive 归属的(域, 角色)—— 供角色经验沉淀(W1 补直聊漏)。
+
+    - @ 命中(群里点名一个业务角色)→ 用被 @ 角色的(域, 角色);跨域同名靠 mention_domain 消歧。
+    - 否则用当前 peer:业务域私聊 → (peer.domain_id, peer.role/agent_id);私聊小卡(l0)/群协调
+      场 → ("", "")(sediment 内部保守门会拒 l0/无域,这里给空即可)。
+    只返回**能归属到某业务域某角色**的情形;拿不到 → ("", "")(触发点交给内部保守门兜底)。
+    """
+    try:
+        from karvyloop.karvy.capability import is_karvy_peer
+        peer = mgr.current_peer() if mgr is not None else None
+    except Exception:
+        peer = None
+    if peer is None:
+        return "", ""
+    # @ 命中:在群场点名了一个业务角色 → 归属被 @ 角色(它自己的域)
+    m = (mention or "").strip()
+    if m and getattr(peer, "role", "") == "group":
+        try:
+            from .roundtable_engine import _roundtable_roster
+            did = (mention_domain or "").strip()
+            for a in _roundtable_roster(app, peer):
+                if a.agent_id == m and (not did or a.domain_id == did):
+                    a_did = getattr(a, "domain_id", "") or ""
+                    if a_did and not is_karvy_peer(a_did):
+                        a_role = (a.agent_id if (getattr(a, "role", "") == "agent" and a.agent_id)
+                                  else getattr(a, "role", "")) or ""
+                        return a_did, a_role
+        except Exception:
+            return "", ""
+        return "", ""
+    # 非 @:当前 peer 直聊。私聊小卡(l0)/群场 → 空(内部保守门会拒)
+    did = getattr(peer, "domain_id", "l0") or "l0"
+    try:
+        if is_karvy_peer(did) or getattr(peer, "role", "") == "group":
+            return "", ""
+    except Exception:
+        return "", ""
+    role = (peer.agent_id if (getattr(peer, "role", "") == "agent" and getattr(peer, "agent_id", ""))
+            else getattr(peer, "role", "")) or ""
+    return did, role
+
+
 async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     """WS 路径的 intent 处理(同 routes.api_intent 的核心逻辑)。"""
     intent = (payload.get("intent") or "").strip()
@@ -320,6 +363,21 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         # loop step4b:轮后自动蒸馏(fire-and-forget,不阻塞 WS 响应)
         from .routes import schedule_auto_distill
         schedule_auto_distill(app, mgr)
+        # W1(docs/56 审计 HIGH):角色经验沉淀补**直聊路径**(此前只在委派 ACCEPT 沉,
+        # 直接跟业务角色私聊/群里 @ 它做完域内活儿角色学不到 → 飞轮半瘫)。
+        # 只对**能归属到某业务域某角色**的成功轮触发;保守门(无域/l0/纯失败)在
+        # sediment_experience/should_distill 内部兜底。直聊无独立 checker → 干净完成(无 error)
+        # 即本路径可得的最强成功信号,当 verified。fire-and-forget、fail-soft,绝不阻断响应。
+        try:
+            _exp_domain, _exp_role = _direct_chat_role_domain(
+                app, mgr, mention=mention, mention_domain=mention_domain)
+            if _exp_domain and _exp_role:
+                from .proposal_handlers import _schedule_role_experience
+                _schedule_role_experience(
+                    app, role=_exp_role, domain=_exp_domain, requirement=intent,
+                    result=(outcome.text or ""), success=True, verified=True)
+        except Exception:
+            logger.debug("[ws] 直聊角色经验沉淀触发失败(静默,不阻断)", exc_info=True)
 
     _payload = drive_outcome_to_dict(outcome)
     _payload["speaker"] = _turn_speaker   # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
