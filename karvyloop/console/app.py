@@ -209,7 +209,11 @@ def build_console_app(
                         # 对 pump.daily 而言等效于"每 interval 醒一次";子 tick 只服务质量评积压,
                         # 已随质量评搬去维护 loop。这里整段沉睡 → 没到点零工作(idle=0 契约)。
                         await asyncio.sleep(interval)
-                        proposal, sent = await pump.daily()
+                        # 可观测性①:daily 是非 drive 入口,自带 run_scope —— 本轮建议链上的
+                        # Trace/token 行带同一 run_id(内层 drive 自己再开新 scope,不冲突)。
+                        from karvyloop.cognition.trace import run_scope
+                        with run_scope():
+                            proposal, sent = await pump.daily()
                         if proposal is not None:
                             logger.info(
                                 f"[karvyloop console] 小卡 daily 建议 → 推 {sent} client(s): "

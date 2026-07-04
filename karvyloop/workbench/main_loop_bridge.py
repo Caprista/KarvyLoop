@@ -142,6 +142,9 @@ async def drive_in_tui(
                                               role_registry=role_registry, role_id=self_create_role or None)
                 except Exception:
                     logger.warning("[drive] 撤自造孤儿 atom 失败", exc_info=True)
+            # 可观测性②:error 带**真实异常类名**(TypeError/KeyError…)—— 代码缺陷从执行器
+            # fail-loud 上冒到这里,绝不在边界又抹成无名错误;traceback 已由上面 logger.exception
+            # 全量落日志,Trace 里另有 drive 写的 kind="error" 真因条目。
             return DriveOutcome(
                 intent=intent,
                 brain=Brain.SLOW,
@@ -149,7 +152,7 @@ async def drive_in_tui(
                 skill_name="",
                 fast_brain_hit=False,
                 crystallized=False,
-                error=str(e),
+                error=f"{type(e).__name__}: {e}",
             )
 
     outcome = await asyncio.to_thread(_run_drive)

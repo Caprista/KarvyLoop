@@ -410,7 +410,28 @@ class MainLoop:
         fresh: bool = False,   # True=一次性步骤(workflow/圆桌):跳过 recall+observe+结晶,纯跑慢脑
         prefer: "Optional[list[str]]" = None,   # 角色**绑定**技能名(COMPOSITION.yaml skills:)→ 召回优先
     ) -> DriveResult:
-        """跑一次主循环。返回 DriveResult。
+        """跑一次主循环(可观测性①:drive 是 run_id 的生成入口)。返回 DriveResult。
+
+        run_scope 在此裹一次:本次 drive 链上(慢脑/forge → gateway.complete → 工具)写的
+        Trace 条目 + token 账本行都自动带同一个 run_id(contextvar 透传,零 I/O 零行为变化);
+        `karvyloop replay --run <id>` 据此把一次 run 串起来看。
+        """
+        from karvyloop.cognition.trace import run_scope
+        with run_scope():
+            return self._drive(intent, slow_brain=slow_brain, ctx=ctx,
+                               scope=scope, fresh=fresh, prefer=prefer)
+
+    def _drive(
+        self,
+        intent: str,
+        *,
+        slow_brain: SlowBrain,
+        ctx: object = None,
+        scope: "Optional[str]" = None,
+        fresh: bool = False,
+        prefer: "Optional[list[str]]" = None,
+    ) -> DriveResult:
+        """drive 的本体(run_scope 之内)。返回 DriveResult。
 
         流程:
           0. 上下文依赖门(CV-9):intent 强依赖当前对话(指代/省略)→ 跳快脑 + 不结晶
@@ -508,10 +529,30 @@ class MainLoop:
             from karvyloop.crystallize import compose_rerun_context
             brain_intent = compose_rerun_context(guided_skill, intent)
         self.stats.slow_brain_runs += 1
-        if ctx is not None and _slow_brain_accepts_ctx(slow_brain):
-            text, run = slow_brain(brain_intent, ctx=ctx)
-        else:
-            text, run = slow_brain(brain_intent)
+        try:
+            if ctx is not None and _slow_brain_accepts_ctx(slow_brain):
+                text, run = slow_brain(brain_intent, ctx=ctx)
+            else:
+                text, run = slow_brain(brain_intent)
+        except Exception as e:
+            # 可观测性②:慢脑代码缺陷 fail-loud 上冒(执行器已按白名单把 TypeError 等放上来)——
+            # 真因(异常类名 + traceback)落 Trace 再上冒,别让"误诊成模型/网络调不通"再发生;
+            # 用户可见文案由上层(桥/handler)兜,内部记录必须带真因。
+            import traceback as _tb
+            try:
+                self.trace.append(TraceEntry(
+                    task_id=result.task_id, kind="error",
+                    payload={
+                        "error_type": type(e).__name__,
+                        "error": str(e),
+                        "traceback": _tb.format_exc(),
+                        "stage": "slow_brain",
+                    },
+                    ts=self._clock(), source="main_loop",
+                ))
+            except Exception:
+                logger.warning("[drive] 慢脑异常落 Trace 失败(仍上冒原异常)", exc_info=True)
+            raise
         result.text = text
         result.terminal = getattr(run, "terminal", None) or ""  # docs/02 §15:终止语义上冒到 DriveResult
         result.sig = run.trace_ref  # 慢脑的 sig 由 observe 算出(下面再填)
@@ -810,7 +851,16 @@ class MainLoop:
         现改为 atom 的 improve 由 **role 的质量评语**(满意度 critique,§14.2 第 3 条)驱动:
         把每个技能近期评语写回 SKILL.md 的 `Role critique` 段(`write_critiques_to_skill_md`
         按内容幂等,后台可反复跑)。人的纠正归 role 层决策偏好(§11),不在此。
+
+        可观测性①:后台维护是**非 drive 入口**,自带一个 run_scope —— 本轮维护写的
+        Trace 条目(quality/lesson 等)带同一 run_id,与 drive 的 run 不串。
         """
+        from karvyloop.cognition.trace import run_scope
+        with run_scope():
+            return self._background_review()
+
+    def _background_review(self) -> int:
+        """background_review 的本体(run_scope 之内)。"""
         from karvyloop.crystallize import evict_stale, evaluate_pending, write_critiques_to_skill_md
         now = self._clock()
         # docs/40 §3 跑评分离:先跑 Trace-派生评价器(离执行热路径)——读 drive 写下的 eval_fact,

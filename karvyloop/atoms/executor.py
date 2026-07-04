@@ -35,6 +35,18 @@ from .terminal import Terminal
 CIRCUIT_OPEN_THRESHOLD = 3  # 连续失败次数(HR-3)
 
 
+class AdapterStreamError(RuntimeError):
+    """adapter 把流内异常归一化成 ErrorEvent(kind=原异常类名, message=str(e),不穿透)——
+    executor 在此重建异常语义(可观测性②):此前 executor 没有 ErrorEvent 分支,
+    真网络断/4xx 会变成「COMPLETED + 空输出」的静默假成功。原始 traceback 已在 adapter
+    被吞(其契约如此),kind+message 是能拿到的全部真因,如实携带。"""
+
+    def __init__(self, kind: str, message: str) -> None:
+        super().__init__(f"{kind}: {message}")
+        self.kind = kind or ""
+        self.message = message or ""
+
+
 @dataclass
 class TurnOutcome:
     """单轮模型调用结果。"""
@@ -225,6 +237,9 @@ async def run(
     final_reason: Terminal = Terminal.COMPLETED
     tool_calls_log: list[dict] = []
     last_assistant_output: Optional[Any] = None
+    # 可观测性②:代码缺陷 fail-loud 上冒时置位 —— finally 不再吐 TerminalEvent
+    # (否则半截"COMPLETED/success"假事件先于异常到达消费方 = 误报)。
+    fail_loud_crash = False
 
     try:
         while True:
@@ -265,11 +280,17 @@ async def run(
             try:
                 model_ref = gateway.resolve_model(scope)
             except Exception as e:
-                # 解析失败 = 基础能力没了(没有可用模型/解析不出)→ infra-dead,**不是** token 预算。
-                # 上层(尽责下属阶梯)据此 fail-loud 标 infra,不让 role 白重规划(docs/02 §15)。
+                # 白名单式分类(可观测性②):解析类失败(没有可用模型/配置不合法)= 基础能力没了
+                # → infra-dead,**不是** token 预算;上层据此 fail-loud 标 infra,不让 role 白重规划
+                # (docs/02 §15)。TypeError/AttributeError 等**代码缺陷**绝不吞成 infra —— 上冒原始异常链。
+                from .terminal import classify_resolve_exception
+                reason = classify_resolve_exception(e)
+                if reason is None:
+                    fail_loud_crash = True
+                    raise
                 state.transition = Transition(reason="resolve_model_failed",
-                                              extra={"error": str(e)})
-                final_reason = Terminal.INFRA_DEAD
+                                              extra={"error": f"{type(e).__name__}: {e}"})
+                final_reason = reason
                 break
 
             # 3) 调模型 + 4) 边流边收集
@@ -327,6 +348,12 @@ async def run(
                         output_tokens += getattr(ev, "output_tokens", 0) or 0
                         cache_read += getattr(ev, "cache_read", 0) or 0
                         cache_write += getattr(ev, "cache_write", 0) or 0
+                    elif tname == "ErrorEvent":
+                        # 可观测性②:adapter 流内异常(网络断/超时/HTTP 状态/解析 bug)被归一化成
+                        # ErrorEvent 且流随即结束 —— 此前这里没有分支,失败被当"正常结束、无 tool_use"
+                        # → COMPLETED + 空输出的静默假成功。重建异常交下方分类(kind 是原异常类名)。
+                        raise AdapterStreamError(getattr(ev, "kind", "") or "",
+                                                 getattr(ev, "message", "") or "")
                     elif tname == "Done":
                         pass
                 state.cumulative_input_tokens += input_tokens
@@ -356,14 +383,36 @@ async def run(
                 last_assistant_output = assistant_text or (
                     [tu.input for tu in assistant_tool_uses] if assistant_tool_uses else None
                 )
-            except Exception as e:
+            except AdapterStreamError as e:
+                # ErrorEvent 重建的流内异常:kind = 原异常类名 → 按 kind 分类(同一白名单纪律)。
+                # 代码缺陷 kind / 4xx 坏请求 → fail-loud 上冒(str(e) 带 "Kind: message" 真因);
+                # 传输层/认证/限流/5xx → INFRA_DEAD。
+                from .terminal import classify_error_event
+                reason = classify_error_event(e.kind, e.message)
+                if reason is None:
+                    fail_loud_crash = True
+                    raise
                 state.transition = Transition(reason="model_call_failed",
                                               extra={"error": str(e)})
-                # 调模型失败本身不进断路器(避免误判 tool 质量)。这是**网关/网络调不通** = infra-dead
-                # (token 调不通/网络断),非 token 预算耗尽 —— role 重规划同一条路也没用,fail-loud 标
-                # infra,不进 replan 阶梯(docs/02 §15)。4xx 坏请求暂同归此类(也不该靠反复 replan 救),
-                # 更细的状态码分类留作 follow-up。
-                final_reason = Terminal.INFRA_DEAD
+                final_reason = reason
+                break
+            except Exception as e:
+                # 白名单式分类(可观测性②,本周真痛的治本):只有网络/超时/认证/限流/5xx 才算
+                # **网关/网络调不通** = infra-dead(role 重规划同一条路也没用,fail-loud 标 infra,
+                # 不进 replan 阶梯,docs/02 §15);预算/上下文天花板(系统有意拒发)= BLOCKING_LIMIT;
+                # TypeError/AttributeError/KeyError 等**代码缺陷**(含 400 坏请求 = 请求体/协议 bug)
+                # 绝不吞成"模型/网络调不通" —— fail-loud 上冒原始异常链(traceback 由 drive 记进
+                # Trace,用户可见文案由上层兜),否则误诊耽误排查(实捕:to_blocks 少 cache kwarg 的
+                # TypeError 被报成 infra-dead,整条慢脑全灭还查错方向)。
+                from .terminal import classify_model_call_exception
+                reason = classify_model_call_exception(e)
+                if reason is None:
+                    fail_loud_crash = True
+                    raise
+                state.transition = Transition(reason="model_call_failed",
+                                              extra={"error": f"{type(e).__name__}: {e}"})
+                # 调模型失败本身不进断路器(避免误判 tool 质量)。
+                final_reason = reason
                 break
 
             # 5) 续跑判据：不信 stop_reason,看 tool_use 列表
@@ -442,30 +491,34 @@ async def run(
             )
 
     finally:
-        # 写 AtomRun(末事件给上层去存 Trace;结晶 observe 用)
-        # output 必须是 dict(str/list 转 dict 的兼容做法:list→{"items":...},str→{"text":...})
-        def _coerce_output(v: Any) -> Optional[dict]:
-            if v is None:
-                return None
-            if isinstance(v, dict):
-                return v
-            if isinstance(v, str):
-                return {"text": v}
-            if isinstance(v, list):
-                return {"items": v}
-            return {"value": str(v)}
+        # 可观测性②:代码缺陷 fail-loud 路径**不吐** TerminalEvent —— 原始异常链直接上冒
+        # (注意:此处绝不能 return —— finally 里 return 会吞掉在飞的异常,恰是要治的病),
+        # 消费方(forge → drive → 桥)在各自边界记真因/兜文案,不发半截"成功"假事件。
+        if not fail_loud_crash:
+            # 写 AtomRun(末事件给上层去存 Trace;结晶 observe 用)
+            # output 必须是 dict(str/list 转 dict 的兼容做法:list→{"items":...},str→{"text":...})
+            def _coerce_output(v: Any) -> Optional[dict]:
+                if v is None:
+                    return None
+                if isinstance(v, dict):
+                    return v
+                if isinstance(v, str):
+                    return {"text": v}
+                if isinstance(v, list):
+                    return {"items": v}
+                return {"value": str(v)}
 
-        run_obj = AtomRun(
-            atom_id=atom.id,
-            input=input,
-            output=_coerce_output(last_assistant_output),
-            success=(final_reason == Terminal.COMPLETED),
-            tool_calls=tool_calls_log,
-            trace_ref=f"trace://{atom.id}/{int(started_at*1000)}",
-            ts=started_at,
-            terminal=final_reason.value,  # 终止语义上冒(尽责下属阶梯据此决定 replan vs fail-loud)
-        )
-        yield TerminalEvent(reason=final_reason, run=run_obj)
+            run_obj = AtomRun(
+                atom_id=atom.id,
+                input=input,
+                output=_coerce_output(last_assistant_output),
+                success=(final_reason == Terminal.COMPLETED),
+                tool_calls=tool_calls_log,
+                trace_ref=f"trace://{atom.id}/{int(started_at*1000)}",
+                ts=started_at,
+                terminal=final_reason.value,  # 终止语义上冒(尽责下属阶梯据此决定 replan vs fail-loud)
+            )
+            yield TerminalEvent(reason=final_reason, run=run_obj)
 
 
 # ---- 工具 → schema(M0 占位;真转换在 registry)----

@@ -66,9 +66,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_doctor.add_argument("--online", action="store_true", help=t("cli.help.doctor.online"))
     sub.add_parser("status", help=t("cli.help.status"))
 
-    # replay(M3+ 批 6 — Trace 重放子命令)
+    # replay(M3+ 批 6 — Trace 重放子命令;可观测性③:--run 按 run_id 过滤)
     p_replay = sub.add_parser("replay", help=t("cli.help.replay"))
-    p_replay.add_argument("task_id", help=t("cli.help.replay.task_id"))
+    p_replay.add_argument("task_id", nargs="?", default="", help=t("cli.help.replay.task_id"))
+    p_replay.add_argument("--run", dest="run_id", type=str, default="", help=t("cli.help.replay.run"))
     p_replay.add_argument("--trace-path", type=str, default=None, help=t("cli.help.replay.trace_path"))
 
     # console(M3+ 批 8.5-C — 本地 HTML 控制台,K3/K4 只读 + K5 工厂)
@@ -235,6 +236,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         from .replay import cmd_replay
         return cmd_replay(
             task_id=args.task_id,
+            run_id=getattr(args, "run_id", "") or "",
             trace_path=Path(args.trace_path) if args.trace_path else None,
         )
 

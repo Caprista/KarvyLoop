@@ -82,6 +82,16 @@ def get_ledger() -> Optional["TokenLedger"]:
     return _LEDGER
 
 
+def _current_run_id() -> str:
+    """可观测性①:run_id 串联 —— contextvar 在 Trace 模块(run_scope 是 Trace 的语义,
+    账本只打标)。惰性 import + 兜底:任何异常 = ""(缺省,零行为变化)。"""
+    try:
+        from karvyloop.cognition.trace import current_run_id
+        return current_run_id()
+    except Exception:
+        return ""
+
+
 def record(
     *,
     model: str,
@@ -100,6 +110,7 @@ def record(
             input=int(input or 0), output=int(output or 0),
             cache_read=int(cache_read or 0), cache_write=int(cache_write or 0),
             task_id=current_task(),
+            run_id=_current_run_id(),
         )
     except Exception:
         # 账本失败绝不打断主流程(测量是增益,不是阻塞)
@@ -146,6 +157,10 @@ class TokenLedger:
         if "task_id" not in cols:
             self._conn.execute("ALTER TABLE token_usage ADD COLUMN task_id TEXT NOT NULL DEFAULT ''")
             self._conn.execute("CREATE INDEX IF NOT EXISTS token_usage_task ON token_usage(task_id)")
+        # 迁移(幂等):老库补 run_id 列(可观测性①串联;老行 run_id='' 诚实缺省,不猜)
+        if "run_id" not in cols:
+            self._conn.execute("ALTER TABLE token_usage ADD COLUMN run_id TEXT NOT NULL DEFAULT ''")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS token_usage_run ON token_usage(run_id)")
         self._conn.commit()
         self._lock = threading.Lock()
         self._clock = clock
@@ -154,13 +169,14 @@ class TokenLedger:
         self, *, source: str, model: str,
         input: int, output: int, cache_read: int = 0, cache_write: int = 0,
         task_id: str = "",
+        run_id: str = "",   # 可观测性①:本次调用属于哪次 run(缺省 ''=无 scope;记账逻辑本身不变)
     ) -> None:
         ts = self._clock()
         with self._lock:
             self._conn.execute(
-                "INSERT INTO token_usage (ts, day, source, model, input, output, cache_read, cache_write, task_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (ts, _day_of(ts), source, model, input, output, cache_read, cache_write, task_id or ""),
+                "INSERT INTO token_usage (ts, day, source, model, input, output, cache_read, cache_write, task_id, run_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ts, _day_of(ts), source, model, input, output, cache_read, cache_write, task_id or "", run_id or ""),
             )
             self._conn.commit()
 
@@ -207,6 +223,17 @@ class TokenLedger:
                 "total": int(r[1]) + int(r[2]), "calls": int(r[5]),
             })
         return out
+
+    def run_totals(self, run_id: str) -> dict:
+        """某次 run 烧了多少(可观测性③ replay --run 摘要)。**只读**,从现有记账行算,不新增记账。"""
+        if not run_id:
+            return {"input": 0, "output": 0, "total": 0, "calls": 0}
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), COUNT(*) "
+                "FROM token_usage WHERE run_id=?", (run_id,)).fetchone()
+        return {"input": int(row[0]), "output": int(row[1]),
+                "total": int(row[0]) + int(row[1]), "calls": int(row[2])}
 
     def task_total(self, task_id: str) -> int:
         """某任务烧了多少(input+output)。"""

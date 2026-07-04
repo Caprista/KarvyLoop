@@ -27,10 +27,22 @@ _INFRA_DEAD_FINGERPRINTS = (
     "sandbox", "沙箱", "unauthorized", "api key", "api_key", "rate limit", "network",
 )
 
+# 可观测性②同款纪律:代码缺陷绝不归 infra。桥的 error 现在带真实异常类名前缀
+# ("TypeError: 'GatewayClient' object is not callable")—— 这类消息哪怕碰巧含
+# "gateway"/"connection" 字样也不是基础能力失效,盲 retry/误诊都耽误排查。
+_CODE_DEFECT_PREFIXES = (
+    "typeerror:", "attributeerror:", "keyerror:", "indexerror:", "nameerror:",
+    "zerodivisionerror:", "assertionerror:", "recursionerror:", "unboundlocalerror:",
+    "notimplementederror:",
+)
+
 
 def _is_infra_dead_error(err: str) -> bool:
-    """DriveOutcome.error 是否指向"基础能力失效"(token/网/沙箱/网关 dead)。宽松指纹匹配。"""
-    low = (err or "").lower()
+    """DriveOutcome.error 是否指向"基础能力失效"(token/网/沙箱/网关 dead)。宽松指纹匹配;
+    但代码缺陷类异常(带类名前缀)一票否决 —— 那是 bug,不是 infra(可观测性②)。"""
+    low = (err or "").lower().strip()
+    if any(low.startswith(p) for p in _CODE_DEFECT_PREFIXES):
+        return False
     return any(fp in low for fp in _INFRA_DEAD_FINGERPRINTS)
 
 

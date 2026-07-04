@@ -9,12 +9,50 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator, Optional
 
 from karvyloop.schemas import AtomRun
+
+
+# ---- run_id 串联(可观测性收敛①):contextvar per-run scope ----
+# 一次 drive(或 daily/后台各自入口)生成一个短 run_id,顺 contextvar 全链透传
+# (drive → forge/coding → gateway.complete → 工具执行;asyncio 复制上下文,入口裹一次即可)。
+# **长在现有 Trace 上**:它只是 TraceEntry/token 账本的一个可选字段,不是第二套事件流。
+# 模式与 capability/deontic_gate 的 per-run contextvar 一致(set → 干活 → finally reset)。
+# 无 scope 时字段缺省 = ""(零行为变化;老记录/非入口路径照旧)。
+
+_RUN_ID: contextvars.ContextVar[str] = contextvars.ContextVar("trace_run_id", default="")
+
+
+def new_run_id() -> str:
+    """短 run_id(uuid4 hex[:12]),replay --run / 账本串联用。"""
+    return uuid.uuid4().hex[:12]
+
+
+def current_run_id() -> str:
+    """当前 run scope 的 run_id;不在任何 scope 内 = ""(诚实缺省)。"""
+    return _RUN_ID.get()
+
+
+@contextlib.contextmanager
+def run_scope(run_id: str = ""):
+    """在 with 块内标记一次 run(空参 = 自动生成)。随块退出复位,绝不跨 run 泄漏。
+
+    yield 生成的 run_id,入口方(drive/daily)可回传给调用者做串联。
+    """
+    rid = run_id or new_run_id()
+    token = _RUN_ID.set(rid)
+    try:
+        yield rid
+    finally:
+        with contextlib.suppress(Exception):   # 跨 context 复位失败不冒泡(同 deontic gate)
+            _RUN_ID.reset(token)
 
 
 @dataclass
@@ -27,6 +65,7 @@ class TraceEntry:
     agent: str = ""
     source: str = ""
     seq: int = 0  # 由 TraceStore 分配
+    run_id: str = ""  # 可观测性①:本条属于哪次 run(入口 run_scope 生成;缺省 "" = 无 scope,照旧)
 
 
 class TraceStore:
@@ -50,6 +89,9 @@ class TraceStore:
             entry.seq = seq
             if not entry.ts:
                 entry.ts = self._clock()
+            if not entry.run_id:
+                # 可观测性①:在唯一写入咽喉盖 run_id 戳 —— 调用点零改动,contextvar 读一次,无 I/O。
+                entry.run_id = _RUN_ID.get()
             self._seq[entry.task_id] = seq + 1
             self._by_task.setdefault(entry.task_id, []).append(entry)
             return f"{entry.task_id}:{seq}"
@@ -94,6 +136,15 @@ class TraceStore:
                 continue
         return out
 
+    def query_run(self, run_id: str) -> list[TraceEntry]:
+        """按 run_id 跨 task 查(replay --run 用)。空 run_id → [](不把无戳老记录当一个 run)。"""
+        if not run_id:
+            return []
+        with self._lock:
+            out = [e for ents in self._by_task.values() for e in ents if e.run_id == run_id]
+        out.sort(key=lambda e: (e.ts, e.seq))
+        return out
+
     def all_tasks(self) -> list[str]:
         with self._lock:
             return list(self._by_task.keys())
@@ -129,4 +180,5 @@ class TraceStore:
 DROPPABLE_KINDS = frozenset({"atom_run", "user_turn", "assistant_turn", "tool_call"})
 
 
-__all__ = ["TraceEntry", "TraceStore", "DROPPABLE_KINDS"]
+__all__ = ["TraceEntry", "TraceStore", "DROPPABLE_KINDS",
+           "run_scope", "new_run_id", "current_run_id"]

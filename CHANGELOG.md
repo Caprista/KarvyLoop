@@ -22,6 +22,20 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   for them, and the poller rejects them again as a second fence); a persisted watermark plus a
   processed-id ring prevents re-consumption across restarts. Unset `reply_url` = v1
   outbound-only behavior, unchanged.
+- **Observability, grown on the Trace (external suggestion, converged).** No parallel event
+  stream, no second ledger — three additions that live on what's already there:
+  - **`run_id` threads one run together.** Each drive (and each daily/background entry) opens a
+    per-run scope (contextvar, same pattern as the deontic gate); every Trace entry and every
+    token-ledger row written on that chain is stamped with the same short id. Old records without
+    the field read back unchanged; existing DBs migrate in place.
+  - **`karvyloop replay --run <run_id>`.** Filter the replay to a single run across tasks, with a
+    stderr summary line (entries / duration / tokens — computed read-only from existing data).
+  - **Real causes surface, not misdiagnoses.** "Infra dead" (model/network unreachable) is now a
+    *whitelist* — network/timeout/auth/rate-limit/5xx only. Code defects (`TypeError`,
+    `AttributeError`, bad-request 4xx…) fail loud with the original exception chain, and the true
+    cause (exception class + traceback) is recorded into the Trace; budget/context-ceiling gates
+    report as budget stops instead of "network down". This fixes the week's real pain: a swallowed
+    `TypeError` was reported as "model unreachable" and sent debugging in the wrong direction.
 
 ### Planned
 - **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends

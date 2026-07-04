@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS trace_entries (
   agent TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL DEFAULT '',
   trace_ref TEXT NOT NULL DEFAULT '',
+  run_id TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (task_id, seq)
 );
 CREATE INDEX IF NOT EXISTS trace_entries_kind ON trace_entries(kind);
@@ -69,6 +70,13 @@ class SqliteTraceStore(TraceStore):
             self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = _open_sqlite(self._path)
         self._conn.executescript(_TRACE_SCHEMA_SQL)
+        # 迁移(幂等):老库补 run_id 列(可观测性①;append-only 语义不变,老行 run_id='' 诚实缺省)。
+        # 索引必须在补列**之后**建 —— 放进 _TRACE_SCHEMA_SQL 会在老库上(表已存在、列还没有)直接
+        # OperationalError: no such column。
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(trace_entries)").fetchall()}
+        if "run_id" not in cols:
+            self._conn.execute("ALTER TABLE trace_entries ADD COLUMN run_id TEXT NOT NULL DEFAULT ''")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS trace_entries_run ON trace_entries(run_id)")
         self._conn.commit()
         self._lock = threading.Lock()
         self._clock = clock
@@ -116,14 +124,19 @@ class SqliteTraceStore(TraceStore):
             entry.seq = seq
             if not entry.ts:
                 entry.ts = self._clock()
+            if not entry.run_id:
+                # 可观测性①:与内存版同款 —— 写入咽喉盖 run_id 戳(contextvar 读一次,无额外 I/O)
+                from .trace import current_run_id
+                entry.run_id = current_run_id()
             self._conn.execute(
-                "INSERT INTO trace_entries (task_id, seq, kind, payload_json, ts, agent, source, trace_ref) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO trace_entries (task_id, seq, kind, payload_json, ts, agent, source, trace_ref, run_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     entry.task_id, seq, entry.kind,
                     json.dumps(entry.payload, ensure_ascii=False),
                     entry.ts, entry.agent, entry.source,
                     (entry.payload or {}).get("trace_ref", "") if isinstance(entry.payload, dict) else "",
+                    entry.run_id,
                 ),
             )
             self._conn.commit()
@@ -134,7 +147,7 @@ class SqliteTraceStore(TraceStore):
               end_ts: Optional[float] = None) -> list[TraceEntry]:
         """同 InMemory 版语义:可选 kind + 可选时间窗(闭区间 `start_ts <= ts <= end_ts`;
         None = 不限,向后兼容 —— 旧调用 `query(tid, kind=...)` 行为一字不变)。"""
-        sql = ("SELECT task_id, seq, kind, payload_json, ts, agent, source "
+        sql = ("SELECT task_id, seq, kind, payload_json, ts, agent, source, run_id "
                "FROM trace_entries WHERE task_id = ?")
         params: list = [task_id]
         if kind is not None:
@@ -172,6 +185,18 @@ class SqliteTraceStore(TraceStore):
                 continue
         return out
 
+    def query_run(self, run_id: str) -> list[TraceEntry]:
+        """按 run_id 跨 task 查(replay --run 用)。空 run_id → [](不把无戳老记录当一个 run)。"""
+        if not run_id:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT task_id, seq, kind, payload_json, ts, agent, source, run_id "
+                "FROM trace_entries WHERE run_id = ? ORDER BY ts ASC, seq ASC",
+                (run_id,),
+            ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
     def all_tasks(self) -> list[str]:
         with self._lock:
             rows = self._conn.execute(
@@ -181,7 +206,7 @@ class SqliteTraceStore(TraceStore):
 
     @staticmethod
     def _row_to_entry(row: tuple) -> TraceEntry:
-        task_id, seq, kind, payload_json, ts, agent, source = row
+        task_id, seq, kind, payload_json, ts, agent, source, run_id = row
         return TraceEntry(
             task_id=task_id,
             seq=int(seq),
@@ -190,6 +215,7 @@ class SqliteTraceStore(TraceStore):
             ts=float(ts),
             agent=agent or "",
             source=source or "",
+            run_id=run_id or "",
         )
 
 

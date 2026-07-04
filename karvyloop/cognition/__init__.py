@@ -51,7 +51,7 @@ from .pursuit import (
     eval_verify_gate,
 )
 from .recall import MemoryIndex, RecallHit, recall
-from .trace import TraceEntry, TraceStore
+from .trace import TraceEntry, TraceStore, current_run_id, new_run_id, run_scope
 from .sqlite_trace import SqliteTraceStore
 from .conversation import (
     BRAIN_FAST,
@@ -69,6 +69,7 @@ from .conversation import (
 __all__ = [
     # trace
     "TraceEntry", "TraceStore", "SqliteTraceStore",
+    "run_scope", "new_run_id", "current_run_id",
     # conversation(拍 9.1a/9.1c + 9.2a 归属)
     "Conversation", "Turn", "ConversationStore", "ConversationMeta",
     "ConversationManager", "BRAIN_FAST", "BRAIN_SLOW",

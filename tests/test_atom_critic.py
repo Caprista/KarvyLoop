@@ -621,8 +621,10 @@ def test_background_review_writes_role_critique_not_human_steer(tmp_path):
     import karvyloop.runtime.main_loop as ml_mod
     src = (ml_mod.__file__)
     text = open(src, encoding="utf-8").read()
-    # background_review 体内不得再引用 steered_by_user(死路已拆)
-    bg = text[text.index("def background_review"):text.index("def background_review") + 1600]
+    # background_review 体内不得再引用 steered_by_user(死路已拆)。
+    # 窗口切到下一个模块级 def:可观测性①后 background_review = run_scope 薄包装 +
+    # _background_review 本体,固定 1600 字符窗看不全本体(critiques 调用在后半)。
+    bg = text[text.index("def background_review"):text.index("def forge_slow_brain_factory")]
     # 真行为契约:不再读 steered_by_user 字段、不再调人训 atom 的 maybe_improve
     assert ".steered_by_user" not in bg
     assert "maybe_improve(" not in bg
