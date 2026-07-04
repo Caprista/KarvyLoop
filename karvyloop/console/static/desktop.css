@@ -32,6 +32,37 @@ body.desk-view .cockpit {
 }
 
 /* ============================================================================
+   日/夜壁纸(Hardy 出图,1920×1079):desktop.ts 按客户端本地时间挂类
+   (6:00–18:59 = desk-wall-day,其余 desk-wall-night;设置 auto/day/night/off,
+   off = 不挂类,纯色回现状)。cover 铺满;便签/窗口是主角 —— 不压暗壁纸,
+   可读性靠部件自身实底/毛玻璃(下方微调),字直接写在壁纸上的才补字色/影。
+   ========================================================================= */
+body.desk-view.desk-wall-day .cockpit {
+  background: var(--desk-bg) url("/static/assets/wallpaper-day.jpg") center / cover no-repeat;
+}
+body.desk-view.desk-wall-night .cockpit {
+  background: #23222b url("/static/assets/wallpaper-night.jpg") center / cover no-repeat;
+}
+/* 壁纸下的半透部件提不透明度 + 轻毛玻璃(便签本身是实底,不用动) */
+body.desk-view.desk-wall-day .desk-station,
+body.desk-view.desk-wall-night .desk-station {
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+body.desk-view.desk-wall-day .desk-workcard,
+body.desk-view.desk-wall-night .desk-workcard,
+body.desk-view.desk-wall-day .desk-recent-knowledge .desk-recent-item,
+body.desk-view.desk-wall-night .desk-recent-knowledge .desk-recent-item {
+  background: rgba(255, 255, 255, 0.93);
+}
+/* 夜图偏深:直接写在壁纸上的小标题换亮字 + 落影(不动壁纸本身) */
+body.desk-view.desk-wall-night .desk-recent-knowledge .desk-recent-head {
+  color: #ffe9c9;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+/* ============================================================================
    四象限 → 桌面便签:同一批 DOM(id 不动),grid 壳退位,列变绝对定位便签
    ========================================================================= */
 body.desk-view .cockpit-grid { display: contents; }

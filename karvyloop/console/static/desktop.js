@@ -365,6 +365,14 @@
         else if (ov && !ov.classList.contains("hidden")) minimizeWin("mgmt");
       });
       right.appendChild(mgmtBtn);
+      const wall = document.createElement("button");
+      wall.className = "dock-item dock-wall";
+      wall.id = "desk-wall-btn";
+      wall.textContent = "🌗";
+      wall.addEventListener("click", () => {
+        setWallMode(WALL_MODES[(WALL_MODES.indexOf(wallMode()) + 1) % WALL_MODES.length]);
+      });
+      right.appendChild(wall);
       const reset = document.createElement("button");
       reset.className = "dock-item dock-reset";
       reset.textContent = "↺";
@@ -1019,6 +1027,62 @@
       };
       if (!playCarry(note, flash)) flash();
     }
+    const WALL_LS_KEY = "karvyloop_desk_wall.v1";
+    const WALL_MODES = ["auto", "day", "night", "off"];
+    const WALL_CHECK_MS = 60 * 1e3;
+    let _wallTimer = 0;
+    function wallMode() {
+      try {
+        const v = localStorage.getItem(WALL_LS_KEY) || "auto";
+        return WALL_MODES.indexOf(v) >= 0 ? v : "auto";
+      } catch {
+        return "auto";
+      }
+    }
+    function wallVariantFor(hour) {
+      return hour >= 6 && hour < 19 ? "day" : "night";
+    }
+    function applyWall(now) {
+      const mode = wallMode();
+      let v = "";
+      if (mode === "day" || mode === "night") v = mode;
+      else if (mode === "auto") v = wallVariantFor((now || /* @__PURE__ */ new Date()).getHours());
+      document.body.classList.toggle("desk-wall-day", _entered && v === "day");
+      document.body.classList.toggle("desk-wall-night", _entered && v === "night");
+    }
+    function setWallMode(mode) {
+      if (WALL_MODES.indexOf(mode) < 0) return;
+      try {
+        localStorage.setItem(WALL_LS_KEY, mode);
+      } catch {
+      }
+      applyWall();
+      updateWallTip();
+    }
+    function updateWallTip() {
+      const b = document.getElementById("desk-wall-btn");
+      if (!b) return;
+      const tip = t("desk.wall_" + wallMode());
+      b.setAttribute("data-tip", tip);
+      b.setAttribute("title", tip);
+      b.setAttribute("aria-label", tip);
+    }
+    function wallStart() {
+      applyWall();
+      updateWallTip();
+      if (!_wallTimer) {
+        _wallTimer = window.setInterval(() => {
+          if (_entered) applyWall();
+        }, WALL_CHECK_MS);
+      }
+    }
+    function wallStop() {
+      if (_wallTimer) {
+        window.clearInterval(_wallTimer);
+        _wallTimer = 0;
+      }
+      document.body.classList.remove("desk-wall-day", "desk-wall-night");
+    }
     const KARVY_ZONE = { w: 220, h: 200 };
     function computeNoteDefault(col, idx, colBottoms) {
       const desk = deskEl();
@@ -1105,10 +1169,12 @@
         cx.setAttribute("aria-label", t("desk.min"));
       }
       updateDockIndicators();
+      wallStart();
       enterSoul();
     }
     function leave() {
       _entered = false;
+      wallStop();
       leaveSoul();
       noteEls().forEach((col) => {
         col.style.transform = "";
@@ -1256,7 +1322,9 @@
         refreshRecentKnowledge,
         refreshMemento,
         stationCount: () => _stations.size
-      }
+      },
+      // 日/夜壁纸测试接缝:apply 可注入 Date(mock 时间验 auto 档);生产路径 = wallStart 的分钟级重判
+      _wall: { apply: applyWall, mode: wallMode, set: setWallMode, variantFor: wallVariantFor }
     };
     window.KarvyDesktop = KarvyDesktop;
   })();

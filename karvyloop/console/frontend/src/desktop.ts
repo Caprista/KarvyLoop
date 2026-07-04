@@ -271,6 +271,15 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
       else if (ov && !ov.classList.contains("hidden")) minimizeWin("mgmt");
     });
     right.appendChild(mgmtBtn);
+    // 🌗 日/夜壁纸换挡:auto(默认)→ day → night → off 循环;tip 实时显示当前档
+    const wall = document.createElement("button");
+    wall.className = "dock-item dock-wall";
+    wall.id = "desk-wall-btn";
+    wall.textContent = "🌗";
+    wall.addEventListener("click", () => {
+      setWallMode(WALL_MODES[(WALL_MODES.indexOf(wallMode()) + 1) % WALL_MODES.length]);
+    });
+    right.appendChild(wall);
     const reset = document.createElement("button");
     reset.className = "dock-item dock-reset";
     reset.textContent = "↺";
@@ -933,6 +942,60 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     if (!playCarry(note, flash)) flash();
   }
 
+  // ---- 日/夜壁纸(Hardy 出图,1920×1079):按**客户端本地时间**自动切 ----
+  // 6:00–18:59 = day,其余 night;四档设置存 localStorage:auto(默认)/day/night/off。
+  // 判定时机 = 进桌面那刻 + 分钟级低频重判(跨过 6:00/19:00 边界自动换,不上高频 timer);
+  // off = 摘光类名,纯色桌面回现状。类只挂在 body(desk-wall-day/-night),CSS 全部
+  // body.desk-view 前缀 → 老视图零影响。
+  const WALL_LS_KEY = "karvyloop_desk_wall.v1";
+  const WALL_MODES = ["auto", "day", "night", "off"];
+  const WALL_CHECK_MS = 60 * 1000;
+  let _wallTimer = 0;
+  function wallMode(): string {
+    try {
+      const v = localStorage.getItem(WALL_LS_KEY) || "auto";
+      return WALL_MODES.indexOf(v) >= 0 ? v : "auto";      // 脏数据回默认
+    } catch { return "auto"; }
+  }
+  function wallVariantFor(hour: number): string {
+    return hour >= 6 && hour < 19 ? "day" : "night";
+  }
+  function applyWall(now?: Date): void {
+    const mode = wallMode();
+    let v = "";
+    if (mode === "day" || mode === "night") v = mode;
+    else if (mode === "auto") v = wallVariantFor((now || new Date()).getHours());
+    document.body.classList.toggle("desk-wall-day", _entered && v === "day");
+    document.body.classList.toggle("desk-wall-night", _entered && v === "night");
+  }
+  function setWallMode(mode: string): void {
+    if (WALL_MODES.indexOf(mode) < 0) return;
+    try { localStorage.setItem(WALL_LS_KEY, mode); } catch { /* 无 localStorage → 本次会话生效 */ }
+    applyWall();
+    updateWallTip();
+  }
+  function updateWallTip(): void {
+    const b = document.getElementById("desk-wall-btn");
+    if (!b) return;
+    const tip = t("desk.wall_" + wallMode());
+    b.setAttribute("data-tip", tip);
+    b.setAttribute("title", tip);
+    b.setAttribute("aria-label", tip);
+  }
+  function wallStart(): void {
+    applyWall();
+    updateWallTip();
+    if (!_wallTimer) {
+      _wallTimer = window.setInterval(() => { if (_entered) applyWall(); }, WALL_CHECK_MS);
+    }
+  }
+  function wallStop(): void {
+    // 与 wallStart 的 window.setInterval 严格同源(window.clearInterval):浏览器里二者等价,
+    // jsdom smoke 里 bare clearInterval 是 Node 的表,清不掉 jsdom 的 interval → 进程永不退出
+    if (_wallTimer) { window.clearInterval(_wallTimer); _wallTimer = 0; }
+    document.body.classList.remove("desk-wall-day", "desk-wall-night");
+  }
+
   // ---- 默认摆位:办公桌式铺开(Hardy 2026-07-03:堆一列=墙角,不是桌子)----
   // 便签铺成右侧**两列错落**:第 1 列(最右)⚖最上(继承"⚖永远第一")+ 🔄;
   // 第 2 列(中右,y 略降造错落感)📥 + 🔮。左半留给聊天主窗;
@@ -1018,11 +1081,13 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     const cx = document.getElementById("chat-modal-close");
     if (cx) { cx.setAttribute("title", t("desk.min")); cx.setAttribute("aria-label", t("desk.min")); }
     updateDockIndicators();
+    wallStart();   // 日/夜壁纸:进场判定一次 + 分钟级低频重判
     enterSoul();   // P1.5 灵魂:工位区 + 像素小卡 + 只读 WS(desk 进场才活)
   }
 
   function leave(): void {
     _entered = false;
+    wallStop();    // 摘壁纸类 + 停低频重判(老视图零痕迹)
     leaveSoul();   // P1.5 灵魂:断 WS、销毁像素形象、清便签/工作证(老视图零痕迹)
     // 清干净全部内联痕迹:两个老视图(对话/看板)像素级不动
     noteEls().forEach((col) => { col.style.transform = ""; col.style.zIndex = ""; col.classList.remove("note-alert", "desk-focused"); });
@@ -1137,6 +1202,8 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     // P1.5 测试接缝(smoke/Playwright 喂真实事件形状,不开真 socket;生产路径 = soulConnect 的 onmessage)
     _soul: { handle: soulHandle, refreshPresence, refreshRecentKnowledge, refreshMemento,
              stationCount: () => _stations.size },
+    // 日/夜壁纸测试接缝:apply 可注入 Date(mock 时间验 auto 档);生产路径 = wallStart 的分钟级重判
+    _wall: { apply: applyWall, mode: wallMode, set: setWallMode, variantFor: wallVariantFor },
   };
   (window as unknown as { KarvyDesktop: typeof KarvyDesktop }).KarvyDesktop = KarvyDesktop;
 })();

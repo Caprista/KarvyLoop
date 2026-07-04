@@ -198,9 +198,37 @@ dom.window.confirm = () => true;
 KD.resetLayout();
 assert.equal(dom.window.localStorage.getItem("karvyloop_desk.v1"), null, "resetLayout 应清掉存档");
 
+// ---- 日/夜壁纸:auto 变体纯函数 / 四档切换挂类 / dock 换挡按钮 / leave 摘类 ----
+const W = KD._wall;
+assert.ok(W && typeof W.apply === "function", "KarvyDesktop._wall 测试接缝缺失");
+assert.equal(W.variantFor(6), "day", "6:00 = day(边界)");
+assert.equal(W.variantFor(18), "day", "18:59 侧 = day");
+assert.equal(W.variantFor(19), "night", "19:00 = night(边界)");
+assert.equal(W.variantFor(5), "night");
+assert.equal(W.variantFor(0), "night");
+assert.equal(W.mode(), "auto", "默认档 = auto");
+W.apply(new Date(2026, 6, 4, 10, 0, 0));   // auto + mock 白天
+assert.ok(document.body.classList.contains("desk-wall-day"), "auto 档白天应挂 desk-wall-day");
+W.apply(new Date(2026, 6, 4, 22, 0, 0));   // auto + mock 夜晚
+assert.ok(document.body.classList.contains("desk-wall-night") && !document.body.classList.contains("desk-wall-day"),
+  "auto 档夜晚应换挂 desk-wall-night");
+W.set("day");
+assert.ok(document.body.classList.contains("desk-wall-day"), "固定白天档应挂 desk-wall-day");
+assert.equal(dom.window.localStorage.getItem("karvyloop_desk_wall.v1"), "day", "档位应持久化 localStorage");
+W.set("off");
+assert.ok(!document.body.classList.contains("desk-wall-day") && !document.body.classList.contains("desk-wall-night"),
+  "off 档 = 摘光壁纸类(纯色回现状)");
+const wallBtn = document.getElementById("desk-wall-btn");
+assert.ok(wallBtn, "dock 应有 🌗 壁纸换挡按钮");
+wallBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));   // off → auto(循环)
+assert.equal(W.mode(), "auto", "点击换挡应循环 off → auto");
+W.set("night");   // 留一档挂着,验 leave 摘干净
+
 // ---- leave:清干净全部内联痕迹(两个老视图像素级不动的保险)----
 document.body.classList.remove("desk-view");
 KD.leave();
+assert.ok(!document.body.classList.contains("desk-wall-day") && !document.body.classList.contains("desk-wall-night"),
+  "leave 后壁纸类应摘干净(老视图零痕迹)");
 assert.equal(decide.style.transform, "", "leave 后便签 transform 未清");
 assert.equal(chatPanel.style.transform, "", "leave 后聊天窗 transform 未清");
 assert.ok(!document.getElementById("chat-modal").classList.contains("desk-min"), "leave 后 desk-min 未清");
@@ -317,5 +345,5 @@ assert.ok(document.getElementById("desk-presence").classList.contains("hidden") 
 document.body.classList.remove("desk-view");
 KD2.leave();
 
-console.log("✓ desktop smoke OK — dock 12 入口同构 / enter定位+a11y / 拖拽落盘 / ✕最小化+卡皮巴拉恢复 / ⚖告警(事件演·回放不演) / reset / leave清痕");
+console.log("✓ desktop smoke OK — dock 12 入口同构 / enter定位+a11y / 拖拽落盘 / ✕最小化+卡皮巴拉恢复 / ⚖告警(事件演·回放不演) / 日夜壁纸四档 / reset / leave清痕");
 console.log("✓ desk soul OK — 工位区(busy亮灯/idle呼吸/久静睡/无活动不摆) / 只读WS增量 / 工作证✓✗ / 署名便签3张cap / 叼卡→到位闪⚖→回窝 / leave全清 / API不通优雅隐藏");

@@ -13,6 +13,7 @@ jsdom smoke 验逻辑,这里验**浏览器运行时**(官方原图真加载没 /
 桌面视图三件套(2026-07-04,Hardy 实拍回归锁):
   5. 开屏回放存量 pending 卡(≥1 张,复现纪律)→ 前 3 秒吉祥物稳在窝(不叼卡不离席不闪),
      卡照常摆回列表;**真**新卡(live 事件)→ 叼卡剧场仍触发(功能没修没);
+  7. 日/夜壁纸:mock 时间(page.clock)验 auto 档昼夜类名,固定/关闭档 + localStorage 持久。
 
 守卫:Playwright(python 包)没装 → skip(老实降级,不假装验过);
       console 起不来(端口/环境)→ fail(这是真回归,不吞)。
@@ -237,5 +238,48 @@ def test_desk_boot_replay_mascot_stays_home(console_url):
         assert page.evaluate(
             "document.querySelector('.col-decide').classList.contains('note-alert')"
         ), "真新卡到位后 ⚖ 应闪(叼卡剧场不许修没)"
+        browser.close()
+    assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
+
+
+def test_desk_wallpaper_day_night(console_url):
+    """日/夜壁纸:mock 客户端时钟(page.clock)—— auto 档白天挂 desk-wall-day、
+    夜晚换 desk-wall-night;固定档/off 档立即生效且 localStorage 持久;离场摘类。"""
+    import datetime
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1600, "height": 900})
+        _wire(page, errors, desk_boot=True)
+        page.clock.set_fixed_time(datetime.datetime(2026, 7, 4, 10, 0, 0))   # 白天 10:00
+        page.goto(console_url, wait_until="domcontentloaded")
+        page.wait_for_function("document.body.classList.contains('desk-view')", timeout=10000)
+        assert page.evaluate("document.body.classList.contains('desk-wall-day')"), \
+            "auto 档(默认)白天开屏应挂 desk-wall-day"
+        # 时间走到夜里 → 重判(生产 = 分钟级 interval 调同一 apply;测试直接调,不等真分钟)
+        page.clock.set_fixed_time(datetime.datetime(2026, 7, 4, 22, 0, 0))
+        page.evaluate("window.KarvyDesktop._wall.apply()")
+        assert page.evaluate("document.body.classList.contains('desk-wall-night')"), \
+            "auto 档 19:00 后应换挂 desk-wall-night"
+        # 固定档 + off 档 + localStorage 持久
+        page.evaluate("window.KarvyDesktop._wall.set('day')")
+        assert page.evaluate("document.body.classList.contains('desk-wall-day')")
+        page.evaluate("window.KarvyDesktop._wall.set('off')")
+        assert page.evaluate(
+            "!document.body.classList.contains('desk-wall-day') && !document.body.classList.contains('desk-wall-night')"
+        ), "off 档 = 纯色回现状"
+        assert page.evaluate("localStorage.getItem('karvyloop_desk_wall.v1')") == "off"
+        # 壁纸图真的能被服务出来(不是 404 装饰)
+        for name in ("wallpaper-day.jpg", "wallpaper-night.jpg"):
+            status = page.evaluate(
+                "(u) => fetch(u).then((r) => r.status)", f"/static/assets/{name}")
+            assert status == 200, f"{name} 应能静态服务(实际 {status})"
+        # 离场摘类(老视图零痕迹)
+        page.evaluate("window.KarvyDesktop._wall.set('night')")
+        page.click("#view-opt-chat")
+        page.wait_for_function("!document.body.classList.contains('desk-view')", timeout=5000)
+        assert page.evaluate(
+            "!document.body.classList.contains('desk-wall-day') && !document.body.classList.contains('desk-wall-night')"
+        ), "离开桌面应摘光壁纸类"
         browser.close()
     assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
