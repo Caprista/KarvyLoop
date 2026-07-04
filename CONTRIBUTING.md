@@ -26,8 +26,9 @@ ruff check .
 
 That's the whole contributor loop: **`pip install -e ".[dev]"` → `pytest` → `ruff check`.**
 CI runs exactly these two gates on every pull request (Ubuntu, Python 3.11 + 3.12), plus a
-Windows leg (windows-latest, Python 3.12) so the win32 sandbox backends stay verified —
-sandbox tests that need OS privileges the runner can't grant self-skip rather than fail.
+Windows leg (windows-latest, Python 3.12) and a macOS leg (macos-latest, Python 3.12) so
+all three sandbox backends (bubblewrap / win32 / Seatbelt) stay verified — sandbox tests
+that need OS privileges the runner can't grant self-skip rather than fail.
 
 ## Optional feature dependencies
 
