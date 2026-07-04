@@ -195,3 +195,29 @@ def test_i18n_journey_keys_built():
 
 def test_stages_constant_locked():
     assert JOURNEY_STAGES == ("fresh", "step1", "step2", "done", "skipped")
+
+
+# ---- 6. J22 压测台的 workspace 覆盖(W1 回归锁,零模型可验)----
+
+def test_j22_workspace_override_never_points_at_source_tree(tmp_path):
+    """J22(真模型旅程压测)必须把 workspace_root **和 fs token 授权范围**都覆盖到 tmp,
+    绝不继承模块级 runtime 的 cwd=仓根 —— 否则真模型把分析脚本写进 karvyloop/sample_data/
+    (2026-07-04 独立验收实捕游离产物)。这里直接测 J22 用的同一个 helper,CI 无 key 也验。"""
+    import test_e2e_pressure as e2e
+
+    repo = Path(__file__).resolve().parent.parent
+    rk = {"workspace_root": str(repo), "token": object(),
+          "gateway": object(), "model_ref": "m", "sandbox": object()}
+    out = e2e._tmp_workspace_kwargs(rk, tmp_path)
+    ws = Path(out["workspace_root"]).resolve()
+    assert ws.is_relative_to(tmp_path.resolve()), "workspace 没覆盖到 tmp"
+    assert not ws.is_relative_to(repo), "workspace 还指着源码树"
+    # fs token 的授权范围必须同步覆盖(不能 workspace 指 tmp、token 还授权仓根)
+    grants = out["token"].grants
+    assert grants, "覆盖后的 token 没有任何授权"
+    for g in grants:
+        assert g.resource == "fs:" + out["workspace_root"], \
+            f"token 授权范围没跟着 workspace 走: {g.resource!r}"
+    # 只动副本:模块级共用的 runtime_kwargs 原 dict 不被改(J22 局部覆盖别动全局)
+    assert rk["workspace_root"] == str(repo)
+    assert out["gateway"] is rk["gateway"] and out["model_ref"] == "m"

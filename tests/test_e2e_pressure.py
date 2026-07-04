@@ -40,6 +40,26 @@ _RT = _real_runtime()
 pytestmark = pytest.mark.skipif(_RT is None, reason="无真模型 config(~/.karvyos/config.yaml)→ CI 跳过")
 
 
+def _tmp_workspace_kwargs(rk: dict, tmp: Path) -> dict:
+    """把 runtime_kwargs 的 workspace(连同 fs token 的授权范围)覆盖到 tmp 目录。
+
+    为什么(2026-07-04 独立验收 W1):模块级 _RT 没传 workspace_root → 回退 cwd=仓根;
+    J22 原样继承后,真模型把分析脚本/中间产物写进源码树(karvyloop/sample_data/ 游离
+    产物实捕)。演示 CSV 是文本内联进 intent 的(onboarding.compose_task_intent),
+    tmp workspace 不改变演示语义。**只覆盖传入的副本** —— 模块级 _RT.runtime_kwargs
+    被其他 J 步共用,绝不动全局。
+
+    零模型也可验(tests/test_onboarding_journey.py 的 W1 回归锁直接测本函数)。
+    """
+    from karvyloop.cli.run import _make_token
+    ws = tmp / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    out = dict(rk)
+    out["workspace_root"] = str(ws)
+    out["token"] = _make_token(str(ws))   # fs 授权范围同步指 tmp,不再覆盖仓根
+    return out
+
+
 @pytest.fixture(scope="module")
 def app():
     """真 app.state:真 gateway/main_loop + 真 registry(两个分析师跨域 + 一个设计师)+ 真记忆。"""
@@ -801,7 +821,10 @@ def test_j22_first_ten_minutes_journey_real(app):
 
     name, text = load_sample()
     assert name and text.strip(), "随包样例数据丢了"
-    rk = dict(app.state.runtime_kwargs)
+    # W1:workspace + fs token 覆盖到 tmp —— 真模型的分析脚本绝不写进源码树(只动本地副本)
+    rk = _tmp_workspace_kwargs(dict(app.state.runtime_kwargs), tmp)
+    assert Path(rk["workspace_root"]).resolve().is_relative_to(tmp.resolve()), \
+        "J22 的 workspace 没覆盖到 tmp(真模型会写脏源码树)"
 
     # 非 COMPLETED 终局(infra-dead/预算/断路…)会把 ⚠ 兜底提示**拼进 text 且 error=None**——
     # 光断"text 非空"会被兜底文案骗成假绿(2026-07-04 实捕:CodingPrompt.to_blocks 少 cache

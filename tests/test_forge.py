@@ -159,16 +159,20 @@ async def test_ac2_ndjson_count(tmp_path):
     assert len(results) == 2  # 每个 tool_use 恰一个 tool_result
 
 
-# ============ AC3：流式断流 → 降级非流式 ============
+# ============ AC3：流式断流 → 降级非流式（+ 真 body 构建路径）============
 @pytest.mark.asyncio
 async def test_ac3_stream_fallback_to_non_stream(tmp_path):
     """模拟流式 provider 在 ToolUseStart 后异常,Forge 应当继续(executor 自身重试由 provider 决定,M0 测：单次失败后 final_reason=BUILDING_LIMIT 之外仍可完成)。"""
     # 这个 AC 实际由 gateway 的流式降级实现;forge 不重试。改为测：NDJSON
     # 含 schema + format_version(spec §2.5)。
+    # AC11c 的第二道防线(动态):这条走 providers/mock.py 的 MockAdapter —— 它像真 adapter
+    # 一样构建请求 body、**真调 system.to_blocks(cache=...)**(ScriptedMockAdapter 不调)。
+    # CodingPrompt 的网关 duck-type 契约一漂移(参数缺/签名不合),这里直接 TypeError 红。
     from karvyloop.coding.forge import generate_and_run
+    from karvyloop.gateway.providers.mock import MockAdapter
     sb = FakeSandbox(str(tmp_path))
     sb.files[str(tmp_path / "a.txt")] = b"a"
-    adapter = ScriptedMockAdapter(rounds=[text_round("ok")])
+    adapter = MockAdapter(api="anthropic-messages")   # 默认脚本:text "ok" + Usage + Done
     gw = _gw(adapter)
     sink = io.StringIO()
     emitter = NdjsonEmitter(sink=sink)
@@ -179,6 +183,12 @@ async def test_ac3_stream_fallback_to_non_stream(tmp_path):
             ev = json.loads(line)
             assert ev["schema"] == "karvyloop-forge-ndjson"
             assert ev["v"] == 1
+    # to_blocks 真被调过:请求 body 里的 system blocks 是 CodingPrompt 的真组装产物
+    assert adapter.last_request is not None
+    sys_blocks = adapter.last_request["system_blocks"]
+    assert sys_blocks, "system.to_blocks 没被调用(body 构建路径没走到 CodingPrompt)"
+    joined = "\n".join(b.get("text", "") for b in sys_blocks)
+    assert BOUNDARY_MARKER in joined, "system blocks 不是 CodingPrompt 组装的(哨兵丢了)"
 
 
 # ============ AC4：工具输出 >32KB → truncated + UTF-8 不破 ============
@@ -389,6 +399,32 @@ def test_ac11b_prompt_blocks_gateway_cache_contract(tmp_path):
     assert blocks, "to_blocks(cache=False) 不能为空"
     assert all("cache_control" not in b for b in blocks), \
         "cache=False 仍在打 cache_control 断点"
+
+
+# ============ AC11c:to_blocks 签名 parity —— 防住 AC11b 抓不到的同类漂移 ============
+def test_ac11c_to_blocks_signature_parity_with_gateway_system_prompt():
+    """AC11b 只锁「CodingPrompt 删/改 cache 参数」;同类复发(SystemPrompt.to_blocks 和
+    adapter 一起演进出新参数、CodingPrompt 忘了跟)它不红 —— forge 单测的 ScriptedMockAdapter
+    根本不调 to_blocks。这里锁**签名 parity**:SystemPrompt.to_blocks 有的参数,
+    CodingPrompt.to_blocks 必须有,且默认值一致(duck-type 契约的静态防线;
+    CodingPrompt 允许是超集之外——对齐方向是"SystemPrompt 有的它必须有")。"""
+    import inspect
+    from karvyloop.gateway.system import SystemPrompt
+
+    sys_params = inspect.signature(SystemPrompt.to_blocks).parameters
+    coding_params = inspect.signature(CodingPrompt.to_blocks).parameters
+    for name, sp in sys_params.items():
+        if name == "self":
+            continue
+        assert name in coding_params, (
+            f"SystemPrompt.to_blocks 有参数 {name!r} 而 CodingPrompt.to_blocks 没有 —— "
+            "adapter 按网关契约调 system.to_blocks(...),forge 的慢脑路径会整条 TypeError 全灭"
+        )
+        cp = coding_params[name]
+        assert cp.default == sp.default, (
+            f"to_blocks 参数 {name!r} 默认值漂移:SystemPrompt={sp.default!r} "
+            f"CodingPrompt={cp.default!r}(两边必须同一个 duck-type 契约)"
+        )
 
 
 # ============ AC12：Forge 不含独立 agent 循环（导入检查）============

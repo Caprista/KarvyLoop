@@ -26,3 +26,7 @@ config.yaml
 
 # 本地内部草稿/设计(绝不入公开仓)
 _local/
+
+# 模型产物兜底:压测/演示若往包内样例区写临时文件,绝不让它误入 git
+# (workspace 已在测试里覆盖到 tmp;此行是第二道防线,产物命名无常按前缀兜)
+karvyloop/sample_data/_*
