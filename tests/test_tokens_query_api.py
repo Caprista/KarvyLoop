@@ -10,10 +10,15 @@ import time
 
 from karvyloop.llm.token_ledger import TokenLedger
 
-# 固定基准:取"今天本地零点 + 12h"当 now,让跨天/跨小时写入落在确定的日历日上
+# 固定基准:取"今天本地零点 + 12h"当 now,让跨天/跨小时写入落在确定的日历日上。
+# **封顶到墙钟 now-5s**:缺省查询窗口截止于 time.time(),正午之前跑时"今天正午"那条会落在
+# 未来被窗口排除 → 3 个 default-window 测试无端拉红(时间依赖 flake)。min 保证"今天"锚点永不
+# 超过 now,过去时段(1/2 天前)记录仍稳落在各自日历日/小时桶(after-noon 退回原 noon 行为)。
 _NOW = time.time()
-_TODAY_NOON = time.mktime(time.strptime(time.strftime("%Y-%m-%d", time.localtime(_NOW)),
-                                        "%Y-%m-%d")) + 12 * 3600
+_TODAY_NOON = min(
+    time.mktime(time.strptime(time.strftime("%Y-%m-%d", time.localtime(_NOW)), "%Y-%m-%d")) + 12 * 3600,
+    _NOW - 5.0,
+)
 _DAY = 86400.0
 
 
