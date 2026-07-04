@@ -19,16 +19,24 @@
   资源上限 Job Object:JOB_MEMORY(默认 2 GiB)+ ACTIVE_PROCESS(默认 64,防进程炸弹)
           + KILL_ON_JOB_CLOSE;超时/收尾 `TerminateJobObject` 杀整棵进程树
           (Windows 上 proc.kill() 杀不到子孙,Job 是唯一可靠杀树面)。
-  网络门  **本层做不满**(restricted token / Job / IL 都挡不住 socket;防火墙/WFP
-          规则需一次性 admin,违背免 admin + Home 版硬约束)→ 带 `net:` grant 的
-          token **fail-closed 拒跑**,错误如实说,绝不"假装隔离地放行"。
+  网络门  **默认拒网 + AppContainer 内核门(免 admin,best-effort)**:
+          - 带 `net:` grant 的 token → **fail-closed 拒跑**(放行特定网络需域名级 WFP
+            过滤器 = 要 admin,违背免 admin;不假装隔离地放行)。
+          - **无 `net:` 声明的 token(默认,含第三方脚本)→ 默认拒网**:把子进程放进一个
+            **无 internetClient capability 的 AppContainer(LowBox)令牌**(见 appcontainer.py)。
+            Windows 内核 WFP 有内置默认规则:不持 Internet Capability 的 AppContainer 进程
+            出站连接被内核直接拒(免 admin、与用户防火墙配置无关)。这把"没声明网络的第三方
+            脚本"从**socket 全通**升级为**内核级默认无网**。
+          - AppContainer 起不来的机器(系统 DLL/Python 对 ALL APPLICATION PACKAGES 不可读、
+            杀软干预)→ probe 探不通 → 优雅回退到纯受限令牌(网络非内核强制,如实标注 P2)。
   超时/截断 UTF-8 边界截断照抄 bubblewrap/seatbelt(与沙箱机制无关)。
   write_file/read_file 纯 token 闸 IO,跨平台同语义。
 
 诚实边界(如实标注,不吹):
-  - 无 `net:` 的 token 在本层**技术上无法断网**(bwrap `--unshare-net` 在免 admin 的
-    Windows 上没有等价物)。写隔离守住"不能篡改";"未授权不能外传"只能靠上层收口
-    (第三方默认拒网、授网是人的决定),不能靠内核兜。
+  - 默认拒网**首选 AppContainer 内核门**(WFP 默认规则,真 OS 强制、免 admin);probe 探不通
+    的机器回退到"上层默认拒网 + 授权门",此时网络**非内核强制**(靠第三方默认拒网 + 授网是
+    人的决定收口)—— 回退态如实标 P2,不假装内核挡住了。
+  - 网络门覆盖**出站 connect**(第三方外传是威胁模型重点);域名级白名单是 P1(需 admin 配 WFP)。
   - 读隔离 v1 放宽(对齐 macOS seatbelt 先例)。
   - 世界可写(DACL 已授 Everyone 写)的既有路径不在拒写范围 —— 用 Everyone 作
     write-gate 的取舍;用户 profile / 系统目录默认不授 Everyone 写,都在拒写范围。
@@ -47,6 +55,7 @@ import ctypes
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from typing import Optional
@@ -57,6 +66,7 @@ from karvyloop.schemas import CapabilityToken
 
 from ._util import (
     _truncate_utf8,
+    is_skill_exec_token,
     resolve_argv,
     rw_ro_paths_with_grants,
     token_gated_read,
@@ -261,6 +271,7 @@ if _IS_WIN:
     # 模块级 SID 缓存(进程生命周期;裸指针 int)
     _SID_EVERYONE: Optional[int] = None
     _SID_RESTRICTED: Optional[int] = None
+    _SID_ALL_APP_PKGS: Optional[int] = None
 
     def _well_known_sids() -> tuple[int, int]:
         global _SID_EVERYONE, _SID_RESTRICTED
@@ -269,6 +280,13 @@ if _IS_WIN:
         if _SID_RESTRICTED is None:
             _SID_RESTRICTED = _string_sid("S-1-5-12")    # NT AUTHORITY\RESTRICTED
         return _SID_EVERYONE, _SID_RESTRICTED
+
+    def _all_app_packages_sid() -> int:
+        """ALL APPLICATION PACKAGES(S-1-15-2-1)—— AppContainer 进程访问文件需此 SID 的 ACE。"""
+        global _SID_ALL_APP_PKGS
+        if _SID_ALL_APP_PKGS is None:
+            _SID_ALL_APP_PKGS = _string_sid("S-1-15-2-1")
+        return _SID_ALL_APP_PKGS
 
     def _open_own_token() -> _HANDLE:
         h = _HANDLE()
@@ -339,12 +357,17 @@ if _IS_WIN:
             raise _winerr("SetInformationJobObject")
         return h_job
 
-    def _set_dacl_entry(path: str, mode: int, perms: int = _GENERIC_ALL) -> None:
-        """对 path 加(GRANT)/撤(REVOKE)Everyone(write-gate SID)的白名单 ACE(含继承传播)。
+    def _set_dacl_entry(path: str, mode: int, perms: int = _GENERIC_ALL,
+                        trustee_sid: Optional[int] = None) -> None:
+        """对 path 加(GRANT)/撤(REVOKE)某 SID 的白名单 ACE(含继承传播)。
 
+        trustee_sid:被授的 SID 裸指针;默认(None)= Everyone(write-gate SID)。
+                     AppContainer 模式下白名单还要授 ALL APPLICATION PACKAGES(S-1-15-2-1),
+                     否则 LowBox 子进程连自己的 workspace/scripts 都读/写不了。
         perms:GRANT 时授的权限(GENERIC_ALL=写白名单 / GENERIC_READ|EXECUTE=读+遍历白名单)。
         """
         everyone, _restricted = _well_known_sids()
+        sid = everyone if trustee_sid is None else trustee_sid
         p_sd = ctypes.c_void_p()
         p_old = ctypes.c_void_p()
         rc = _adv.GetNamedSecurityInfoW(
@@ -359,7 +382,7 @@ if _IS_WIN:
             ea.grfInheritance = _SUB_CONTAINERS_AND_OBJECTS_INHERIT
             ea.Trustee.TrusteeForm = _TRUSTEE_IS_SID
             ea.Trustee.TrusteeType = _TRUSTEE_IS_WELL_KNOWN_GROUP
-            ea.Trustee.ptstrName = everyone
+            ea.Trustee.ptstrName = sid
             p_new = ctypes.c_void_p()
             rc = _adv.SetEntriesInAclW(1, ctypes.byref(ea), p_old, ctypes.byref(p_new))
             if rc:
@@ -383,6 +406,18 @@ if _IS_WIN:
 
     def _revoke_gate_write(path: str) -> None:
         _set_dacl_entry(path, _REVOKE_ACCESS)
+
+    def _grant_appc_all(path: str) -> None:
+        """AppContainer 白名单:授 ALL APPLICATION PACKAGES 全权(含继承)—— LowBox 子进程可读写。"""
+        _set_dacl_entry(path, _GRANT_ACCESS, _GENERIC_ALL, trustee_sid=_all_app_packages_sid())
+
+    def _grant_appc_read(path: str) -> None:
+        """AppContainer 只读白名单:授 ALL APPLICATION PACKAGES 读+执行(解释器/DLL 目录用)。"""
+        _set_dacl_entry(path, _GRANT_ACCESS, _GENERIC_READ | _GENERIC_EXECUTE,
+                        trustee_sid=_all_app_packages_sid())
+
+    def _revoke_appc(path: str) -> None:
+        _set_dacl_entry(path, _REVOKE_ACCESS, trustee_sid=_all_app_packages_sid())
 
     def _gate_ace_count(path: str) -> int:
         """path DACL 里显式授给 write-gate SID(Everyone/S-1-1-0)的 ACE 数(测试/审计用)。"""
@@ -456,13 +491,25 @@ if _IS_WIN:
     def _run_restricted(argv: list[str], cwd: str, stdin: bytes, timeout_s: float,
                         max_output_bytes: int, rw_paths: list[str],
                         job_memory: int, proc_limit: int,
-                        ro_paths: Optional[list[str]] = None) -> ExecResult:
-        """同步核心:ACL 白名单 → 受限令牌 → Job → CreateProcessAsUser → 收割。"""
+                        ro_paths: Optional[list[str]] = None,
+                        net_isolated: bool = False,
+                        appc_ro_dirs: Optional[list[str]] = None) -> ExecResult:
+        """同步核心:ACL 白名单 → 受限令牌(net_isolated 再套 LowBox)→ Job →
+        CreateProcessAsUser → 收割。
+
+        net_isolated=True:把子进程放进无 internetClient 的 AppContainer(LowBox)令牌,
+        内核 WFP 默认规则拒出站网络(免 admin)。此时白名单还要额外授 ALL APPLICATION
+        PACKAGES(否则 LowBox 进程读不到自己的 workspace/scripts)。
+        appc_ro_dirs:AppContainer 下需授 ALL-APP-PACKAGES **只读+执行**的目录(解释器安装树/
+        依赖 DLL 目录)—— 否则 LowBox 里的 python.exe 起不来(0xC0000135 DLL_NOT_FOUND)。
+        这些目录**只读**授权,不进可写集(解释器不该被脚本改)。
+        """
         import msvcrt
 
-        applied: list[str] = []          # 已加白名单 ACE 的路径(收尾 REVOKE)
+        applied: list[str] = []          # 已加白名单 Everyone ACE 的路径(收尾 REVOKE)
+        appc_applied: list[str] = []     # net_isolated 下额外加的 ALL-APP-PACKAGES ACE(收尾 REVOKE)
         tmpdir: Optional[str] = None
-        h_tok = h_job = None
+        h_tok = h_lowbox = h_job = None
         pi = _PROCESS_INFORMATION()
         try:
             # 1) 白名单 ACE(去重、realpath、必须存在):rw 授写、ro 授读+遍历(RX)。
@@ -475,6 +522,8 @@ if _IS_WIN:
                 seen.add(key)
                 _grant_gate_write(rp)
                 applied.append(rp)
+                if net_isolated:
+                    _grant_appc_all(rp); appc_applied.append(rp)
             for p in (ro_paths or []):
                 rp = os.path.realpath(p)
                 key = rp.lower()
@@ -483,8 +532,20 @@ if _IS_WIN:
                 seen.add(key)
                 _grant_gate_read(rp)
                 applied.append(rp)
+                if net_isolated:
+                    _grant_appc_all(rp); appc_applied.append(rp)
+            # AppContainer 专用:解释器/DLL 目录授 ALL-APP-PACKAGES 只读(让 python.exe 起得来)。
+            # 不进 Everyone 写门,只 ALL-APP-PACKAGES 只读 —— 收尾单独 REVOKE。
+            if net_isolated:
+                for p in (appc_ro_dirs or []):
+                    rp = os.path.realpath(p)
+                    key = ("appc-ro:" + rp.lower())
+                    if key in seen or not os.path.isdir(rp):
+                        continue
+                    seen.add(key)
+                    _grant_appc_read(rp); appc_applied.append(rp)
 
-            # 2) 子进程专用 TEMP(落在白名单内,继承 RESTRICTED ACE → 可写;
+            # 2) 子进程专用 TEMP(落在白名单内,继承 ACE → 可写;
             #    否则子进程连临时文件都写不了,很多脚本直接翻车)
             env_overrides: dict = {}
             tmp_host = next((p for p in applied if os.path.isdir(p)), None)
@@ -492,8 +553,11 @@ if _IS_WIN:
                 tmpdir = tempfile.mkdtemp(prefix=".klsbx-tmp-", dir=tmp_host)
                 env_overrides = {"TMP": tmpdir, "TEMP": tmpdir, "TMPDIR": tmpdir}
 
-            # 3) 受限令牌 + Job
+            # 3) 受限令牌(+ net_isolated → 套 LowBox AppContainer)+ Job
             h_tok = _make_write_restricted_token()
+            if net_isolated:
+                from .appcontainer import make_lowbox_token
+                h_lowbox = make_lowbox_token(h_tok)   # 失败抛 OSError,上层回退
             h_job = _make_job(job_memory, proc_limit)
 
             # 4) 管道
@@ -510,8 +574,10 @@ if _IS_WIN:
             si.hStdError = err_child
             cmdline = ctypes.create_unicode_buffer(subprocess.list2cmdline(argv))
             env_buf = _env_block(env_overrides)
+            # net_isolated → 用 LowBox 主令牌(无网 AppContainer);否则纯受限令牌。
+            h_launch = h_lowbox if h_lowbox is not None else h_tok
             ok = _adv.CreateProcessAsUserW(
-                h_tok, None, cmdline, None, None, True,
+                h_launch, None, cmdline, None, None, True,
                 _CREATE_SUSPENDED | _CREATE_UNICODE_ENVIRONMENT | _DETACHED_PROCESS,
                 env_buf, cwd, ctypes.byref(si), ctypes.byref(pi))
             if not ok:
@@ -592,15 +658,48 @@ if _IS_WIN:
                 _k32.CloseHandle(pi.hProcess)
             if h_job:
                 _k32.CloseHandle(h_job)      # KILL_ON_JOB_CLOSE 兜底杀残留
+            if h_lowbox:
+                _k32.CloseHandle(h_lowbox)
             if h_tok:
                 _k32.CloseHandle(h_tok)
             if tmpdir:
                 shutil.rmtree(tmpdir, ignore_errors=True)
-            for p in applied:                # 撤白名单 ACE(REVOKE 含继承传播)
+            for p in applied:                # 撤白名单 Everyone ACE(REVOKE 含继承传播)
                 try:
                     _revoke_gate_write(p)
                 except OSError:
                     pass                     # 残留 ACE 只对白名单目录放行,run 后即撤,无长期提权面
+            for p in appc_applied:           # 撤 net_isolated 下额外的 ALL-APP-PACKAGES ACE
+                try:
+                    _revoke_appc(p)
+                except OSError:
+                    pass
+
+
+def _appc_interp_dirs(argv: list[str]) -> list[str]:
+    """AppContainer 下需授 ALL-APP-PACKAGES 只读的解释器/DLL 目录(否则 LowBox 里 python.exe
+    起不来:0xC0000135 DLL_NOT_FOUND)。
+
+    取 argv[0](已被 resolve_argv 解成绝对解释器路径)的目录;若它是 Python 解释器,再加
+    sys.base_prefix(stdlib/DLLs 常在此)。系统 System32 默认已对 ALL-APP-PACKAGES 可读,不用管。
+    """
+    dirs: list[str] = []
+    if argv:
+        exe = argv[0]
+        if os.path.isabs(exe) and os.path.exists(exe):
+            dirs.append(os.path.dirname(exe))
+    # Python 解释器:base_prefix 下有 DLLs / Lib(内嵌/venv 时与 exe 目录可能不同)
+    for d in (sys.base_prefix, os.path.dirname(sys.executable)):
+        if d and os.path.isdir(d):
+            dirs.append(d)
+    # 去重(保序)
+    out: list[str] = []
+    seen: set[str] = set()
+    for d in dirs:
+        k = os.path.realpath(d).lower()
+        if k not in seen:
+            seen.add(k); out.append(d)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -617,6 +716,8 @@ class RestrictedTokenSandbox:
 
     #: 探测结果类级缓存(None=未探测)
     _available_cache: Optional[bool] = None
+    #: AppContainer(无网 LowBox)可用性探测缓存(None=未探测)
+    _appc_cache: Optional[bool] = None
 
     def __init__(self, *, job_memory_bytes: int = 2 << 30,
                  active_process_limit: int = 64):
@@ -651,19 +752,60 @@ class RestrictedTokenSandbox:
         cls._available_cache = ok
         return cls._available_cache
 
+    @classmethod
+    def appcontainer_available(cls) -> bool:
+        """AppContainer(无网 LowBox)网络门在本机能否落地(best-effort 探测,缓存)。
+
+        真造 LowBox 令牌 + 真起 **sys.executable**(真解释器,`-c` 退 11)收回退出码 —— 验证:
+        ① NtCreateLowBoxToken 可造(medium IL,免 admin)② LowBox 进程能起来(Python DLL 对
+        ALL APPLICATION PACKAGES 授了只读能起 —— 用真解释器探,不用 cmd,否则会假阳性:cmd 在
+        System32 默认可读、但 Python 在用户目录不可读,拿 cmd 探过、真跑 python 却 0xC0000135)。
+        探不通(Python 装在 ALL-APP-PACKAGES 读不到的目录 / 杀软)→ False → exec 回退纯受限令牌
+        + 默认拒网(非内核强制,如实标 P2)。
+        """
+        if not _IS_WIN:
+            return False
+        if cls._appc_cache is not None:
+            return cls._appc_cache
+        interp = [sys.executable, "-c", "import sys; sys.exit(11)"]
+        appc_ro = _appc_interp_dirs(interp)
+        ok = False
+        for _ in range(2):
+            try:
+                r = _run_restricted(interp, cwd=os.getcwd(),
+                                    stdin=b"", timeout_s=30.0, max_output_bytes=4096,
+                                    rw_paths=[os.getcwd()], job_memory=256 << 20,
+                                    proc_limit=8, net_isolated=True, appc_ro_dirs=appc_ro)
+                if r.exit_code == 11 and not r.timed_out:
+                    ok = True
+                    break
+            except Exception:
+                pass
+        cls._appc_cache = ok
+        return cls._appc_cache
+
     async def exec(self, argv, *, token, cwd, stdin=b"", timeout_s=120.0,
                    max_output_bytes=30_000) -> ExecResult:
         if not argv:
             raise ValueError("argv 必须非空")
-        # 网络门 fail-closed:先于一切平台调用(错误如实说,不假装隔离)
+        # 网络门(先于一切平台调用):
+        #   - 带 `net:` grant → fail-closed 拒跑(放行特定网络需 admin 级 WFP 过滤器;不假装放行)。
+        #   - 第三方技能脚本(skill-exec token)且无 net 声明 → **默认拒网**:能造 LowBox 就走
+        #     AppContainer 内核门(免 admin),否则回退纯受限令牌(网络非内核强制,靠上层默认
+        #     拒网 + 授权门兜底,如实标 P2)。别人的代码默认无网,不再 socket 全通。
+        #   - 第一方 workspace exec(非 skill-exec)保持原行为(不套 AppContainer,避免文件访问
+        #     摩擦引回归;第一方 net token 同样 fail-closed)。
         if has_net(token):
             raise PermissionError(_NET_FAIL_CLOSED)
         if not self.available():
             raise RuntimeError(
                 "RestrictedToken 沙箱在本机探测失败(锁定策略/杀软拦截?)—— "
                 "selector 会降级到 DegradedWindowsSandbox,不应直接调到这里")
+        net_isolated = is_skill_exec_token(token) and self.appcontainer_available()
         ro, rw = rw_ro_paths_with_grants(token)
         argv = resolve_argv(list(argv))
+        # AppContainer 下需给解释器/DLL 目录授 ALL-APP-PACKAGES 只读(否则 LowBox 里 python 起不来)
+        appc_ro = _appc_interp_dirs(argv) if net_isolated else None
         # 起子进程偶发被杀软瞬时拦(WinError 5/1920,docs/48 A.4 风险②)→ 重试一次,
         # 两次都因瞬时拦截失败才上抛。非 transient 错误(权限门等)立即抛,不掩盖。
         last: Optional[BaseException] = None
@@ -671,7 +813,8 @@ class RestrictedTokenSandbox:
             try:
                 return await asyncio.to_thread(
                     _run_restricted, argv, cwd, stdin, timeout_s, max_output_bytes,
-                    rw, self.job_memory_bytes, self.active_process_limit, ro)
+                    rw, self.job_memory_bytes, self.active_process_limit, ro,
+                    net_isolated, appc_ro)
             except OSError as e:
                 if not getattr(e, "transient_spawn", False):
                     raise

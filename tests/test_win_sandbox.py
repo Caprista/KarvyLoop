@@ -33,6 +33,8 @@ from karvyloop.platform.win._util import (
 )
 from karvyloop.schemas import Capability, CapabilityToken
 
+pytestmark = pytest.mark.security   # 安全套件:Windows Tier3 沙箱写隔离/进程炸弹对抗
+
 
 def _tok(ws, *, net=False, ro=None):
     grants = [Capability(resource=f"fs:{ws}", ops=["read", "write"])]
@@ -97,6 +99,39 @@ def test_rw_ro_paths_split(tmp_path):
     ro, rw = rw_ro_paths_with_grants(tok)
     assert str(tmp_path) in rw
     assert str(ro_dir) in ro
+
+
+# ---- AppContainer 网络门:package SID 推导(纯逻辑,跨平台)----
+
+def test_appcontainer_package_sid_is_stable_and_wellformed():
+    """moniker → package SID 字符串:S-1-15-2 前缀 + 7 个 uint32,稳定可复现。"""
+    from karvyloop.platform.win.appcontainer import (
+        APPCONTAINER_SID_STRING,
+        _sha256_appcontainer_sid_string,
+    )
+    sid = _sha256_appcontainer_sid_string("com.karvyloop.sandbox.nonet")
+    assert sid.startswith("S-1-15-2-")
+    parts = sid.split("-")
+    assert len(parts) == 4 + 7          # "S","1","15","2" + 7 个 subauthority
+    # 7 个 subauthority 全是 uint32
+    for p in sid[len("S-1-15-2-"):].split("-"):
+        assert 0 <= int(p) <= 0xFFFFFFFF
+    # 稳定:同 moniker 同结果 + 模块常量一致
+    assert _sha256_appcontainer_sid_string("com.karvyloop.sandbox.nonet") == sid
+    assert APPCONTAINER_SID_STRING == sid
+    # 不同 moniker → 不同 SID
+    assert _sha256_appcontainer_sid_string("other.moniker") != sid
+
+
+def test_appcontainer_sid_matches_known_windows_algorithm():
+    """SID 推导对齐 Windows DeriveAppContainerSidFromAppContainerName(UTF-16LE 大写 SHA-256)。"""
+    import hashlib
+    import struct
+    from karvyloop.platform.win.appcontainer import _sha256_appcontainer_sid_string
+    moniker = "test.app"
+    digest = hashlib.sha256(moniker.upper().encode("utf-16-le")).digest()[:28]
+    expect = "S-1-15-2-" + "-".join(str(x) for x in struct.unpack("<7I", digest))
+    assert _sha256_appcontainer_sid_string(moniker) == expect
 
 
 # ============================================================================
@@ -241,3 +276,82 @@ async def test_tier3_third_party_skill_runs_sandboxed(tmp_path):
     r = await run_skill_script(str(d), "scripts/run.py", sandbox=sb, workspace=str(ws), timeout_s=60)
     assert r.exit_code == 0, r.stderr[-400:]
     assert b"THIRD_PARTY_RAN" in r.stdout
+
+
+# ---- AppContainer 网络门:第三方脚本默认拒网(真对抗)----
+
+def _skill_tok(ws, *, net=False):
+    """构造 skill-exec 指纹的 token(task_id='skill-exec'),模拟第三方脚本执行路径。"""
+    grants = [Capability(resource=f"fs:{ws}", ops=["read", "write"])]
+    if net:
+        grants.append(Capability(resource="net:*", ops=["connect"]))
+    return CapabilityToken(task_id=SKILL_EXEC_TASK_ID, grants=grants, expiry=9_999_999_999.0)
+
+
+@requires_tier3
+def test_appcontainer_probe_runs(tmp_path):
+    """appcontainer_available() 真探一次(造 LowBox + 起 cmd);只验不崩、返回 bool。"""
+    from karvyloop.platform.win.restricted import RestrictedTokenSandbox
+    if not RestrictedTokenSandbox.available():
+        pytest.skip("RestrictedToken 探测不可用")
+    RestrictedTokenSandbox._appc_cache = None   # 强制重探
+    assert isinstance(RestrictedTokenSandbox.appcontainer_available(), bool)
+
+
+@requires_tier3
+@pytest.mark.asyncio
+async def test_appcontainer_third_party_default_no_net_blocked(tmp_path):
+    """第三方 skill-exec token(无 net 声明)→ 默认拒网:AppContainer 可用则出站被内核拒。
+
+    若本机 AppContainer 探不通(个别机器/杀软)→ skip(诚实:此时靠上层默认拒网 + 授权门,
+    非内核强制,是标注的 P2 回退态)。有 AppContainer 时,出站 connect 必失败(WFP 默认规则)。
+    """
+    from karvyloop.platform.win.restricted import RestrictedTokenSandbox
+    if not RestrictedTokenSandbox.available():
+        pytest.skip("RestrictedToken 探测不可用")
+    if not RestrictedTokenSandbox.appcontainer_available():
+        pytest.skip("本机 AppContainer 探不通 —— 网络门回退非内核强制(P2),此断言不适用")
+    sb = RestrictedTokenSandbox(job_memory_bytes=256 << 20, active_process_limit=8)
+    tok = _skill_tok(str(tmp_path))   # 第三方、无 net
+    # 尝试出站 TCP connect(1.1.1.1:53);AppContainer 无 internetClient → 内核 WFP 拒。
+    probe = (
+        "import socket, sys\n"
+        "try:\n"
+        "    s = socket.create_connection(('1.1.1.1', 53), timeout=5)\n"
+        "    s.close(); print('NET_OK')\n"
+        "except Exception as e:\n"
+        "    print('NET_BLOCKED', type(e).__name__)\n"
+    )
+    r = await sb.exec([sys.executable, "-c", probe], token=tok, cwd=str(tmp_path), timeout_s=40)
+    out = (r.stdout + r.stderr).decode("utf-8", "replace")
+    assert "NET_OK" not in out, f"第三方脚本竟连上外网(网络门失效!):{out[-200:]}"
+    assert "NET_BLOCKED" in out, f"未观察到连接被拒:{out[-200:]}"
+
+
+@requires_tier3
+@pytest.mark.asyncio
+async def test_appcontainer_third_party_can_still_write_workspace(tmp_path):
+    """AppContainer 无网门下,第三方脚本仍能写自己的 workspace(ALL-APP-PACKAGES 白名单)。"""
+    from karvyloop.platform.win.restricted import RestrictedTokenSandbox
+    if not RestrictedTokenSandbox.available():
+        pytest.skip("RestrictedToken 探测不可用")
+    if not RestrictedTokenSandbox.appcontainer_available():
+        pytest.skip("本机 AppContainer 探不通(P2 回退)")
+    sb = RestrictedTokenSandbox(job_memory_bytes=256 << 20, active_process_limit=8)
+    tok = _skill_tok(str(tmp_path))
+    tgt = str(tmp_path / "appc_ok.txt")
+    r = await sb.exec([sys.executable, "-c", f"open(r'{tgt}','w').write('hi'); print('WROTE')"],
+                      token=tok, cwd=str(tmp_path), timeout_s=60)
+    assert r.exit_code == 0, r.stderr[-400:]
+    assert (tmp_path / "appc_ok.txt").read_text() == "hi"
+
+
+@requires_tier3
+@pytest.mark.asyncio
+async def test_appcontainer_third_party_net_grant_still_fail_closed(tmp_path):
+    """第三方 skill-exec token 带 net: grant → 仍 fail-closed 拒跑(放行特定网络需 admin)。"""
+    sb = _sb()
+    tok = _skill_tok(str(tmp_path), net=True)
+    with pytest.raises(PermissionError) as ei:
+        await sb.exec([sys.executable, "-c", "print(1)"], token=tok, cwd=str(tmp_path), timeout_s=20)
+    assert "net" in str(ei.value)

@@ -6,6 +6,9 @@
   2) token.net 缺 → --unshare-net 兜底（v1 仅二元网络）
   3) 超时强杀 + 输出字节截断（UTF-8 边界，HR-9 同源）
   4) 不接 L7 过滤（v1 范围外，留 P1）
+  5) **Landlock 深度防御**（landlock.py）：内核支持则在 bwrap 之上再叠一层 Landlock LSM
+     文件系统门（workspace 可写、系统 bin 只读、其余默认拒）——mount 隔离 + 内核路径规则
+     双层。旧核不支持 → 优雅降级为纯 bwrap（fail-closed 语义不变）。免特权（no_new_privs）。
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import sys
 from typing import Optional
 
 from karvyloop.capability import is_within_workspace
@@ -89,9 +93,31 @@ class BubblewrapSandbox:
 
     name = "bubblewrap"
 
+    #: Landlock 支持性探测缓存(None=未探测;避免每次 exec 都 syscall 探)
+    _landlock_supported: Optional[bool] = None
+
     @staticmethod
     def available() -> bool:
         return shutil.which("bwrap") is not None
+
+    @classmethod
+    def _wrap_landlock(cls, bwrap: list[str], ro: list[str], rw: list[str]) -> list[str]:
+        """内核支持 Landlock → 返回 `python -m ...landlock <rw> <ro> -- bwrap …`(前置 wrapper);
+        不支持 → 原样返回 bwrap(优雅降级,零回归)。探测结果缓存。
+
+        wrapper 里 workspace/授权 rw 可写、系统目录 + ro 只读、其余内核拒 —— 与 bwrap 挂载叠加。
+        """
+        import json
+        if cls._landlock_supported is None:
+            try:
+                from karvyloop.platform.linux.landlock import is_supported
+                cls._landlock_supported = is_supported()
+            except Exception:
+                cls._landlock_supported = False
+        if not cls._landlock_supported:
+            return bwrap
+        return [sys.executable, "-m", "karvyloop.platform.linux.landlock",
+                json.dumps(rw), json.dumps(ro), "--"] + bwrap
 
     async def exec(self, argv, *, token, cwd, stdin=b"", timeout_s=120.0,
                    max_output_bytes=30_000) -> ExecResult:
@@ -144,8 +170,12 @@ class BubblewrapSandbox:
 
         bwrap += ["--"] + list(argv)
 
+        # Landlock 深度防御:内核支持则以前置 wrapper 装内核路径门再 execve 成 bwrap
+        # (Landlock domain 被 bwrap 及其内子进程继承)。旧核 → 优雅降级,cmd 保持纯 bwrap。
+        cmd = self._wrap_landlock(bwrap, ro, rw)
+
         proc = await asyncio.create_subprocess_exec(
-            *bwrap, stdin=asyncio.subprocess.PIPE,
+            *cmd, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
