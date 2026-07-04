@@ -376,6 +376,21 @@ def test_ac11_prompt_boundary_cache_truncate(tmp_path):
     assert text3.count("y") <= 4 * 1024 + 100  # 留点标签
 
 
+# ============ AC11b:CodingPrompt 必须满足网关 system 的 duck-type 契约 ============
+def test_ac11b_prompt_blocks_gateway_cache_contract(tmp_path):
+    """adapter 调 `system.to_blocks(cache=...)`(gateway SystemPrompt 契约)。CodingPrompt 作为
+    forge 的 system 走同一条线 —— 少了 cache 参数,每次 forge 调模型直接 TypeError,被执行器
+    误判 infra-dead(模型/网络调不通),整条慢脑路径全灭(2026-07-04 真机实捕,J22 揪出)。"""
+    p = build_coding_prompt(str(tmp_path))
+    # cache=True(默认)与位置调用等价,静态尾块保留 cache_control
+    assert p.to_blocks(cache=True) == p.to_blocks()
+    # cache=False:合法调用 + 不打任何断点
+    blocks = p.to_blocks(cache=False)
+    assert blocks, "to_blocks(cache=False) 不能为空"
+    assert all("cache_control" not in b for b in blocks), \
+        "cache=False 仍在打 cache_control 断点"
+
+
 # ============ AC12：Forge 不含独立 agent 循环（导入检查）============
 def test_ac12_forge_no_independent_loop():
     """**forge 编排层**（coding/forge.py）不应自起 while True;只能复用 atoms.executor.run。

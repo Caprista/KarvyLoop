@@ -124,18 +124,26 @@ class CodingPrompt:
         idx = text.find(BOUNDARY_MARKER)
         return idx if idx >= 0 else None
 
-    def to_blocks(self) -> list[dict]:
-        """网关层用的 block 列表;静态前缀打 cache_control: ephemeral(HR-9 闭环)。"""
+    def to_blocks(self, cache: bool = True) -> list[dict]:
+        """网关层用的 block 列表;静态前缀打 cache_control: ephemeral(HR-9 闭环)。
+
+        `cache` 参数是网关 SystemPrompt.to_blocks 的**duck-type 契约**(adapter 调
+        `system.to_blocks(cache=cache)`,本类作为 forge 的 system 同走那条线):
+        cache=False → 不打任何断点。少这个参数 = 每次 forge 调模型直接 TypeError →
+        被执行器误判成 infra-dead(模型/网络调不通),整条慢脑路径全灭。
+        """
         blocks: list[dict] = []
         for i, s in enumerate(self.static):
             blk: dict = {"type": "text", "text": s}
             # 静态最后一段打 cache_control(喂缓存;改进常见的做法)
-            if i == len(self.static) - 1 and self.dynamic_blocks:
+            if cache and i == len(self.static) - 1 and self.dynamic_blocks:
                 blk["cache_control"] = {"type": "ephemeral"}
             blocks.append(blk)
         if self.dynamic_blocks:
-            blocks.append({"type": "text", "text": BOUNDARY_MARKER,
-                           "cache_control": {"type": "ephemeral"}})
+            marker: dict = {"type": "text", "text": BOUNDARY_MARKER}
+            if cache:
+                marker["cache_control"] = {"type": "ephemeral"}
+            blocks.append(marker)
             for d in self.dynamic_blocks:
                 blocks.append({"type": "text", "text": d})
         return blocks
