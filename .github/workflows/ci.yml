@@ -62,7 +62,7 @@ jobs:
   # --- Windows gate: karvyloop/platform/win/ is real code (AppContainer / LowBox /
   # RestrictedToken / JobObject), so the cross-platform claim needs at least one
   # non-Linux leg. Single py3.12 on purpose — no matrix, Actions minutes are budgeted
-  # for a 1-3 person team. Tier-3 true-adversarial sandbox tests self-skip when the
+  # for a solo developer. Tier-3 true-adversarial sandbox tests self-skip when the
   # runner forbids RestrictedToken/AppContainer probing (guards in tests/test_win_sandbox.py,
   # same skip-not-fail policy as tests/test_landlock.py); pure-logic tests run everywhere.
   # The old KLawScan grep-subprocess false reds are root-fixed (tests/_scan.py grep_py,
@@ -95,7 +95,7 @@ jobs:
   # real sandbox backend, so the cross-platform claim now has all three legs
   # (ubuntu / windows / macos — this closes the old P2 TODO, docs/58 §5 item 9).
   # Single py3.12, no matrix, and a tight timeout on purpose: macOS runner minutes
-  # bill at 10x Linux for a 1-3 person team's budget. True-adversarial seatbelt tests
+  # bill at 10x Linux for a solo developer's budget. True-adversarial seatbelt tests
   # (tests/test_seatbelt_profile.py §2) self-skip when the runner forbids real
   # sandbox-exec — same skip-not-fail policy as tests/test_landlock.py; pure-logic
   # profile tests run everywhere.
