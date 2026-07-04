@@ -2,7 +2,7 @@
 
 病灶:域的 deontic.forbid 此前只是塞进 system prompt 的一段 markdown(软护栏)——
 finance 模板 forbid「直接执行任何交易或转账操作」在执行路径上只是祈祷模型不做。
-业界共识(NeMo Guardrails / policy-as-code 一系):prompt 内嵌规则 ≠ 控制边界,
+业界 guardrails / policy-as-code 一系的共识:prompt 内嵌规则 ≠ 控制边界,
 确定性策略求值器必须放在 context window 之外。本模块补上这一层。
 
 **分层诚实**(deontic 是自然语言,不假装全能确定性匹配):
