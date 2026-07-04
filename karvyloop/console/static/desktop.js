@@ -1084,6 +1084,7 @@
       document.body.classList.remove("desk-wall-day", "desk-wall-night");
     }
     const KARVY_ZONE = { w: 220, h: 200 };
+    const NOTE_MAX_H = 330;
     function computeNoteDefault(col, idx, colBottoms) {
       const desk = deskEl();
       if (!desk) return { x: 12, y: 16 };
@@ -1093,11 +1094,13 @@
       const lane = Math.floor(idx / 2);
       const x = Math.max(12, d.width - (lane + 1) * (w + 24));
       const laneStart = lane === 0 ? 16 : 44;
-      let y = colBottoms[lane] !== void 0 ? colBottoms[lane] : laneStart;
+      const floor = colBottoms[lane] !== void 0 ? colBottoms[lane] : laneStart;
+      let y = floor;
       if (lane === 0 && y + h > d.height - KARVY_ZONE.h && d.width - w - 24 < d.width - KARVY_ZONE.w) {
-        y = Math.max(16, d.height - KARVY_ZONE.h - h - 12);
+        y = Math.max(Math.max(16, d.height - KARVY_ZONE.h - h - 12), floor);
       }
-      colBottoms[lane] = y + h + 14;
+      const slot = idx === 0 ? Math.max(h, NOTE_MAX_H) : h;
+      colBottoms[lane] = y + slot + 14;
       return { x, y };
     }
     function wireAll() {

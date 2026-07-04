@@ -13,6 +13,8 @@ jsdom smoke 验逻辑,这里验**浏览器运行时**(官方原图真加载没 /
 桌面视图三件套(2026-07-04,Hardy 实拍回归锁):
   5. 开屏回放存量 pending 卡(≥1 张,复现纪律)→ 前 3 秒吉祥物稳在窝(不叼卡不离席不闪),
      卡照常摆回列表;**真**新卡(live 事件)→ 叼卡剧场仍触发(功能没修没);
+  6. 首开默认布局 = "有人住的桌面":4 张便签铺右侧两列(⚖ 预留整槽不盖 📥 头)、
+     聊天浮窗待命(非最小化)、dock 在、吉祥物在窝;
   7. 日/夜壁纸:mock 时间(page.clock)验 auto 档昼夜类名,固定/关闭档 + localStorage 持久。
 
 守卫:Playwright(python 包)没装 → skip(老实降级,不假装验过);
@@ -150,7 +152,7 @@ def test_desk_soul_in_real_browser(console_url):
 
 
 # ============================================================================
-# 桌面视图三件套(2026-07-04):开屏回放不演剧场(Hardy 实拍回归锁)
+# 桌面视图三件套(2026-07-04):开屏回放不演剧场 / 首开默认布局 / 日夜壁纸
 # ============================================================================
 
 import json  # noqa: E402
@@ -238,6 +240,56 @@ def test_desk_boot_replay_mascot_stays_home(console_url):
         assert page.evaluate(
             "document.querySelector('.col-decide').classList.contains('note-alert')"
         ), "真新卡到位后 ⚖ 应闪(叼卡剧场不许修没)"
+        browser.close()
+    assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
+
+
+def test_desk_first_open_default_layout(console_url):
+    """首开默认态 = 布置好的桌面(不是空场):4 张便签铺右侧两列、⚖ 整槽不盖 📥 头、
+    聊天浮窗待命(非最小化)、dock 在位、吉祥物在窝。只验默认 —— 用户挪过的存档另有拖拽测试。"""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1600, "height": 900})
+        _wire(page, errors, desk_boot=False)   # 家仍是对话视图(方案 A),手动切进桌面
+        page.goto(console_url, wait_until="domcontentloaded")
+        page.wait_for_selector("#view-opt-desk", timeout=10000)
+        page.click("#view-opt-desk")
+        page.wait_for_function("document.body.classList.contains('desk-view')", timeout=5000)
+
+        # 4 张便签全部拿到 translate3d 摆位(有人住的铺开,不是 0,0 堆角落)
+        layout = page.evaluate("""() => {
+            const out = {};
+            document.querySelectorAll('.cockpit-grid .cockpit-col').forEach((c) => {
+                const k = Array.from(c.classList).find((x) => x.indexOf('col-') === 0);
+                out[k] = { x: parseFloat(c.dataset.deskX || 'NaN'), y: parseFloat(c.dataset.deskY || 'NaN'),
+                           t: c.style.transform };
+            });
+            out._w = document.querySelector('.cockpit').getBoundingClientRect().width;
+            return out;
+        }""")
+        for k in ("col-decide", "col-intel", "col-predict", "col-busy"):
+            assert layout[k]["t"].startswith("translate3d"), f"{k} 未摆位(空场):{layout}"
+        # ⚖ 在最右列且第一(永远第一);📥 同列在其整槽(330px)之下 —— 存量卡长高也盖不住头
+        assert layout["col-decide"]["x"] > layout["_w"] * 0.6, f"⚖ 应铺在右侧: {layout}"
+        assert layout["col-intel"]["x"] == layout["col-decide"]["x"], "📥 应与 ⚖ 同列"
+        assert layout["col-intel"]["y"] - layout["col-decide"]["y"] >= 330, \
+            f"⚖ 应预留整槽(≥330px),否则待拍卡一多就盖住 📥 的头: {layout}"
+        assert layout["col-predict"]["x"] < layout["col-decide"]["x"], "🔮 应在第二列(错落有桌感)"
+        # 聊天浮窗待命:可见、非最小化、在左半区(默认主位)
+        chat = page.evaluate("""() => {
+            const ov = document.getElementById('chat-modal');
+            const p = document.querySelector('#chat-modal .chat-panel');
+            const r = p.getBoundingClientRect();
+            return { min: ov.classList.contains('desk-min'), w: r.width, x: r.left };
+        }""")
+        assert not chat["min"] and chat["w"] > 400, f"聊天浮窗应默认待命(非最小化): {chat}"
+        assert chat["x"] < layout["_w"] * 0.4, f"聊天浮窗默认应在左半区: {chat}"
+        # dock 在位(12 入口 + 窗口指示 + 🌗 + ↺),吉祥物在窝
+        assert page.evaluate("document.querySelectorAll('#desk-dock .dock-item').length") >= 12
+        assert page.is_visible("#desk-dock")
+        assert page.is_visible("#desk-karvy-pixel")
+        assert page.evaluate("document.getElementById('desk-wall-btn') !== null"), "dock 应有 🌗 壁纸换挡"
         browser.close()
     assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
 

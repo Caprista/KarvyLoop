@@ -1001,6 +1001,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   // 第 2 列(中右,y 略降造错落感)📥 + 🔮。左半留给聊天主窗;
   // 右下 220×200 是卡皮巴拉的地盘,默认摆位永不侵入(超出往上收)。
   const KARVY_ZONE = { w: 220, h: 200 };
+  const NOTE_MAX_H = 330;                                   // 便签 CSS max-height(desktop.css)
   function computeNoteDefault(col: HTMLElement, idx: number, colBottoms: number[]): Pos {
     const desk = deskEl();
     if (!desk) return { x: 12, y: 16 };
@@ -1010,12 +1011,18 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     const lane = Math.floor(idx / 2);                       // 0=最右列,1=中右列
     const x = Math.max(12, d.width - (lane + 1) * (w + 24));
     const laneStart = lane === 0 ? 16 : 44;                 // 第 2 列略降,错落有桌感
-    let y = colBottoms[lane] !== undefined ? colBottoms[lane] : laneStart;
-    // 最右列避让卡皮巴拉地盘:便签底部会压进右下角 → 往上收(至少留出顶部 16px)
+    const floor = colBottoms[lane] !== undefined ? colBottoms[lane] : laneStart;
+    let y = floor;
+    // 最右列避让卡皮巴拉地盘:便签底部会压进右下角 → 往上收(至少留出顶部 16px);
+    // 但**绝不叠回同列上一张**(便签互相盖头比压吉祥物糟 —— z 设计本就内容在上,
+    // 真挤不下时吉祥物让位,不是便签让位)。
     if (lane === 0 && y + h > d.height - KARVY_ZONE.h && d.width - w - 24 < d.width - KARVY_ZONE.w) {
-      y = Math.max(16, d.height - KARVY_ZONE.h - h - 12);
+      y = Math.max(Math.max(16, d.height - KARVY_ZONE.h - h - 12), floor);
     }
-    colBottoms[lane] = y + h + 14;
+    // ⚖ 是主角且开机后才灌进存量待拍卡:按 CSS max-height 预留整槽,不按进场瞬时高度排
+    // (Hardy 实拍:5 张 pending 卡让 ⚖ 长到全高,按瞬时高度排位会盖住下一张的头)。
+    const slot = idx === 0 ? Math.max(h, NOTE_MAX_H) : h;
+    colBottoms[lane] = y + slot + 14;
     return { x, y };
   }
 
