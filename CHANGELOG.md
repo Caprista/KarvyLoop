@@ -11,6 +11,50 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Planned
+- **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
+  near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the
+  hot path, no vectors. (Today the same tidy-up runs as an explicit H2A "consolidate" action.)
+
+## [2026.7.4] — 2026-07-04
+
+**The see-it release.** "More like you with every use" stopped being a promise you take on faith:
+you can now *watch* it happen in your first ten minutes, *read* it as a growth curve, and *trust* it
+behind statistical gates that refuse to bluff.
+
+### Added
+- **The first ten minutes.** A fresh install now opens with a guided journey: run one real demo
+  task (a bundled sample CSV, executed by **your** configured model — nothing pre-recorded), run a
+  second one, and watch the ♻ method-reuse receipt appear as the runtime recalls how it solved the
+  first. The finale lights up only when your growth curve has real points. Skippable, replayable
+  (🎬 in the top bar), and it never pops for existing instances upgrading in.
+- **Growth you can see.** `GET /api/skills/curve` replays your Trace (read-only, same scoring code
+  as production) into per-skill score sparklines and a library-wide growth chart at the top of the
+  skills panel — usage, success rate, promotion progress over calendar days.
+- **Webhook push channel.** Decision cards can now reach you wherever you actually are: a generic
+  outbound webhook with presets for ntfy / Bark / Slack-compatible endpoints (plus a body template
+  for anything else). Same dispatch point and card-selection semantics as the email channel;
+  secrets never logged — including a redaction filter for the HTTP client's own request logs.
+  Outbound-only in v1 (decide via the console link).
+- **Attachments, really parsed.** PDF / docx / xlsx now flow down the same lane CSV always had —
+  preview, truncation labels, one-click "have them analyze it" — via the optional `[files]` extra
+  (`pypdf`, `python-docx`, `openpyxl`). Parse-empty-not-poison: corrupt or mislabeled files yield
+  an empty result and a clear error, never binary garbage in your context.
+- **Earned silence, fully gated.** All six statistical gates behind auto-handled decisions are now
+  real code: irreversible actions never enter the pool; Wilson 95% lower-bound ≥ 0.90 with
+  pre-registered evaluation windows; accept- and reject-direction accuracy each gated separately
+  (with an honest correction: a 0.90 reject-side bar is mathematically unreachable at a ~93%
+  approval base rate — the gate that can't be passed is decoration, so it's now a
+  better-than-chance bound); 15% unannounced audits; renewals require reviewing evidence, not
+  rubber-stamping; a rolling blast-radius cap. And the silenced path itself now runs the same
+  violation checks as human-facing cards — fail-closed when the checker can't run.
+- **Windows joins CI.** A `windows-latest` gate runs the full suite (the sandbox's AppContainer /
+  RestrictedToken code is real Windows code — the cross-platform claim needed a non-Linux leg).
+  The last shell-`grep` subprocess tests migrated to an OS-portable scanner.
+- **Public docs, layer one.** `docs/QUICKSTART.md`, `docs/ARCHITECTURE.md`, `docs/CONCEPTS.md`
+  (English + 中文) — the ten-minute journey in text, the two-loops architecture with real
+  thresholds verified against the code, and a concepts dictionary.
+
 ### Changed
 - **Console IA converges to one home + one mode.** The top-bar view switch is now two options —
   💬 Chat (the home: talk + decide, always one click back) ⇄ 🖥 Desk (watch your team at work).
@@ -20,11 +64,37 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   never remembered as a startup view — and a stored "board" startup preference migrates smoothly
   back to chat. The first-10-minutes journey always lands in the chat view and introduces the Desk
   as a reward moment at the finale instead of a cold-start three-way choice.
+- **The desk mascot is the official capybara.** Hand-drawn pixel frames retired; the real artwork
+  now renders at native resolution with CSS state animations (breathing, typing, card-carry,
+  sleeping, a happy hop). Role accents became chest badges. The no-fake-idle red line stands:
+  states change only on real events.
 
-### Planned
-- **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
-  near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the
-  hot path, no vectors. (Today the same tidy-up runs as an explicit H2A "consolidate" action.)
+### Fixed
+- **Slow-brain total outage on `main`.** A prompt-cache contract change had evolved the gateway's
+  `to_blocks(cache=...)` signature without its duck-typed twin in the coding executor — every model
+  call raised `TypeError`, was misdiagnosed as "model/network unreachable", and 2,900 green unit
+  tests couldn't see it (their mock never calls the real body builder). Caught by the real-model
+  end-to-end journey; fixed with a signature-parity contract test and a test that exercises the
+  real request-body path, both verified to go red on drift.
+- The journey's model-readiness poll no longer yanks you back to the chat view (or steals focus)
+  every 15 seconds while you're exploring unconfigured; the forced view replay happens once, on
+  first mount.
+- Wheel builds from a dirty tree can no longer package stray files from the sample-data directory;
+  the release test-bench writes to a temp workspace instead of the source tree.
+
+### Security
+- **`web_fetch` egress guard (SSRF).** Outbound fetches now resolve the target and refuse private,
+  loopback, link-local, and cloud-metadata ranges, plus `file://` and credentialed URLs — with
+  every redirect hop re-validated. Closes a credential-theft vector (a page could previously point
+  the fetcher at `169.254.169.254` or your own loopback console).
+- **Skill-library poisoning via corrections closed.** Reviewer feedback written back into a skill's
+  `SKILL.md` is now sanitized — no header/frontmatter injection can hijack a skill's method.
+- **Adversarial tests are a first-class suite**: `pytest -m security` runs 25 attack-vector classes
+  (SSRF, poisoning, traversal, injection provenance, sandbox escape probes …) with an OWASP
+  LLM Top-10 cross-reference in `tests/security/README.md`.
+- **Deeper sandbox floors**: the Windows network gate is now OS-enforced (AppContainer/LowBox WFP
+  deny — no admin required), and Linux gained a Landlock kernel layer under bubblewrap (older
+  kernels degrade gracefully).
 
 ## [2026.7.3] — 2026-07-03
 
