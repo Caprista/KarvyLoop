@@ -499,14 +499,17 @@ def build_console_app(
         except Exception as e:
             logger.warning(f"[karvyloop console] MCP 接入失败(降级无 MCP 工具,不影响启动): {e}")
 
-        # #39 ①:持久化执行 —— 续跑上次被中断的 workflow(console 崩/重启后,已完成步秒命中、剩余续)。
+        # #39 ① + #54 逃生门:持久化执行的中断 workflow **不再无条件复活**。
+        # 超时的标 abandoned(不复活);其余挂起待人拍板(续/丢),不自动烧 token。让重启成为真正的逃生门。
         try:
             from karvyloop.console.workflow_engine import resume_workflows
-            n = await resume_workflows(app)
-            if n:
-                print(f"[karvyloop console] 续跑了 {n} 个被中断的 workflow", flush=True)
+            summary = await resume_workflows(app)
+            _ab, _pd = summary.get("abandoned", 0), summary.get("pending", 0)
+            if _ab or _pd:
+                print(f"[karvyloop console] 中断 workflow:{_ab} 条超时丢弃 / {_pd} 条挂起待拍板"
+                      f"(不自动续跑,逃生门)", flush=True)
         except Exception as e:
-            logger.warning(f"[karvyloop console] workflow 续跑失败(不影响启动): {e}")
+            logger.warning(f"[karvyloop console] workflow 续跑处置失败(不影响启动): {e}")
 
         yield
 

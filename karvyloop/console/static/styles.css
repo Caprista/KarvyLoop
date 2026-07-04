@@ -1587,6 +1587,11 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .task-blocked { font-size: 12px; font-weight: 700; color: #8a5a1e; background: #fbf1dc;
   border: 1px solid var(--gold, #c39a45); border-radius: 8px; padding: 5px 9px; margin: 5px 0 2px; }
 .task-card.has-blocked { border-color: var(--gold, #c39a45); }
+/* #54 逃生门:运行中 workflow/圆桌的"中止"按钮(踩刹车) */
+.task-abort { font-size: 11px; font-weight: 700; color: #b23b3b; background: #fbe9e9;
+  border: 1px solid #d98a8a; border-radius: 8px; padding: 3px 10px; margin-top: 6px;
+  cursor: pointer; align-self: flex-start; }
+.task-abort:hover { background: #f5d6d6; }
 /* 活动时间线(任务详情):这个任务经历了什么 */
 .task-timeline { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 14px; }
 .task-ev { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: var(--text-dim); }

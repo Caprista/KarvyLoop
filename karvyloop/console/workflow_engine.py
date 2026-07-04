@@ -18,6 +18,22 @@ def _extract_json_obj(text: str) -> str:
     return s[i:j + 1] if (i >= 0 and j > i) else s
 
 
+# infra-dead 的错误指纹:基础能力没了(网关/网络/模型解析/沙箱/token 调不通)。DriveOutcome 只给
+# error 字符串(不透 terminal),故按指纹判 —— 命中 → fail-loud 中止,不盲 retry(自家原则)。
+# 不是任务的问题:role 重规划同一条路也没用。宁可漏判(当普通失败 skip)也别误判(把真任务失败当 infra)。
+_INFRA_DEAD_FINGERPRINTS = (
+    "infra_dead", "infra-dead", "resolve_model", "no model", "无可用模型", "模型解析",
+    "gateway", "网关", "connection", "连接", "timeout", "超时", "econnrefused",
+    "sandbox", "沙箱", "unauthorized", "api key", "api_key", "rate limit", "network",
+)
+
+
+def _is_infra_dead_error(err: str) -> bool:
+    """DriveOutcome.error 是否指向"基础能力失效"(token/网/沙箱/网关 dead)。宽松指纹匹配。"""
+    low = (err or "").lower()
+    return any(fp in low for fp in _INFRA_DEAD_FINGERPRINTS)
+
+
 def _workflow_roles_from_mentions(app, peer, mentions):
     """把 @ 的 mentions 解析成角色 [{role_id, display, agent_id, domain_id, domain_name}](去重保序)。
 
@@ -106,6 +122,35 @@ def _workflow_store(app):
     return st
 
 
+# ---- 逃生门:按 task_id 的协作式中止旗(圆桌无 run store,借它;workflow 也可双保险)----
+# §0.7:人点"中止" → 把 task_id 记进这个集合 → 跑中的圆桌/工作流循环每轮查它 → 不再起新步/新轮。
+
+def _mark_task_cancelled(app, task_id: str) -> None:
+    if not task_id:
+        return
+    s = getattr(app.state, "cancelled_tasks", None)
+    if not isinstance(s, set):
+        s = set()
+    s.add(task_id)
+    try:
+        app.state.cancelled_tasks = s
+    except Exception:
+        pass
+
+
+def _is_task_cancelled(app, task_id: str) -> bool:
+    if not task_id:
+        return False
+    s = getattr(app.state, "cancelled_tasks", None)
+    return isinstance(s, set) and task_id in s
+
+
+def _clear_task_cancelled(app, task_id: str) -> None:
+    s = getattr(app.state, "cancelled_tasks", None)
+    if isinstance(s, set):
+        s.discard(task_id)
+
+
 def _workflow_run_store(app):
     st = getattr(app.state, "workflow_run_store", None)
     if st is None:
@@ -152,44 +197,123 @@ async def execute_workflow_durable(app, *, run_id: str, goal: str, steps: list,
         outcome = await drive_in_tui(intent, main_loop, governance=governance,
                                      persona=persona, scope="domain", fresh=True,
                                      **_rk_model(rk, _model_for_role(app, step.get("agent_id", ""))))
-        err = getattr(outcome, "error", "")
+        err = (getattr(outcome, "error", "") or "").strip()
+        out = (outcome.text or "").strip()
+        # 失败但没 error 且正文也空 = 静默空产出 → 给个原因,别在文档里留空白 ✗(MAST:坏产出别静默)
+        if not out and not err:
+            err = "该步无产出(角色没交东西)"
+        dead = bool(err) and _is_infra_dead_error(err)
         await _push_step(app, task_id, sid,
                          disp_by_id.get(sid, step.get("agent_id", "?")),
-                         "failed" if err else "done", err)
-        if err:
-            return None                # 不落盘 → 重启会重试这步(失败可能是瞬时)
-        out = (outcome.text or "").strip()
+                         "done" if out else "failed",
+                         ("基础能力失效(infra-dead):" + err) if dead else err)
+        if not out:
+            # 失败不落盘 → 重启会重试这步(失败可能是瞬时)。infra-dead → 附标,引擎据此 fail-loud 中止。
+            return {"output": "", "error": err, "infra_dead": dead}
         store.set_step(run_id, sid, out)   # memoize:成功才存,这就是 durable 的家
         return {"output": out}
 
-    return await run_workflow({"goal": goal, "steps": steps}, run_step=run_step)
+    def _should_cancel() -> bool:
+        # §0.7 逃生门:人点了"中止"(经 run store 的 cancelled 标,或按 task_id 的中止旗)→ 不再起新步。
+        return store.is_cancelled(run_id) or _is_task_cancelled(app, task_id or "")
+
+    return await run_workflow({"goal": goal, "steps": steps}, run_step=run_step,
+                              should_cancel=_should_cancel)
 
 
-async def resume_workflows(app) -> int:
-    """启动时 replay 被中断的 workflow(console 重启/崩溃后续上)。返回续跑的运行数。"""
+# 重启时超此 age 的中断 workflow 直接标 abandoned(不复活)。默认 6h:比任何合理的单轮工作流都长,
+# 挂这么久的八成是跑歪 / 忘了的(逃生门:一条跑歪烧 token 的流程,重启就该能杀掉它)。0=不 sweep。
+_STALE_RESUME_AGE_S = 6 * 3600
+
+
+async def resume_workflows(app, *, max_age_s: float = _STALE_RESUME_AGE_S) -> dict:
+    """启动时**不再无条件复活**被中断的 workflow(#54 逃生门解锁,最疼的病灶)。
+
+    旧行为:启动 → 对所有 running 态**自动续跑**。后果:用户想靠重启杀掉一条跑歪烧 token 的 workflow,
+    重启后它自动复活续烧 —— 逃生门反锁了。
+
+    新行为(重启成为真正的逃生门):
+      1. 超 age 上限(默认 6h)的 running → 直接标 **abandoned**,绝不复活(sweep_stale)。
+      2. 其余 running → **挂起待人拍板**(不自动烧 token):记进 app.state.pending_resume,
+         广播一条系统提示"上次有 N 条流程被中断,续跑还是丢弃?",由用户经 /api/workflow/resume(续)/
+         /api/workflow/discard(丢)显式处置。重启默认 = 不动它(省 token,人坐驾驶座)。
+
+    返回 {"abandoned": int, "pending": int, "pending_runs": [{run_id, goal, domain_id, done, total}]}。
+    """
+    store = _workflow_run_store(app)
+    dropped = store.sweep_stale(max_age_s)
+    if dropped:
+        logger.info(f"[workflow] 重启:{len(dropped)} 条超时中断流程标 abandoned(不复活)")
+
+    pending = []
+    for run in list(store.running()):
+        steps = run.get("steps", []) or []
+        done = len(run.get("step_outputs", {}) or {})
+        pending.append({"run_id": run.get("run_id", ""), "goal": run.get("goal", ""),
+                        "domain_id": run.get("domain_id", "l0"),
+                        "done": done, "total": len(steps)})
+    # 挂起清单存 app.state,供 /api/workflow/pending_resume 查、/resume|/discard 处置。
+    try:
+        app.state.pending_resume = pending
+    except Exception:
+        pass
+    if pending:
+        logger.info(f"[workflow] 重启:{len(pending)} 条中断流程**挂起待拍板**(不自动续跑,逃生门)")
+        # 主动冒泡(§0.7 fail-loud):别让它静默挂着,也别静默复活 —— 让人看见并拍板。
+        try:
+            from karvyloop.console.task_events import broadcast_system_error
+            await broadcast_system_error(
+                app, source="workflow_resume",
+                message=f"{len(pending)} interrupted workflow(s) awaiting resume/discard")
+        except Exception:
+            pass
+    return {"abandoned": len(dropped), "pending": len(pending), "pending_runs": pending}
+
+
+async def resume_one_workflow(app, run_id: str) -> dict:
+    """人显式选择"续跑"一条中断的 workflow(经 /api/workflow/resume)。已完成步秒命中缓存、只续剩余。"""
     main_loop = getattr(app.state, "main_loop", None)
     rk = getattr(app.state, "runtime_kwargs", None) or {}
-    if main_loop is None or rk.get("gateway") is None:
-        return 0
     store = _workflow_run_store(app)
+    run = store.get(run_id)
+    if run is None or run.get("status") != "running":
+        return {"ok": False, "reason": "no_such_running_workflow"}
+    if main_loop is None or rk.get("gateway") is None:
+        return {"ok": False, "reason": "no_llm"}
     mgr = getattr(app.state, "conversation_manager", None)
-    n = 0
-    for run in list(store.running()):
-        try:
-            rid = run["run_id"]
-            result = await execute_workflow_durable(
-                app, run_id=rid, goal=run.get("goal", ""), steps=run.get("steps", []),
-                governance="")
-            # 续完 → 落一条工作流线(和首跑一致,2a),标完成
-            if mgr is not None and result.get("ok"):
-                _record_workflow_line(app, run.get("domain_id", "l0"), run.get("goal", ""), result)
-            store.finish(rid)
-            n += 1
-        except Exception as e:
-            logger.warning(f"[workflow] 续跑 {run.get('run_id')} 失败: {e}")
-    if n:
-        logger.info(f"[karvyloop console] 续跑了 {n} 个被中断的 workflow")
-    return n
+    try:
+        result = await execute_workflow_durable(
+            app, run_id=run_id, goal=run.get("goal", ""), steps=run.get("steps", []),
+            governance="")
+    except Exception as e:
+        logger.warning(f"[workflow] 续跑 {run_id} 失败: {e}")
+        return {"ok": False, "reason": f"resume_failed: {e}"}
+    if mgr is not None and result.get("ok"):
+        _record_workflow_line(app, run.get("domain_id", "l0"), run.get("goal", ""), result)
+    # cancelled(续跑中人又踩了刹车)不覆盖回 done —— finish 只在 running 时生效
+    store.finish(run_id)
+    _drop_pending(app, run_id)
+    return {"ok": True, "workflow": result}
+
+
+def discard_workflow(app, run_id: str) -> dict:
+    """人显式选择"丢弃"一条中断的 workflow(经 /api/workflow/discard):标 abandoned,不复活。"""
+    store = _workflow_run_store(app)
+    run = store.get(run_id)
+    if run is None:
+        return {"ok": False, "reason": "no_such_workflow"}
+    # 复用 cancel 语义标死(cancelled=人主动叫停);再移出挂起清单。
+    store.cancel(run_id)
+    _drop_pending(app, run_id)
+    return {"ok": True}
+
+
+def _drop_pending(app, run_id: str) -> None:
+    try:
+        pend = getattr(app.state, "pending_resume", None) or []
+        app.state.pending_resume = [p for p in pend if p.get("run_id") != run_id]
+    except Exception:
+        pass
 
 
 def _record_workflow_line(app, domain_id: str, goal: str, result: dict) -> None:
@@ -243,7 +367,22 @@ async def _push_step(app: Any, task_id: Optional[str], step_id: str, display: st
 
 def _workflow_result_doc(result: dict) -> str:
     parts = [f"⚙ 工作流:{result.get('goal', '')}"]
+    # 逃生门/fail-loud 状态如实上镜:被中止 / infra-dead 中止,别假装跑成了。
+    if result.get("cancelled"):
+        parts.append("\n\n🛑 (已中止 —— 剩余步骤未执行)")
+    elif result.get("infra_dead"):
+        parts.append("\n\n⛔ (基础能力失效 infra-dead:中止,非任务本身的问题)")
+    elif result.get("aborted"):
+        parts.append("\n\n⛔ (某步 on_fail=abort → 全流程中止)")
     for s in result.get("steps", []):
-        mark = "✓" if s.get("status") == "done" else "✗"
-        parts.append(f"\n\n**{mark} {s.get('display', '?')} · {s.get('task', '')}**\n{(s.get('output') or '').strip()}")
+        st = s.get("status", "")
+        mark = "✓" if st == "done" else ("✗" if st == "failed" else "—")
+        head = f"\n\n**{mark} {s.get('display', '?')} · {s.get('task', '')}**"
+        body = (s.get("output") or "").strip()
+        if st == "failed":
+            # 失败带**原因**(#54):✗ 后写为什么,别静默空白(MAST:坏产出别静默喂下游)
+            body = "原因:" + (s.get("error") or "该步无产出").strip()
+        elif st == "skipped":
+            body = "(未执行:被中止 / 分支未选中)"
+        parts.append(head + "\n" + body)
     return "".join(parts)

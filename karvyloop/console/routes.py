@@ -46,13 +46,16 @@ from .serializers import (
     widget_snapshot,
 )
 from .workflow_engine import (  # P2-e:workflow 引擎已下沉(纯搬移);re-export 保端点与既有 import/monkeypatch 可达
+    _mark_task_cancelled,
     _push_step,
     _workflow_plan_llm,
     _workflow_result_doc,
     _workflow_roles_from_mentions,
     _workflow_run_store,
     _workflow_store,
+    discard_workflow,
     execute_workflow_durable,
+    resume_one_workflow,
 )
 from .distill_engine import (  # P2-e:沉淀引擎已下沉(纯搬移);同上 re-export
     _distill_analyze,
@@ -651,7 +654,9 @@ async def api_workflow_run(req: WorkflowRunRequest, request: Request) -> dict[st
     # #39 ①:持久化执行 —— 登记运行(每步落盘),console 中途崩/重启能 replay 续上
     import uuid as _uuid
     run_id = _uuid.uuid4().hex[:16]
-    _workflow_run_store(app).create(run_id, goal=goal, steps=steps, domain_id=peer.domain_id)
+    # task_id 存进 run 记录 → 前端"中止"按钮只握 task_id 也能定位到这条 run(cancel 用)。
+    _workflow_run_store(app).create(run_id, goal=goal, steps=steps, domain_id=peer.domain_id,
+                                    task_id=task_id or "")
     try:
         result = await execute_workflow_durable(app, run_id=run_id, goal=goal, steps=steps,
                                                 governance=governance, task_id=task_id)
@@ -704,10 +709,80 @@ async def api_workflow_run(req: WorkflowRunRequest, request: Request) -> dict[st
     _workflow_run_store(app).finish(run_id)   # #39 ①:跑完 → 标 done(不再被重启 replay)
     stable = result.get("ok") and all(s.get("status") == "done" for s in result.get("steps", []))
     crystallizable = bool(stable and not from_tpl)
+    _clear_task_cancelled_safe(app, task_id or "")   # 中止旗用完即清(下次同 id 复用别误判)
     return {"ok": True, "workflow": result, "conversation_id": conv_id,
             "run_line": run_line,   # 2a:专属工作流会话线(左栏出卡 + 追问跳它)
             "crystallizable": crystallizable,
             "plan": {"goal": goal, "steps": steps} if crystallizable else None}
+
+
+def _clear_task_cancelled_safe(app, task_id: str) -> None:
+    try:
+        from .workflow_engine import _clear_task_cancelled
+        _clear_task_cancelled(app, task_id)
+    except Exception:
+        pass
+
+
+# ---- #54 逃生门:跑起来也能踩刹车(cancel)+ 重启不无条件复活(resume/discard 拍板)----
+
+class WorkflowCancelRequest(BaseModel):
+    # 前端"中止"按钮只握 task_id(看板卡的 tk.id);也接 run_id(durable run 直连)。给一个即可。
+    task_id: str = Field(default="", max_length=64)
+    run_id: str = Field(default="", max_length=64)
+
+
+@router.post("/workflow/cancel")
+async def api_workflow_cancel(req: WorkflowCancelRequest, request: Request) -> dict[str, Any]:
+    """中止一条正在跑的 workflow(§0.7 逃生门):置该 run 为 cancelled → 跑中的步循环不再起新步、
+    剩余步标 skipped。**协作式**:已在跑的步尽力跑完(不硬杀线程),但绝不再烧下一步 token。"""
+    app = request.app
+    store = _workflow_run_store(app)
+    run = None
+    if req.run_id:
+        run = store.get(req.run_id)
+    if run is None and req.task_id:
+        run = store.find_by_task(req.task_id)
+    rid = (run or {}).get("run_id", "") if run else req.run_id
+    ok = store.cancel(rid) if rid else False
+    # 双保险:按 task_id 也记中止旗(圆桌无 run store,workflow 借它兜底 durable run 未及时找到的窗口)。
+    if req.task_id:
+        _mark_task_cancelled(app, req.task_id)
+    return {"ok": bool(ok or req.task_id), "run_id": rid, "cancelled": bool(ok)}
+
+
+@router.post("/roundtable/cancel")
+async def api_roundtable_cancel(req: WorkflowCancelRequest, request: Request) -> dict[str, Any]:
+    """中止一场正在进行的圆桌(§0.7 逃生门):按 task_id 记中止旗 → 圆桌每轮开始前查它 →
+    不再烧下一轮 token,拿已有发言收敛返回。"""
+    app = request.app
+    if not req.task_id:
+        return {"ok": False, "reason": "need_task_id"}
+    _mark_task_cancelled(app, req.task_id)
+    return {"ok": True, "task_id": req.task_id}
+
+
+@router.get("/workflow/pending_resume")
+def api_workflow_pending_resume(request: Request) -> dict[str, Any]:
+    """重启后**挂起待拍板**的中断 workflow 清单(逃生门:不自动复活,让人续/丢)。"""
+    pend = getattr(request.app.state, "pending_resume", None) or []
+    return {"pending": list(pend)}
+
+
+class WorkflowResumeRequest(BaseModel):
+    run_id: str = Field(..., min_length=1, max_length=64)
+
+
+@router.post("/workflow/resume")
+async def api_workflow_resume(req: WorkflowResumeRequest, request: Request) -> dict[str, Any]:
+    """人显式选择"续跑"一条中断的 workflow(已完成步秒命中缓存、只续剩余)。"""
+    return await resume_one_workflow(request.app, req.run_id)
+
+
+@router.post("/workflow/discard")
+async def api_workflow_discard(req: WorkflowResumeRequest, request: Request) -> dict[str, Any]:
+    """人显式选择"丢弃"一条中断的 workflow(标死,不复活)。"""
+    return discard_workflow(request.app, req.run_id)
 
 
 def _recall_domain(mgr) -> str:

@@ -401,12 +401,18 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
     task_id = (task_reg.start(who="🎡 圆桌", domain_id=peer.domain_id, role="group",
                               intent=f"🎡 {topic[:120]}") if task_reg is not None else None)
     from karvyloop.karvy.roundtable import run_roundtable_session
+
+    from .workflow_engine import _clear_task_cancelled, _is_task_cancelled  # noqa: F401
+    # §0.7 逃生门:人点"中止" → 按 task_id 记旗 → 每轮开始前查它 → 圆桌不再烧下一轮 token。
+    def _should_cancel() -> bool:
+        return _is_task_cancelled(app, task_id or "")
     # 50+ 大桌:全员上桌(封顶 64,防真·失控),但**并发只 6 路**——别 50 路同时打一把 key 截断。
     _seats = min(len(members), 64)
     try:
         result = await run_roundtable_session(goal, members, member_reply=member_reply,
                                               host_moderate=host_moderate, max_rounds=3,
-                                              max_seats=_seats, concurrency=6)
+                                              max_seats=_seats, concurrency=6,
+                                              should_cancel=_should_cancel)
     except Exception as e:
         if task_reg is not None and task_id is not None:
             task_reg.finish(task_id, error=str(e))
@@ -415,6 +421,10 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
     result["topic"] = topic
     result["goal"] = goal
     result_doc = _roundtable_result_doc(result)
+    # 中止旗用完即清(下次同 task_id 复用不误判);中止的圆桌在文档里如实标一句。
+    _clear_task_cancelled(app, task_id or "")
+    if result.get("cancelled"):
+        result_doc = "🛑 (已中止)\n\n" + result_doc
     if task_reg is not None and task_id is not None:
         task_reg.finish(task_id, result=result_doc)
         task_reg.set_conversation(task_id, conversation_id)   # 卡 → 跳回这条圆桌

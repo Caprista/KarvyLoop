@@ -57,6 +57,7 @@ async def run_roundtable_session(
     max_rounds: int = 3,
     max_seats: int = 6,
     concurrency: int = 6,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict:
     """**小卡主持的圆桌**(ch4 final):围绕 topic 多轮成员发言 + 小卡控场,差不多就收敛。
 
@@ -67,15 +68,26 @@ async def run_roundtable_session(
 
     - member_reply(member, topic, transcript_so_far) -> {speaker, text}:一个成员就主题
       + 已有讨论发言。
-    - 返回 {topic, transcript:[{round,speaker,text}], rounds, converged, conclusion}。
+    - should_cancel():每轮**开始前**查刹车 —— True 就**不再起新一轮**(§0.7 逃生门:人踩刹车),
+      拿已有 transcript 直接收敛返回(cancelled=True)。
+    - 返回 {topic, transcript:[{round,speaker,text}], rounds, converged, conclusion, cancelled}。
     """
     if not (topic or "").strip() or not members:
         return {"topic": topic, "transcript": [], "rounds": 0,
-                "converged": False, "conclusion": ""}
+                "converged": False, "conclusion": "", "cancelled": False}
     transcript: list = []
     converged = False
+    cancelled = False
     rounds = 0
     for r in range(max(1, max_rounds)):
+        # §0.7 逃生门:开新一轮前查刹车 —— 中止就不再烧下一轮 token,拿已有的收敛。
+        if should_cancel is not None:
+            try:
+                if should_cancel():
+                    cancelled = True
+                    break
+            except Exception:
+                pass
         rounds = r + 1
         snapshot = list(transcript)   # 这一轮成员看到的是"已有讨论"(防把自己刚说的喂回去)
         replies = await run_roundtable(
@@ -95,15 +107,16 @@ async def run_roundtable_session(
         if d.get("action") == "converge":
             converged = True
             break
-    # 小卡收敛产出(结论 → 上层写进认知库)
+    # 被中止 → 不再烧 host 的收敛调用(省 token);拿已有 transcript 老实返回。
     conclusion = ""
-    try:
-        fin = await host_moderate(topic, transcript, final=True) or {}
-        conclusion = fin.get("text", "")
-    except Exception:
-        conclusion = ""
+    if not cancelled:
+        try:
+            fin = await host_moderate(topic, transcript, final=True) or {}
+            conclusion = fin.get("text", "")
+        except Exception:
+            conclusion = ""
     return {"topic": topic, "transcript": transcript, "rounds": rounds,
-            "converged": converged, "conclusion": conclusion}
+            "converged": converged, "conclusion": conclusion, "cancelled": cancelled}
 
 
 __all__ = ["run_roundtable", "run_roundtable_session"]

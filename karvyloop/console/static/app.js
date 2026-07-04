@@ -2214,14 +2214,33 @@
     if (tk.status === "running" && tk.blocked && tk.last_event) {
       blockedEl = el("div", { class: "task-blocked", text: "⚠ " + t("task.blocked_on", { what: tk.last_event.text || "?" }) });
     }
+    // #54 逃生门:跑起来也能踩刹车 —— 运行中的 workflow/圆桌给"中止"按钮(§0.7:人坐驾驶座)。
+    let abortEl = null;
+    const who = tk.who || "";
+    const isWf = who.indexOf("工作流") >= 0 || who.indexOf("Workflow") >= 0 || who.indexOf("⚙") >= 0;
+    const isRt = who.indexOf("圆桌") >= 0 || who.indexOf("Roundtable") >= 0 || who.indexOf("🎡") >= 0;
+    if (tk.status === "running" && (isWf || isRt)) {
+      abortEl = el("button", { class: "task-abort", text: t("task.abort"),
+        onClick: (e) => { e.stopPropagation(); _abortTask(tk, isWf); } });
+    }
     return el("div", { class: "task-card" + (blockedEl ? " has-blocked" : ""),
-      onclick: (e) => { if (e.target && e.target.classList.contains("task-check")) return; openTaskDetail(tk); } },
+      onclick: (e) => { if (e.target && (e.target.classList.contains("task-check") || e.target.classList.contains("task-abort"))) return; openTaskDetail(tk); } },
       top,
       el("div", { class: "task-intent", text: tk.intent || "" }),
       blockedEl,
       stepsEl,
+      abortEl,
       (tk.status !== "running" && tk.result) ? el("div", { class: "task-result", text: tk.result }) : null,
       (tk.status !== "running") ? el("div", { class: "task-jump", text: t("task.view_result") }) : null);
+  }
+  // #54 逃生门:点"中止" → 打 cancel 端点(workflow 走 /workflow/cancel,圆桌走 /roundtable/cancel)。
+  async function _abortTask(tk, isWf) {
+    try {
+      const url = isWf ? "/api/workflow/cancel" : "/api/roundtable/cancel";
+      await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: tk.id }) });
+      pushChatLine("system", t("task.aborting", { who: _localizeWho(tk.who) }));
+    } catch (e) { pushChatLine("system", "⚠ " + e.message); }
   }
   // ch4:任务分两象限 —— 跑完的进【流进来的料】,跑着的进【谁在忙】(干完即撤)
   function renderTaskBoard(tasks) {

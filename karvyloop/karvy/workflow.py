@@ -98,35 +98,57 @@ async def run_workflow(
     *,
     run_step: Callable[[dict, dict], Awaitable[dict]],
     max_parallel: int = 6,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict:
     """按 DAG 执行 workflow:依赖满足的步骤**并发**跑,**上游产出喂下游**(data flow),
     支持**条件分支**(when)、**容错策略**(on_fail: skip/retry/abort)、**选择性输入/分支合并**(inputs)。
 
     plan: {"goal": str, "steps": [{"id","display","task","depends_on":[ids],
             "inputs":[ids]?, "when":{...}?, "on_fail":"skip|retry|abort"?, "max_retries":N?}]}。
-    run_step(step, upstream) -> awaitable dict(至少含 "output")。upstream={dep_id: dep_output}(只含该步
-      data-inputs 里**已产出**的上游)。抛错/None/空 output → 该步按 on_fail 处置。
+    run_step(step, upstream) -> awaitable dict。upstream={dep_id: dep_output}(只含该步 data-inputs 里
+      **已产出**的上游)。返回约定(#54):
+        - {"output": str}                成功
+        - {"output": "", "error": str}   失败(带**原因**,写进最终文档的 ✗ 后)
+        - {"infra_dead": True, "error"}  基础能力失效(token/网/沙箱)→ **fail-loud 中止全流程**,
+                                          不盲 retry(自家"infra-dead 不重规划同一条路"原则)。
+      抛错/None/空 output(无 error)→ 视为失败(error 兜底)。
+
+    should_cancel():每轮起新步前查一次 —— True 就**不再起新步**(§0.7 逃生门:人踩刹车),
+      剩余未决步标 skipped,run 标 cancelled=True 返回。
 
     状态语义:done(有产出)/ failed(跑了没产出,失败隔离:下游照跑拿空)/ skipped(分支没选中或
-      其全部输入都被跳过 → 级联剪枝;但合并步只要还有任一输入产出就跑)。on_fail=abort → 标 failed
-      并**中止全流程**(剩余未决步标 skipped)。
+      其全部输入都被跳过 → 级联剪枝;但合并步只要还有任一输入产出就跑)。on_fail=abort 或 infra-dead →
+      标 failed 并**中止全流程**(剩余未决步标 skipped)。
 
-    返回 {"goal", "steps":[{...step,"output","status"}], "ok", "ran":[done 序], "aborted":bool}。
-    空/有环/悬空依赖 → ok=False(执行前该被规划层拦,这里兜底)。
+    返回 {"goal", "steps":[{...step,"output","status","error"}], "ok", "ran":[done 序],
+          "aborted":bool, "cancelled":bool, "infra_dead":bool}。
+    - ok = **真实成败**:所有非 skipped 的步都 done(不再是"跑成任意一步就 ok")。有 failed / 被中止 /
+      被取消 / infra-dead → ok=False。空/有环/悬空依赖 → ok=False(规划层该拦,这里兜底)。
     """
     steps = {s["id"]: dict(s) for s in plan.get("steps", []) if s.get("id")}
     goal = plan.get("goal", "")
     if not steps or not _topo_ok(steps):
-        return {"goal": goal, "steps": [], "ok": False, "ran": [],
-                "aborted": False, "reason": "空 workflow 或依赖有环/悬空"}
+        return {"goal": goal, "steps": [], "ok": False, "ran": [], "aborted": False,
+                "cancelled": False, "infra_dead": False, "reason": "空 workflow 或依赖有环/悬空"}
 
     status: dict[str, str] = {}          # id -> done/failed/skipped
     output: dict[str, str] = {}          # id -> 产出文本(失败/跳过=空)
+    errors: dict[str, str] = {}          # id -> 失败原因(✗ 后写它)
     ran_order: list = []
     remaining = set(steps)
     aborted = False
+    cancelled = False
+    infra_dead = False
 
     while remaining and not aborted:
+        # §0.7 逃生门:每轮起新步前查刹车 —— 已在跑的这批让它跑完(尽力而止),但不再起新步。
+        if should_cancel is not None:
+            try:
+                if should_cancel():
+                    cancelled = True
+                    break
+            except Exception:
+                pass
         ready = [sid for sid in remaining
                  if all(d in status for d in steps[sid].get("depends_on", []))]
         if not ready:
@@ -153,19 +175,29 @@ async def run_workflow(
             up = {d: output.get(d, "") for d in _data_deps(step) if status.get(d) == "done"}
             policy, retries = _fail_policy(step)
             attempts = 1 + (retries if policy == "retry" else 0)
-            out = ""
+            out, err, dead = "", "", False
             for _ in range(attempts):
                 try:
-                    r = await run_step(step, up)
-                    out = ((r or {}).get("output") or "").strip()
-                except Exception:
-                    out = ""
+                    r = await run_step(step, up) or {}
+                    out = (r.get("output") or "").strip()
+                    err = (r.get("error") or "").strip()
+                    dead = bool(r.get("infra_dead"))
+                except Exception as e:   # noqa: BLE001 — 步内任何异常都收成失败原因,不吞
+                    out, err, dead = "", (str(e) or "step raised").strip(), False
                 if out:
+                    err = ""
                     break
-            return sid, out, (policy if not out else "")
+                # infra-dead(基础能力没了)→ 别浪费剩余 retry,同一条路重试没意义(fail-loud)
+                if dead:
+                    break
+            # 失败但没给原因 → 兜个底,别在文档里留空白 ✗(违背"失败带原因")
+            if not out and not err:
+                err = "step produced no output"
+            fail_policy = ("abort" if dead else policy) if not out else ""
+            return sid, out, err, dead, fail_policy
 
         results = await asyncio.gather(*[_one(sid) for sid in batch])
-        for sid, out, failed_policy in results:
+        for sid, out, err, dead, failed_policy in results:
             remaining.discard(sid)
             output[sid] = out
             if out:
@@ -173,17 +205,26 @@ async def run_workflow(
                 ran_order.append(sid)
             else:
                 status[sid] = "failed"
-                if failed_policy == "abort":
-                    aborted = True   # 中止全流程:剩余未决步下面统一标 skipped
+                errors[sid] = err
+                if dead:
+                    infra_dead = True
+                    aborted = True   # infra-dead:fail-loud 中止全流程,剩余步下面标 skipped
+                elif failed_policy == "abort":
+                    aborted = True
 
-    # 中止/卡死后仍未决的步骤 → skipped(老实标,不假装做了)
+    # 中止/取消/卡死后仍未决的步骤 → skipped(老实标,不假装做了)
     for sid in remaining:
-        status[sid] = "skipped"; output.setdefault(sid, "")
+        status.setdefault(sid, "skipped")
+        output.setdefault(sid, "")
 
     out_steps = [{**steps[sid], "output": output.get(sid, ""),
-                  "status": status.get(sid, "skipped")} for sid in steps]
-    return {"goal": goal, "steps": out_steps, "ok": bool(ran_order),
-            "ran": ran_order, "aborted": aborted}
+                  "status": status.get(sid, "skipped"),
+                  "error": errors.get(sid, "")} for sid in steps]
+    # ok = 真实成败:没有 failed、没被中止/取消/infra-dead,且真跑过(有 done)。
+    any_failed = any(s["status"] == "failed" for s in out_steps)
+    ok = bool(ran_order) and not any_failed and not aborted and not cancelled and not infra_dead
+    return {"goal": goal, "steps": out_steps, "ok": ok, "ran": ran_order,
+            "aborted": aborted, "cancelled": cancelled, "infra_dead": infra_dead}
 
 
 __all__ = ["run_workflow"]
