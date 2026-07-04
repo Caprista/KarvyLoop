@@ -5001,6 +5001,19 @@ def api_setup_status(request: Request) -> dict[str, Any]:
     return setup_status(request.app)
 
 
+@router.get("/health")
+def api_health(request: Request, online: bool = True) -> dict[str, Any]:
+    """系统健康摘要(doctor 环的 REST 面)—— overall + 逐条 finding(level/code/params/fixable)。
+
+    区别于 /healthz(简单存活探针,app.py:645):这条给控制台「系统健康」卡用,前端自己走 i18n 渲染。
+    online 默认 True(带活性探测:模型端点/本地服务/磁盘可写/沙箱);?online=false 跳过网络探测快速返回。
+    诚实边界:health_summary 永不抛、不含 key(活性探测只连通性,不读/打印凭证);config_path 取自 app.state。
+    """
+    from karvyloop.cli.doctor_cmd import health_summary
+    cfg_path = getattr(request.app.state, "config_path", "") or None
+    return health_summary(online=online, config_path=cfg_path)
+
+
 @router.get("/lang")
 def api_lang_get() -> dict[str, Any]:
     """当前生效语言。"""

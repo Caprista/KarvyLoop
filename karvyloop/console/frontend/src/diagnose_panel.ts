@@ -47,8 +47,43 @@ function renderOpsDiagnosis(log: HTMLElement, x: any): void {
   log.appendChild(box); log.scrollTop = log.scrollHeight;
 }
 
+// 系统健康卡(doctor 环的可视面):调 /api/health 显 overall + 逐条 finding。
+// 后端 finding 是 {level, code, params, fixable};逐条走 doctor.msg.<code> i18n 渲染人话。
+// fixable=auto/confirm 的项给徽标 + CLI 修法提示(`karvyloop doctor --fix`)——**只展示不硬造修复端点**。
+const _ICON: Record<string, string> = { ok: "✓", warn: "⚠", fail: "✗" };
+async function renderHealthCard(body: HTMLElement): Promise<void> {
+  const card = el("div", { class: "health-card" });
+  card.appendChild(el("div", { class: "mgmt-section-title", text: t("health.title") }));
+  const loading = el("div", { class: "diag-status", text: t("health.running") });
+  card.appendChild(loading); body.appendChild(card);
+  const h: any = await _getJSON("/api/health?online=true");
+  loading.remove();
+  if (!h || !h.overall) { card.appendChild(el("div", { class: "mgmt-empty", text: t("health.failed") })); return; }
+  card.appendChild(el("div", { class: "health-overall health-overall-" + h.overall,
+    text: t("health.overall." + h.overall) }));
+  const findings: any[] = Array.isArray(h.findings) ? h.findings : [];
+  let anyFixable = false;
+  for (const f of findings) {
+    const row = el("div", { class: "health-row health-row-" + (f.level || "ok") });
+    row.appendChild(el("span", { class: "health-icon", text: (_ICON[f.level] || "·") + " " }));
+    row.appendChild(el("span", { class: "health-msg",
+      text: t("doctor.msg." + f.code, f.params || {}) }));
+    if (f.fixable === "auto" || f.fixable === "confirm") {
+      anyFixable = true;
+      row.appendChild(el("span", { class: "health-fixable health-fixable-" + f.fixable,
+        text: " · " + t("health.fixable_" + f.fixable) }));
+    }
+    card.appendChild(row);
+  }
+  // 有可修项 → 提示 CLI 修法(不硬造 fix 端点;展示为主,把用户引到确定性自愈命令)。
+  if (anyFixable) {
+    card.appendChild(el("div", { class: "health-fix-hint", text: t("health.fix_hint") }));
+  }
+}
+
 async function renderDiagnosePanel(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
+  await renderHealthCard(body);   // doctor 环:系统健康卡先行(确定性 + 活性)
   body.appendChild(el("div", { class: "mgmt-section-title", text: t("diag.title") }));
   const status = el("div", { class: "diag-status", text: t("diag.running") });
   body.appendChild(status);

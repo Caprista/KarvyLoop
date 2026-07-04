@@ -312,3 +312,35 @@ def test_task_cost_estimate_endpoint_and_card_wiring():
               / "static" / "app.js").read_text(encoding="utf-8")
     assert "/api/task_cost_estimate" in app_js and "proposal.cost_estimate" in app_js
     assert "est.n >= 3" in app_js                            # 样本门:少于 3 不显示数字
+
+
+def test_health_endpoint_shape_and_wiring():
+    """doctor 环 REST 面 /api/health:返 health_summary 形状(overall + findings[level/code/params/fixable]
+    + log_path);?online=false 跳过活性探测。前端诊断面板真引用 /api/health(不算孤儿)。别打印/含 key。"""
+    from fastapi.testclient import TestClient
+    from karvyloop.console import build_console_app
+    from karvyloop.karvy.observer import WorkbenchObserver
+
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    client = TestClient(app)
+
+    # online=false:确定性自检 only(不触网),快速返回
+    r = client.get("/api/health?online=false")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(("overall", "findings", "log_path")).issubset(body)   # health_summary 契约
+    assert body["overall"] in ("ok", "warn", "fail")
+    assert isinstance(body["findings"], list)
+    for f in body["findings"]:
+        assert set(("level", "code", "params", "fixable")).issubset(f)
+        assert f["level"] in ("ok", "warn", "fail")
+        assert f["fixable"] in ("auto", "confirm", "no")
+    # /api/health 里绝不含 key/authorization 泄漏(活性探测只连通性)
+    raw = r.text.lower()
+    assert "authorization" not in raw and "api_key" not in raw and "sk-" not in raw
+
+    # 前端诊断面板真引用 /api/health(治"造了没接线"→ 不算孤儿)
+    import pathlib
+    dp = (pathlib.Path(__file__).resolve().parents[1] / "karvyloop" / "console"
+          / "static" / "diagnose_panel.js").read_text(encoding="utf-8")
+    assert "/api/health" in dp and 'doctor.msg.' in dp   # 引用端点 + 逐条走 i18n 渲染

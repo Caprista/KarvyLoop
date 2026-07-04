@@ -32,10 +32,50 @@ var KarvyDiagnosePanelBundle = (function(exports) {
     log.appendChild(box);
     log.scrollTop = log.scrollHeight;
   }
+  const _ICON = { ok: "✓", warn: "⚠", fail: "✗" };
+  async function renderHealthCard(body) {
+    const card = el("div", { class: "health-card" });
+    card.appendChild(el("div", { class: "mgmt-section-title", text: t("health.title") }));
+    const loading = el("div", { class: "diag-status", text: t("health.running") });
+    card.appendChild(loading);
+    body.appendChild(card);
+    const h = await _getJSON("/api/health?online=true");
+    loading.remove();
+    if (!h || !h.overall) {
+      card.appendChild(el("div", { class: "mgmt-empty", text: t("health.failed") }));
+      return;
+    }
+    card.appendChild(el("div", {
+      class: "health-overall health-overall-" + h.overall,
+      text: t("health.overall." + h.overall)
+    }));
+    const findings = Array.isArray(h.findings) ? h.findings : [];
+    let anyFixable = false;
+    for (const f of findings) {
+      const row = el("div", { class: "health-row health-row-" + (f.level || "ok") });
+      row.appendChild(el("span", { class: "health-icon", text: (_ICON[f.level] || "·") + " " }));
+      row.appendChild(el("span", {
+        class: "health-msg",
+        text: t("doctor.msg." + f.code, f.params || {})
+      }));
+      if (f.fixable === "auto" || f.fixable === "confirm") {
+        anyFixable = true;
+        row.appendChild(el("span", {
+          class: "health-fixable health-fixable-" + f.fixable,
+          text: " · " + t("health.fixable_" + f.fixable)
+        }));
+      }
+      card.appendChild(row);
+    }
+    if (anyFixable) {
+      card.appendChild(el("div", { class: "health-fix-hint", text: t("health.fix_hint") }));
+    }
+  }
   async function renderDiagnosePanel() {
     const body = mgmtBody();
     if (!body) return;
     body.innerHTML = "";
+    await renderHealthCard(body);
     body.appendChild(el("div", { class: "mgmt-section-title", text: t("diag.title") }));
     const status = el("div", { class: "diag-status", text: t("diag.running") });
     body.appendChild(status);

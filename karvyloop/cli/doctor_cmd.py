@@ -115,16 +115,19 @@ def cmd_status() -> int:
     return 0
 
 
-def health_summary(*, online: bool = False,
+def health_summary(*, online: bool = False, check_port: bool = False,
                     config_path: Optional[object] = None) -> dict:
     """给 console `/api/health` 用:结构化健康摘要(零渲染,前端自己走 i18n)。
 
     返回 {overall, findings:[{level,code,params,fixable}], log_path}。
     fixable ∈ auto|confirm|no —— 前端据此决定"一键修"按钮怎么显示。永不抛、不含 key。
+
+    check_port 默认 False:本函数只在**运行中的 console**里被 /api/health 调,那时端口本就被
+    console 自己占着 → check_console_port 必然报 port_busy 假警(同 /api/ops/diagnose 的处置)。
     """
     from karvyloop import doctor as D
     from karvyloop.doctor import overall, run_doctor
-    findings = run_doctor(config_path=config_path)
+    findings = run_doctor(config_path=config_path, check_port=check_port)
     if online:
         try:
             from karvyloop.doctor_liveness import run_liveness
