@@ -30,3 +30,6 @@ _local/
 # 模型产物兜底:压测/演示若往包内样例区写临时文件,绝不让它误入 git
 # (workspace 已在测试里覆盖到 tmp;此行是第二道防线,产物命名无常按前缀兜)
 karvyloop/sample_data/_*
+
+# 测试产物(Playwright 截图等):按需生成给人工看,不入库(随每次跑变、占体积)
+tests/_artifacts/

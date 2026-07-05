@@ -139,6 +139,7 @@
           const w = j.windows || {};
           if (w.chat && num(w.chat.x) && num(w.chat.y)) out.windows.chat = { x: w.chat.x, y: w.chat.y, min: !!w.chat.min };
           if (w.mgmt && num(w.mgmt.x) && num(w.mgmt.y)) out.windows.mgmt = { x: w.mgmt.x, y: w.mgmt.y };
+          if (j.chatMode === "compact" || j.chatMode === "expanded" || j.chatMode === "full") out.chatMode = j.chatMode;
         }
       } catch {
       }
@@ -365,6 +366,13 @@
         else if (ov && !ov.classList.contains("hidden")) minimizeWin("mgmt");
       });
       right.appendChild(mgmtBtn);
+      const board = document.createElement("button");
+      board.className = "dock-item dock-board";
+      board.id = "desk-board-btn";
+      board.textContent = "📋";
+      board.setAttribute("data-i18n-tip", "desk.board_open");
+      board.addEventListener("click", () => toggleBoard());
+      right.appendChild(board);
       const wall = document.createElement("button");
       wall.className = "dock-item dock-wall";
       wall.id = "desk-wall-btn";
@@ -761,6 +769,8 @@
       } else if (msg.type === "h2a_envelope") {
         mascotHappy();
       }
+      refreshPending();
+      updateBoardBadge();
     }
     function soulConnect() {
       if (typeof WebSocket !== "function") return;
@@ -999,15 +1009,10 @@
     }
     function notifyH2A(opts) {
       if (!deskView()) return;
+      refreshPending();
+      updateBoardBadge();
       const note = document.querySelector(".cockpit-grid .col-decide");
       if (!note) return;
-      if (note.classList.contains("col-collapsed")) {
-        note.classList.remove("col-collapsed");
-        try {
-          localStorage.setItem("karvy.rail.col-decide", "0");
-        } catch {
-        }
-      }
       focusEl(note);
       const pos = clampPos(note, getPos(note).x, getPos(note).y);
       applyPos(note, pos.x, pos.y);
@@ -1083,24 +1088,250 @@
       }
       document.body.classList.remove("desk-wall-day", "desk-wall-night");
     }
-    const KARVY_ZONE = { w: 220, h: 200 };
-    const NOTE_MAX_H = 330;
-    function computeNoteDefault(col, idx, colBottoms) {
+    function ensureFocusDom() {
       const desk = deskEl();
-      if (!desk) return { x: 12, y: 16 };
-      const d = desk.getBoundingClientRect();
-      const w = col.offsetWidth || 304;
-      const h = col.offsetHeight || 180;
-      const lane = Math.floor(idx / 2);
-      const x = Math.max(12, d.width - (lane + 1) * (w + 24));
-      const laneStart = lane === 0 ? 16 : 44;
-      const floor = colBottoms[lane] !== void 0 ? colBottoms[lane] : laneStart;
-      let y = floor;
-      if (lane === 0 && y + h > d.height - KARVY_ZONE.h && d.width - w - 24 < d.width - KARVY_ZONE.w) {
-        y = Math.max(Math.max(16, d.height - KARVY_ZONE.h - h - 12), floor);
+      if (!desk) return;
+      if (!document.getElementById("desk-focus")) {
+        const wrap = document.createElement("div");
+        wrap.className = "desk-focus";
+        wrap.id = "desk-focus";
+        const clock = document.createElement("div");
+        clock.className = "desk-clock";
+        clock.id = "desk-clock";
+        clock.setAttribute("aria-live", "off");
+        const pend = document.createElement("div");
+        pend.className = "desk-pending";
+        pend.id = "desk-pending";
+        wrap.appendChild(clock);
+        wrap.appendChild(pend);
+        desk.insertBefore(wrap, desk.firstChild);
       }
-      const slot = idx === 0 ? Math.max(h, NOTE_MAX_H) : h;
-      colBottoms[lane] = y + slot + 14;
+    }
+    function paintClock(now) {
+      const el = document.getElementById("desk-clock");
+      if (!el) return;
+      const d = now || /* @__PURE__ */ new Date();
+      let hh = d.getHours(), mm = d.getMinutes();
+      const h = String(hh), m = mm < 10 ? "0" + mm : String(mm);
+      el.textContent = "";
+      const hs = document.createElement("span");
+      hs.className = "clock-h";
+      hs.textContent = h;
+      const cs = document.createElement("span");
+      cs.className = "clock-c";
+      cs.textContent = ":";
+      const ms = document.createElement("span");
+      ms.className = "clock-m";
+      ms.textContent = m;
+      el.appendChild(hs);
+      el.appendChild(cs);
+      el.appendChild(ms);
+    }
+    let _clockTimer = 0;
+    function clockStart() {
+      paintClock();
+      if (!_clockTimer) {
+        _clockTimer = window.setInterval(() => {
+          if (_entered) {
+            paintClock();
+            refreshPending();
+            updateBoardBadge();
+          }
+        }, 30 * 1e3);
+      }
+    }
+    function clockStop() {
+      if (_clockTimer) {
+        window.clearInterval(_clockTimer);
+        _clockTimer = 0;
+      }
+      const wrap = document.getElementById("desk-focus");
+      if (wrap) wrap.remove();
+    }
+    const PENDING_CAP = 4;
+    function collectPending() {
+      const out = [];
+      document.querySelectorAll("#h2a-list .h2a-card").forEach((c) => {
+        if (out.length >= PENDING_CAP + 4) return;
+        const s = c.querySelector(".h2a-summary, .h2a-title, .h2a-card-title");
+        const txt = (s && s.textContent || c.textContent || "").trim().replace(/\s+/g, " ");
+        if (txt) out.push({ icon: "⚖", text: txt.slice(0, 68) });
+      });
+      document.querySelectorAll("#task-board .task-card").forEach((c) => {
+        if (out.length >= PENDING_CAP + 8) return;
+        const it = c.querySelector(".task-intent");
+        const txt = (it && it.textContent || "").trim().replace(/\s+/g, " ");
+        if (txt) out.push({ icon: "📥", text: txt.slice(0, 68) });
+      });
+      return out;
+    }
+    function refreshPending() {
+      if (!deskView()) return;
+      const box = document.getElementById("desk-pending");
+      if (!box) return;
+      const items = collectPending();
+      box.textContent = "";
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "desk-pending-empty";
+        empty.textContent = t("desk.pending_none");
+        box.appendChild(empty);
+        return;
+      }
+      const head = document.createElement("div");
+      head.className = "desk-pending-head";
+      head.textContent = t("desk.pending_head");
+      box.appendChild(head);
+      items.slice(0, PENDING_CAP).forEach((it) => {
+        const row = document.createElement("button");
+        row.className = "desk-pending-row";
+        row.setAttribute("data-tip", t("desk.pending_open"));
+        const ic = document.createElement("span");
+        ic.className = "desk-pending-ico";
+        ic.textContent = it.icon;
+        const tx = document.createElement("span");
+        tx.className = "desk-pending-txt";
+        tx.textContent = it.text;
+        row.appendChild(ic);
+        row.appendChild(tx);
+        row.addEventListener("click", () => openBoard(true));
+        box.appendChild(row);
+      });
+      if (items.length > PENDING_CAP) {
+        const more = document.createElement("button");
+        more.className = "desk-pending-more";
+        more.textContent = t("desk.pending_more", { n: items.length - PENDING_CAP });
+        more.addEventListener("click", () => openBoard(true));
+        box.appendChild(more);
+      }
+    }
+    function chatMode() {
+      return _store.chatMode || "compact";
+    }
+    function chatDefaultPos(cp) {
+      const desk = deskEl();
+      if (!desk) return { x: 18, y: 18 };
+      const d = desk.getBoundingClientRect();
+      if (!(d.width > 0)) return { x: 18, y: 18 };
+      const w = cp.offsetWidth || Math.min(560, d.width * 0.44);
+      const x = Math.max(12, (d.width - w) / 2);
+      const y = Math.max(150, d.height * 0.2);
+      return clampPos(cp, x, y);
+    }
+    function setChatMode(mode, silent) {
+      if (mode !== "compact" && mode !== "expanded" && mode !== "full") mode = "compact";
+      _store.chatMode = mode;
+      if (!silent) saveStore();
+      document.body.classList.toggle("desk-chat-expanded", mode === "expanded");
+      document.body.classList.toggle("desk-chat-full", mode === "full");
+      const cp = chatPanel();
+      if (cp && mode !== "full") {
+        const cw = _store.windows.chat;
+        const pos = cw ? clampPos(cp, cw.x, cw.y) : chatDefaultPos(cp);
+        applyPos(cp, pos.x, pos.y);
+      }
+      if (cp) focusEl(cp);
+      updateChatExpandBtn();
+    }
+    function cycleChatMode() {
+      const m = chatMode();
+      setChatMode(m === "compact" ? "expanded" : m === "expanded" ? "full" : "compact");
+    }
+    function updateChatExpandBtn() {
+      const btn = document.getElementById("desk-chat-expand");
+      if (!btn) return;
+      const m = chatMode();
+      btn.textContent = m === "compact" ? "⤢" : m === "expanded" ? "⛶" : "⤡";
+      const tip = m === "compact" ? t("desk.chat_expand") : m === "expanded" ? t("desk.chat_full") : t("desk.chat_collapse");
+      btn.setAttribute("data-tip", tip);
+      btn.setAttribute("title", tip);
+      btn.setAttribute("aria-label", tip);
+    }
+    function injectChatExpand() {
+      const head = document.querySelector("#chat-modal .chat-panel-head");
+      const close = document.getElementById("chat-modal-close");
+      if (!head || document.getElementById("desk-chat-expand")) return;
+      const b = document.createElement("button");
+      b.className = "modal-close desk-chat-expand-btn";
+      b.id = "desk-chat-expand";
+      b.textContent = "⤢";
+      b.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleChatMode();
+      });
+      if (close && close.parentElement === head) head.insertBefore(b, close);
+      else head.appendChild(b);
+    }
+    function boardCount() {
+      let n = 0;
+      n += document.querySelectorAll("#h2a-list .h2a-card").length;
+      n += document.querySelectorAll("#task-board .task-card").length;
+      return n;
+    }
+    function updateBoardBadge() {
+      const btn = document.getElementById("desk-board-btn");
+      if (!btn) return;
+      const n = boardCount();
+      let badge = btn.querySelector(".dock-badge");
+      if (n > 0) {
+        if (!badge) {
+          badge = document.createElement("span");
+          badge.className = "dock-badge";
+          btn.appendChild(badge);
+        }
+        badge.textContent = n > 99 ? "99+" : String(n);
+        btn.classList.add("has-new");
+      } else {
+        if (badge) badge.remove();
+        btn.classList.remove("has-new");
+      }
+    }
+    function boardOpen() {
+      return document.body.classList.contains("desk-board-open");
+    }
+    function openBoard(on) {
+      if (!deskView()) return;
+      document.body.classList.toggle("desk-board-open", on);
+      if (on) {
+        noteEls().forEach((col) => {
+          col.classList.remove("col-collapsed");
+          col.style.zIndex = String(++_zTop);
+        });
+      } else {
+        noteEls().forEach((col) => {
+          let collapsed = true;
+          try {
+            if (localStorage.getItem("karvy.rail." + noteKey(col)) === "0") collapsed = false;
+          } catch {
+          }
+          col.classList.toggle("col-collapsed", collapsed);
+        });
+      }
+      const btn = document.getElementById("desk-board-btn");
+      if (btn) {
+        btn.classList.toggle("dock-active", on);
+        const tip = on ? t("desk.board_close") : t("desk.board_open");
+        btn.setAttribute("data-tip", tip);
+        btn.setAttribute("title", tip);
+      }
+    }
+    function toggleBoard() {
+      openBoard(!boardOpen());
+    }
+    const KARVY_ZONE = { h: 200 };
+    const DOCK_NOTE_W = 236;
+    const DOCK_NOTE_H = 40;
+    const DOCK_NOTE_GAP = 10;
+    const DOCK_LANE_TOP = 150;
+    function computeNoteDock(_col, idx) {
+      const desk = deskEl();
+      if (!desk) return { x: 12, y: DOCK_LANE_TOP + idx * (DOCK_NOTE_H + DOCK_NOTE_GAP) };
+      const d = desk.getBoundingClientRect();
+      const x = d.width > 0 ? Math.max(12, d.width - DOCK_NOTE_W - 18) : 12;
+      const floorMax = d.height > 0 ? d.height - KARVY_ZONE.h - DOCK_NOTE_H : Infinity;
+      let y = DOCK_LANE_TOP + idx * (DOCK_NOTE_H + DOCK_NOTE_GAP);
+      if (isFinite(floorMax) && y > floorMax) y = Math.max(DOCK_LANE_TOP, floorMax);
       return { x, y };
     }
     function wireAll() {
@@ -1143,18 +1374,25 @@
       _store = loadStore();
       _entered = true;
       _zTop = BASE_Z;
-      const colBottoms = [];
       noteEls().forEach((col, idx) => {
         const k = noteKey(col);
         const saved = _store.notes[k];
-        const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDefault(col, idx, colBottoms);
+        let collapsed = true;
+        try {
+          const v = localStorage.getItem("karvy.rail." + k);
+          if (v === "0") collapsed = false;
+        } catch {
+        }
+        col.classList.toggle("col-collapsed", collapsed);
+        const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDock(col, idx);
         applyPos(col, pos.x, pos.y);
         col.style.zIndex = String(++_zTop);
       });
       const cw = _store.windows.chat;
       const cp = chatPanel();
+      setChatMode(_store.chatMode || "compact", true);
       if (cp) {
-        const pos = cw ? clampPos(cp, cw.x, cw.y) : { x: 18, y: 18 };
+        const pos = cw ? clampPos(cp, cw.x, cw.y) : chatDefaultPos(cp);
         applyPos(cp, pos.x, pos.y);
       }
       const cOv = chatOverlay();
@@ -1172,12 +1410,17 @@
         cx.setAttribute("aria-label", t("desk.min"));
       }
       updateDockIndicators();
+      ensureFocusDom();
+      clockStart();
+      refreshPending();
+      updateBoardBadge();
       wallStart();
       enterSoul();
     }
     function leave() {
       _entered = false;
       wallStop();
+      clockStop();
       leaveSoul();
       noteEls().forEach((col) => {
         col.style.transform = "";
@@ -1204,6 +1447,7 @@
         mOv.classList.remove("desk-min");
         mOv.style.zIndex = "";
       }
+      document.body.classList.remove("desk-chat-expanded", "desk-chat-full", "desk-board-open");
       handles().forEach((h) => h.removeAttribute("tabindex"));
       const cx = document.getElementById("chat-modal-close");
       if (cx) {
@@ -1312,6 +1556,7 @@
     });
     renderDock();
     injectMgmtMin();
+    injectChatExpand();
     observeOverlays();
     const KarvyDesktop = {
       enter,
@@ -1327,7 +1572,20 @@
         stationCount: () => _stations.size
       },
       // 日/夜壁纸测试接缝:apply 可注入 Date(mock 时间验 auto 档);生产路径 = wallStart 的分钟级重判
-      _wall: { apply: applyWall, mode: wallMode, set: setWallMode, variantFor: wallVariantFor }
+      _wall: { apply: applyWall, mode: wallMode, set: setWallMode, variantFor: wallVariantFor },
+      // 空旷单焦点测试接缝:大时间/待办条/聊天三态/看板召唤(smoke/Playwright 断言新布局)
+      _layout: {
+        paintClock,
+        refreshPending,
+        chatMode,
+        setChatMode,
+        cycleChatMode,
+        openBoard,
+        toggleBoard,
+        boardOpen,
+        updateBoardBadge,
+        boardCount
+      }
     };
     window.KarvyDesktop = KarvyDesktop;
   })();

@@ -40,9 +40,11 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   let _suppressClick: HTMLElement | null = null;   // 拖完的 click 不当"点头折叠"
 
   type Pos = { x: number; y: number };
+  type ChatMode = "compact" | "expanded" | "full";
   type Store = {
     notes: Record<string, Pos>;
     windows: { chat?: Pos & { min?: boolean }; mgmt?: Pos };
+    chatMode?: ChatMode;   // 居中精简聊天的三态(compact 默认 / expanded 完整 / full 网页内全屏)
   };
   let _store: Store = { notes: {}, windows: {} };
 
@@ -69,6 +71,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
         const w = (j.windows || {}) as Store["windows"];
         if (w.chat && num(w.chat.x) && num(w.chat.y)) out.windows.chat = { x: w.chat.x, y: w.chat.y, min: !!w.chat.min };
         if (w.mgmt && num(w.mgmt.x) && num(w.mgmt.y)) out.windows.mgmt = { x: w.mgmt.x, y: w.mgmt.y };
+        if (j.chatMode === "compact" || j.chatMode === "expanded" || j.chatMode === "full") out.chatMode = j.chatMode;
       }
     } catch { /* 脏数据 → 默认布局 */ }
     return out;
@@ -271,6 +274,14 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
       else if (ov && !ov.classList.contains("hidden")) minimizeWin("mgmt");
     });
     right.appendChild(mgmtBtn);
+    // 🗂 看板:点开摊四标签(待拍板/情报/想做/谁在忙);角标 = 有没有待拍板/新料。默认收起,召唤才出。
+    const board = document.createElement("button");
+    board.className = "dock-item dock-board";
+    board.id = "desk-board-btn";
+    board.textContent = "📋";
+    board.setAttribute("data-i18n-tip", "desk.board_open");
+    board.addEventListener("click", () => toggleBoard());
+    right.appendChild(board);
     // 🌗 日/夜壁纸换挡:auto(默认)→ day → night → off 循环;tip 实时显示当前档
     const wall = document.createElement("button");
     wall.className = "dock-item dock-wall";
@@ -686,6 +697,9 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     } else if (msg.type === "h2a_envelope") {
       mascotHappy();                                          // 拍板闭环 → 小卡短暂开心(真实事件)
     }
+    // 任何改动待拍板/料的真实事件后,刷新轻量待办条 + 看板角标(读现有 DOM,零轮询)
+    refreshPending();
+    updateBoardBadge();
     // h2a_proposal 不在这处理:app.js 收到会调 notifyH2A(叼卡);双处理 = 播两遍
   }
 
@@ -915,12 +929,13 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   // 调用方(app.js)标注来源 —— WS h2a_proposal / 手动求建议 = 事件;boot fetch = replay。
   function notifyH2A(opts?: { replay?: boolean }): void {
     if (!deskView()) return;
+    // 空旷单焦点(Hardy 2026-07-05):待拍板经**轻量待办条 + 看板角标**浮现,不再自动展开便签
+    // 摊满桌面 —— 便签保持收起停靠(空旷),用户点待办条 / 📋 看板去看完整卡。回放也刷,状态照做。
+    refreshPending();
+    updateBoardBadge();
     const note = document.querySelector<HTMLElement>(".cockpit-grid .col-decide");
     if (!note) return;
-    if (note.classList.contains("col-collapsed")) {          // 折叠态自动展开
-      note.classList.remove("col-collapsed");
-      try { localStorage.setItem("karvy.rail.col-decide", "0"); } catch { /* */ }
-    }
+    // 便签**不再自动展开/持久化展开**:收起态下 note-alert 边框呼吸仍能 fail-loud 吸睛(推回决策舱)
     focusEl(note);                                           // 置顶(便签与窗口同一 z 空间)
     const pos = clampPos(note, getPos(note).x, getPos(note).y);
     applyPos(note, pos.x, pos.y);                            // 永远保证在视口内
@@ -996,33 +1011,248 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     document.body.classList.remove("desk-wall-day", "desk-wall-night");
   }
 
-  // ---- 默认摆位:办公桌式铺开(Hardy 2026-07-03:堆一列=墙角,不是桌子)----
-  // 便签铺成右侧**两列错落**:第 1 列(最右)⚖最上(继承"⚖永远第一")+ 🔄;
-  // 第 2 列(中右,y 略降造错落感)📥 + 🔮。左半留给聊天主窗;
-  // 右下 220×200 是卡皮巴拉的地盘,默认摆位永不侵入(超出往上收)。
-  const KARVY_ZONE = { w: 220, h: 200 };
-  const NOTE_MAX_H = 330;                                   // 便签 CSS max-height(desktop.css)
-  function computeNoteDefault(col: HTMLElement, idx: number, colBottoms: number[]): Pos {
+  // ============================================================================
+  // 空旷单焦点(Hardy 2026-07-05):顶部大时间(桌面锚点)+ 轻量待处理任务条
+  // 主角是居中大时间与居中聊天;时钟是真实时间(不是戏),分钟级重判复用壁纸同款低频节奏。
+  // ============================================================================
+  function ensureFocusDom(): void {
     const desk = deskEl();
-    if (!desk) return { x: 12, y: 16 };
-    const d = desk.getBoundingClientRect();
-    const w = col.offsetWidth || 304;
-    const h = col.offsetHeight || 180;
-    const lane = Math.floor(idx / 2);                       // 0=最右列,1=中右列
-    const x = Math.max(12, d.width - (lane + 1) * (w + 24));
-    const laneStart = lane === 0 ? 16 : 44;                 // 第 2 列略降,错落有桌感
-    const floor = colBottoms[lane] !== undefined ? colBottoms[lane] : laneStart;
-    let y = floor;
-    // 最右列避让卡皮巴拉地盘:便签底部会压进右下角 → 往上收(至少留出顶部 16px);
-    // 但**绝不叠回同列上一张**(便签互相盖头比压吉祥物糟 —— z 设计本就内容在上,
-    // 真挤不下时吉祥物让位,不是便签让位)。
-    if (lane === 0 && y + h > d.height - KARVY_ZONE.h && d.width - w - 24 < d.width - KARVY_ZONE.w) {
-      y = Math.max(Math.max(16, d.height - KARVY_ZONE.h - h - 12), floor);
+    if (!desk) return;
+    if (!document.getElementById("desk-focus")) {
+      const wrap = document.createElement("div");
+      wrap.className = "desk-focus";
+      wrap.id = "desk-focus";
+      const clock = document.createElement("div");
+      clock.className = "desk-clock";
+      clock.id = "desk-clock";
+      clock.setAttribute("aria-live", "off");
+      const pend = document.createElement("div");
+      pend.className = "desk-pending";
+      pend.id = "desk-pending";
+      wrap.appendChild(clock);
+      wrap.appendChild(pend);
+      // 时钟/待办放在最底层(z 低于便签/窗口),纯锚点,穿透可点的只有待办条目
+      desk.insertBefore(wrap, desk.firstChild);
     }
-    // ⚖ 是主角且开机后才灌进存量待拍卡:按 CSS max-height 预留整槽,不按进场瞬时高度排
-    // (Hardy 实拍:5 张 pending 卡让 ⚖ 长到全高,按瞬时高度排位会盖住下一张的头)。
-    const slot = idx === 0 ? Math.max(h, NOTE_MAX_H) : h;
-    colBottoms[lane] = y + slot + 14;
+  }
+
+  function paintClock(now?: Date): void {
+    const el = document.getElementById("desk-clock");
+    if (!el) return;
+    const d = now || new Date();
+    let hh = d.getHours(), mm = d.getMinutes();
+    const h = String(hh), m = mm < 10 ? "0" + mm : String(mm);
+    el.textContent = "";
+    const hs = document.createElement("span"); hs.className = "clock-h"; hs.textContent = h;
+    const cs = document.createElement("span"); cs.className = "clock-c"; cs.textContent = ":";
+    const ms = document.createElement("span"); ms.className = "clock-m"; ms.textContent = m;
+    el.appendChild(hs); el.appendChild(cs); el.appendChild(ms);
+  }
+
+  let _clockTimer = 0;
+  function clockStart(): void {
+    paintClock();
+    if (!_clockTimer) {
+      // 分钟级低频重判(桌面锚点的时间;真实时间不是假戏,一分钟一跳是钟的本分)
+      _clockTimer = window.setInterval(() => { if (_entered) { paintClock(); refreshPending(); updateBoardBadge(); } }, 30 * 1000);
+    }
+  }
+  function clockStop(): void {
+    if (_clockTimer) { window.clearInterval(_clockTimer); _clockTimer = 0; }
+    const wrap = document.getElementById("desk-focus");
+    if (wrap) wrap.remove();
+  }
+
+  // ---- 待处理任务项(极简条目,不是完整卡):读现有 #h2a-list / #task-board DOM,轻量列出 ----
+  // 可见但不喧宾:每条一行(⚖/📥 图标 + 一句摘要),点条目 = 打开看板去处理;空 = 一句"没有待办"。
+  const PENDING_CAP = 4;
+  function collectPending(): Array<{ icon: string; text: string }> {
+    const out: Array<{ icon: string; text: string }> = [];
+    // ⚖ 待拍板:h2a 卡的 summary(.h2a-card 每张一条)
+    document.querySelectorAll<HTMLElement>("#h2a-list .h2a-card").forEach((c) => {
+      if (out.length >= PENDING_CAP + 4) return;
+      const s = c.querySelector(".h2a-summary, .h2a-title, .h2a-card-title");
+      const txt = ((s && s.textContent) || c.textContent || "").trim().replace(/\s+/g, " ");
+      if (txt) out.push({ icon: "⚖", text: txt.slice(0, 68) });
+    });
+    // 📥 流进来的料(task-board 里的任务卡):intent 一句(⚖ 先排,看板卡在后)
+    document.querySelectorAll<HTMLElement>("#task-board .task-card").forEach((c) => {
+      if (out.length >= PENDING_CAP + 8) return;
+      const it = c.querySelector(".task-intent");
+      const txt = ((it && it.textContent) || "").trim().replace(/\s+/g, " ");
+      if (txt) out.push({ icon: "📥", text: txt.slice(0, 68) });
+    });
+    return out;
+  }
+  function refreshPending(): void {
+    if (!deskView()) return;
+    const box = document.getElementById("desk-pending");
+    if (!box) return;
+    const items = collectPending();
+    box.textContent = "";
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "desk-pending-empty";
+      empty.textContent = t("desk.pending_none");
+      box.appendChild(empty);
+      return;
+    }
+    const head = document.createElement("div");
+    head.className = "desk-pending-head";
+    head.textContent = t("desk.pending_head");
+    box.appendChild(head);
+    items.slice(0, PENDING_CAP).forEach((it) => {
+      const row = document.createElement("button");
+      row.className = "desk-pending-row";
+      row.setAttribute("data-tip", t("desk.pending_open"));
+      const ic = document.createElement("span"); ic.className = "desk-pending-ico"; ic.textContent = it.icon;
+      const tx = document.createElement("span"); tx.className = "desk-pending-txt"; tx.textContent = it.text;
+      row.appendChild(ic); row.appendChild(tx);
+      row.addEventListener("click", () => openBoard(true));   // 点条目 = 打开看板去处理
+      box.appendChild(row);
+    });
+    if (items.length > PENDING_CAP) {
+      const more = document.createElement("button");
+      more.className = "desk-pending-more";
+      more.textContent = t("desk.pending_more", { n: items.length - PENDING_CAP });
+      more.addEventListener("click", () => openBoard(true));
+      box.appendChild(more);
+    }
+  }
+
+  // ============================================================================
+  // 居中精简聊天的三态:compact(默认,单窗口无会话列表)→ expanded(完整,带会话列表)
+  //   → full(网页内全屏,占满 console 视口)。⤢ 按钮循环:compact→expanded→full→compact。
+  // 形态用 body class 表达(desktop.css 控尺寸/藏会话列表),位置仍走 transform(compact/expanded);
+  // full 态 CSS 铺满,不用 transform。形态持久化进 _store.chatMode。
+  // ============================================================================
+  function chatMode(): ChatMode { return _store.chatMode || "compact"; }
+  function chatDefaultPos(cp: HTMLElement): Pos {
+    // 居中:大时间与 dock 之间的精简聊天(compact 窄窗居中);无布局环境回左上兜底
+    const desk = deskEl();
+    if (!desk) return { x: 18, y: 18 };
+    const d = desk.getBoundingClientRect();
+    if (!(d.width > 0)) return { x: 18, y: 18 };
+    const w = cp.offsetWidth || Math.min(560, d.width * 0.44);
+    const x = Math.max(12, (d.width - w) / 2);
+    const y = Math.max(150, d.height * 0.20);   // 大时间下方
+    return clampPos(cp, x, y);
+  }
+  function setChatMode(mode: ChatMode, silent?: boolean): void {
+    if (mode !== "compact" && mode !== "expanded" && mode !== "full") mode = "compact";
+    _store.chatMode = mode;
+    if (!silent) saveStore();
+    document.body.classList.toggle("desk-chat-expanded", mode === "expanded");
+    document.body.classList.toggle("desk-chat-full", mode === "full");
+    // full 态不用 transform(CSS 铺满);从 full 回来时把窗摆回居中默认(位置未存则默认)
+    const cp = chatPanel();
+    if (cp && mode !== "full") {
+      const cw = _store.windows.chat;
+      const pos = cw ? clampPos(cp, cw.x, cw.y) : chatDefaultPos(cp);
+      applyPos(cp, pos.x, pos.y);
+    }
+    if (cp) focusEl(cp);
+    updateChatExpandBtn();
+  }
+  function cycleChatMode(): void {
+    const m = chatMode();
+    setChatMode(m === "compact" ? "expanded" : m === "expanded" ? "full" : "compact");
+  }
+  function updateChatExpandBtn(): void {
+    const btn = document.getElementById("desk-chat-expand");
+    if (!btn) return;
+    const m = chatMode();
+    // 图标:compact→⤢(放大到完整)/ expanded→⛶(全屏)/ full→⤡(收回)
+    btn.textContent = m === "compact" ? "⤢" : m === "expanded" ? "⛶" : "⤡";
+    const tip = m === "compact" ? t("desk.chat_expand") : m === "expanded" ? t("desk.chat_full") : t("desk.chat_collapse");
+    btn.setAttribute("data-tip", tip);
+    btn.setAttribute("title", tip);
+    btn.setAttribute("aria-label", tip);
+  }
+  // ⤢ 放大按钮注入进聊天标题栏(只桌面视图显示,CSS 控;放在 ✕ 之前)
+  function injectChatExpand(): void {
+    const head = document.querySelector("#chat-modal .chat-panel-head");
+    const close = document.getElementById("chat-modal-close");
+    if (!head || document.getElementById("desk-chat-expand")) return;
+    const b = document.createElement("button");
+    b.className = "modal-close desk-chat-expand-btn";
+    b.id = "desk-chat-expand";
+    b.textContent = "⤢";
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); cycleChatMode(); });
+    if (close && close.parentElement === head) head.insertBefore(b, close);
+    else head.appendChild(b);
+  }
+
+  // ============================================================================
+  // 看板 dock 图标 + 角标:点开 → body.desk-board-open 摊开四标签(便签全展开+居中大态);
+  // 角标 = 有没有待拍板/新料(读现有 DOM 计数)。不再右侧铺满 —— 召唤才出。
+  // ============================================================================
+  function boardCount(): number {
+    let n = 0;
+    n += document.querySelectorAll("#h2a-list .h2a-card").length;
+    n += document.querySelectorAll("#task-board .task-card").length;
+    return n;
+  }
+  function updateBoardBadge(): void {
+    const btn = document.getElementById("desk-board-btn");
+    if (!btn) return;
+    const n = boardCount();
+    let badge = btn.querySelector<HTMLElement>(".dock-badge");
+    if (n > 0) {
+      if (!badge) { badge = document.createElement("span"); badge.className = "dock-badge"; btn.appendChild(badge); }
+      badge.textContent = n > 99 ? "99+" : String(n);
+      btn.classList.add("has-new");
+    } else {
+      if (badge) badge.remove();
+      btn.classList.remove("has-new");
+    }
+  }
+  function boardOpen(): boolean { return document.body.classList.contains("desk-board-open"); }
+  function openBoard(on: boolean): void {
+    if (!deskView()) return;
+    document.body.classList.toggle("desk-board-open", on);
+    if (on) {
+      // 摊开 = 四张便签全展开(看全部详情);关 = 回各自收起态
+      noteEls().forEach((col) => {
+        col.classList.remove("col-collapsed");
+        col.style.zIndex = String(++_zTop);
+      });
+    } else {
+      // 关看板 = 便签回默认收起态(尊重用户显式展开偏好)
+      noteEls().forEach((col) => {
+        let collapsed = true;
+        try { if (localStorage.getItem("karvy.rail." + noteKey(col)) === "0") collapsed = false; } catch { /* */ }
+        col.classList.toggle("col-collapsed", collapsed);
+      });
+    }
+    const btn = document.getElementById("desk-board-btn");
+    if (btn) {
+      btn.classList.toggle("dock-active", on);
+      const tip = on ? t("desk.board_close") : t("desk.board_open");
+      btn.setAttribute("data-tip", tip);
+      btn.setAttribute("title", tip);
+    }
+  }
+  function toggleBoard(): void { openBoard(!boardOpen()); }
+
+  // ---- 默认摆位:空旷单焦点(Hardy 2026-07-05:铺满=杂乱,主次不分)----
+  // 主角 = 居中大时间 + 居中精简聊天;标签卡默认**收起、停靠在右侧一竖条**(标题+角标即可,
+  // 点开才展开看详情),不再自动铺满右半屏。停靠条从 y=CLOCK 下方起,一张挨一张往下排;
+  // 右下 220×200 仍是卡皮巴拉地盘,停靠条止步于它之上。用户挪过某张便签(存档里有)则尊重存档。
+  const KARVY_ZONE = { w: 220, h: 200 };
+  const DOCK_NOTE_W = 236;                                  // 收起态停靠便签宽(desktop.css .col-collapsed)
+  const DOCK_NOTE_H = 40;                                   // 收起态高(标题条)
+  const DOCK_NOTE_GAP = 10;
+  const DOCK_LANE_TOP = 150;                                // 从大时间下方起(时钟区 ~130px)
+  // 收起态停靠位:右侧一竖条,自上而下;停在卡皮巴拉地盘之上(挤不下就压回最后一格,不侵入)。
+  function computeNoteDock(_col: HTMLElement, idx: number): Pos {
+    const desk = deskEl();
+    if (!desk) return { x: 12, y: DOCK_LANE_TOP + idx * (DOCK_NOTE_H + DOCK_NOTE_GAP) };
+    const d = desk.getBoundingClientRect();
+    const x = d.width > 0 ? Math.max(12, d.width - DOCK_NOTE_W - 18) : 12;
+    const floorMax = d.height > 0 ? d.height - KARVY_ZONE.h - DOCK_NOTE_H : Infinity;
+    let y = DOCK_LANE_TOP + idx * (DOCK_NOTE_H + DOCK_NOTE_GAP);
+    if (isFinite(floorMax) && y > floorMax) y = Math.max(DOCK_LANE_TOP, floorMax);
     return { x, y };
   }
 
@@ -1058,20 +1288,28 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     _store = loadStore();
     _entered = true;
     _zTop = BASE_Z;
-    // 便签:存过用存的(clamp 进当前视口),没存过按"办公桌铺开"默认位(两列错落,避卡皮巴拉)
-    const colBottoms: number[] = [];
+    // 便签:默认**收起、停靠右侧一竖条**(标题+角标即可,不铺满);存过位置(用户挪过)则尊重存档。
+    // 收起态由 col-collapsed 控(CSS);没显式存过展开偏好的便签,进桌面默认收起(空旷)。
     noteEls().forEach((col, idx) => {
       const k = noteKey(col);
       const saved = _store.notes[k];
-      const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDefault(col, idx, colBottoms);
+      // 默认收起;用户若显式展开过某张(rail.<col> = "0")则尊重,否则收起
+      let collapsed = true;
+      try {
+        const v = localStorage.getItem("karvy.rail." + k);
+        if (v === "0") collapsed = false;
+      } catch { /* 无 localStorage → 默认收起 */ }
+      col.classList.toggle("col-collapsed", collapsed);
+      const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDock(col, idx);
       applyPos(col, pos.x, pos.y);
       col.style.zIndex = String(++_zTop);
     });
-    // 聊天窗:默认开、默认左上主位;记住上次位置与最小化态
+    // 聊天窗:默认开、**居中精简态**(单窗口无会话列表);记住上次位置/最小化态/放大态
     const cw = _store.windows.chat;
     const cp = chatPanel();
+    setChatMode(_store.chatMode || "compact", true);   // 恢复上次的形态(compact/expanded/full)
     if (cp) {
-      const pos = cw ? clampPos(cp, cw.x, cw.y) : { x: 18, y: 18 };
+      const pos = cw ? clampPos(cp, cw.x, cw.y) : chatDefaultPos(cp);
       applyPos(cp, pos.x, pos.y);
     }
     const cOv = chatOverlay();
@@ -1088,6 +1326,10 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     const cx = document.getElementById("chat-modal-close");
     if (cx) { cx.setAttribute("title", t("desk.min")); cx.setAttribute("aria-label", t("desk.min")); }
     updateDockIndicators();
+    ensureFocusDom();   // 空旷单焦点:大时间 + 待处理任务轻量条(桌面锚点)
+    clockStart();       // 大时间:进场对一次 + 分钟级低频重判(复用壁纸同款低频,不上高频 timer)
+    refreshPending();   // 待处理任务项(极简条目,读现有 h2a/task DOM,不喧宾)
+    updateBoardBadge(); // 看板 dock 图标角标(有没有新数据)
     wallStart();   // 日/夜壁纸:进场判定一次 + 分钟级低频重判
     enterSoul();   // P1.5 灵魂:工位区 + 像素小卡 + 只读 WS(desk 进场才活)
   }
@@ -1095,6 +1337,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   function leave(): void {
     _entered = false;
     wallStop();    // 摘壁纸类 + 停低频重判(老视图零痕迹)
+    clockStop();   // 停大时间低频重判 + 摘时钟/待办 DOM(老视图零痕迹)
     leaveSoul();   // P1.5 灵魂:断 WS、销毁像素形象、清便签/工作证(老视图零痕迹)
     // 清干净全部内联痕迹:两个老视图(对话/看板)像素级不动
     noteEls().forEach((col) => { col.style.transform = ""; col.style.zIndex = ""; col.classList.remove("note-alert", "desk-focused"); });
@@ -1102,6 +1345,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     const mp = mgmtPanel(); if (mp) { mp.style.transform = ""; mp.classList.remove("desk-focused"); }
     const cOv = chatOverlay(); if (cOv) { cOv.classList.remove("desk-min"); cOv.style.zIndex = ""; }
     const mOv = mgmtOverlay(); if (mOv) { mOv.classList.remove("desk-min"); mOv.style.zIndex = ""; }
+    document.body.classList.remove("desk-chat-expanded", "desk-chat-full", "desk-board-open");   // 聊天三态/看板态回默认(老视图零痕迹)
     handles().forEach((h) => h.removeAttribute("tabindex"));
     const cx = document.getElementById("chat-modal-close");
     if (cx) { cx.setAttribute("title", ""); cx.setAttribute("aria-label", "close"); }
@@ -1202,6 +1446,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   // ---- load 时的一次性准备(脚本在 body 尾、app.js 之前:DOM 已就绪,boot 未跑)----
   renderDock();        // dock 按钮先于 setupMgmtPanels 存在 → 同一批绑定命中
   injectMgmtMin();
+  injectChatExpand();  // ⤢ 放大按钮注入进聊天标题栏(桌面视图才显示)
   observeOverlays();
 
   const KarvyDesktop = {
@@ -1211,6 +1456,11 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
              stationCount: () => _stations.size },
     // 日/夜壁纸测试接缝:apply 可注入 Date(mock 时间验 auto 档);生产路径 = wallStart 的分钟级重判
     _wall: { apply: applyWall, mode: wallMode, set: setWallMode, variantFor: wallVariantFor },
+    // 空旷单焦点测试接缝:大时间/待办条/聊天三态/看板召唤(smoke/Playwright 断言新布局)
+    _layout: {
+      paintClock, refreshPending, chatMode, setChatMode, cycleChatMode,
+      openBoard, toggleBoard, boardOpen, updateBoardBadge, boardCount,
+    },
   };
   (window as unknown as { KarvyDesktop: typeof KarvyDesktop }).KarvyDesktop = KarvyDesktop;
 })();

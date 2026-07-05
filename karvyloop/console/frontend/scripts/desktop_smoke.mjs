@@ -29,12 +29,17 @@ const HTML = `<!doctype html><body>
       <div class="chat-panel">
         <div class="chat-panel-head"><span class="modal-title" id="chat-title">💬</span>
           <button class="modal-close" id="chat-modal-close">✕</button></div>
-        <div id="chat-input" contenteditable="true"></div>
+        <div class="chat-panel-body">
+          <aside class="chat-panel-side"><div id="peer-list"></div></aside>
+          <main class="chat-panel-main"><div id="chat-input" contenteditable="true"></div></main>
+        </div>
       </div>
     </div>
     <div class="cockpit-grid">
-      <section class="cockpit-col col-decide"><h2 class="col-head">⚖</h2><div class="col-scroll"><div id="h2a-list"></div></div></section>
-      <section class="cockpit-col col-intel"><h2 class="col-head">📥</h2><div class="col-scroll"><div id="task-board"></div></div></section>
+      <section class="cockpit-col col-decide"><h2 class="col-head">⚖</h2><div class="col-scroll">
+        <div id="h2a-list"><div class="h2a-card"><div class="h2a-summary">把周报整理成模板并沉淀为技能</div></div></div></div></section>
+      <section class="cockpit-col col-intel"><h2 class="col-head">📥</h2><div class="col-scroll">
+        <div id="task-board"><div class="task-card"><div class="task-intent">整理季度周报</div></div></div></div></section>
       <section class="cockpit-col col-predict"><h2 class="col-head">🔮</h2><div class="col-scroll"><div id="predict-list"></div></div></section>
       <section class="cockpit-col col-busy"><h2 class="col-head">🔄</h2><div class="col-scroll"><div id="busy-list"></div></div></section>
     </div>
@@ -132,6 +137,64 @@ assert.ok(decide.style.transform.indexOf("translate3d") === 0, "便签未拿到 
 assert.ok(chatPanel.style.transform.indexOf("translate3d") === 0, "聊天窗未拿到 translate3d 定位");
 assert.equal(decide.querySelector(".col-head").getAttribute("tabindex"), "0", "便签头应 tab 可达");
 assert.ok(parseInt(decide.style.zIndex, 10) > 0, "便签应拿到 z-index(聚焦置顶空间)");
+
+// ============================================================================
+// 空旷单焦点新布局(Hardy 2026-07-05):大时间 / 待办轻量条 / 便签默认收起 / 看板收图标 / 聊天三态
+// ============================================================================
+// ---- 大时间(桌面锚点):进场就在,H:MM 结构 ----
+const clock = document.getElementById("desk-clock");
+assert.ok(clock, "进桌面应出现大时间锚点(#desk-clock)");
+KD._layout.paintClock(new Date(2026, 6, 5, 9, 7, 0));
+assert.equal(clock.querySelector(".clock-h").textContent, "9", "大时间时位应对");
+assert.equal(clock.querySelector(".clock-m").textContent, "07", "大时间分位应补零");
+
+// ---- 待处理任务项(极简条目,读现有 h2a/task DOM):可见但不喧宾,不是完整卡 ----
+const pending = document.getElementById("desk-pending");
+assert.ok(pending && !pending.querySelector(".desk-pending-empty"), "有待办时应列出轻量条目(非空态)");
+const rows = pending.querySelectorAll(".desk-pending-row");
+assert.ok(rows.length >= 2, "⚖ 待拍板 + 📥 料应各出一条极简待办");
+assert.ok((rows[0].textContent || "").indexOf("周报") >= 0, "待办条应是摘要(一行),不是完整卡");
+
+// ---- 便签默认收起(停靠态,标题+角标即可,不铺满)----
+KD._layout; // seam 存在
+assert.ok(decide.classList.contains("col-collapsed"), "便签默认应收起(空旷,不自动铺满)");
+document.querySelectorAll(".cockpit-grid .cockpit-col").forEach((c) => {
+  assert.ok(c.classList.contains("col-collapsed"), `${c.className} 默认应收起`);
+});
+
+// ---- 聊天默认 compact(单窗口无会话列表)⤢→expanded→full 三态 ----
+assert.ok(document.getElementById("desk-chat-expand"), "聊天标题栏应注入 ⤢ 放大按钮");
+assert.equal(KD._layout.chatMode(), "compact", "聊天默认 = 精简单窗口态");
+assert.ok(!document.body.classList.contains("desk-chat-expanded") && !document.body.classList.contains("desk-chat-full"),
+  "compact 态不挂 expanded/full 类");
+KD._layout.cycleChatMode();
+assert.equal(KD._layout.chatMode(), "expanded", "⤢ 第一下 → 完整态(带会话列表)");
+assert.ok(document.body.classList.contains("desk-chat-expanded"), "expanded 应挂 body.desk-chat-expanded");
+KD._layout.cycleChatMode();
+assert.equal(KD._layout.chatMode(), "full", "⤢ 第二下 → 网页内全屏");
+assert.ok(document.body.classList.contains("desk-chat-full"), "full 应挂 body.desk-chat-full");
+assert.equal(JSON.parse(dom.window.localStorage.getItem("karvyloop_desk.v1")).chatMode, "full", "聊天形态应持久化");
+KD._layout.cycleChatMode();
+assert.equal(KD._layout.chatMode(), "compact", "⤢ 第三下 → 回精简(三态循环)");
+
+// ---- 看板收进 dock 📋 图标 + 角标(有没有新料);点开摊四标签(便签全展开)----
+const boardBtn = document.getElementById("desk-board-btn");
+assert.ok(boardBtn, "dock 应有 📋 看板图标");
+KD._layout.updateBoardBadge();
+assert.ok(boardBtn.querySelector(".dock-badge"), "有待拍板/料 → 看板图标应有角标(新数据提示)");
+assert.ok(KD._layout.boardCount() >= 2, "看板角标计数应含 h2a + task 卡");
+KD._layout.toggleBoard();
+assert.ok(document.body.classList.contains("desk-board-open"), "点 📋 应摊开看板(desk-board-open)");
+assert.ok(!decide.classList.contains("col-collapsed"), "看板摊开时便签应全展开看详情");
+KD._layout.toggleBoard();
+assert.ok(!document.body.classList.contains("desk-board-open"), "再点 📋 应关看板");
+assert.ok(decide.classList.contains("col-collapsed"), "关看板后便签回默认收起态");
+
+// ---- 全局小卡 z-index 最高(修 bug:现在能被面板遮挡)----
+// desktop.css: body.desk-view .karvy-dock { z-index: 9550 } —— 压过 dock 9500 与所有窗口/便签 220+
+const deskCss = readFileSync(resolve(here, "../../static/desktop.css"), "utf8");
+assert.ok(/\.karvy-dock\s*\{[^}]*z-index:\s*9550/.test(deskCss.replace(/\n/g, " ")),
+  "全局小卡 .karvy-dock 应置顶 z-index:9550(绝不被面板遮挡)");
 
 // ---- 拖拽:pointerdown→move→up 落 localStorage(karvyloop_desk.v1)----
 function pt(type, x, y) {
@@ -233,6 +296,9 @@ assert.equal(decide.style.transform, "", "leave 后便签 transform 未清");
 assert.equal(chatPanel.style.transform, "", "leave 后聊天窗 transform 未清");
 assert.ok(!document.getElementById("chat-modal").classList.contains("desk-min"), "leave 后 desk-min 未清");
 assert.equal(decide.querySelector(".col-head").getAttribute("tabindex"), null, "leave 后 tabindex 未清");
+assert.ok(!document.getElementById("desk-clock"), "leave 后大时间 DOM 应清(老视图零痕迹)");
+assert.ok(!document.body.classList.contains("desk-chat-expanded") && !document.body.classList.contains("desk-chat-full")
+  && !document.body.classList.contains("desk-board-open"), "leave 后聊天三态/看板类应摘干净");
 
 // ============================================================================
 // P1.5 灵魂(docs/53):工位区 / 像素小卡 / 叼卡 / 署名便签 / 工作证 —— 全走真实事件形状
@@ -345,5 +411,5 @@ assert.ok(document.getElementById("desk-presence").classList.contains("hidden") 
 document.body.classList.remove("desk-view");
 KD2.leave();
 
-console.log("✓ desktop smoke OK — dock 12 入口同构 / enter定位+a11y / 拖拽落盘 / ✕最小化+卡皮巴拉恢复 / ⚖告警(事件演·回放不演) / 日夜壁纸四档 / reset / leave清痕");
+console.log("✓ desktop smoke OK — dock 12 入口同构 / enter定位+a11y / 空旷单焦点(大时间·待办轻量条·便签默认收起·看板收📋图标+角标·聊天⤢三态·小卡z置顶) / 拖拽落盘 / ✕最小化+卡皮巴拉恢复 / ⚖告警(事件演·回放不演) / 日夜壁纸四档 / reset / leave清痕");
 console.log("✓ desk soul OK — 工位区(busy亮灯/idle呼吸/久静睡/无活动不摆) / 只读WS增量 / 工作证✓✗ / 署名便签3张cap / 叼卡→到位闪⚖→回窝 / leave全清 / API不通优雅隐藏");

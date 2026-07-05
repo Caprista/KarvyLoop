@@ -167,7 +167,34 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
     report as budget stops instead of "network down". This fixes the week's real pain: a swallowed
     `TypeError` was reported as "model unreachable" and sent debugging in the wrong direction.
 
+### Changed
+- **Desktop view redesigned for a calm, single-focus layout.** The desktop used to open with every
+  sticky note auto-spread across the right half — busy, no hierarchy, visually crowded. It now
+  opens **empty and single-focus**: a large centered **clock** anchors the top with a **lightweight
+  "waiting on you" list** beneath it (minimal one-line entries for pending decisions and tasks —
+  visible but not shouting, never full cards); a **compact centered chat** sits between the clock
+  and the dock — a single-window chat with no conversation sidebar, like a small chat app. A `⤢`
+  button in the chat titlebar cycles three states: **compact → expanded** (full chat with the
+  conversation list and history) **→ full** (fills the whole console viewport) → back. The four
+  sticky notes (decisions / intel / ideas / who's-busy) default to **collapsed and parked** in a
+  tidy strip (title only, click to open); the **board** is folded into a single dock icon (📋) with
+  a **badge** that lights up when there's a new decision or new data — click it to fan out all four
+  full tabs, click again to tuck them away. The dock, the day/night wallpaper (auto/day/night/off),
+  and the "no fake theater" soul layer (zero engine timers, real-event-driven only) are all
+  preserved; the app's default view is still the conversation (the desktop is a place you switch
+  into). Saved layouts you'd rearranged are still honored; an incompatible old layout falls back to
+  the new default without breaking. Verified in a real browser (Playwright) with screenshots of the
+  empty / expanded / full states, and the pending list, board badge, and three chat states are
+  locked by smoke + browser tests.
+
 ### Fixed
+- **The global Karvy (bottom-right capybara) can no longer be covered by a panel.** On the desktop
+  it used to sit *below* windows and panels (z-index 210), so an open management panel or the board
+  could hide it. It now stays pinned on top (z-index 9550 — above the dock and every window/note),
+  so the one place you always talk to Karvy is always reachable. It still sits below its own
+  "carrying a card" walk-on and speech bubble (those are its theater). Regression-locked by a
+  browser test that opens a panel over the mascot's corner and asserts the mascot is still the
+  top-most element at that point.
 - **Onboarding guidance is now impossible to miss.** First-10-minutes feedback: the guidance
   bubbles were easy to overlook. Guidance now uses the standard spotlight treatment — a black
   semi-transparent mask (0.7) covers everything else, the target is cut out with a pulsing accent

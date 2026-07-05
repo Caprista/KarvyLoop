@@ -244,52 +244,178 @@ def test_desk_boot_replay_mascot_stays_home(console_url):
     assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
 
 
+import os  # noqa: E402
+
+_SHOTS_DIR = os.path.join(os.path.dirname(__file__), "_artifacts", "desk_layout")
+
+
 def test_desk_first_open_default_layout(console_url):
-    """首开默认态 = 布置好的桌面(不是空场):4 张便签铺右侧两列、⚖ 整槽不盖 📥 头、
-    聊天浮窗待命(非最小化)、dock 在位、吉祥物在窝。只验默认 —— 用户挪过的存档另有拖拽测试。"""
+    """首开默认态 = **空旷、单焦点**(Hardy 2026-07-05 重构):主角 = 顶部大时间 + 居中精简聊天;
+    标签卡默认**收起停靠**(不自动铺满)、看板**收进 dock 📋 图标**(角标提示新数据);
+    待处理任务**轻量列出**(极简条目,非完整卡);dock/吉祥物在位。截图存档给人工看空旷度。"""
+    os.makedirs(_SHOTS_DIR, exist_ok=True)
     errors: list[str] = []
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1600, "height": 900})
         _wire(page, errors, desk_boot=False)   # 家仍是对话视图(方案 A),手动切进桌面
+        # 造 ≥1 张待拍板卡 → 验待办轻量条真列出 + 看板角标真亮
+        page.route("**/api/proposals/pending",
+                   lambda route: route.fulfill(status=200, content_type="application/json",
+                                               body=json.dumps(_PENDING_FIXTURE)))
         page.goto(console_url, wait_until="domcontentloaded")
         page.wait_for_selector("#view-opt-desk", timeout=10000)
         page.click("#view-opt-desk")
         page.wait_for_function("document.body.classList.contains('desk-view')", timeout=5000)
+        page.wait_for_timeout(400)   # 等 h2a 卡回放进列表(待办条从中读)
 
-        # 4 张便签全部拿到 translate3d 摆位(有人住的铺开,不是 0,0 堆角落)
-        layout = page.evaluate("""() => {
+        w = page.evaluate("document.querySelector('.cockpit').getBoundingClientRect().width")
+
+        # ① 空旷:4 张标签卡默认全部**收起**(col-collapsed),不自动铺满右半屏
+        collapsed = page.evaluate("""() => {
             const out = {};
             document.querySelectorAll('.cockpit-grid .cockpit-col').forEach((c) => {
                 const k = Array.from(c.classList).find((x) => x.indexOf('col-') === 0);
-                out[k] = { x: parseFloat(c.dataset.deskX || 'NaN'), y: parseFloat(c.dataset.deskY || 'NaN'),
-                           t: c.style.transform };
+                out[k] = c.classList.contains('col-collapsed');
             });
-            out._w = document.querySelector('.cockpit').getBoundingClientRect().width;
             return out;
         }""")
         for k in ("col-decide", "col-intel", "col-predict", "col-busy"):
-            assert layout[k]["t"].startswith("translate3d"), f"{k} 未摆位(空场):{layout}"
-        # ⚖ 在最右列且第一(永远第一);📥 同列在其整槽(330px)之下 —— 存量卡长高也盖不住头
-        assert layout["col-decide"]["x"] > layout["_w"] * 0.6, f"⚖ 应铺在右侧: {layout}"
-        assert layout["col-intel"]["x"] == layout["col-decide"]["x"], "📥 应与 ⚖ 同列"
-        assert layout["col-intel"]["y"] - layout["col-decide"]["y"] >= 330, \
-            f"⚖ 应预留整槽(≥330px),否则待拍卡一多就盖住 📥 的头: {layout}"
-        assert layout["col-predict"]["x"] < layout["col-decide"]["x"], "🔮 应在第二列(错落有桌感)"
-        # 聊天浮窗待命:可见、非最小化、在左半区(默认主位)
+            assert collapsed[k] is True, f"{k} 默认应收起(空旷,不自动铺满): {collapsed}"
+        # 看板默认没摊开(收进图标,召唤才出)
+        assert not page.evaluate("document.body.classList.contains('desk-board-open')"), "看板默认应收起(不铺满)"
+
+        # ② 居中精简聊天窗在:可见、非最小化、compact(无会话列表)、大致居中
         chat = page.evaluate("""() => {
             const ov = document.getElementById('chat-modal');
-            const p = document.querySelector('#chat-modal .chat-panel');
-            const r = p.getBoundingClientRect();
-            return { min: ov.classList.contains('desk-min'), w: r.width, x: r.left };
+            const pnl = document.querySelector('#chat-modal .chat-panel');
+            const side = document.querySelector('#chat-modal .chat-panel-side');
+            const r = pnl.getBoundingClientRect();
+            const sideVisible = side ? getComputedStyle(side).display !== 'none' : false;
+            return { min: ov.classList.contains('desk-min'), w: r.width,
+                     cx: r.left + r.width / 2, sideVisible };
         }""")
-        assert not chat["min"] and chat["w"] > 400, f"聊天浮窗应默认待命(非最小化): {chat}"
-        assert chat["x"] < layout["_w"] * 0.4, f"聊天浮窗默认应在左半区: {chat}"
-        # dock 在位(12 入口 + 窗口指示 + 🌗 + ↺),吉祥物在窝
-        assert page.evaluate("document.querySelectorAll('#desk-dock .dock-item').length") >= 12
+        assert not chat["min"] and chat["w"] > 300, f"精简聊天应默认待命(非最小化): {chat}"
+        assert not chat["sideVisible"], f"compact 态应藏会话列表(单窗口聊天形态): {chat}"
+        assert abs(chat["cx"] - w / 2) < w * 0.18, f"精简聊天应大致居中: cx={chat['cx']} w={w}"
+
+        # ③ 顶部大时间在(桌面锚点),H:MM 结构
+        assert page.is_visible("#desk-clock"), "顶部大时间应在(桌面锚点)"
+        clock_txt = page.inner_text("#desk-clock")
+        assert ":" in clock_txt, f"大时间应是 H:MM: {clock_txt!r}"
+
+        # ④ 待处理任务项轻量列出(极简条目,非完整卡)
+        assert page.is_visible("#desk-pending"), "待处理任务轻量条应在"
+        rows = page.evaluate("document.querySelectorAll('#desk-pending .desk-pending-row').length")
+        assert rows >= 1, "有待拍板卡时,待办轻量条应至少列一条(极简条目)"
+
+        # 看板 dock 📋 图标 + 角标(有没有新料);dock/🌗/吉祥物在位
+        assert page.evaluate("document.getElementById('desk-board-btn') !== null"), "dock 应有 📋 看板图标"
+        assert page.evaluate("document.querySelector('#desk-board-btn .dock-badge') !== null"), \
+            "有待拍板卡 → 看板图标应有角标(新数据提示)"
+        assert page.evaluate("document.querySelectorAll('#desk-dock .dock-item').length") >= 13
         assert page.is_visible("#desk-dock")
         assert page.is_visible("#desk-karvy-pixel")
         assert page.evaluate("document.getElementById('desk-wall-btn') !== null"), "dock 应有 🌗 壁纸换挡"
+
+        # 截图①:默认空旷态(给人工看主次分明/不拥挤)
+        page.screenshot(path=os.path.join(_SHOTS_DIR, "01-default-empty.png"))
+
+        # 点 📋 摊开看板 → 四标签全展开(召唤才出),截个板态确认功能没删
+        page.click("#desk-board-btn")
+        page.wait_for_function("document.body.classList.contains('desk-board-open')", timeout=3000)
+        assert not page.evaluate("document.querySelector('.col-decide').classList.contains('col-collapsed')"), \
+            "点 📋 应摊开看板(便签全展开看详情)"
+        page.click("#desk-board-btn")   # 关回默认收起
+        page.wait_for_function("!document.body.classList.contains('desk-board-open')", timeout=3000)
+
+        browser.close()
+    assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
+
+
+def test_desk_chat_three_states_and_screenshots(console_url):
+    """⤢ 放大三态:compact(精简)→ expanded(完整,带会话列表)→ full(网页内全屏,占满视口)。
+    每态截一张图给人工看。三态循环,形态持久化。"""
+    os.makedirs(_SHOTS_DIR, exist_ok=True)
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1600, "height": 900})
+        _wire(page, errors, desk_boot=True)
+        page.goto(console_url, wait_until="domcontentloaded")
+        page.wait_for_function("document.body.classList.contains('desk-view')", timeout=10000)
+        page.wait_for_selector("#desk-chat-expand", state="visible", timeout=5000)
+
+        # compact(默认):无会话列表
+        assert page.evaluate("window.KarvyDesktop._layout.chatMode()") == "compact"
+        assert not page.evaluate("() => { const s = document.querySelector('#chat-modal .chat-panel-side'); return s && getComputedStyle(s).display !== 'none'; }"), \
+            "compact 态应藏会话列表"
+
+        # ⤢ 第一下 → expanded:完整,会话列表回来、窗更大
+        page.click("#desk-chat-expand")
+        page.wait_for_function("document.body.classList.contains('desk-chat-expanded')", timeout=3000)
+        assert page.evaluate("() => { const s = document.querySelector('#chat-modal .chat-panel-side'); return s && getComputedStyle(s).display !== 'none'; }"), \
+            "expanded 态会话列表应可见(完整聊天)"
+        page.screenshot(path=os.path.join(_SHOTS_DIR, "02-chat-expanded.png"))
+
+        # ⤢ 第二下 → full:网页内全屏(几乎占满视口宽)
+        page.click("#desk-chat-expand")
+        page.wait_for_function("document.body.classList.contains('desk-chat-full')", timeout=3000)
+        full = page.evaluate("""() => {
+            const r = document.querySelector('#chat-modal .chat-panel').getBoundingClientRect();
+            return { w: r.width, vw: window.innerWidth };
+        }""")
+        assert full["w"] > full["vw"] * 0.9, f"full 态应占满视口宽(网页内全屏): {full}"
+        page.screenshot(path=os.path.join(_SHOTS_DIR, "03-chat-full.png"))
+
+        # ⤢ 第三下 → 回 compact(三态循环)+ 持久化
+        page.click("#desk-chat-expand")
+        page.wait_for_function("window.KarvyDesktop._layout.chatMode() === 'compact'", timeout=3000)
+        assert not page.evaluate("document.body.classList.contains('desk-chat-full')")
+        browser.close()
+    assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
+
+
+def test_desk_global_karvy_zindex_above_panels(console_url):
+    """全局小卡(右下卡皮巴拉)永远置顶、绝不被面板遮挡(Hardy 2026-07-05 修 bug:现在能被面板盖住)。
+    造一个开着的 mgmt 面板窗,断言吉祥物的堆叠 z-index 仍高于面板(用 elementsFromPoint 命中最上层)。"""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1600, "height": 900})
+        _wire(page, errors, desk_boot=True)
+        page.goto(console_url, wait_until="domcontentloaded")
+        page.wait_for_function("document.body.classList.contains('desk-view')", timeout=10000)
+        page.wait_for_selector("#desk-karvy-pixel", state="visible", timeout=5000)
+
+        # 开一个 mgmt 面板窗(点 dock 的域入口),并把它拖/摆到覆盖右下吉祥物地盘
+        panel_z = page.evaluate("""() => {
+            const nav = document.querySelector('#desk-dock .dock-item[data-panel]');
+            if (nav) nav.click();
+            const ov = document.getElementById('mgmt-modal');
+            const m = document.querySelector('#mgmt-modal .modal');
+            if (!ov || !m) return null;
+            ov.classList.remove('hidden');
+            // 强行把面板摆到右下角(覆盖吉祥物地盘),并抬到很高的 z
+            m.style.transform = 'translate3d(1100px, 500px, 0)';
+            ov.style.zIndex = '9000';
+            return parseInt(getComputedStyle(ov).zIndex || '0', 10);
+        }""")
+        assert panel_z is not None, "mgmt 面板应可开(dock 域入口)"
+
+        # 吉祥物的实际堆叠 z(.karvy-dock)应高于面板 —— elementsFromPoint 命中吉祥物区最上层不是面板
+        fab_z = page.evaluate(
+            "parseInt(getComputedStyle(document.querySelector('.karvy-dock')).zIndex || '0', 10)")
+        assert fab_z > panel_z, f"全局小卡 z({fab_z}) 应高于面板 z({panel_z})(绝不被遮挡)"
+
+        # 命中测试:吉祥物中心点最上层元素应属于 .karvy-dock(不是被面板盖住)
+        on_top = page.evaluate("""() => {
+            const fab = document.getElementById('chat-open');
+            const r = fab.getBoundingClientRect();
+            const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !!(el && el.closest('.karvy-dock'));
+        }""")
+        assert on_top, "右下吉祥物中心点最上层应是它自己(没被面板遮挡)"
         browser.close()
     assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
 
