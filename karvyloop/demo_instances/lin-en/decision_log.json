@@ -1,0 +1,92 @@
+[
+ {
+  "ts": 1782705000.1799998,
+  "decision": "REJECT",
+  "summary": "Send to the \"Writing Assistant\" in the \"Lin Writing Studio\" business domain: \"Have the Writing Assistant directly draft an 800-word first version on the topic 'Attention Economy' — needed today.\"",
+  "proposal_id": "route_to_role-0-b06be79e",
+  "reason": "The topic isn't finalized yet — don't start drafting the full article before the topic direction is settled. Give me the topic direction and outline first.",
+  "kind": "route_to_role",
+  "domain": "dom-1a46e096",
+  "role": "agent"
+ },
+ {
+  "ts": 1782808200.3199997,
+  "decision": "ACCEPT",
+  "summary": "Have the writing assistant draft an 800-word first version of *The Disillusionment of Digital Nomads* based on the outline we set this morning. Don't play it safe—give it the edge I'm after.",
+  "proposal_id": "route_to_role-0-326f9e02",
+  "reason": "The topic and outline are set, so we can start writing. Remember, I want raw intensity, not something safe and middle-of-the-road.",
+  "kind": "route_to_role",
+  "domain": "dom-1a46e096",
+  "role": "agent"
+ },
+ {
+  "ts": 1782808201.019999,
+  "decision": "ACCEPT",
+  "summary": "🧹 Merged 3 near-duplicate knowledge entries → \"Loss Leader Strategy with Slow-Burn Content as the Hook\"",
+  "proposal_id": "merge_knowledge-3d1c3e07",
+  "reason": "Indeed, it's the same point, and it looks cleaner after merging.",
+  "kind": "merge_knowledge",
+  "domain": "",
+  "role": "agent"
+ },
+ {
+  "ts": 1782963900.2599998,
+  "decision": "ACCEPT",
+  "summary": "Forward the following to the business domain \"Lin Writing Studio\"'s \"Writing Assistant\":\n\n\"Have the writing assistant draft an 800-word initial version of 'Ears Are the New Eyes' according to the outline.\"",
+  "proposal_id": "route_to_role-0-08d829b2",
+  "reason": "You already know the standards, just follow the usual approach.",
+  "kind": "route_to_role",
+  "domain": "dom-1a46e096",
+  "role": "agent"
+ },
+ {
+  "ts": 1782963900.8799992,
+  "decision": "REJECT",
+  "summary": "🧹 Merging 2 near-duplicate knowledge entries → \"The core value of in-depth content lies in long-term retention (next-month retention can reach instant...\"",
+  "proposal_id": "merge_knowledge-12b24a56",
+  "reason": "These two points should be cited separately, not combined.",
+  "kind": "merge_knowledge",
+  "domain": "",
+  "role": "agent"
+ },
+ {
+  "ts": 1783049400.1799998,
+  "decision": "REJECT",
+  "summary": "```json\n{\n  \"from\": \"dispatcher\",\n  \"to\": {\n    \"domain\": \"小林撰稿工作室\",\n    \"agent\": \"写作助手\"\n  },\n  \"message\": \"There's a commercial order: have the writing assistant draft a 500-word product promotion script, quoted at 150 per thousand words.\"\n}\n```",
+  "proposal_id": "route_to_role-0-5d4edf8a",
+  "reason": "Old rules apply—I don't take any commissioned pieces under 300 words.",
+  "kind": "route_to_role",
+  "domain": "dom-1a46e096",
+  "role": "agent"
+ },
+ {
+  "ts": 1783049400.4599996,
+  "decision": "ACCEPT",
+  "summary": "🧹 Merge 3 near-duplicate knowledge items → \"The AI Productivity Paradox and the Shift in the Trust Bottleneck\"",
+  "proposal_id": "merge_knowledge-afcb39c3",
+  "reason": "Merge, keeping the one with more information.",
+  "kind": "merge_knowledge",
+  "domain": "",
+  "role": "agent"
+ },
+ {
+  "ts": 1783149600.2599998,
+  "decision": "ACCEPT",
+  "summary": "Let the writing assistant draft an 800-word initial version of *\"The Writer's Reserved Plot\"* based on the outline.",
+  "proposal_id": "route_to_role-0-2ba14525",
+  "reason": "Let him pass, as per the usual rules.",
+  "kind": "route_to_role",
+  "domain": "dom-1a46e096",
+  "role": "agent"
+ },
+ {
+  "ts": 1783166400.1399999,
+  "decision": "ACCEPT",
+  "summary": "Weekly Report 2026-06-27 → 2026-07-04: Ran 33 tasks (33 successful / 0 failed), used 405,849 tokens",
+  "proposal_id": "weekly_digest-0-79abf1ad",
+  "reason": "",
+  "kind": "weekly_digest",
+  "domain": "",
+  "role": "agent"
+ }
+]

@@ -1,0 +1,7 @@
+<!-- step_id: COMPOSITION -->
+role: 资料管家
+created_by: console
+atoms:
+  # (暂未挑原子;以后从公共原子库加)
+skills:
+  - skill: file-butler

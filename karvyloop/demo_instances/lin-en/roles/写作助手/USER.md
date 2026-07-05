@@ -1,0 +1,1 @@
+Lin’s style: sharp, loves metaphors, enjoys counterintuitive angles; fixed routine: morning news reading, midday writing, afternoon editing, evening reading.

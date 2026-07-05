@@ -1,0 +1,1393 @@
+[
+ {
+  "content": "A reusable AI collaboration workflow: one AI agent generates content, a second agent performs adversarial review, and humans only review the review conclusions and make decisions—shifting the human role from executor to adjudicator.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782607200.1399999,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Three-Stage AI Workflow Pattern",
+   "source_ref": "text:48edf9878db3ac15"
+  },
+  "freshness_ts": 1782607200.1399999,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782790800.02,
+  "recall_count": 6
+ },
+ {
+  "content": "Short video platform recommendation algorithms exhibit an inverse pricing phenomenon: instant gratification content has a high ad value per unit time, but low long-term user retention; deep content has lower completion rates, yet drives 3x+ next-month retention, resulting in higher long-term user value.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782693300.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# The Reverse Pricing Phenomenon of the Attention Economy",
+   "source_ref": "text:b002196a6a693a6b"
+  },
+  "freshness_ts": 1782693300.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783041000.02,
+  "recall_count": 11
+ },
+ {
+  "content": "Instant-gratification content and slow content are diametrically opposed in the algorithm's objective function. Essentially, it's a trade-off between short-term unit ad value (eCPM) and long-term user lifetime value (LTV). The two aren't simply good versus bad—they represent value trade-offs across different time horizons.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782693300.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Short-term unit price vs. long-term LTV trade-off",
+   "source_ref": "text:b002196a6a693a6b"
+  },
+  "freshness_ts": 1782693300.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782977400.04,
+  "recall_count": 5
+ },
+ {
+  "content": "High Completion Rate ≠ High User Value: When evaluating content or recommendation systems, completion rate cannot be looked at in isolation. It must be tied to long-term metrics like next-month retention, T+30 retention, or LTV to reflect true value.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782693300.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Completion rates only make sense when tied to retention.",
+   "source_ref": "text:b002196a6a693a6b"
+  },
+  "freshness_ts": 1782693300.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782977400.04,
+  "recall_count": 6
+ },
+ {
+  "content": "The recommendation algorithm design should incorporate weights for delayed metrics like T+30 retention and long-term LTV, rather than relying solely on immediate feedback metrics like CTR and completion rate, to prevent the algorithm from being hijacked by content with short-term high unit prices but low retention.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782693300.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "**Long-Term Metric Weighting for Recommendation Systems**",
+   "source_ref": "text:b002196a6a693a6b"
+  },
+  "freshness_ts": 1782693300.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782977400.04,
+  "recall_count": 7
+ },
+ {
+  "content": "Production capacity (lines of code, immediate output) can be measured in real time, but long-term maintenance costs and accountability cannot be reflected immediately. This reverse pricing problem is common across all domains and requires slow review mechanisms such as adversarial acceptance or human adjudication to secure subsidies for long-term reliability.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782693300.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Short-Term Output vs. Long-Term Responsibility: Reverse Pricing",
+   "source_ref": "text:b002196a6a693a6b"
+  },
+  "freshness_ts": 1782693300.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782790800.02,
+  "recall_count": 4
+ },
+ {
+  "content": "Reports from multiple remote work surveys in 2025 show that the average stay duration for digital nomads has shortened from 6 months to 6 weeks, searches for \"nomad burnout\" have quadrupled, and the romantic narrative of \"coding while surfing\" is fading.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782779400.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "The Digital Nomad Narrative Wanes in 2025",
+   "source_ref": "text:7173f1a103e07fa2"
+  },
+  "freshness_ts": 1782779400.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783059600.04,
+  "recall_count": 7
+ },
+ {
+  "content": "The novelty of new environments and the depth of focus exist in a trade-off: the more fresh stimulation you get from constantly changing locations, the harder it becomes to sustain the deep concentration required for meaningful work.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782779400.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Environmental novelty and cognitive depth have an inverse relationship",
+   "source_ref": "text:7173f1a103e07fa2"
+  },
+  "freshness_ts": 1782779400.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783059600.04,
+  "recall_count": 7
+ },
+ {
+  "content": "Deep work requires \"boring stability\" as a prerequisite. The earliest wave of digital nomads returning to fixed cities was driven by a cognitive need for focus, not an emotional sense of homesickness.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782779400.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Deep work requires stable boredom.",
+   "source_ref": "text:7173f1a103e07fa2"
+  },
+  "freshness_ts": 1782779400.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783059600.04,
+  "recall_count": 5
+ },
+ {
+  "content": "The end of freedom is not unrestrained wandering, but a discipline that you choose for yourself — redefining \"freedom\" as the autonomous right to choose your own discipline, rather than the complete escape from all constraints.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782779400.2199998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "At the end of freedom lies a discipline of one's own choosing.",
+   "source_ref": "text:7173f1a103e07fa2"
+  },
+  "freshness_ts": 1782779400.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783059600.04,
+  "recall_count": 5
+ },
+ {
+  "content": "In the second half of the attention economy, short-video platforms will be forced to subsidize slow content (in-depth content). The logic is shifting from maximizing immediate ad eCPM to boosting long-term user retention—a pivot forced by inverse data-driven pricing. Slow content plays the role of a traffic-driver product in the content mix, much like supermarkets placing their lowest-margin milk at the back of the store: users are forced to walk through high-margin product zones to get the low-margin item. Slow content drives overall retention, while instantly-satisfying content generates profit. This is a strategic framework transferable to content platforms, retail traffic-flow design, recommendation system subsidies, and other scenarios: use low-margin traffic-driver products to attract flow, pair them with high-margin profit products to achieve overall profitability.",
+  "provenance": {
+   "source": "consolidated",
+   "agent": "user",
+   "ts": 1782808201.099999,
+   "kind": "knowledge",
+   "title": "# Subsidy Strategy: Using Slow Content as a Traffic Driver"
+  },
+  "freshness_ts": 1782808201.099999,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783153200.02,
+  "recall_count": 10
+ },
+ {
+  "content": "In the real-world deployment costs of open-source large models, downloading the model weights itself accounts for only about 18%, while three hidden components—inference compute, fine-tuning data cleaning, and safety alignment—together consume roughly 82% of the total cost.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782866700.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Open-Source LLM Cost Structure",
+   "source_ref": "text:f76f83512c74a7f0"
+  },
+  "freshness_ts": 1782866700.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782998700.04,
+  "recall_count": 6
+ },
+ {
+  "content": "Open-source models are like being given a free elephant: the elephant itself (the model weights) is free, but the elephant's room (hosting infrastructure), the elephant's food (inference compute and training data), and the elephant trainer (engineering and operations manpower) all have to be shouldered by the user.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782866700.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "The Free Elephant Metaphor",
+   "source_ref": "text:f76f83512c74a7f0"
+  },
+  "freshness_ts": 1782866700.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782998700.04,
+  "recall_count": 5
+ },
+ {
+  "content": "In the field of large models, the competitive moat for enterprises has shifted from \"whether you own the model weights\" to \"whether you can sustain the engineering chain that brings models into production\" — that is, the ongoing operational capability built on infrastructure, compute, data, and talent.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782866700.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "## Migration of Competitive Barriers",
+   "source_ref": "text:f76f83512c74a7f0"
+  },
+  "freshness_ts": 1782866700.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782998700.04,
+  "recall_count": 6
+ },
+ {
+  "content": "Self-hosting open-source models versus directly calling commercial APIs is essentially an ROI trade-off between **engineering capability reserves** and **cash flow expenditure**, rather than a comparison of technical先进性 or model quality.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782866700.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Self-Hosted vs API Decision",
+   "source_ref": "text:f76f83512c74a7f0"
+  },
+  "freshness_ts": 1782866700.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782960000.04,
+  "recall_count": 4
+ },
+ {
+  "content": "For resource-constrained small teams, the total cost of an API is often lower than that of self-hosting open-source models. The cost advantage of open-source scales inversely with a team's engineering capabilities — the fewer the resources, the greater the tendency to purchase an API.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782866700.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Adverse Selection in Small Teams",
+   "source_ref": "text:f76f83512c74a7f0"
+  },
+  "freshness_ts": 1782866700.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782998700.04,
+  "recall_count": 4
+ },
+ {
+  "content": "In the algorithms and AI industry, a common cognitive bias is equating \"explicit free\" (attention, model weights) with \"zero total cost,\" while overlooking the implicit ongoing expenses they generate (retention, inference, alignment, operations).",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782866700.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Visible Free vs. Hidden Bills",
+   "source_ref": "text:f76f83512c74a7f0"
+  },
+  "freshness_ts": 1782866700.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782998700.04,
+  "recall_count": 3
+ },
+ {
+  "content": "Once AI capabilities are open-sourced or commoditized into explicitly free supply, the real bottleneck will shift from \"production capacity (model weights)\" to \"implementation engineering (deployment, operations, accountability).\"",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782866700.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# The Migration Pattern of AI Bottlenecks",
+   "source_ref": "text:f76f83512c74a7f0"
+  },
+  "freshness_ts": 1782866700.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782998700.04,
+  "recall_count": 3
+ },
+ {
+  "content": "Before judging any \"rising/falling\" trend, you should first verify whether the measurement framework has kept pace with the evolution of the underlying medium. When the framework is anchored to an outdated medium, it will diverge from actual consumption and lead to false conclusions — a pitfall that transfers across domains like reading, user behavior, and skill acquisition.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782952500.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Measurement Scope Pitfalls",
+   "source_ref": "text:713efdd4d0f998ab"
+  },
+  "freshness_ts": 1782952500.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783153200.02,
+  "recall_count": 3
+ },
+ {
+  "content": "Deep text consumption is migrating from visual (paper books, e-books) to auditory (podcasts, audiobooks, long-form subscriptions). If the National Reading Survey only tracks print + digital, it will misread an increase in total volume as a decline in reading.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782952500.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Reading Organ Migration Phenomena",
+   "source_ref": "text:713efdd4d0f998ab"
+  },
+  "freshness_ts": 1782952500.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783128000.04,
+  "recall_count": 4
+ },
+ {
+  "content": "Slow/deep content extends beyond visual formats (in-depth articles), with audio formats (podcasts, audiobooks) emerging as new primary entry points. While completion rates are low, long-term retention is high, making them complementary to short-form video.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782952500.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Dual-channel entry to in-depth content",
+   "source_ref": "text:713efdd4d0f998ab"
+  },
+  "freshness_ts": 1782952500.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1782977400.04,
+  "recall_count": 4
+ },
+ {
+  "content": "The core new craft for writers is \"writing for the ear\": controlling the rhythm of sentences, setting conversational anchors, and adapting paragraph length to auditory working memory—so that text remains comprehensible when read aloud.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782952500.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "**Read-aloud Writing Skill**",
+   "source_ref": "text:713efdd4d0f998ab"
+  },
+  "freshness_ts": 1782952500.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783068000.04,
+  "recall_count": 5
+ },
+ {
+  "content": "As the reader's sensory channel shifts from eyes to ears, the final consumption scenario of the text changes from \"silent reading\" to \"listening.\" When putting pen to paper, creators should incorporate \"whether it can be read smoothly aloud\" as a judgment criterion on par with readability.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1782952500.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "The endpoint of text shifts from being seen to being heard",
+   "source_ref": "text:713efdd4d0f998ab"
+  },
+  "freshness_ts": 1782952500.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783128000.04,
+  "recall_count": 4
+ },
+ {
+  "content": "Books and notes the user has recently been reading/organizing: *Technology and Civilization* (Chapters 3 & 4), *Ears Are the New Eyes*, *Amusing Ourselves to Death* (Chapters 1 & 2).",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783006200.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783006200.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": 1783179000.02,
+  "invalid_reason": "duplicate(auto-merged): same assertion as [conversation]: 用户本周阅读并做笔记的书:《技术与文明》第三、四章;《娱乐至死》第一、二章",
+  "last_recalled_ts": 1783128000.04,
+  "recall_count": 2
+ },
+ {
+  "content": "There are scattered asset files in the user's workspace root directory that need to be organized by topic.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783006200.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783006200.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783068000.04,
+  "recall_count": 2
+ },
+ {
+  "content": "Users prefer using mixed question types for self-assessment: one factual, one comprehension, one application—climbing up the Bloom's taxonomy ladder step by step.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783006200.02,
+   "trace_ref": "",
+   "kind": "preference",
+   "provisional": true
+  },
+  "freshness_ts": 1783006200.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783170600.02,
+  "recall_count": 2
+ },
+ {
+  "content": "The user wants to be asked questions without the answer given first — they will answer themselves first, then have the assistant judge each point against their notes as correct/partial/missing, without giving a score.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783006200.02,
+   "trace_ref": "",
+   "kind": "preference",
+   "provisional": true
+  },
+  "freshness_ts": 1783006200.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783170600.02,
+  "recall_count": 1
+ },
+ {
+  "content": "The user's notes contain a sentence that the assistant itself simplified: \"Public discourse in the age of print was argumentative; in the age of television it became performative\" — this is a simplified version, not the original words of Postman.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783006200.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783006200.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783149600.3399997,
+  "recall_count": 4
+ },
+ {
+  "content": "Lin has a business domain called \"Lin Writing Studio,\" along with a \"Writing Assistant\" sub-agent that can be delegated tasks.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783006200.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783006200.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783170600.02,
+  "recall_count": 3
+ },
+ {
+  "content": "For tasks like organizing/archiving the local workspace, the assistant must actually read the workspace contents before proposing a plan; it cannot fabricate a \"source → destination\" list out of thin air. If it can't read the contents, it should stop and be upfront, asking the user to run `dir` in the terminal or reopen the channel—rather than pretending to have done the work.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783006200.3599997,
+   "kind": "constraint",
+   "evidence": [],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "",
+    "role": ""
+   }
+  },
+  "freshness_ts": 1783006200.3599997,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783170600.02,
+  "recall_count": 1
+ },
+ {
+  "content": "For any tasks involving \"the user's own notes\" (generating questions, understanding, application), do not trigger web_search for external verification—the assertions in the notes are classic arguments, not time-sensitive information; verification would introduce material the user hasn't read and muddle the questions.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783006200.3799996,
+   "kind": "constraint",
+   "evidence": [],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "",
+    "role": ""
+   }
+  },
+  "freshness_ts": 1783006200.3799996,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783170600.02,
+  "recall_count": 1
+ },
+ {
+  "content": "When the assistant uses simplified note content that hasn't been verified against the source, it should flag \"this is a simplification from the notes, not the original wording,\" but should NOT secretly go verify or fill in details from external sources — to avoid altering the user's original notes.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783006200.3999996,
+   "kind": "constraint",
+   "evidence": [],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "",
+    "role": ""
+   }
+  },
+  "freshness_ts": 1783006200.3999996,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783128000.04,
+  "recall_count": 1
+ },
+ {
+  "content": "Application problems require applying the logic learned in the notes to new contexts the user hasn't written about—don't go looking for \"how the original author evaluated the new thing\"—the assistant can't fabricate that, and it shouldn't be the answer.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783006200.4199996,
+   "kind": "standing",
+   "evidence": [],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "",
+    "role": ""
+   }
+  },
+  "freshness_ts": 1783006200.4199996,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783170600.02,
+  "recall_count": 1
+ },
+ {
+  "content": "The traditional value proposition of a tech writer is that of a \"translator\" — converting papers and code into plain language. When AI can generate summaries in seconds, this role faces the risk of being replaced.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783041000.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "The Translator's Dilemma for Tech Writers",
+   "source_ref": "text:7c2bfff3b499cf81"
+  },
+  "freshness_ts": 1783041000.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783153200.02,
+  "recall_count": 7
+ },
+ {
+  "content": "\"**Dimensionality reduction**\" refers to simplifying complex information (complex → simple, such as summarization and explanation); \"**dimensionality elevation**\" refers to extracting meaning from phenomena (phenomenon → meaning, such as cross-source connections and insights). AI excels at dimensionality reduction, while humans excel at dimensionality elevation.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783041000.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Dimensionality Reduction and Elevation as a Capability Dichotomy",
+   "source_ref": "text:7c2bfff3b499cf81"
+  },
+  "freshness_ts": 1783041000.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783068000.04,
+  "recall_count": 2
+ },
+ {
+  "content": "AI easily replaces tasks involving \"information transfer / dimension reduction,\" but struggles to replace tasks involving \"meaning production / dimension elevation.\" This is an effective yardstick for judging whether a particular writing job will be replaced by AI.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783041000.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "The Boundaries of AI's Replacement Capabilities",
+   "source_ref": "text:7c2bfff3b499cf81"
+  },
+  "freshness_ts": 1783041000.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783149600.3399997,
+  "recall_count": 6
+ },
+ {
+  "content": "In the AI era, reader needs have shifted from \"what did I understand\" to \"what does this mean\" — the former is information digestion, the latter is meaning judgment.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783041000.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Shifts in Reader Needs\n\n## 1. From Generic to Personalized\n\n**Past:** Readers accepted standard, one-size-fits-all content.\n\n**Now:** Readers expect content tailored to their interests, reading habits, and context.\n\n## 2. From Reading to Interacting\n\n**Past:** Reading was a passive, one-way experience.\n\n**Now:** Readers want to comment, share, like, and engage in real-time discussion.\n\n## 3. From Text-Only to Multimedia\n\n**Past:** Plain text was the primary format.\n\n**Now:** Readers prefer rich formats — images, audio, video, and infographics.\n\n## 4. From Fixed-Time to Anytime, Anywhere\n\n**Past:** Reading was tied to specific times and places (e.g., a desk with a newspaper).\n\n**Now:** Readers want on-demand access across mobile devices, fragmented throughout the day.\n\n## 5. From Depth to Skimmability\n\n**Past:** Readers were willing to read long-form articles in full.\n\n**Now:** Attention spans are shorter; readers scan, skim, and look for key takeaways.\n\n## 6. From Single-Source to Cross-Platform\n\n**Past:** Readers relied on a single publication or channel.\n\n**Now:** Readers discover content across multiple platforms and compare sources.\n\n## 7. From Consumption to Creation\n\n**Past:** Readers were pure consumers of content.\n\n**Now:** Readers want to create, contribute, and share their own perspectives — becoming \"prosumers.\"\n\n## 8. From Knowledge Acquisition to Emotional Connection\n\n**Past:** Reading was primarily about gaining information.\n\n**Now:** Readers also seek emotional resonance, identity认同, and a sense of belonging.\n\n---\n\n**Key Takeaway:** Reader needs have shifted from \"getting information\" to \"getting experiences.\" Content products must evolve from information delivery toward **personalized, interactive, and immersive** experiences.",
+   "source_ref": "text:7c2bfff3b499cf81"
+  },
+  "freshness_ts": 1783041000.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783068000.04,
+  "recall_count": 1
+ },
+ {
+  "content": "**\"Detective-style writing\"** refers to the practice of extracting a single hidden thread from multiple seemingly unrelated pieces of information (such as news stories and events) to construct meaning across sources. It represents a new identity for the tech writer after their evolution beyond the role of translator.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783041000.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Detective-Style Writing Methodology",
+   "source_ref": "text:7c2bfff3b499cf81"
+  },
+  "freshness_ts": 1783041000.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783149600.3399997,
+  "recall_count": 6
+ },
+ {
+  "content": "**The standard for determining whether a writing task constitutes a human moat:** Ask \"Is this dimensionality reduction or dimensionality elevation?\" Dimensionality reduction tasks can be replaced by AI; dimensionality elevation tasks are where scarce value lies.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783041000.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Quick Moat Assessment Method",
+   "source_ref": "text:7c2bfff3b499cf81"
+  },
+  "freshness_ts": 1783041000.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783136400.04,
+  "recall_count": 3
+ },
+ {
+  "content": "The value evolution path for tech writers is \"translator → detective\"—upgrading from transcribing single points of information to connecting the meaning of clues across sources. This is a value upgrade, not a lateral replacement.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783041000.1599998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Translator to Detective Upgrade",
+   "source_ref": "text:7c2bfff3b499cf81"
+  },
+  "freshness_ts": 1783041000.1599998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783170600.02,
+  "recall_count": 6
+ },
+ {
+  "content": "Writing/commissioned tasks are forwarded to the \"Writing Assistant\" of \"Kobayashi Writing Studio\" according to established standards, following the usual procedure.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783049400.3199997,
+   "kind": "standing",
+   "evidence": [
+    {
+     "ts": 1782963900.2999997,
+     "decision": "ACCEPT",
+     "gist": "You already know the standards, just follow the usual rules."
+    },
+    {
+     "ts": 1782963900.9199991,
+     "decision": "REJECT",
+     "gist": "These two need to be cited separately, don't merge them."
+    },
+    {
+     "ts": 1783049400.2199998,
+     "decision": "REJECT",
+     "gist": "Same rule as always — commissioned work under 300 yuan a thousand characters is a no-go."
+    }
+   ],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "dom-1",
+    "role": "agent"
+   }
+  },
+  "freshness_ts": 1783049400.3199997,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "All commission offers below 300 per thousand characters will be rejected.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783049400.3399997,
+   "kind": "constraint",
+   "evidence": [
+    {
+     "ts": 1782963900.2999997,
+     "decision": "ACCEPT",
+     "gist": "You already know the standard, just follow the usual procedure."
+    },
+    {
+     "ts": 1782963900.9199991,
+     "decision": "REJECT",
+     "gist": "These two quotes need to be cited separately, don't merge them."
+    },
+    {
+     "ts": 1783049400.2199998,
+     "decision": "REJECT",
+     "gist": "As always, I don't take commissioned work under 300 words."
+    }
+   ],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "dom-1",
+    "role": "agent"
+   }
+  },
+  "freshness_ts": 1783049400.3399997,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The more capable AI coding agents become, the heavier the review burden on senior engineers: generating 1,000 lines of code takes only 3 minutes, but understanding and taking responsibility for them takes 3 hours—an asymmetry between productivity and accountability. Once AI tools solve the productivity bottleneck, a new bottleneck shifts to the trust dimension: how to credibly accept and hold AI output accountable, rather than how to produce it faster. In a context of AI productivity overflow, what is truly scarce is no longer output volume, but an accountable trust chain—one with clear ownership, traceability, and answerability.",
+  "provenance": {
+   "source": "consolidated",
+   "agent": "user",
+   "ts": 1783049400.5399995,
+   "kind": "knowledge",
+   "title": "# The AI Productivity Paradox and the Shift in Trust Bottlenecks"
+  },
+  "freshness_ts": 1783049400.5399995,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "Content platforms provide traffic for writers, but take away two things: the reader relationship (the platform owns the user data and outreach channels) and pricing power (algorithmic distribution determines traffic and monetization). Writers may seem to be farming their own land, but in reality both their harvest and reach are controlled by the platform, creating a dependent production relationship.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783128000.1799998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# The Sharecropper Trap of Platform Writing",
+   "source_ref": "text:f2ccfb2b26860988"
+  },
+  "freshness_ts": 1783128000.1799998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783153200.02,
+  "recall_count": 5
+ },
+ {
+  "content": "Subscription models are often seen as an independence movement for writers, but data shows that about 90% of independent subscriptions stop updating within 18 months. The core bottleneck is that creators have to bear customer acquisition costs on their own. Going independent doesn't mean shedding the burden—in fact, it shifts the platform's hidden customer acquisition costs onto individuals.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783128000.1799998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Subscription Churn Rate & Customer Acquisition Cost",
+   "source_ref": "text:f2ccfb2b26860988"
+  },
+  "freshness_ts": 1783128000.1799998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783153200.02,
+  "recall_count": 5
+ },
+ {
+  "content": "The creator model that actually works is **\"Platform Farming, Private Harvest\"**: 90% of your public content goes out on platforms to build trust and drive traffic, while the 10% deepest content lives in your own channels (like an email list). The public layer handles acquisition; the private layer drives deep retention and relationship ownership — forming a trust funnel.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783128000.1799998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# 90/10 Content Tiering Model",
+   "source_ref": "text:f2ccfb2b26860988"
+  },
+  "freshness_ts": 1783128000.1799998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783153200.02,
+  "recall_count": 5
+ },
+ {
+  "content": "To judge whether a creator is truly independent, diagnose along two core dimensions: ① Whether they own the reader relationship (whether user data and direct channels for reach are in their own hands); ② Whether they have pricing power (can they autonomously decide traffic and monetization apart from algorithmic distribution). Platform-based creator economies are generally weakened along both dimensions.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783128000.1799998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "Creator Independence Dual-Dimension Diagnosis",
+   "source_ref": "text:f2ccfb2b26860988"
+  },
+  "freshness_ts": 1783128000.1799998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783153200.02,
+  "recall_count": 1
+ },
+ {
+  "content": "Platform channels are well-suited for traffic generation and trust-building, while owned channels (email lists, subscriptions) are better suited for deep retention and private relationship management. Together, they form a \"public domain acquisition + private domain retention\" combination—leveraging the traffic scale of platforms while avoiding complete dependence on them.",
+  "provenance": {
+   "source": "fed",
+   "agent": "user",
+   "ts": 1783128000.1799998,
+   "trace_ref": "",
+   "kind": "knowledge",
+   "title": "# Platform vs. Own Channel Division of Labor",
+   "source_ref": "text:f2ccfb2b26860988"
+  },
+  "freshness_ts": 1783128000.1799998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783153200.02,
+  "recall_count": 2
+ },
+ {
+  "content": "Near-duplicate knowledge entries, even if they appear mergeable, should remain separate and not be merged as long as users have the need to reference them individually.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783049400.3599997,
+   "kind": "constraint",
+   "evidence": [
+    {
+     "ts": 1782963900.2999997,
+     "decision": "ACCEPT",
+     "gist": "You already know the standards, just follow the usual routine."
+    },
+    {
+     "ts": 1782963900.9199991,
+     "decision": "REJECT",
+     "gist": "These two need to be cited separately, don't merge them."
+    },
+    {
+     "ts": 1783049400.2199998,
+     "decision": "REJECT",
+     "gist": "Same old rule — any commissioned work under 300,000 characters, I won't take."
+    }
+   ],
+   "strength": 0.49999999999999994,
+   "status": "confirmed",
+   "explicit": true,
+   "applies": {
+    "domain": "",
+    "role": ""
+   }
+  },
+  "freshness_ts": 1783166400.2199998,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 1783170600.02,
+  "recall_count": 1
+ },
+ {
+  "content": "The user operates the \"Lin Writing Studio\" business domain, involving a collaborative workflow for assigning writing tasks to a writing assistant for content production.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783179000.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783179000.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The user has a writing gig: have a writing assistant draft a 500-word promotional livestream script, quoted at 150 per thousand words.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783179000.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783179000.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The user asks the writing assistant to draft an 800-word initial version of \"The Writer's Private Garden\" according to the outline.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783179000.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783179000.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The books Lin has read and taken notes on this week: *Technics and Civilization*, Chapters 3 and 4; *Amusing Ourselves to Death*, Chapters 1 and 2.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783179000.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783179000.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "Key judgments on *Technology and Civilization* from user notes: the clock is the key machine; time shifted from experience to a tradable commodity; technology evolves in three stages (proto-technology, paleo-technology, neo-technology); and the history of materials is the history of civilization.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783179000.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783179000.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "Key arguments from *Amusing Ourselves to Death* in the user's notes: the medium is the message (medium as epistemology); print corresponds to the argumentative mode while television corresponds to the performative mode; imbalance in the ratio of information to action; Orwell feared those who would ban books, while Huxley feared that no one would want to read them anymore.",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783179000.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783179000.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The user handles time-sensitive tasks by: \"verify first, admit if you can't find the information, never fabricate.\"",
+  "provenance": {
+   "source": "conversation",
+   "agent": "user",
+   "ts": 1783179000.02,
+   "trace_ref": "",
+   "kind": "fact",
+   "provisional": true
+  },
+  "freshness_ts": 1783179000.02,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The user requires Xiaoka to perform web verification on time-sensitive tasks, but for non-time-sensitive materials like reading notes, no timeliness prompts should be added, and responses should be given directly based on existing materials.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783179000.5599995,
+   "kind": "constraint",
+   "evidence": [],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "",
+    "role": ""
+   }
+  },
+  "freshness_ts": 1783179000.5599995,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The user emphasizes \"no fabrication\": when materials are insufficient, you must be honest and provide available options (A/B/C), and must not force-fit an answer.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783179000.5799994,
+   "kind": "constraint",
+   "evidence": [],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "",
+    "role": ""
+   }
+  },
+  "freshness_ts": 1783179000.5799994,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The user requires that question generation follows Bloom's Taxonomy, with a step-by-step progression, mixed difficulty, cross-book linkage, and 1–2 questions each for fact/comprehension/application, with no answers provided upfront so the user can answer themselves.",
+  "provenance": {
+   "source": "decision_pref",
+   "agent": "user",
+   "ts": 1783179000.5999994,
+   "kind": "constraint",
+   "evidence": [],
+   "strength": 0.7,
+   "status": "provisional",
+   "explicit": true,
+   "applies": {
+    "domain": "",
+    "role": ""
+   }
+  },
+  "freshness_ts": 1783179000.5999994,
+  "scope": "personal",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The writing assistant should attempt to verify information before producing content that involves external facts; when the sandbox's public internet egress is blocked, it should proactively and honestly inform the user that it \"couldn't find the information,\" rather than papering over the gap with placeholders or vague wording.",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782619800.08,
+   "kind": "method",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782619800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "When a verifiable source cannot be found, the example slot should be explicitly marked with '【To be added, source verification needed】' and the user should be asked to provide a verifiable source—do not sacrifice accuracy for pace or \"drama.\"",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782619800.08,
+   "kind": "method",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782619800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The user prefers a three-part skeleton with a clear argumentative thread (for this task: \"lesion → misdiagnosis → prescription\"), where each section starts with the sub-thesis followed by bullet-point elaboration, with word counts pre-allocated per section.",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782619800.08,
+   "kind": "preference",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782619800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "The \"counterintuitive hook\" sub-item in the user preference outline—which requires, under each supporting argument, a counter-intuitive little hook that creates tension, rather than straightforward exposition.",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782619800.08,
+   "kind": "preference",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782619800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "**Pitfall:** In the sandbox, search engines and mainstream sites get blocked as intranet. Don't keep retrying `web_fetch` against the public web — switch to using confirmed points from memory and flag them as pending verification.",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782619800.08,
+   "kind": "pitfall",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782619800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "When crafting titles for the \"AI Writes X For You\" category, aim for \"counterintuitive second-order insights\" (e.g., \"AI writes for you, you read for AI\") and avoid first-order takes like \"how powerful AI is\" or \"who AI will replace\" — those have become clichés.",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782790800.08,
+   "kind": "method",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782790800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "For writing tasks with the strict requirement of \"must be sharp, avoid mediocrity,\" you first need to embed a clear foundational judgment structure in the output (all five headlines sharing the same hook framework), then expand each one individually—rather than drafting each headline independently.",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782790800.08,
+   "kind": "method",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782790800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "After the user picks a preferred candidate title in this domain, they should give pros-and-cons feedback on each one and score it across quantifiable dimensions (e.g., pause rate, screenshot viability rate, counterargument fuel, channel fit)—rather than just offering a single gut-feel comment.",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782790800.08,
+   "kind": "preference",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782790800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ },
+ {
+  "content": "**Candidates containing specific platform names, product names, or year-based data as time anchors must be flagged as \"requires time-sensitivity verification\" — concrete numbers/events recalled from training memory cannot be trusted.**",
+  "provenance": {
+   "source": "role_experience",
+   "agent": "写作助手",
+   "ts": 1782790800.08,
+   "kind": "pitfall",
+   "trace_ref": "",
+   "applies": {
+    "domain": "dom-1a46e096",
+    "role": "写作助手"
+   }
+  },
+  "freshness_ts": 1782790800.08,
+  "scope": "domain",
+  "pinned": false,
+  "invalid_at": null,
+  "invalid_reason": "",
+  "last_recalled_ts": 0.0,
+  "recall_count": 0
+ }
+]

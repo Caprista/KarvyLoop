@@ -1,0 +1,1 @@
+**Key talking points:** One person + a group of agents maintaining 4 products. The biggest pain point isn't writing code—it's having no one to consult on decisions.
