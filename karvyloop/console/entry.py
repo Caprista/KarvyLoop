@@ -519,10 +519,18 @@ def cmd_console(args: argparse.Namespace) -> int:
         )
         # loop step4b 地基:个人知识库 = 活的、落盘的 Belief 长期库(重启不丢)。
         # 摄入编译(4b-1)/对话蒸馏(后续)写进它,drive 前从它召回注入上下文。
+        # 概念标签缓存(#61 研判①):与图谱面板同一份缓存(routes._concept_cache 复用
+        # app.state.concept_cache,base 同一决定逻辑)——写入侧打一次标签,召回/图谱/
+        # supersede 三处共读,不各存各的。
         from karvyloop.cognition.memory import MemoryManager
         from karvyloop.cognition.belief_store import BeliefStore
+        from karvyloop.cognition.concepts import ConceptCache
+        _cfgp = getattr(app.state, "config_path", "") or ""
+        _cc_base = _Path(_cfgp).parent if _cfgp else (_Path.home() / ".karvyloop")
+        app.state.concept_cache = ConceptCache(_cc_base / "concept_cache.json")
         app.state.memory = MemoryManager(
             store=BeliefStore(_Path.home() / ".karvyloop" / "beliefs.json"),
+            concept_cache=app.state.concept_cache,
         )
         conv_mgr = ConversationManager(
             conv_store, trace_index=pump_trace_index, domain_registry=domain_registry,

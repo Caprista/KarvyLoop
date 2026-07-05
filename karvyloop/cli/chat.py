@@ -86,8 +86,13 @@ def cmd_chat(
     memory = None
     try:
         from karvyloop.cognition.belief_store import BeliefStore
+        from karvyloop.cognition.concepts import ConceptCache
         from karvyloop.cognition.memory import MemoryManager
-        memory = MemoryManager(store=BeliefStore(Path.home() / ".karvyloop" / "beliefs.json"))
+        memory = MemoryManager(
+            store=BeliefStore(Path.home() / ".karvyloop" / "beliefs.json"),
+            # 与 console 同一份标签缓存(#61 研判①):召回种子的语义层读预计算标签,零 LLM
+            concept_cache=ConceptCache(Path.home() / ".karvyloop" / "concept_cache.json"),
+        )
     except Exception as e:
         logger.warning(f"认知库接线失败(TUI 照常起,只是不预对齐你的标准): {e}")
 

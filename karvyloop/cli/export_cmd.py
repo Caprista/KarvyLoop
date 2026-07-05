@@ -41,6 +41,8 @@ _KNOWN_ENTRIES = {
     "channel_used_codes.json": "email-channel replay guard (hashes of spent decision codes)",
     "consolidate_tick.json": "daily knowledge-consolidation watermark state",
     "skill_tags_tick.json": "daily skill-tagging watermark state",
+    "belief_tags_tick.json": "daily belief-tagging (concept backfill) watermark state",
+    "concept_cache.json": "precomputed concept tags (semantic recall layer + graph edges)",
 }
 
 

@@ -365,6 +365,15 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 技能语义标签:补 {tres['tagged']} 个")
                         except Exception as ie:
                             _maintenance_item_failed(app, "skill_tags_tick", ie)
+                        # #61 研判①b:知识概念标签回填(存量老条补进 ConceptCache,同义改写
+                        # 召回渐进增强;watermark=缓存命中即跳过;新条由写入路径打,这里收存量的尾)
+                        try:
+                            from karvyloop.console.belief_tags_tick import belief_tags_tick
+                            bres = await belief_tags_tick(app)
+                            if bres.get("tagged"):
+                                logger.info(f"[karvyloop console] 知识概念标签:补 {bres['tagged']} 条")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "belief_tags_tick", ie)
                     except asyncio.CancelledError:
                         break
                     except Exception as e:
