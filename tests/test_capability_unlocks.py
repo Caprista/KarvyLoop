@@ -23,7 +23,7 @@ from karvyloop.console import build_console_app  # noqa: E402
 from karvyloop.console.unlocks import list_unlocks  # noqa: E402
 from karvyloop.karvy.observer import WorkbenchObserver  # noqa: E402
 
-EXPECTED_IDS = {"mcp", "files", "webhook_channel", "email_channel", "relay", "web_verify"}
+EXPECTED_IDS = {"mcp", "files", "asr", "webhook_channel", "email_channel", "relay", "web_verify"}
 VALID_STATUS = {"on", "off", "missing_dep"}
 
 
@@ -49,7 +49,7 @@ def test_unlocks_api_shape():
 def test_all_deps_missing_reported_honestly():
     """依赖全缺 → 依赖型能力全 missing_dep + 每项都带安装命令;渠道型仍是 off(纯配置)。"""
     got = _by_id(list_unlocks("", has_dep=lambda m: False))
-    for cid in ("mcp", "files", "relay", "web_verify"):
+    for cid in ("mcp", "files", "asr", "relay", "web_verify"):
         assert got[cid]["status"] == "missing_dep", cid
         assert "pip install" in got[cid]["install"], cid
     assert got["files"]["detail"]["missing"] == ["pypdf", "python-docx", "openpyxl"]
@@ -62,7 +62,7 @@ def test_deps_present_but_nothing_configured():
     got = _by_id(list_unlocks("", has_dep=lambda m: True))
     assert got["mcp"]["status"] == "off"
     assert got["mcp"]["detail"]["servers"] == 0
-    for cid in ("files", "relay", "web_verify"):
+    for cid in ("files", "asr", "relay", "web_verify"):
         assert got[cid]["status"] == "on", cid
     assert got["email_channel"]["status"] == "off"
     assert got["webhook_channel"]["status"] == "off"

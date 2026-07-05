@@ -38,6 +38,13 @@ files = [
     "python-docx>=1.1",   # MIT;Word .docx(zip 容器)段落+表格
     "openpyxl>=3.1",      # MIT;Excel .xlsx(zip 容器)按行铺成 CSV 形状
 ]
+# 本地音频转写(ASR):mp3/wav/m4a → 文字稿,进附件解析同一条产线(audio_transcribe.py),
+# 转写后的文字走 meeting-notes 等既有通道。选型 docs/64:faster-whisper(MIT,CTranslate2,
+# CPU int8 可跑,自带 PyAV 解码不要求系统 ffmpeg)。**模型不随包**:首次使用时从 HF 下载
+# (默认 small ≈ 480MB,KARVYLOOP_ASR_MODEL 可换)。没装 → 明确提示,绝不假装转写。
+asr = [
+    "faster-whisper>=1.1",
+]
 # Windows Tier 3 沙箱(RestrictedToken 写隔离 + Job 资源上限)——**零额外依赖**:
 # 全用 stdlib ctypes 手绑 Win32,不引 pywin32(避免给非 Windows 用户加基础重量)。
 # 此 extra 故意留空,只作显式声明:装不装都一样,Windows 上探测到即启用 Tier 3,

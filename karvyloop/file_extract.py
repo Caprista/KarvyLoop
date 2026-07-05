@@ -23,17 +23,20 @@ MAX_EXTRACT_CHARS = 100_000
 INSTALL_HINT = 'pip install "karvyloop[files]"'
 
 #: 后缀 → 解析类别。CSV / 纯文本**不在此表**:它们本来就是文本,走原有 decode 路径。
-_SUFFIX_KINDS = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx"}
+#: 音频三格式(mp3/wav/m4a)→ "audio":本地 ASR 转写(audio_transcribe.py,[asr] extra),
+#: 与文档解析走同一条产线(预览/截断/read_file/交办全免新接线)。
+_SUFFIX_KINDS = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx",
+                 ".mp3": "audio", ".wav": "audio", ".m4a": "audio"}
 
 
 @dataclass
 class ExtractResult:
     """解析结果。``ok=False`` 时 ``text`` 恒为空串(宁空勿毒)。"""
     ok: bool
-    kind: str = ""          # pdf | docx | xlsx
+    kind: str = ""          # pdf | docx | xlsx | audio
     text: str = ""
     truncated: bool = False
-    error: str = ""         # "" | "missing_dependency" | "bad_file"
+    error: str = ""         # "" | "missing_dependency" | "bad_file" | "asr_failed"
     hint: str = ""          # 人可读补充(缺哪个包 / 坏在哪),绝不含文件内容
 
 
@@ -49,8 +52,12 @@ def extract_text(data: bytes, kind: str, *, max_chars: int = MAX_EXTRACT_CHARS) 
     伪造扩展名防线:先验 magic(PDF 头 / zip 容器 PK 头),不符直接 ``bad_file`` ——
     解析库还没碰到字节就被拒,坏文件伪装不进上下文。
     """
-    if kind not in ("pdf", "docx", "xlsx"):
+    if kind not in ("pdf", "docx", "xlsx", "audio"):
         return ExtractResult(False, kind, error="bad_file", hint=f"未知格式: {kind}")
+    if kind == "audio":
+        # 音频分支整体委托(magic 防线在 audio_transcribe 内,容器判定与后缀解耦)
+        from karvyloop.audio_transcribe import transcribe
+        return transcribe(data, max_chars=max_chars)
     if not _magic_ok(data, kind):
         return ExtractResult(False, kind, error="bad_file",
                              hint="文件头与扩展名不符(伪造扩展名或已损坏)")

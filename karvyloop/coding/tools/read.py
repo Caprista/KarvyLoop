@@ -67,25 +67,33 @@ class ReadTool:
             return CodingResult(ok=True,
                                 payload={"system_reminder": "文件为空"},
                                 truncated=False)
-        # 附件真解析:PDF/docx/xlsx → 文本,之后与 CSV 走同一条产线(行号/offset/limit/truncated)。
+        # 附件真解析:PDF/docx/xlsx → 文本、音频(mp3/wav/m4a)→ 本地 ASR 文字稿,
+        # 之后与 CSV 走同一条产线(行号/offset/limit/truncated)。
         # 解析器纪律(宁空勿毒):坏文件/缺依赖 → 明确报错,绝不把二进制垃圾灌进上下文。
-        from karvyloop.file_extract import INSTALL_HINT, extract_kind, extract_text
+        from karvyloop.file_extract import extract_kind, extract_text
         kind = extract_kind(path)
         extract_truncated = False
         if kind:
-            res = extract_text(content, kind)
+            # 转写/解析可能秒级~分钟级(长录音),丢线程池 —— 不卡 loop 上其他任务的事件流
+            import asyncio
+            res = await asyncio.to_thread(extract_text, content, kind)
             if not res.ok:
                 if res.error == "missing_dependency":
+                    # hint 自带对应 extra 的安装命令([files] / [asr]),别硬编码成同一个
                     return CodingResult(ok=False, payload=None, error_code=7,
                                         error_message=(f"无法解析 {kind} 附件:缺可选依赖 —— "
-                                                       f"{INSTALL_HINT} 后重试"))
+                                                       f"{res.hint},装好后重试"))
+                if res.error == "asr_failed":
+                    return CodingResult(ok=False, payload=None, error_code=7,
+                                        error_message=f"无法转写音频:{res.hint}")
                 return CodingResult(ok=False, payload=None, error_code=7,
                                     error_message=(f"无法解析 {kind} 附件:文件损坏或与扩展名不符"
                                                    f"({res.hint})—— 拒绝注入二进制垃圾"))
             if not res.text:
                 return CodingResult(ok=True,
                                     payload={"system_reminder":
-                                             f"{kind} 解析成功但无可提取文本(可能是扫描件/纯图像)"},
+                                             f"{kind} 解析成功但无可提取文本"
+                                             f"(可能是扫描件/纯图像/无人声音频)"},
                                     truncated=False)
             text = res.text
             extract_truncated = res.truncated

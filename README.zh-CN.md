@@ -133,6 +133,8 @@ embedding:
 | **web** | `pip install -e ".[web]"` 再 `playwright install chromium` | 网页产物的**运行时**验收(`karvyloop verify-web`)——真把页面加载起来验 | 降级到只验语法;老实告诉你运行时没验过 |
 | **redis** | `pip install -e ".[redis]"` | 跨进程 / 跨机的 agent 协作(Redis A2A transport) | 自动降级到 in-process transport——单进程够用 |
 | **relay** | `pip install -e ".[relay]"` | 给"小卡信使中继"加端到端加密:用 `karvyloop console --relay` + `karvyloop relay-pair` 从任何地方够到你的控制台(中继本身 —— `karvyloop relay-serve` —— 无状态、盲转发,不需要额外装包) | `--relay` / `relay-pair` 报清楚的"pip install karvyloop[relay]"提示 |
+| **files** | `pip install -e ".[files]"` | 附件真解析:PDF / Word(.docx)/ Excel(.xlsx)提取成文本,供文件面板预览和 agent 分析(CSV/纯文本无需额外装);损坏/伪造扩展名的文件明确拒收 —— 绝不吐二进制垃圾 | 预览/读取这些格式时返回清楚的 "pip install karvyloop[files]" 提示 |
+| **asr** | `pip install -e ".[asr]"` | **本地音频转写**([faster-whisper](https://github.com/SYSTRAN/faster-whisper),MIT):会议录音/语音备忘(mp3/wav/m4a)在你自己机器上转成文字 —— 与 PDF 同一条附件产线,文件面板能预览、角色(如会议纪要)直接吃文字稿。首次使用才下载语音模型(默认 `small` ≈ 480MB,`KARVYLOOP_ASR_MODEL` 可换);CPU 就能跑,全程不上传 | 音频文件返回清楚的 "pip install karvyloop[asr]" 提示 —— 绝不编造转写 |
 | **dev** | `pip install -e ".[dev]"` | 跑测试套件(`pytest`、`respx`…) | ——(只在开发/测试 KarvyLoop 时需要) |
 
 可组合:`pip install -e ".[mcp,web]"`。这些都不卡核心 loop——聊天、业务域/角色、决策、技能、token 账本在基础安装上全都能用。

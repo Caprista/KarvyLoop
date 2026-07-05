@@ -86,6 +86,13 @@ def list_unlocks(config_path: str = "", *,
                 "install": 'pip install "karvyloop[files]"',
                 "detail": {"missing": missing}})
 
+    # ②b 本地音频转写(ASR)—— faster-whisper 在 = 就绪(与附件解析同一条产线,紧挨着列)。
+    #    语音模型**首次使用时**才下载(默认 small ≈ 480MB)—— 前端文案负责把这句诚实话说出来。
+    out.append({"id": "asr",
+                "status": STATUS_ON if dep("faster_whisper") else STATUS_MISSING_DEP,
+                "install": 'pip install "karvyloop[asr]"',
+                "detail": {}})
+
     # ③ 推送渠道(webhook:ntfy/Bark/Slack)—— 纯配置,零额外依赖。
     #    复用 config_channels 解析器判定(enabled + url 合法才算通),绝不回显 url/headers。
     try:

@@ -137,6 +137,7 @@ var KarvyUnlockPanelBundle = (function(exports) {
     const list = el("div", { class: "mgmt-list" });
     if (byId["mcp"]) list.appendChild(_mcpCard(byId["mcp"]));
     if (byId["files"]) list.appendChild(_depCard("📎", "files", byId["files"]));
+    if (byId["asr"]) list.appendChild(_depCard("🎙️", "asr", byId["asr"], "unlock.asr.how"));
     if (byId["webhook_channel"]) list.appendChild(_channelCard("📮", "webhook", byId["webhook_channel"], WEBHOOK_SNIPPET));
     if (byId["email_channel"]) list.appendChild(_channelCard("📧", "email", byId["email_channel"], EMAIL_SNIPPET));
     if (byId["relay"]) list.appendChild(_depCard("📡", "relay", byId["relay"], "unlock.relay.how"));

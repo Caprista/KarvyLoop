@@ -26,6 +26,7 @@ const FIXTURE = {
     { id: "mcp", status: "off", install: 'pip install "karvyloop[mcp]"', detail: { servers: 0 } },
     { id: "files", status: "missing_dep", install: 'pip install "karvyloop[files]"',
       detail: { missing: ["pypdf", "python-docx", "openpyxl"] } },
+    { id: "asr", status: "missing_dep", install: 'pip install "karvyloop[asr]"', detail: {} },
     { id: "webhook_channel", status: "off", install: "", detail: {} },
     { id: "email_channel", status: "on", install: "", detail: { inbox: false } },
     { id: "relay", status: "missing_dep", install: 'pip install "karvyloop[relay]"', detail: {} },
@@ -53,6 +54,8 @@ for (const k of ["unlock.status_on", "unlock.status_off", "unlock.status_missing
 }
 // 缺依赖行:可复制安装命令原样在场(files + relay)
 assert.ok(text.includes('pip install "karvyloop[files]"'), "缺依赖应给 files 安装命令");
+assert.ok(text.includes('pip install "karvyloop[asr]"'), "缺依赖应给 asr 安装命令");
+assert.ok(text.includes("unlock.asr.how"), "asr 卡应带模型首次下载的诚实注记");
 assert.ok(text.includes('pip install "karvyloop[relay]"'), "缺依赖应给 relay 安装命令");
 // MCP 生态目录链接:官方 registry + 目录站,渲染成外链 <a>(只进文案不进逻辑)
 const hrefs = [...body.querySelectorAll("a")].map((a) => a.getAttribute("href"));

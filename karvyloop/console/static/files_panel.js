@@ -134,7 +134,7 @@ var KarvyFilesPanelBundle = (function(exports) {
     if (!d || !d.ok) pre.textContent = t("files.bad_path");
     else if (d.too_big) pre.textContent = t("files.too_big");
     else if (d.extract_error === "missing_dependency") {
-      pre.textContent = t("files.extract_missing_dep");
+      pre.textContent = t(d.extract === "audio" ? "files.extract_missing_dep_asr" : "files.extract_missing_dep");
       const unlock = window.KarvyUnlockPanel;
       if (unlock) unlockBtn = el("button", {
         class: "mgmt-inline-link",

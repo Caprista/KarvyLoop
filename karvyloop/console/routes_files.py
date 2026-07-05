@@ -64,9 +64,11 @@ def api_files_list(request: Request, path: str = "") -> dict[str, Any]:
     return {"ok": True, "path": rel, "entries": entries, "workspace": str(root)}
 
 
-#: 纯文本预览上限(bytes)= 提取文本上限(chars)—— PDF/docx/xlsx 解析后走同一条截断线。
+#: 纯文本预览上限(bytes)= 提取文本上限(chars)—— PDF/docx/xlsx/音频转写走同一条截断线。
 _PREVIEW_CAP = 100_000
 #: 可解析二进制附件的原始体积上限:容器(PDF/zip)天然比其中文本大,给到 20MB;超了同样提示下载。
+#: 音频同吃这条线(≈20 分钟 mp3):预览是同步请求,上限同时兜住转写时长;更长的录音
+#: 走「让TA处理」交办 → read_file 工具(线程池转写,无此上限)。
 _EXTRACT_RAW_CAP = 20 * 1024 * 1024
 
 
