@@ -12,6 +12,33 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **Reverse tagging: the vocabulary classifies the new note, not the other way around.** Free-form
+  LLM tagging fragments the vocabulary over time — one memory gets tagged "夜间模式", a synonymous
+  one "深色主题", and tag-overlap matching goes blind between them. Tag assignment is now
+  **reuse-first**: the existing tag vocabulary is pre-filtered (content token overlap + frequency
+  top-up, zero LLM) into a top-K candidate list that rides along in the tagging prompt with the
+  instruction *reuse an existing tag when one fits; creating a new one requires a reason*. New tags
+  are determined deterministically (never by the model's say-so) and each one is an explicit
+  `tag_created` Trace event — the vocabulary can grow, but never silently sprawl. The comparison
+  happens at the discrete symbol level: no vectors, inspectable, hand-editable.
+  - **Daily synonym convergence.** A slow-lane tick (`tag_merge_tick`; vocabulary-fingerprint
+    watermark + judged-pair cooldown; zero LLM when nothing changed) finds synonym candidates by
+    tag-name overlap and **second-order co-occurrence** (true synonyms almost never co-occur on one
+    note — the model picks one phrasing per note — but they orbit the same neighbor tags), has one
+    cheap LLM call judge them, and merges automatically into an **alias table**. Tags are derived
+    data, not user data, so auto-merge is safe: no belief's stored tags are rewritten, the old tag
+    survives as an alias that still matches, and the audit trail is the alias file (via/ts) plus a
+    `tag_merged` Trace event. Recall seeds, graph-edge keys and supersede candidates all read the
+    alias-expanded view, so converged phrasings become mutually visible — fragment scenario
+    measured: paraphrase recall@8 **0.67 → 1.00** at N=1k/5k with latency unchanged; the typing hot
+    path stays zero-LLM, zero-IO.
+  - **Ingest-time reconciliation shipped (was Planned).** The single supersede LLM call at write
+    time now also judges `duplicate` and `extends`, adding no calls: a high-confidence duplicate
+    (LLM verdict **plus** deterministic lexical/tag corroboration — the model's word alone never
+    touches the store) is auto-merged by invalidating the losing copy (invalidate-don't-delete,
+    reason on record, provenance authority still wins); an `extends` (same topic, new information)
+    raises the existing merge-knowledge decision card with the model's proposed merged text —
+    adding information stays your call.
 - **`[asr]` extra — meeting recordings become minutes, locally.** Audio files (mp3/wav/m4a) now
   ride the same attachment pipeline as PDFs: upload → transcribed on-device → the text flows into
   the existing channels (files-panel preview, `read_file` for roles, the meeting-notes skill).
@@ -65,7 +92,7 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
     with the three-bucket method (decisions / action items as who-what-by-when / open questions),
     and a glossary gate — unknown terms are checked against a **human-owned team glossary**
     template and flagged "needs confirmation", never expanded by guessing. Honest input contract:
-    it consumes text; it does not transcribe audio (no ASR is promised). Growth stays real: the
+    it consumes text; audio only via the optional `[asr]` extra (see above). Growth stays real: the
     glossary file getting longer is the metric — no invented percentages.
 - **"Unlock more capabilities" panel — degraded features now guide instead of hiding.** Graceful
   degradation had a blind spot: if you never configure MCP, push channels or attachment parsing,
@@ -116,11 +143,6 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   The mask only exists while guidance is active: Esc or clicking the mask dismisses it, the
   spotlit button stays clickable through the cutout, and `prefers-reduced-motion` disables the
   animations. Locked with a real-browser regression test across both views (chat + desk).
-
-### Planned
-- **Ingest-time knowledge reconciliation** (fully automatic): new knowledge merges/extends
-  near-duplicates, inserts the genuinely new, and meshes the related at ingest — patiently, off the
-  hot path, no vectors. (Today the same tidy-up runs as an explicit H2A "consolidate" action.)
 
 ## [2026.7.4] — 2026-07-04
 
