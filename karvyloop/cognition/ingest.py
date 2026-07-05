@@ -57,6 +57,8 @@ class IngestResult:
     skipped: int = 0                   # 空内容 / 写入失败被跳过的条数
     skip_reasons: list = field(default_factory=list)  # 跳过原因(可诊断:100% 跳过时能查为何)
     raw: str = ""                      # 摘要(调试)
+    extends: list = field(default_factory=list)   # 摄入调和 extends 半边:待升 H2A 合并卡的素材
+                                                  # (run_supersede_pass 判的;console 侧升卡)
 
 
 _BULLET_RE = re.compile(r"^([-*•]|\d+[.、)])\s+(.*)$")
@@ -176,6 +178,7 @@ async def ingest_material(
     now: Optional[float] = None,
     system: str = INGEST_SYSTEM,       # 抽取口径:默认关于用户;KNOWLEDGE_SYSTEM=通用知识
     provisional: bool = False,         # auto 蒸(无人审)标 True:低置信,不与人审沉淀同权
+    trace: Any = None,                 # Trace 底座(可选):标签词表事件/自动合并审计落这里
 ) -> IngestResult:
     """摄入一段材料 → 编译成结构化 Belief → 写进长期记忆(provenance/freshness/去重在 write 里)。
 
@@ -208,37 +211,43 @@ async def ingest_material(
         except Exception as e:
             # 不静默吞:记下原因(否则 100% 跳过无从诊断,独立 checker 抓到的 MEDIUM)
             reasons.append(f"write failed: {type(e).__name__}: {e}")
+    extends: list = []
     if written:
-        # 写入路径 supersede(核心接线):失败自吞(run_supersede_pass 内部宁空勿毒,原库不动)
+        # 写入路径 supersede(核心接线):失败自吞(run_supersede_pass 内部宁空勿毒,原库不动)。
+        # 摄入调和:duplicate 高置信自动合并(审计痕留 invalid_reason/Trace);extends 素材
+        # 带回给 console 升 H2A 卡(cognition 不依赖 console,升卡在调用方)。
         from karvyloop.cognition.conflict import run_supersede_pass
-        await run_supersede_pass(written, mem=mem, gateway=gateway,
-                                 model_ref=model_ref, now=now)
-        # 标签预计算(#61 研判①a):新条批量抽概念标签入 ConceptCache —— 召回种子的语义层/
-        # supersede 候选筛选读的就是它。与 supersede 同节奏(写入侧异步,打字热路径零 LLM
-        # 铁律不动);失败自吞(标签是增益不是命脉,daily 慢侧 belief_tags_tick 会回填)。
+        sup = await run_supersede_pass(written, mem=mem, gateway=gateway,
+                                       model_ref=model_ref, now=now, trace=trace)
+        extends = list(sup.get("extends") or [])
+        # 标签预计算(#61 研判①a + 反向标签):新条 reuse-first 打标入 ConceptCache —— 召回
+        # 种子的语义层/supersede 候选筛选读的就是它。与 supersede 同节奏(写入侧异步,打字
+        # 热路径零 LLM 铁律不动);失败自吞(标签是增益不是命脉,daily 慢侧 belief_tags_tick 会回填)。
         cc = getattr(mem, "concept_cache", None)
         if cc is not None:
             try:
                 from karvyloop.cognition.concepts import tag_beliefs
                 from karvyloop.llm.token_ledger import token_source
                 with token_source("belief_tags"):
-                    await tag_beliefs(written, cache=cc, gateway=gateway, model_ref=model_ref)
+                    await tag_beliefs(written, cache=cc, gateway=gateway,
+                                      model_ref=model_ref, trace=trace)
             except Exception:
                 pass
     return IngestResult(written=len(written), beliefs=written,
                         skipped=len(reasons), skip_reasons=reasons,
-                        raw=f"compiled {len(facts)} fact(s)")
+                        raw=f"compiled {len(facts)} fact(s)", extends=extends)
 
 
 async def ingest_knowledge(material: str, *, gateway: Any, mem: Any, model_ref: str = "",
                            scope: str = "personal", source: str = "knowledge",
                            trace_ref: str = "", source_ref: str = "",
-                           now: Optional[float] = None) -> IngestResult:
+                           now: Optional[float] = None, trace: Any = None) -> IngestResult:
     """沉淀**通用知识**进知识库(喂料蒸馏流的 persist 步用)。同 ingest_material 但走 KNOWLEDGE_SYSTEM
     抽客观知识点(kind='knowledge'),不是关于用户的偏好。source_ref=来源指纹(supersede 用)。"""
     return await ingest_material(material, gateway=gateway, mem=mem, model_ref=model_ref,
                                  agent_id="user", scope=scope, source=source, trace_ref=trace_ref,
-                                 source_ref=source_ref, now=now, system=KNOWLEDGE_SYSTEM)
+                                 source_ref=source_ref, now=now, system=KNOWLEDGE_SYSTEM,
+                                 trace=trace)
 
 
 __all__ = ["IngestResult", "INGEST_SYSTEM", "KNOWLEDGE_SYSTEM", "parse_facts",

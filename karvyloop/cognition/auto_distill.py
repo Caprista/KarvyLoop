@@ -80,6 +80,7 @@ async def distill_turns(
     model_ref: str = "",
     agent_id: str = "user",
     now: Optional[float] = None,
+    trace: Any = None,
 ) -> IngestResult:
     """把一批对话轮编译成"关于用户"的 Belief(source=conversation)。复用 4b-1 摄入编译器。
 
@@ -91,7 +92,7 @@ async def distill_turns(
     return await ingest_material(
         material, gateway=gateway, mem=mem, model_ref=model_ref,
         agent_id=agent_id, scope="personal", source="conversation", now=now,
-        provisional=True,
+        provisional=True, trace=trace,
     )
 
 
@@ -123,7 +124,7 @@ def parse_combined(text: str) -> tuple[list[dict], list[dict]]:
 
 async def distill_turns_with_decisions(
     turns: list, *, gateway: Any, mem: Any, model_ref: str = "",
-    agent_id: str = "user", now: Optional[float] = None,
+    agent_id: str = "user", now: Optional[float] = None, trace: Any = None,
 ) -> tuple[IngestResult, list[dict]]:
     """**一次** LLM 调用 piggyback:抽 facts(写进记忆)+ decisions(返回给调用方路由进决策结晶)。
 
@@ -167,23 +168,28 @@ async def distill_turns_with_decisions(
             written.append(b)
         except Exception:
             pass
+    extends: list = []
     if written:
-        # 写入路径 supersede(与 ingest_material 同一咽喉;失败内部自吞,原库不动)
+        # 写入路径 supersede(与 ingest_material 同一咽喉;失败内部自吞,原库不动)。
+        # 摄入调和:duplicate 高置信自动并;extends 素材带回给 console 升卡。
         from karvyloop.cognition.conflict import run_supersede_pass
-        await run_supersede_pass(written, mem=mem, gateway=gateway,
-                                 model_ref=model_ref, now=now)
-        # 标签预计算(#61 研判①a,与 ingest_material 同一接缝):蒸馏产物措辞高度模板化,
-        # 语义标签是同义改写召回的唯一救场层;失败自吞,daily 慢侧回填。
+        sup = await run_supersede_pass(written, mem=mem, gateway=gateway,
+                                       model_ref=model_ref, now=now, trace=trace)
+        extends = list(sup.get("extends") or [])
+        # 标签预计算(#61 研判①a + 反向标签,与 ingest_material 同一接缝):蒸馏产物措辞高度
+        # 模板化,语义标签是同义改写召回的唯一救场层;失败自吞,daily 慢侧回填。
         cc = getattr(mem, "concept_cache", None)
         if cc is not None:
             try:
                 from karvyloop.cognition.concepts import tag_beliefs
                 from karvyloop.llm.token_ledger import token_source
                 with token_source("belief_tags"):
-                    await tag_beliefs(written, cache=cc, gateway=gateway, model_ref=model_ref)
+                    await tag_beliefs(written, cache=cc, gateway=gateway,
+                                      model_ref=model_ref, trace=trace)
             except Exception:
                 pass
-    return IngestResult(written=len(written), raw=f"facts={len(facts)} decisions={len(decisions)}"), decisions
+    return IngestResult(written=len(written), raw=f"facts={len(facts)} decisions={len(decisions)}",
+                        extends=extends), decisions
 
 
 __all__ = [

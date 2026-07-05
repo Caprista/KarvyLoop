@@ -7,10 +7,17 @@
 
 **写入路径 supersede(生产接线,不再是死代码)**:`run_supersede_pass` 在
 ingest/auto_distill 写入新 Belief 后被调——用已有召回栈(overlap_score+概念标签,无向量)
-找 top-k 相似旧条 → 一次便宜 LLM 判"矛盾/更新/无关"(严格 JSON,宁空勿毒,解析失败=
-当无关不动旧条)→ 矛盾/更新:给**输的那条**打 `invalid_at`(失效不删,保历史可审计)。
+找 top-k 相似旧条 → 一次便宜 LLM 判"矛盾/更新/重复/补充/无关"(严格 JSON,宁空勿毒,
+解析失败=当无关不动旧条)→ 矛盾/更新:给**输的那条**打 `invalid_at`(失效不删,保历史可审计)。
 谁输谁赢由 `provenance_rank` 把关:人明说的(user_explicit/ingest)盖过对话蒸馏猜的
 (distill_extracted/conversation)——低权威的新条**不能**掀翻高权威的旧条,反被打失效。
+
+**摄入调和(#61 研判③,Hardy 点头的半步)**:同一次 LLM 调用多判两种关系,不加调用次数:
+- duplicate(同一论断换措辞,信息量相同)→ **高置信才自动合并**(高置信 = 词面/标签有确定性
+  佐证,`_DUPLICATE_AUTO_MIN_SCORE`;合并 = 失效不删输的一方,审计痕在 invalid_reason +
+  Trace belief_auto_merged);佐证不足 → 降级 extends 升卡,不自动动库。
+- extends(同主题、新条补充了新信息)→ **不动库**,收进返回值 `extends`,由 console 侧升
+  merge_knowledge H2A 卡(ACCEPT 才 apply_belief_merge——知识库是护城河资产,加信息的合并人拍板)。
 """
 
 from __future__ import annotations
@@ -112,15 +119,23 @@ _SUPERSEDE_MAX_OLD = 24       # 一次 LLM 调用里旧条总数上限(挡灌爆
 SUPERSEDE_SYSTEM = (
     "你是 KarvyLoop 的记忆一致性审查器。给你两组关于同一个用户/同一知识库的条目:"
     "「新条目」(刚写入)和「旧条目」(库里已有)。\n"
-    "逐对判断新条目与旧条目的关系,只有三种:\n"
+    "逐对判断新条目与旧条目的关系,只有五种:\n"
     "- contradict:两条**不能同时为真**(如「用户吃素」vs「用户吃肉」)。\n"
     "- update:讲同一件事,新条目是**更新/取代**旧条目的版本(状态随时间变了)。\n"
-    "- unrelated:不冲突也不取代(相关但不矛盾的,算 unrelated)。\n"
+    "- duplicate:两条说的**是同一件事、信息量相同**(只是措辞不同),留哪条都不丢信息。\n"
+    "- extends:讲同一个主题,新条目在旧条目基础上**补充了新信息**;此时给 merged="
+    "合并后的一条完整表述(一两句,不丢两边信息)。\n"
+    "- unrelated:以上都不是(只是相关、不矛盾不重复不互补的,算 unrelated)。\n"
     "**严格只输出一个 JSON 对象**:{\"pairs\":[{\"new\":<新条目编号>,\"old\":<旧条目编号>,"
-    "\"relation\":\"contradict|update\"}]}——只列 contradict/update 的对,unrelated 一律不列;"
-    "没有任何冲突就输出 {\"pairs\":[]}。编号必须来自给你的编号,不许编造。"
-    "别的话都不要输出。"
+    "\"relation\":\"contradict|update|duplicate|extends\",\"merged\":\"<仅 extends 时给>\"}]}"
+    "——unrelated 一律不列;没有任何关系就输出 {\"pairs\":[]}。编号必须来自给你的编号,不许编造。"
+    "拿不准的一律算 unrelated。别的话都不要输出。"
 )
+
+# duplicate 自动合并的高置信门(确定性佐证):候选打分 ≥ 2 分 = 词面强重叠(≥2 个词/bigram 双向
+# 命中)或 ≥1 个语义标签命中(2.0×)。只有 LLM 判 duplicate **且**符号层有佐证才自动动库;
+# 佐证不足 → 降级 extends 升 H2A 卡(LLM 一家之言不许直接改护城河资产)。
+_DUPLICATE_AUTO_MIN_SCORE = 2.0
 
 
 def parse_supersede_pairs(text: str, n_new: int, n_old: int) -> list[dict]:
@@ -150,7 +165,7 @@ def parse_supersede_pairs(text: str, n_new: int, n_old: int) -> list[dict]:
         if not isinstance(p, dict):
             continue
         rel = str(p.get("relation", "")).strip().lower()
-        if rel not in ("contradict", "update"):
+        if rel not in ("contradict", "update", "duplicate", "extends"):
             continue   # unrelated / 编造关系 → 不动
         try:
             ni, oi = int(p.get("new")), int(p.get("old"))
@@ -159,18 +174,18 @@ def parse_supersede_pairs(text: str, n_new: int, n_old: int) -> list[dict]:
         if not (0 <= ni < n_new and 0 <= oi < n_old) or (ni, oi) in seen:
             continue   # 编号越界/重复 → 丢
         seen.add((ni, oi))
-        out.append({"new": ni, "old": oi, "relation": rel})
+        item = {"new": ni, "old": oi, "relation": rel}
+        if rel == "extends":
+            m = p.get("merged")
+            item["merged"] = m.strip()[:2000] if isinstance(m, str) else ""
+        out.append(item)
     return out
 
 
-def find_supersede_candidates(new_content: str, olds: list, *, top_k: int = _SUPERSEDE_TOP_K,
-                              concepts: Optional[list] = None) -> list[int]:
-    """用**已有召回栈**(overlap_score 词面+CJK bigram;有缓存概念标签再加语义重叠)
-    找与新条最相似的旧条下标,按分降序取 top_k。零命中 → [](零 LLM)。**无向量**(铁律)。
-
-    标签命中规则共用 `graph.count_tag_hits`(与召回种子③同一条,别漂移)。旧版
-    `tags & _tokens(new_content)` 要求标签**恰好等于**一个 bigram/整词 —— 多字 CJK 标签
-    (如"夜间模式")永远不等于 2 字 bigram,语义层形同虚设(独立对抗验收揪出)。"""
+def _scored_supersede_candidates(new_content: str, olds: list,
+                                 concepts: Optional[list] = None) -> list[tuple[float, int]]:
+    """候选打分(降序 (score, idx) 列表):overlap 词面+CJK bigram 双向取大,+2.0×概念标签命中。
+    这个分同时是 duplicate 自动合并的**高置信佐证**(_DUPLICATE_AUTO_MIN_SCORE 用它把关)。"""
     from karvyloop.context.relevance import overlap_score
     from karvyloop.cognition.graph import _tokens, count_tag_hits
     new_keys = _tokens(new_content or "")
@@ -188,23 +203,38 @@ def find_supersede_candidates(new_content: str, olds: list, *, top_k: int = _SUP
         if s > 0:
             scored.append((s, j))
     scored.sort(key=lambda x: (-x[0], x[1]))
+    return scored
+
+
+def find_supersede_candidates(new_content: str, olds: list, *, top_k: int = _SUPERSEDE_TOP_K,
+                              concepts: Optional[list] = None) -> list[int]:
+    """用**已有召回栈**(overlap_score 词面+CJK bigram;有缓存概念标签再加语义重叠)
+    找与新条最相似的旧条下标,按分降序取 top_k。零命中 → [](零 LLM)。**无向量**(铁律)。
+
+    标签命中规则共用 `graph.count_tag_hits`(与召回种子③同一条,别漂移)。旧版
+    `tags & _tokens(new_content)` 要求标签**恰好等于**一个 bigram/整词 —— 多字 CJK 标签
+    (如"夜间模式")永远不等于 2 字 bigram,语义层形同虚设(独立对抗验收揪出)。"""
+    scored = _scored_supersede_candidates(new_content, olds, concepts)
     return [j for _, j in scored[:max(0, top_k)]]
 
 
 async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                              model_ref: str = "", now: Optional[float] = None,
-                             top_k: int = _SUPERSEDE_TOP_K) -> dict:
+                             top_k: int = _SUPERSEDE_TOP_K, trace: Any = None) -> dict:
     """写入后 supersede 一轮:新条 vs 库里相似旧条,矛盾/更新 → 打失效标记(**失效不删**)。
 
     - 候选=已有召回栈(overlap+概念标签)top-k;**没有候选就不调 LLM**(零成本快路径)。
     - 一次便宜 LLM 调用判整批;解析**宁空勿毒**(失败=当无关,原库不动)。
     - `provenance_rank` 把关:rank(新) >= rank(旧) → 旧条失效;rank(新) < rank(旧) →
       **新条反被打失效**(蒸馏猜的掀不翻人明说的),两条都留库可审计。
+    - 摄入调和(同一次调用,不加次数):duplicate 高置信 → 自动合并(失效不删输方,审计痕
+      invalid_reason + Trace);extends / 低置信 duplicate → 收进返回值 `extends`,console 升卡。
     - 任何异常吞掉只打日志(写入主流程不因审查挂掉),返回摘要 dict。
     """
     if now is None:
         now = time.time()
-    empty = {"checked": 0, "invalidated_old": 0, "invalidated_new": 0, "pairs": []}
+    empty = {"checked": 0, "invalidated_old": 0, "invalidated_new": 0,
+             "auto_merged": 0, "extends": [], "pairs": []}
     news = [b for b in (new_beliefs or []) if getattr(b, "content", "").strip()]
     if not news or mem is None or gateway is None:
         return empty
@@ -239,11 +269,14 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                 old_concepts = [cc.tags_for(getattr(b, "content", "") or "") for b in olds]
             except Exception:
                 old_concepts = None
-        # 每条新知识取 top-k 相似旧条;并集封顶 _SUPERSEDE_MAX_OLD(一次 LLM 判整批)
+        # 每条新知识取 top-k 相似旧条;并集封顶 _SUPERSEDE_MAX_OLD(一次 LLM 判整批)。
+        # 顺手留每对的确定性相似分(pair_score)—— duplicate 自动合并的高置信门用它把关。
         cand_idx: list[int] = []
-        for nb in news:
-            for j in find_supersede_candidates(nb.content, olds, top_k=top_k,
-                                               concepts=old_concepts):
+        pair_score: dict = {}   # (new_idx, old_pool_idx) → score
+        for ni, nb in enumerate(news):
+            for s, j in _scored_supersede_candidates(nb.content, olds,
+                                                     old_concepts)[:max(0, top_k)]:
+                pair_score[(ni, j)] = s
                 if j not in cand_idx:
                     cand_idx.append(j)
         cand_idx = cand_idx[:_SUPERSEDE_MAX_OLD]
@@ -252,13 +285,49 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
         cands = [olds[j] for j in cand_idx]
         out = await _judge(news, cands, gateway=gateway, model_ref=model_ref)
         pairs = parse_supersede_pairs(out, len(news), len(cands))
-        inv_old = inv_new = 0
+        inv_old = inv_new = auto_merged = 0
         applied: list[dict] = []
+        extends_out: list[dict] = []
         for p in pairs:
             nb, ob = news[p["new"]], cands[p["old"]]
+            rel = p["relation"]
+            if rel == "extends":
+                # 加信息的合并不自动动库:收给 console 升 H2A 卡(ACCEPT 才 apply_belief_merge)
+                extends_out.append(_extends_record(nb, ob, p.get("merged", "")))
+                continue
             if getattr(ob, "invalid_at", None) is not None:
                 continue   # 同批里已被失效过
-            rel = p["relation"]
+            if rel == "duplicate":
+                score = pair_score.get((p["new"], cand_idx[p["old"]]), 0.0)
+                if score < _DUPLICATE_AUTO_MIN_SCORE:
+                    # LLM 判 duplicate 但词面/标签佐证不足 → 不够高置信,降级升卡(不自动动库)
+                    extends_out.append(_extends_record(nb, ob, ""))
+                    continue
+                # 高置信自动合并:信息量相同,不需要写合并条 —— 失效不删输的一方即是合并
+                # (审计痕:invalid_reason 全文可查 + Trace belief_auto_merged;两条都留库可翻案)
+                if provenance_rank(nb.provenance) >= provenance_rank(ob.provenance):
+                    winner, loser = nb, ob
+                    inv_old += 1
+                else:
+                    winner, loser = ob, nb
+                    inv_new += 1
+                reason = (f"duplicate(auto-merged): same assertion as "
+                          f"[{(winner.provenance or {}).get('source', '?')}]: {winner.content[:80]}")
+                ok = mem.invalidate(loser, reason=reason, now=now)
+                auto_merged += 1
+                applied.append({"loser": loser.content[:60], "winner": winner.content[:60],
+                                "relation": rel, "auto_merged": True, "persisted": bool(ok)})
+                if trace is not None:
+                    try:
+                        from karvyloop.cognition.trace import TraceEntry
+                        trace.append(TraceEntry(
+                            task_id="memory_reconcile", kind="belief_auto_merged",
+                            payload={"loser": loser.content[:120], "winner": winner.content[:120],
+                                     "score": score, "persisted": bool(ok)},
+                            source="conflict"))
+                    except Exception:
+                        pass
+                continue
             if provenance_rank(nb.provenance) >= provenance_rank(ob.provenance):
                 # 新条权威不低于旧条 → 旧条失效(Graphiti 式失效不删)
                 reason = (f"superseded({rel}) by newer belief "
@@ -276,11 +345,24 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                 applied.append({"loser": nb.content[:60], "winner": ob.content[:60],
                                 "relation": rel, "persisted": bool(ok)})
         return {"checked": len(cands), "invalidated_old": inv_old,
-                "invalidated_new": inv_new, "pairs": applied}
+                "invalidated_new": inv_new, "auto_merged": auto_merged,
+                "extends": extends_out, "pairs": applied}
     except Exception as e:
         # 审查是增益不是命脉:失败绝不拖垮写入主流程,也绝不半判乱改库
         logger.warning(f"[conflict] supersede 审查失败(原库不动): {e}")
         return empty
+
+
+def _extends_record(nb: Belief, ob: Belief, merged: str) -> dict:
+    """extends / 低置信 duplicate 的升卡素材(console 用它建 merge_knowledge 卡)。
+    merged 空 → console 侧用确定性拼接兜底(两条原文都在库里,拼接不投毒)。"""
+    return {
+        "old": getattr(ob, "content", "") or "",
+        "new": getattr(nb, "content", "") or "",
+        "merged": (merged or "").strip()[:2000],
+        "old_title": (getattr(ob, "provenance", {}) or {}).get("title", ""),
+        "new_title": (getattr(nb, "provenance", {}) or {}).get("title", ""),
+    }
 
 
 def _is_decision_pref(b: Belief) -> bool:
@@ -321,4 +403,4 @@ __all__ = [
     "ConflictReport", "resolve", "detect_conflict",
     "SUPERSEDE_SYSTEM", "parse_supersede_pairs", "find_supersede_candidates",
     "run_supersede_pass",
-]
+]   # _scored_supersede_candidates/_extends_record 是内部件,不出模块
