@@ -12,6 +12,39 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **`[asr]` extra — meeting recordings become minutes, locally.** Audio files (mp3/wav/m4a) now
+  ride the same attachment pipeline as PDFs: upload → transcribed on-device → the text flows into
+  the existing channels (files-panel preview, `read_file` for roles, the meeting-notes skill).
+  Selection was a real bake-off (verdict in the internal docs): **faster-whisper** (MIT,
+  CTranslate2) wins on pip-only install (bundled PyAV — no system ffmpeg), CPU int8 viability,
+  one model for zh+en, and active maintenance; SenseVoice (stronger Chinese, custom model license,
+  manual model download) is recorded as the challenger. Honesty is wired in: the speech model is
+  **not** in the wheel (first use downloads it — default `small` ≈480 MB, `KARVYLOOP_ASR_MODEL` to
+  choose); fake-extension/corrupt audio is refused empty with a clear error (never garbage in the
+  context); a failed model download reports "model load failed", not "your file is broken"; and
+  without the extra, audio returns a clear install hint — the meeting-notes skill's contract now
+  says "audio via optional `[asr]`" instead of over-promising ASR. Unlock panel got the 🎙️ row
+  (status + the honest model-download note), i18n en+zh.
+- **Residents fed more method, not more answers.** The File Butler's method library grew the
+  parts a real butler is judged on: the full duplicate decision order (size → hash →
+  "same name, different hash = versions, not duplicates"), a hot/cold archiving default
+  (~180 days untouched → `Archives/<year>/`, finance files exempt by rule not by timer),
+  per-file-type conventions (screenshots by month, installers as 30-day deletion candidates,
+  camera filenames kept), and an explicit "never silent" operations list — all in the skill +
+  seeded into the resident's memory as *candidates to confirm, not facts about the owner*.
+  meeting-notes gained per-meeting-type templates (weekly sync leads with last week's items,
+  reviews lead with the verdict, 1-on-1s record outcomes not personal discussion, brainstorms
+  keep ideas ungraded), a SMART bar for action items, a decided-by/basis/options decision-record
+  block, and glossary entries shown as *clearly-marked fictional examples* — shapes to imitate,
+  never content to copy in.
+- **📚 study-buddy system skill** (pure asset, third alongside data-analyst/meeting-notes; the
+  resident role comes later): retrieval-first studying grounded in the two techniques rated
+  high-utility by the evidence (practice testing + distributed practice, Dunlosky et al. 2013) —
+  quiz from the learner's own material, an SM-2-lineage review ladder (1→3→7→14→30 days),
+  Feynman teach-back, Cornell cues, Bloom's ladder for question depth. Answers are graded
+  against the material ("your notes don't settle this — check the source" is a valid grade),
+  and the growth story is a **human-owned study ledger** template (intervals stretching + old
+  mistakes not resurfacing = the progress report; no invented mastery percentages).
 - **Residents: the empty house gets its first tenant.** A fresh install used to greet you with an
   empty role library. Now, on the first visit with zero roles, Karvy raises a **referral decision
   card** introducing the first resident — the **📁 File Butler** — and nothing happens until you

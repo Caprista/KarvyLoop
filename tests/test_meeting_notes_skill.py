@@ -2,8 +2,8 @@
 
 照 data-analyst 召回测试形制锁三件事:
 1. 中/英会议意图 → recall 真命中 meeting-notes;无关意图不命中;不与其他系统技能互抢。
-2. 资产诚实:输入=文字稿(不承诺 ASR/录音转写);方法=三分栏(决策/行动项/待确认)+
-   who/what/when + 术语表门(查不到标待确认,绝不臆造)。
+2. 资产诚实:输入=文字稿;音频只经可选 [asr] extra 本地转写(装了才支持,不装不假装);
+   方法=三分栏(决策/行动项/待确认)+ who/what/when + 术语表门(查不到标待确认,绝不臆造)。
 3. human-owned 术语表模板随包(会议域的语义层;成长故事=文件变长,零假指标)。
 """
 from __future__ import annotations
@@ -78,9 +78,11 @@ def test_skill_asset_honest_and_methodical():
     assert (fm.raw or {}).get("source") == "system"
     assert fm.result_reuse == "dynamic", "纪要必须每次重跑(存方法不存答案)"
     assert fm.tags, "召回靠 tags(中英双语)"
-    # 诚实输入契约:吃文字稿,不承诺转写音频
+    # 诚实输入契约:吃文字稿;音频**只经可选本地 ASR extra**(装了才支持,不装不假装)
     assert "transcript" in body
-    assert "does **not** transcribe audio" in body, "必须白纸黑字写明不做 ASR"
+    assert 'karvyloop[asr]' in body, "音频支持必须指向可选 [asr] extra,不许无条件承诺"
+    assert "optional local-ASR extra" in body, "必须白纸黑字写明 ASR 是可选项"
+    assert "fabricated minutes" in body, "不装 extra 时假装听过录音=编造纪要,红线要在"
     # 方法要素:三分栏 + who/what/when + 术语表门
     for marker in ("Decisions", "Action items", "who / what / by-when",
                    "needs confirmation", "glossary"):

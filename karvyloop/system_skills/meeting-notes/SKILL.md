@@ -1,13 +1,13 @@
 ---
 name: meeting-notes
-description: Turn a meeting transcript into minutes people can act on — decisions with who-decided-and-why, action items as who/what/by-when, open questions kept separate, and unknown terms checked against the team's human-owned glossary instead of guessed. Input is text (a transcript or notes you already have); this skill does not transcribe audio. A system template — ships with the product, never deleted by a data reset.
-version: "1.0"
+description: Turn a meeting transcript into minutes people can act on — decisions with who-decided-and-why, action items as who/what/by-when, open questions kept separate, and unknown terms checked against the team's human-owned glossary instead of guessed. Input is text (a transcript or notes you already have); audio recordings (mp3/wav/m4a) work too once the optional local-ASR extra is installed — transcribed on-device, then the same path. A system template — ships with the product, never deleted by a data reset.
+version: "1.1"
 signature: system:meeting-notes
 source: system
 scope: user
 result_reuse: dynamic
-when_to_use: When the user pastes or points to a meeting transcript / rough notes and wants structured minutes, action items, or decision records. 当需要把会议文字稿/转写稿/粗记录整理成会议纪要、提取行动项和决策、生成会议总结时(输入是文字,不做录音转写)。
-tags: [会议, 纪要, 会议纪要, 会议记录, 行动项, 待办, 决策记录, 转写稿, 文字稿, 例会, 周会, 复盘, 会议总结, meeting, meetings, minutes, meeting notes, action items, transcript, notes, summary, decisions, follow-up, standup, retro]
+when_to_use: When the user pastes or points to a meeting transcript / rough notes / meeting recording and wants structured minutes, action items, or decision records. 当需要把会议文字稿/转写稿/粗记录/会议录音整理成会议纪要、提取行动项和决策、生成会议总结时(录音转写需装可选 [asr])。
+tags: [会议, 纪要, 会议纪要, 会议记录, 行动项, 待办, 决策记录, 转写稿, 文字稿, 录音, 音频, 转写, 例会, 周会, 复盘, 会议总结, meeting, meetings, minutes, meeting notes, action items, transcript, notes, summary, decisions, follow-up, standup, retro, recording, audio]
 allowed-tools:
   - read_file
 ---
@@ -22,8 +22,12 @@ not a canned answer.
 
 **Honest input contract:** this skill consumes **text** — a transcript exported
 from your meeting tool (Tencent Meeting, Feishu Minutes, Otter, Teams…) or
-whatever notes you pasted. It does **not** transcribe audio; there is no ASR in
-this system today, and pretending otherwise would produce fabricated minutes.
+whatever notes you pasted. Audio recordings (mp3/wav/m4a) are supported **only
+via the optional local-ASR extra** (`pip install "karvyloop[asr]"`, built on
+faster-whisper): the recording is transcribed **on this machine** — nothing is
+uploaded, and the first use downloads a speech model — then the text enters
+this same pipeline. Without that extra installed, audio is declined honestly;
+pretending to have heard a recording would produce fabricated minutes.
 
 ## The accountability rule
 
@@ -54,7 +58,11 @@ notes guidance):
 2. **Extract per topic, into the three buckets.** For each decision: who
    decided + the reason given in the room (quote or close paraphrase, with the
    speaker). For each action item: who / what / by-when — flag any missing
-   element. Also collect explicitly raised risks.
+   element. Also collect explicitly raised risks. Quality bar for both —
+   SMART-shaped action items (one named owner, verifiable outcome, real date)
+   and the decision-record block (decided-by / basis / options-considered) —
+   is in `references/minutes-templates.md`; rewrite toward it **only from what
+   was actually said**, and flag whatever you had to assume.
 
 3. **Check unknown terms against the glossary — never expand by guessing.**
    The team's term sheet is the filled-in copy of
@@ -66,7 +74,12 @@ notes guidance):
 4. **Output markdown in the user's preferred shape.** Default order: header
    (meeting, date, attendees if known) → decisions → action items (a table:
    who | what | by-when | status) → open questions → appendix of flagged
-   terms. If the user has a fixed template, theirs wins.
+   terms. Meeting types reshape the surroundings, not the buckets: a weekly
+   sync leads with last week's action items, a review leads with the verdict,
+   a 1-on-1 records outcomes not personal discussion, a brainstorm keeps ideas
+   ungraded and an honestly-empty Decisions bucket — per-type templates in
+   `references/minutes-templates.md`. If the user has a fixed template,
+   theirs wins over all of these.
 
 5. **After the meeting: propose sediment, don't silently write.** New terms
    (once the human confirms an expansion) are candidates for the glossary; new
@@ -78,8 +91,12 @@ notes guidance):
 
 Transcript too garbled to attribute speakers? Say so and produce what is
 extractable, with attribution marked "unclear" — do not assign quotes to
-guessed speakers. Asked to work from an audio file? Decline honestly: point
-the user to their meeting tool's export, then continue from that text.
+guessed speakers. Asked to work from an audio file? With the `[asr]` extra
+installed, read it like any attachment — the transcription happens locally and
+carries `[mm:ss]` marks but **no speaker labels**, so attribute only what the
+words themselves make clear. Without the extra, decline honestly: point the
+user to `pip install "karvyloop[asr]"` or their meeting tool's export, then
+continue from text.
 
 ## What crystallizes
 

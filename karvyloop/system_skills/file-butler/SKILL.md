@@ -1,7 +1,7 @@
 ---
 name: file-butler
 description: Tidy personal folders safely with a preview-first method — read-only inventory, a dry-run proposal grounded in the user's own filing preferences, explicit human confirmation before anything moves (backup before any delete), then execution with a receipt. A system template for file organization — ships with the product, never deleted by a data reset.
-version: "1.0"
+version: "1.1"
 signature: system:file-butler
 source: system
 scope: user
@@ -53,6 +53,17 @@ or whether it is junk.
   (e.g. `sha1sum`/`md5sum` via run_command) is the *fact*. Browser-created
   `name (1).ext` copies are candidates only until hashes match. Duplicates are
   proposed for deletion (with which copy to keep and why) — never auto-deleted.
+  Full decision order (size → hash → content-difference, with thresholds and
+  the versions-vs-duplicates distinction) is in `references/filing-methods.md`.
+- **Archiving by last use** (hot/cold): untouched for ~180 days and not on the
+  never-touch list → propose moving to `Archives/<year>/`. The timer is a
+  default, not a law — finance/legal files follow the user's rules, not the
+  clock. Archive moves are reversible by design; deletions never ride along in
+  an archive batch. Completed projects archive as a whole folder.
+- **Per-type conventions** (defaults; the user's rules outrank): screenshots →
+  monthly archive folders; installers → deletion candidates ~30 days after
+  install; finance documents → never auto-delete at any age; camera photos →
+  keep original filenames. Full table in `references/filing-methods.md`.
 
 ## Procedure — do not skip steps
 
@@ -85,6 +96,15 @@ or whether it is junk.
    lost**: every inventoried file exists in a planned destination (or backup).
    The receipt lists: moved / renamed / skipped (and why) / new preference
    candidates.
+
+## Operations that always need the human (no exceptions)
+
+Any deletion (backup first, every time — "obvious junk" included); overwriting
+an existing file on move or rename (stop and ask, never clobber); batch renames
+(full before→after list first — a wrong pattern applied 200 times is 200
+mistakes); anything on the never-touch list; anything outside the whitelist;
+hidden files, system folders and application data (out of scope by definition).
+If a plan needs one of these without a confirmation step, the plan is wrong.
 
 ## When you cannot proceed
 
