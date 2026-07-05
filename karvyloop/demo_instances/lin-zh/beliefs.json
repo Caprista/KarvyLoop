@@ -1,149 +1,130 @@
 [
   {
-    "content": "AI 编码代理能力越强,资深工程师的审查负担反而越重:生成 1000 行代码只需约 3 分钟,而读懂并为其负责却需要约 3 小时,生产力的瓶颈从『写』转移到了『信』环节。",
+    "content": "一种可复用的AI协作流程:由AI代理生成内容,第二个代理做对抗式验收,人类只看验收结论并裁决,把人的角色从执行者上移到裁决者。",
     "provenance": {
       "source": "fed",
       "agent": "user",
       "ts": 1782607200.1399999,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "AI 编码代理的生产力悖论",
+      "title": "三段式AI工作流模式",
       "source_ref": "text:48edf9878db3ac15"
     },
     "freshness_ts": 1782607200.1399999,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1782790800.02,
+    "recall_count": 6
+  },
+  {
+    "content": "短视频平台推荐算法中存在反向定价现象:即时满足内容单位时间广告价值高,但用户长期留存低;深度内容完播率低,却带来 3 倍以上的次月留存,长期用户价值反而更高。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1782693300.2199998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "注意力经济的反向定价现象",
+      "source_ref": "text:b002196a6a693a6b"
+    },
+    "freshness_ts": 1782693300.2199998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
     "last_recalled_ts": 1783041000.02,
-    "recall_count": 10
-  },
-  {
-    "content": "应对 AI 代理产出的常用工作流是三层结构:代理 A 执行写码 → 代理 B 进行对抗式验收 → 人类只看验收结论并签收,人类角色从『逐行审查』降级为『终审签收人』。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782607200.1399999,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "代理对抗式验收三层流程",
-      "source_ref": "text:48edf9878db3ac15"
-    },
-    "freshness_ts": 1782607200.1399999,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783049400.02,
-    "recall_count": 3
-  },
-  {
-    "content": "在 AI 代理普及后,真正稀缺的资源不再是产能,而是可以问责的信任链(accountability chain)——即谁来为 AI 产出负责、如何验证其正确性。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782607200.1399999,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "稀缺资源从产能转向信任链",
-      "source_ref": "text:48edf9878db3ac15"
-    },
-    "freshness_ts": 1782607200.1399999,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783153200.04,
-    "recall_count": 8
-  },
-  {
-    "content": "AI 编码代理在过去一年经历了从『补全工具(Copilot 式)』到『独立执行者(agent 式,能端到端完成任务)』的能力跃迁,带来新的工作流挑战。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782607200.1399999,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "AI 编码代理的两阶段进化",
-      "source_ref": "text:48edf9878db3ac15"
-    },
-    "freshness_ts": 1782607200.1399999,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782890400.02,
-    "recall_count": 10
-  },
-  {
-    "content": "当反向定价被识别后,平台可能从依赖广告单价转向为深度/慢内容提供补贴,以换取更高的用户长期留存价值,形成下一阶段的商业模式。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782693300.1599998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "慢内容的平台补贴趋势",
-      "source_ref": "text:b002196a6a693a6b"
-    },
-    "freshness_ts": 1782693300.1599998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783128000.04,
     "recall_count": 11
   },
   {
-    "content": "超市把利润最薄的牛奶放在卖场最深处,迫使顾客穿过整个卖场顺带购买其他商品;该动线设计可类比平台用补贴慢内容来拉动整体用户停留与变现。",
+    "content": "即时满足内容与慢内容在算法目标函数里正相反,本质是短期单位广告价值(eCPM)与长期用户生命周期价值(LTV)的权衡,二者不是简单的好坏关系,而是不同时间尺度上的价值取舍。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1782693300.1599998,
+      "ts": 1782693300.2199998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "超市牛奶动线类比",
+      "title": "短期单价与长期 LTV 的权衡",
       "source_ref": "text:b002196a6a693a6b"
     },
-    "freshness_ts": 1782693300.1599998,
+    "freshness_ts": 1782693300.2199998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1782779400.02,
-    "recall_count": 2
+    "last_recalled_ts": 1782977400.04,
+    "recall_count": 5
   },
   {
-    "content": "「短期广告价值 vs 用户 LTV 倒挂」是一个可跨场景复用的分析框架,适用于短视频、信息流、新闻、播客等内容型产品的价值评估与策略判断。",
+    "content": "高完播率不等于高用户价值:评估内容或推荐系统时,不能孤立看完播率,必须绑定次月留存、T+30 留存或 LTV 等长期指标,才能反映真实价值。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1782693300.1599998,
+      "ts": 1782693300.2199998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "短期广告价值与LTV倒挂框架",
+      "title": "完播率需绑定留存才有意义",
       "source_ref": "text:b002196a6a693a6b"
     },
-    "freshness_ts": 1782693300.1599998,
+    "freshness_ts": 1782693300.2199998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783041000.02,
-    "recall_count": 9
+    "last_recalled_ts": 1782977400.04,
+    "recall_count": 6
   },
   {
-    "content": "2025 年多份远程工作报告显示,数字游民的平均停留周期从 6 个月缩短到 6 周,反映该生活方式正经历祛魅。",
+    "content": "推荐算法设计应加入 T+30 留存、长期 LTV 等延迟指标的权重,而非仅依赖 CTR、完播率等即时反馈指标,以避免算法被短期高单价、低留存的内容绑架。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1782779400.1599998,
+      "ts": 1782693300.2199998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "数字游民停留周期变化",
+      "title": "推荐系统的长期指标加权",
+      "source_ref": "text:b002196a6a693a6b"
+    },
+    "freshness_ts": 1782693300.2199998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1782977400.04,
+    "recall_count": 7
+  },
+  {
+    "content": "产能(代码行数、即时产出)可以即时计量,但长期维护成本与责任无法即时体现,这是各领域普遍存在的反向定价问题,需要用对抗式验收或人类裁决等慢审查机制为长期可靠性争取补贴。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1782693300.2199998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "短期产出与长期责任的反向定价",
+      "source_ref": "text:b002196a6a693a6b"
+    },
+    "freshness_ts": 1782693300.2199998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1782790800.02,
+    "recall_count": 4
+  },
+  {
+    "content": "2025 年多份远程工作报告显示,数字游民的平均停留周期从 6 个月缩短到 6 周,『游民倦怠』搜索量翻了 4 倍,『边冲浪边写代码』的浪漫叙事正在退潮。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1782779400.2199998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "数字游民叙事在 2025 年退潮",
       "source_ref": "text:7173f1a103e07fa2"
     },
-    "freshness_ts": 1782779400.1599998,
+    "freshness_ts": 1782779400.2199998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
@@ -152,148 +133,36 @@
     "recall_count": 7
   },
   {
-    "content": "2025 年『游民倦怠』(nomad burnout)相关搜索量翻了 4 倍,说明该问题已从少数人现象扩散为普遍体验。",
+    "content": "环境的新鲜感和认知的深度是此消彼长的关系:不断更换地点带来的新鲜感越高,投入深度工作所需的持续专注越难建立。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1782779400.1599998,
+      "ts": 1782779400.2199998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "游民倦怠搜索量飙升",
+      "title": "环境新鲜感与认知深度此消彼长",
       "source_ref": "text:7173f1a103e07fa2"
     },
-    "freshness_ts": 1782779400.1599998,
+    "freshness_ts": 1782779400.2199998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1782912000.04,
-    "recall_count": 4
+    "last_recalled_ts": 1783059600.04,
+    "recall_count": 7
   },
   {
-    "content": "深度工作需要『无聊的稳定』环境,频繁更换地点带来的新鲜感会削弱认知深度,二者呈此消彼长的零和关系。",
+    "content": "深度工作需要『无聊的稳定』作为前提条件,最早一批数字游民回流固定城市,真正动因是认知层面的专注需求,而非情感层面的想家。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1782779400.1599998,
+      "ts": 1782779400.2199998,
       "trace_ref": "",
       "kind": "knowledge",
       "title": "深度工作需要无聊的稳定",
       "source_ref": "text:7173f1a103e07fa2"
     },
-    "freshness_ts": 1782779400.1599998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782912000.04,
-    "recall_count": 4
-  },
-  {
-    "content": "环境新鲜感和认知深度是此消彼长的零和关系——这条原则可迁移到『频繁跳槽或频繁切换项目是否削弱深度能力』等问题。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782779400.1599998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "环境新鲜感与认知深度零和",
-      "source_ref": "text:7173f1a103e07fa2"
-    },
-    "freshness_ts": 1782779400.1599998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782866700.04,
-    "recall_count": 3
-  },
-  {
-    "content": "成熟的自由定义是『可以自己选择的规律』,而非无锚点的漂泊——摆脱约束不等于获得自由。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782779400.1599998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "自由是可选择的规律",
-      "source_ref": "text:7173f1a103e07fa2"
-    },
-    "freshness_ts": 1782779400.1599998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782801600.04,
-    "recall_count": 2
-  },
-  {
-    "content": "判断一个被炒作概念进入祛魅阶段的三指标:停留周期缩短 + 相关问题搜索量飙升 + 早期实践者主动回流,三者同时出现即叙事退潮。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782779400.1599998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "被炒作概念的祛魅三指标",
-      "source_ref": "text:7173f1a103e07fa2"
-    },
-    "freshness_ts": 1782779400.1599998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782952500.02,
-    "recall_count": 3
-  },
-  {
-    "content": "最早一批数字游民主动回归固定城市,驱动力是深度认知需求,而非乡愁或社交压力。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782779400.1599998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "数字游民回流非因乡愁",
-      "source_ref": "text:7173f1a103e07fa2"
-    },
-    "freshness_ts": 1782779400.1599998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782801600.4799995,
-    "recall_count": 3
-  },
-  {
-    "content": "用户今晚在读刘易斯·芒福德《技术与文明》,目前已读到第三章和第四章,会自己做笔记后让助手据此出理解题",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1782801600.12,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1782801600.12,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783128000.04,
-    "recall_count": 11
-  },
-  {
-    "content": "用户有一份名为『小林撰稿工作室』的业务,涉及《注意力经济》《数字游民的祛魅》等选题",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1782801600.12,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1782801600.12,
+    "freshness_ts": 1782779400.2199998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
@@ -302,243 +171,129 @@
     "recall_count": 5
   },
   {
-    "content": "用户在《技术与文明》第三章笔记里记录了芒福德『时钟而非蒸汽机才是工业时代关键机器』『技术社会后果往往来自不起眼的发明』两个核心观点",
+    "content": "自由的尽头不是无约束的流浪,而是可以自己选择的规律——把『自由』重新定义为对规律的自主选择权,而不是对约束的彻底摆脱。",
     "provenance": {
-      "source": "conversation",
+      "source": "fed",
       "agent": "user",
-      "ts": 1782801600.12,
+      "ts": 1782779400.2199998,
       "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
+      "kind": "knowledge",
+      "title": "自由的尽头是可自己选择的规律",
+      "source_ref": "text:7173f1a103e07fa2"
     },
-    "freshness_ts": 1782801600.12,
+    "freshness_ts": 1782779400.2199998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783153200.04,
+    "last_recalled_ts": 1783059600.04,
     "recall_count": 5
   },
   {
-    "content": "用户在第四章笔记里记录了芒福德『始技术/古技术/新技术』三阶段(水与木/煤与铁/电与合金)及『材料史即文明史』的论点",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1782801600.12,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1782801600.12,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782912000.04,
-    "recall_count": 3
-  },
-  {
-    "content": "在算法驱动的短视频/信息流平台中,广告单价(短期价值)与用户长期留存价值出现倒挂——即时满足内容短期广告价值高但留存低,深度内容完播率低却带来高次月留存。完播率高并不意味着用户长期留存高;即时满足型内容虽能拉高单次广告价值,却会拉低用户的长期 LTV,二者是相互独立的指标。其根源在于当前主流推荐算法以单次互动和完播率为主要信号,系统性偏向即时满足内容,导致平台广告定价与用户长期价值之间产生结构性失衡。",
+    "content": "注意力经济下半场,短视频平台会被迫为慢内容(深度内容)发放补贴,逻辑是从最大化即时广告eCPM转向提升长期用户留存,这一转向是被数据反向定价逼出来的。慢内容在内容组合中扮演引流品角色,类似超市把利润最薄的牛奶放在卖场最深处:用户为获取低利润商品被迫穿过高利润商品区,慢内容拉动整体留存,即时满足内容贡献利润。这是可迁移到内容平台、零售业动线设计、推荐系统补贴等多种场景的策略框架:用低毛利引流品吸引流量,搭配高毛利利润品实现整体盈利。",
     "provenance": {
       "source": "consolidated",
       "agent": "user",
-      "ts": 1782801602.3199978,
+      "ts": 1782808201.099999,
       "kind": "knowledge",
-      "title": "推荐算法下短期价值与长期留存倒挂"
+      "title": "慢内容作为引流品的补贴策略"
     },
-    "freshness_ts": 1782801602.3199978,
+    "freshness_ts": 1782808201.099999,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783128000.04,
+    "last_recalled_ts": 1783153200.02,
+    "recall_count": 10
+  },
+  {
+    "content": "开源大模型的真实落地账单中,模型权重下载本身只占约 18%,推理算力、微调数据清洗与安全对齐三项隐性环节合计吃掉约 82% 的总成本。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1782866700.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "开源 LLM 成本结构",
+      "source_ref": "text:f76f83512c74a7f0"
+    },
+    "freshness_ts": 1782866700.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1782998700.04,
     "recall_count": 6
   },
   {
-    "content": "开源大模型权重可免费下载,但企业落地真实成本中,推理算力、微调数据清洗和安全对齐合计占总成本约 82%,显性 license 成本远不能反映 TCO。",
+    "content": "开源模型像送你一头免费的大象:象(模型权重)免费,但象房(托管基础设施)、象粮(推理算力与训练数据)、驯象师(工程与运维人力)都要使用者自行承担。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1782866700.1799998,
+      "ts": 1782866700.1599998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "开源模型成本结构",
+      "title": "免费大象比喻",
       "source_ref": "text:f76f83512c74a7f0"
     },
-    "freshness_ts": 1782866700.1799998,
+    "freshness_ts": 1782866700.1599998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783041000.02,
-    "recall_count": 3
-  },
-  {
-    "content": "当某一环节成本被 AI/工具降到接近零后,瓶颈会自动迁移到下一个相邻环节(如从模型训练迁移到运维、合规、信任验证),该规律已在编码和模型落地领域复现。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782866700.1799998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "AI 时代瓶颈迁移规律",
-      "source_ref": "text:f76f83512c74a7f0"
-    },
-    "freshness_ts": 1782866700.1799998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782890400.02,
-    "recall_count": 2
-  },
-  {
-    "content": "在大模型领域,竞争壁垒已从『有没有模型』迁移到『养不养得起模型』,核心能力变成持续承担推理、对齐、数据与人才等运营成本。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782866700.1799998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "竞争壁垒迁移到养模型",
-      "source_ref": "text:f76f83512c74a7f0"
-    },
-    "freshness_ts": 1782866700.1799998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782890400.02,
-    "recall_count": 2
-  },
-  {
-    "content": "评估自建开源模型还是采购闭源 API 时,需按 TCO 估算算力、数据清洗、对齐和人才四项成本,小团队往往因养不起而被推向直接调用 API。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782866700.1799998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "自建 vs API 的 TCO 决策框架",
-      "source_ref": "text:f76f83512c74a7f0"
-    },
-    "freshness_ts": 1782866700.1799998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782890400.02,
-    "recall_count": 2
-  },
-  {
-    "content": "开源模型常被比喻为『送你一头免费的大象』:象体(权重)免费,但象房(基础设施)、象粮(数据)、驯象师(人才)都由使用者承担,形象说明隐性成本。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782866700.1799998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "开源大象成本比喻",
-      "source_ref": "text:f76f83512c74a7f0"
-    },
-    "freshness_ts": 1782866700.1799998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1782890400.02,
-    "recall_count": 2
-  },
-  {
-    "content": "动笔写稿之前必须先有定稿的选题/提纲;没有定选题的方向时不要直接转给写作助手开写。",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1782801602.3999977,
-      "kind": "constraint",
-      "evidence": [
-        {
-          "ts": 1782705000.1999998,
-          "decision": "REJECT",
-          "gist": "选题还没定稿,没定选题之前不要直接动笔写稿;先给我选题方向。"
-        },
-        {
-          "ts": 1782801600.4399996,
-          "decision": "ACCEPT",
-          "gist": "把「让写作助手给《数字游民的祛魅》写一段 300 字的开头初稿,按上午定的提纲来。」转给业务域「小林撰稿工作室」的「写作"
-        },
-        {
-          "ts": 1782801602.2799978,
-          "decision": "ACCEPT",
-          "gist": "确实是同一个点,合并后更干净。"
-        }
-      ],
-      "strength": 0.7999999999999999,
-      "status": "confirmed",
-      "explicit": true,
-      "applies": {
-        "domain": "dom-1",
-        "role": "agent"
-      }
-    },
-    "freshness_ts": 1782912000.4799995,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "统计指标的口径定义会决定结论方向,换一个口径,数据走势可能完全反转;因此见到「某事物在衰退/增长」类统计叙事时,应先核查其测量范围是否覆盖了相关替代载体或行为形式。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1782952500.1599998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "测量口径偏见",
-      "source_ref": "text:713efdd4d0f998ab"
-    },
-    "freshness_ts": 1782952500.1599998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783041000.02,
+    "last_recalled_ts": 1782998700.04,
     "recall_count": 5
   },
   {
-    "content": "「纸质书阅读率下降」并不等于「阅读总量下降」,二者背离往往源于统计口径未覆盖播客、有声书、长文订阅等音频型深度内容;真实指标应是跨介质的深度文本消费总时长。",
+    "content": "在大模型领域,企业的竞争壁垒已从『是否拥有模型权重』转移到『能否养得起模型的落地工程链』,即基础设施、算力、数据与人才组成的持续运营能力。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1782952500.1599998,
+      "ts": 1782866700.1599998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "纸质阅读率与阅读总量背离",
-      "source_ref": "text:713efdd4d0f998ab"
+      "title": "竞争壁垒的迁移",
+      "source_ref": "text:f76f83512c74a7f0"
     },
-    "freshness_ts": 1782952500.1599998,
+    "freshness_ts": 1782866700.1599998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783128000.04,
-    "recall_count": 5
+    "last_recalled_ts": 1782998700.04,
+    "recall_count": 6
   },
   {
-    "content": "数字化时代,深度文本消费介质正从视觉(眼)迁移到听觉(耳),器官变化并不等同于阅读消失;耳朵正在成为新的眼睛。",
+    "content": "自托管开源模型还是直接调用商业 API,本质是『工程能力储备』与『现金流支出』之间的 ROI 置换,而非技术先进性或模型质量的比较。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1782952500.1599998,
+      "ts": 1782866700.1599998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "阅读器官从眼迁移到耳",
-      "source_ref": "text:713efdd4d0f998ab"
+      "title": "自托管 vs API 决策",
+      "source_ref": "text:f76f83512c74a7f0"
     },
-    "freshness_ts": 1782952500.1599998,
+    "freshness_ts": 1782866700.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1782960000.04,
+    "recall_count": 4
+  },
+  {
+    "content": "在资源受限的小型团队中,API 的总成本往往低于自托管开源模型;开源的成本优势会随团队工程能力规模反向变化,资源越少越倾向购买 API。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1782866700.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "小团队的逆向选择",
+      "source_ref": "text:f76f83512c74a7f0"
+    },
+    "freshness_ts": 1782866700.1599998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
@@ -547,14 +302,52 @@
     "recall_count": 4
   },
   {
-    "content": "深度内容的长期留存价值(LTV)不仅存在于文字载体,音频化的深度内容(播客、有声书)由于伴随场景更广,可能是 LTV 的隐藏高地,值得在内容策略中重新评估其留存结构。",
+    "content": "在算法与 AI 行业中,常见的认知偏差是把『显性免费』(注意力、模型权重)等同于『总成本为零』,忽略了由其衍生的隐性持续支出(留存、推理、对齐、运维)。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1782866700.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "显性免费与隐性账单",
+      "source_ref": "text:f76f83512c74a7f0"
+    },
+    "freshness_ts": 1782866700.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1782998700.04,
+    "recall_count": 3
+  },
+  {
+    "content": "AI 能力一旦被开源化或商品化形成显性免费供给,真正的瓶颈会从『产能(模型权重)』迁移到『落地工程化(部署、运维、问责)』环节。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1782866700.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "AI 瓶颈的迁移规律",
+      "source_ref": "text:f76f83512c74a7f0"
+    },
+    "freshness_ts": 1782866700.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1782998700.04,
+    "recall_count": 3
+  },
+  {
+    "content": "判断任何『上升/下降』趋势前,应先核验统计口径是否已跟上载体进化;口径锚定旧载体时,会与真实消费量背离,得出错误结论,这一陷阱在阅读、用户行为、技能习得等领域均可迁移。",
     "provenance": {
       "source": "fed",
       "agent": "user",
       "ts": 1782952500.1599998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "跨介质内容留存价值",
+      "title": "测量口径陷阱",
       "source_ref": "text:713efdd4d0f998ab"
     },
     "freshness_ts": 1782952500.1599998,
@@ -562,18 +355,18 @@
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783153200.04,
-    "recall_count": 5
+    "last_recalled_ts": 1783153200.02,
+    "recall_count": 3
   },
   {
-    "content": "文字作品的终点可能不是被看见,而是被听见;在为他人讲解、记忆或复述场景创作的文字中,应有意识地加入节奏感、口语化衔接和可听性,这是当代写作的一种新增手艺。",
+    "content": "深度文本消费正从视觉(纸质书、电子书)迁移到听觉(播客、有声书、长文订阅),国民阅读调查若只统计纸+电,会把总量上升误读为读书下降。",
     "provenance": {
       "source": "fed",
       "agent": "user",
       "ts": 1782952500.1599998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "写作要预留朗读感",
+      "title": "阅读器官迁移现象",
       "source_ref": "text:713efdd4d0f998ab"
     },
     "freshness_ts": 1782952500.1599998,
@@ -582,17 +375,17 @@
     "invalid_at": null,
     "invalid_reason": "",
     "last_recalled_ts": 1783128000.04,
-    "recall_count": 6
+    "recall_count": 4
   },
   {
-    "content": "国民阅读调查的口径停留在「纸质书+电子书」,系统性遗漏了播客、有声书和长文订阅等音频型深度内容载体。",
+    "content": "慢内容/深度内容不止有视觉形态(深度长文),听觉形态(播客、有声书)正成为新的主力入口,其完播率低但长期留存高,与短视频形成互补。",
     "provenance": {
       "source": "fed",
       "agent": "user",
       "ts": 1782952500.1599998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "国民阅读调查口径范围",
+      "title": "深度内容的双通道入口",
       "source_ref": "text:713efdd4d0f998ab"
     },
     "freshness_ts": 1782952500.1599998,
@@ -601,471 +394,385 @@
     "invalid_at": null,
     "invalid_reason": "",
     "last_recalled_ts": 1782977400.04,
-    "recall_count": 3
-  },
-  {
-    "content": "用户在读《技术与文明》并按章整理笔记",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1783006200.02,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1783006200.02,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "用户在读《娱乐至死》并整理了第一二章笔记",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1783006200.02,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1783006200.02,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "用户有一篇稿件《耳朵是新的眼睛》待写,要求约 800 字、平实四平八稳",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1783006200.02,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1783006200.02,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "用户的工作区根目录有散落的素材文件需要整理归档",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1783006200.02,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1783006200.02,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783068000.04,
-    "recall_count": 1
-  },
-  {
-    "content": "用户使用 Git Bash 作为 shell 环境,该环境存在 cygheap 问题导致 pwd 等命令崩溃",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1783006200.02,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1783006200.02,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "study-ledger.md 这个账本文件在工作区里还不存在",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1783006200.02,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1783006200.02,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "用户已有笔记的事实依据是《技术与文明》第三、四章和《娱乐至死》第一、二章",
-    "provenance": {
-      "source": "conversation",
-      "agent": "user",
-      "ts": 1783006200.02,
-      "trace_ref": "",
-      "kind": "fact",
-      "provisional": true
-    },
-    "freshness_ts": 1783006200.02,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783068000.04,
-    "recall_count": 1
-  },
-  {
-    "content": "不可逆/批操作(如文件归档、move)必须先盘点、先提议、得到用户点头才能动手,不擅自归类",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.4399996,
-      "kind": "constraint",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.4399996,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "Study Buddy 账本(进度/错题清单)由用户拥有和写入,助手不替用户偷偷建账本,做完题后以\"待用户点头才入账\"形式呈交",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.4599996,
-      "kind": "constraint",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.4599996,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783049400.02,
-    "recall_count": 1
-  },
-  {
-    "content": "出题前先尝试调取 study-ledger 看进度,基于\"未测过/上次答错\"优先抽题,而不是随机抽",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.4799995,
-      "kind": "taste",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.4799995,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "命题严格以用户笔记为唯一事实依据,不替用户编造材料,越出笔记范围不出题",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.4999995,
-      "kind": "constraint",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.4999995,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "题目先不给答案,等用户答完后逐条对照笔记打分,对不上的地方直接指出,不替用户圆场",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.5199995,
-      "kind": "constraint",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.5199995,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783170600.02,
-    "recall_count": 1
-  },
-  {
-    "content": "混合出题按 Bloom 梯子从事实(L1)→理解(L2)→应用/迁移(L3)递进,且每条题明确告知用户它落在哪一档和设计意图",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.5399995,
-      "kind": "taste",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.5399995,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "经典文本(非时效信息)的命题任务跳过 web_search 查证,直接用笔记当唯一事实依据,但要在回复中显式说明跳过了查证",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.5599995,
-      "kind": "taste",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.5599995,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "写作/出题前主动声明正在遵循哪条方法纪律,不省略前置澄清(如\"业务域\"\"时效触发\"\"账本不存在\"等都要先讲清)",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.5799994,
-      "kind": "taste",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.5799994,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783068000.04,
-    "recall_count": 3
-  },
-  {
-    "content": "工具故障时主动给出多条备选路径(换 shell/换路径/挂起任务)让用户选,不擅自重试或绕过去",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.5999994,
-      "kind": "taste",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.5999994,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "业务域任务(如稿件撰写)涉及跨角色协作时先问用户是否转交给对应角色(如\"写作助手\"),不直接代劳",
-    "provenance": {
-      "source": "decision_pref",
-      "agent": "user",
-      "ts": 1783006200.6199994,
-      "kind": "constraint",
-      "evidence": [],
-      "strength": 0.7,
-      "status": "provisional",
-      "explicit": true,
-      "applies": {
-        "domain": "",
-        "role": ""
-      }
-    },
-    "freshness_ts": 1783006200.6199994,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783049400.02,
-    "recall_count": 1
-  },
-  {
-    "content": "AI 擅长降维（把复杂信息压缩成简单表达，如摘要、改写），却不擅长升维（从零散现象中提炼意义与判断），这一对比定义了信息工作者被替代的风险边界与护城河所在。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1783041000.2199998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "AI 能力二分法：降维与升维",
-      "source_ref": "text:7c2bfff3b499cf81"
-    },
-    "freshness_ts": 1783041000.2199998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783170600.02,
     "recall_count": 4
   },
   {
-    "content": "在 AI 时代，读者的核心稀缺不再是『看不懂』，而是『看不出所以然』，即不缺信息获取能力，缺对信息背后意义的解读能力，内容价值因此从信息传递转向意义供给。",
+    "content": "写作者新增的核心手艺是『为耳朵写作』:控制句子呼吸感、设置口语化锚点、把段落长度适配听觉工作记忆,使文字在被朗读时仍能被听进去。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1783041000.2199998,
+      "ts": 1782952500.1599998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "读者需求反转：从信息获取到意义解读",
-      "source_ref": "text:7c2bfff3b499cf81"
+      "title": "朗读感写作技能",
+      "source_ref": "text:713efdd4d0f998ab"
     },
-    "freshness_ts": 1783041000.2199998,
+    "freshness_ts": 1782952500.1599998,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783170600.02,
-    "recall_count": 3
-  },
-  {
-    "content": "当 AI 能胜任复杂到简单的降维翻译后，传统写作者的翻译者角色被替代，但若叠加跨源关联与判断能力，可从翻译者升级为侦探式写作者，这是在翻译基础上的能力升维而非平行切换。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1783041000.2199998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "翻译者困境与角色升级方向",
-      "source_ref": "text:7c2bfff3b499cf81"
-    },
-    "freshness_ts": 1783041000.2199998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783146600.02,
+    "last_recalled_ts": 1783068000.04,
     "recall_count": 5
   },
   {
-    "content": "侦探式写作的核心能力是从多条表面不相关的事件或叙事中识别共同线索与模式，串成同一根引线并产出跨叙事的判断，本质上是一种跨源 pattern recognition。",
+    "content": "随读者感官通道从眼转向耳,文本的最终消费场景由『默读』变为『聆听』,创作者在动笔时应把『能否被顺畅朗读』纳入与可读性同级的判断标准。",
     "provenance": {
       "source": "fed",
       "agent": "user",
-      "ts": 1783041000.2199998,
+      "ts": 1782952500.1599998,
       "trace_ref": "",
       "kind": "knowledge",
-      "title": "侦探式写作的本质是跨源模式识别",
-      "source_ref": "text:7c2bfff3b499cf81"
+      "title": "文字终点从被看到转向被听到",
+      "source_ref": "text:713efdd4d0f998ab"
     },
-    "freshness_ts": 1783041000.2199998,
+    "freshness_ts": 1782952500.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783128000.04,
+    "recall_count": 4
+  },
+  {
+    "content": "用户近期在读/整理的书及笔记:《技术与文明》(第三、四章)、《耳朵是新的眼睛》、《娱乐至死》(第一、二章)。",
+    "provenance": {
+      "source": "conversation",
+      "agent": "user",
+      "ts": 1783006200.02,
+      "trace_ref": "",
+      "kind": "fact",
+      "provisional": true
+    },
+    "freshness_ts": 1783006200.02,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": 1783179000.02,
+    "invalid_reason": "duplicate(auto-merged): same assertion as [conversation]: 用户本周阅读并做笔记的书:《技术与文明》第三、四章;《娱乐至死》第一、二章",
+    "last_recalled_ts": 1783128000.04,
+    "recall_count": 2
+  },
+  {
+    "content": "用户的工作区根目录里有散落的素材文件,需要按主题归档。",
+    "provenance": {
+      "source": "conversation",
+      "agent": "user",
+      "ts": 1783006200.02,
+      "trace_ref": "",
+      "kind": "fact",
+      "provisional": true
+    },
+    "freshness_ts": 1783006200.02,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
     "last_recalled_ts": 1783068000.04,
-    "recall_count": 3
+    "recall_count": 2
   },
   {
-    "content": "AI 让『写』这件事变得廉价，稀缺资源从产能转向判断，即『这意味着什么』的解读能力，因此内容工作者的价值重心从信息传递迁移到意义判断。",
+    "content": "用户喜欢用混合题型自测:一道事实、一道理解、一道应用,按 Bloom 阶梯一格一格爬。",
     "provenance": {
-      "source": "fed",
+      "source": "conversation",
       "agent": "user",
-      "ts": 1783041000.2199998,
+      "ts": 1783006200.02,
       "trace_ref": "",
-      "kind": "knowledge",
-      "title": "AI 时代内容工作的价值迁移",
-      "source_ref": "text:7c2bfff3b499cf81"
+      "kind": "preference",
+      "provisional": true
     },
-    "freshness_ts": 1783041000.2199998,
+    "freshness_ts": 1783006200.02,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783146600.02,
+    "last_recalled_ts": 1783170600.02,
+    "recall_count": 2
+  },
+  {
+    "content": "用户出题要求先不给答案,自己先答再让助手按笔记逐条判对/偏/漏,不评分。",
+    "provenance": {
+      "source": "conversation",
+      "agent": "user",
+      "ts": 1783006200.02,
+      "trace_ref": "",
+      "kind": "preference",
+      "provisional": true
+    },
+    "freshness_ts": 1783006200.02,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783170600.02,
+    "recall_count": 1
+  },
+  {
+    "content": "用户笔记里有一句助手自己简化过的话:\"印刷术时代的公共话语是论证式的,电视时代变成了表演式的\"——是简化版,不是波兹曼原话。",
+    "provenance": {
+      "source": "conversation",
+      "agent": "user",
+      "ts": 1783006200.02,
+      "trace_ref": "",
+      "kind": "fact",
+      "provisional": true
+    },
+    "freshness_ts": 1783006200.02,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783149600.3399997,
     "recall_count": 4
   },
   {
-    "content": "接稿/约稿存在报价底线:低于千字 300 的不接;这类底线要让助手记住并坚守",
+    "content": "用户有一个「小林撰稿工作室」业务域,以及一个「写作助手」子智能体可以转交任务。",
+    "provenance": {
+      "source": "conversation",
+      "agent": "user",
+      "ts": 1783006200.02,
+      "trace_ref": "",
+      "kind": "fact",
+      "provisional": true
+    },
+    "freshness_ts": 1783006200.02,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783170600.02,
+    "recall_count": 3
+  },
+  {
+    "content": "整理/归档本地工作区这类任务,助手必须先实际读到工作区内容才能出方案;不能凭脑补编\"源→目的\"清单。读不到就停下来坦白,让用户在终端跑 dir 或重启通道,而不是假装做了。",
+    "provenance": {
+      "source": "decision_pref",
+      "agent": "user",
+      "ts": 1783006200.3599997,
+      "kind": "constraint",
+      "evidence": [],
+      "strength": 0.7,
+      "status": "provisional",
+      "explicit": true,
+      "applies": {
+        "domain": "",
+        "role": ""
+      }
+    },
+    "freshness_ts": 1783006200.3599997,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783170600.02,
+    "recall_count": 1
+  },
+  {
+    "content": "凡是考\"用户自己笔记内容\"的任务(出题、理解、应用),不触发 web_search 外部查证——笔记里的论断是经典论述,不是时效信息;查证反而会引入用户没读过的东西把题目搞混。",
+    "provenance": {
+      "source": "decision_pref",
+      "agent": "user",
+      "ts": 1783006200.3799996,
+      "kind": "constraint",
+      "evidence": [],
+      "strength": 0.7,
+      "status": "provisional",
+      "explicit": true,
+      "applies": {
+        "domain": "",
+        "role": ""
+      }
+    },
+    "freshness_ts": 1783006200.3799996,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783170600.02,
+    "recall_count": 1
+  },
+  {
+    "content": "助手对自己简化过、源头未核实的笔记内容,标注\"这是笔记里的简化、不是原话\",但不偷偷去外部查证补全——避免改变用户笔记原貌。",
+    "provenance": {
+      "source": "decision_pref",
+      "agent": "user",
+      "ts": 1783006200.3999996,
+      "kind": "constraint",
+      "evidence": [],
+      "strength": 0.7,
+      "status": "provisional",
+      "explicit": true,
+      "applies": {
+        "domain": "",
+        "role": ""
+      }
+    },
+    "freshness_ts": 1783006200.3999996,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783128000.04,
+    "recall_count": 1
+  },
+  {
+    "content": "应用题要拿笔记里学过的逻辑去套用户笔记里没写过的新情境,不要去找\"原作者自己怎么评价新事物\"——那是助手编不出来的,也不该是答案。",
+    "provenance": {
+      "source": "decision_pref",
+      "agent": "user",
+      "ts": 1783006200.4199996,
+      "kind": "standing",
+      "evidence": [],
+      "strength": 0.7,
+      "status": "provisional",
+      "explicit": true,
+      "applies": {
+        "domain": "",
+        "role": ""
+      }
+    },
+    "freshness_ts": 1783006200.4199996,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783170600.02,
+    "recall_count": 1
+  },
+  {
+    "content": "科技写作者的传统价值定位是「翻译者」——把论文和代码转译成人话;当 AI 能秒出摘要时,这一角色面临被替代的危机。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783041000.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "科技写作者的翻译者困境",
+      "source_ref": "text:7c2bfff3b499cf81"
+    },
+    "freshness_ts": 1783041000.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783153200.02,
+    "recall_count": 7
+  },
+  {
+    "content": "「降维」指把复杂信息简化(复杂→简单,如摘要、解释),「升维」指从现象中提炼意义(现象→意义,如跨源连线、洞察);AI 擅长降维,人类擅长升维。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783041000.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "降维与升维的能力二分",
+      "source_ref": "text:7c2bfff3b499cf81"
+    },
+    "freshness_ts": 1783041000.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783068000.04,
+    "recall_count": 2
+  },
+  {
+    "content": "AI 易于替代「信息搬运/降维」类任务,难以替代「意义生产/升维」类任务;这是判断某项写作工作是否会被 AI 取代的有效标尺。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783041000.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "AI 替代能力的边界",
+      "source_ref": "text:7c2bfff3b499cf81"
+    },
+    "freshness_ts": 1783041000.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783149600.3399997,
+    "recall_count": 6
+  },
+  {
+    "content": "AI 时代读者需求从「看懂了什么」迁移到「这意味着什么」;前者是信息消化,后者是意义判断。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783041000.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "读者需求的迁移",
+      "source_ref": "text:7c2bfff3b499cf81"
+    },
+    "freshness_ts": 1783041000.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783068000.04,
+    "recall_count": 1
+  },
+  {
+    "content": "「侦探式写作」指从多条表面不相关的信息(如新闻、事件)中抽取同一根隐藏引线,完成跨源意义建构,是科技写作者从翻译者升级后的新身份。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783041000.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "侦探式写作方法论",
+      "source_ref": "text:7c2bfff3b499cf81"
+    },
+    "freshness_ts": 1783041000.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783149600.3399997,
+    "recall_count": 6
+  },
+  {
+    "content": "判断某项写作任务是否构成人类护城河的标准:问「这是降维还是升维?」降维任务可被 AI 替代,升维任务是稀缺价值所在。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783041000.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "护城河快速判断法",
+      "source_ref": "text:7c2bfff3b499cf81"
+    },
+    "freshness_ts": 1783041000.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783136400.04,
+    "recall_count": 3
+  },
+  {
+    "content": "科技写作者的价值跃迁路径是「翻译者→侦探」,即从单点信息的转译升级为跨源线索的意义串联,属于价值升级而非平级替换。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783041000.1599998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "翻译者到侦探的身份升级",
+      "source_ref": "text:7c2bfff3b499cf81"
+    },
+    "freshness_ts": 1783041000.1599998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783170600.02,
+    "recall_count": 6
+  },
+  {
+    "content": "写作/约稿类任务按既定标准转给「小林撰稿工作室」的「写作助手」,遵循老规矩执行",
     "provenance": {
       "source": "decision_pref",
       "agent": "user",
@@ -1073,19 +780,19 @@
       "kind": "standing",
       "evidence": [
         {
-          "ts": 1782963900.2199998,
+          "ts": 1782963900.2999997,
           "decision": "ACCEPT",
-          "gist": "[用户改了再批] requirement:「让写作助手给《耳朵是新的眼睛》写一版 800 字初稿,平实一点,四平八稳交差"
+          "gist": "标准你已经知道了,按老规矩来就行。"
         },
         {
-          "ts": 1782963900.8999991,
+          "ts": 1782963900.9199991,
           "decision": "REJECT",
           "gist": "这两条我要分开引用,别合并。"
         },
         {
           "ts": 1783049400.2199998,
           "decision": "REJECT",
-          "gist": "报价太低,低于千字 300 的约稿一律不接;帮我记住这个底线。"
+          "gist": "老规矩,低于千字 300 的约稿一律不接。"
         }
       ],
       "strength": 0.7,
@@ -1105,24 +812,7 @@
     "recall_count": 0
   },
   {
-    "content": "AI 让执行环节变得廉价时，瓶颈会向验证/信任环节迁移，这一规律适用于任何 AI 代理驱动的任务；可用『降维/升维』二分法快速评估信息工作被 AI 替代的风险——工作若主要是复杂→简单的降维则替代风险高，若主要涉及现象→意义的升维判断则风险低且具备护城河。",
-    "provenance": {
-      "source": "consolidated",
-      "agent": "user",
-      "ts": 1783049400.4999995,
-      "kind": "knowledge",
-      "title": ""
-    },
-    "freshness_ts": 1783049400.4999995,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783170600.02,
-    "recall_count": 2
-  },
-  {
-    "content": "知识合并去重只在你判断需要时做,当用户明确说要分开引用某几条时,即使表面近重复也不合并",
+    "content": "低于千字 300 报价的约稿一律拒绝",
     "provenance": {
       "source": "decision_pref",
       "agent": "user",
@@ -1130,22 +820,174 @@
       "kind": "constraint",
       "evidence": [
         {
-          "ts": 1782963900.2199998,
+          "ts": 1782963900.2999997,
           "decision": "ACCEPT",
-          "gist": "[用户改了再批] requirement:「让写作助手给《耳朵是新的眼睛》写一版 800 字初稿,平实一点,四平八稳交差"
+          "gist": "标准你已经知道了,按老规矩来就行。"
         },
         {
-          "ts": 1782963900.8999991,
+          "ts": 1782963900.9199991,
           "decision": "REJECT",
           "gist": "这两条我要分开引用,别合并。"
         },
         {
           "ts": 1783049400.2199998,
           "decision": "REJECT",
-          "gist": "报价太低,低于千字 300 的约稿一律不接;帮我记住这个底线。"
+          "gist": "老规矩,低于千字 300 的约稿一律不接。"
         }
       ],
-      "strength": 0.7999999999999999,
+      "strength": 0.7,
+      "status": "provisional",
+      "explicit": true,
+      "applies": {
+        "domain": "dom-1",
+        "role": "agent"
+      }
+    },
+    "freshness_ts": 1783049400.3399997,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "AI编码代理能力越强,资深工程师的审查负担反而越越重:生成1000行代码只需3分钟,读懂并为之负责却要3小时,呈现产能与责任的不对称。当AI工具解决了产能瓶颈后,新的瓶颈会转移到信任环节——如何可信地验收和问责AI产出,而非如何更快地产出。在AI产能过剩的语境下,真正稀缺的不再是产出量,而是被明确责任归属、可追溯、可问责的信任链(accountable trust chain)。",
+    "provenance": {
+      "source": "consolidated",
+      "agent": "user",
+      "ts": 1783049400.5399995,
+      "kind": "knowledge",
+      "title": "AI产能悖论与信任瓶颈转移"
+    },
+    "freshness_ts": 1783049400.5399995,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "内容平台为写作者提供流量,但会拿走两样东西:读者关系(平台掌握用户数据与触达渠道)和定价权(算法分发决定流量与变现)。写作者看似在自家土地上耕种,实则收成与触达都受制于平台,形成依附型生产关系。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783128000.1799998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "平台写作的佃农陷阱",
+      "source_ref": "text:f2ccfb2b26860988"
+    },
+    "freshness_ts": 1783128000.1799998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783153200.02,
+    "recall_count": 5
+  },
+  {
+    "content": "订阅制常被视为写作者的独立运动,但数据显示约 90% 的独立订阅在 18 个月内停更,核心瓶颈是创作者需独立承担获客成本。独立形式并不等于摆脱负担,反而把平台隐藏的获客成本转嫁到个人。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783128000.1799998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "订阅制停更率与获客成本",
+      "source_ref": "text:f2ccfb2b26860988"
+    },
+    "freshness_ts": 1783128000.1799998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783153200.02,
+    "recall_count": 5
+  },
+  {
+    "content": "可跑通的创作者模式为『平台种田、自留地收成』:90% 公开内容在平台发布以积累信任与引流,10% 最深度的内容沉淀到自有渠道(如邮件列表)。公开层负责拉新,私有层负责深度留存与关系私有化,形成信任漏斗。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783128000.1799998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "90/10 内容分层模型",
+      "source_ref": "text:f2ccfb2b26860988"
+    },
+    "freshness_ts": 1783128000.1799998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783153200.02,
+    "recall_count": 5
+  },
+  {
+    "content": "判断创作者是否真正独立,可沿两个核心维度诊断:① 是否拥有读者关系(用户数据与直接触达渠道是否在自己手中);② 是否拥有定价权(能否脱离算法分发自主决定流量与变现)。平台型创作者经济普遍在这两个维度上被削弱。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783128000.1799998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "创作者独立性双维度诊断",
+      "source_ref": "text:f2ccfb2b26860988"
+    },
+    "freshness_ts": 1783128000.1799998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783153200.02,
+    "recall_count": 1
+  },
+  {
+    "content": "平台渠道适合承担引流与信任积累功能,自有渠道(邮件列表、订阅)适合承担深度留存与关系私有化功能。二者形成『公域获客 + 私域留存』的组合,既借助平台的流量规模,又避免对平台的完全依附。",
+    "provenance": {
+      "source": "fed",
+      "agent": "user",
+      "ts": 1783128000.1799998,
+      "trace_ref": "",
+      "kind": "knowledge",
+      "title": "平台与自有渠道分工",
+      "source_ref": "text:f2ccfb2b26860988"
+    },
+    "freshness_ts": 1783128000.1799998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783153200.02,
+    "recall_count": 2
+  },
+  {
+    "content": "近重复的知识条目即便看似可合并,只要用户有分别引用的需要,就保持独立、不合并",
+    "provenance": {
+      "source": "decision_pref",
+      "agent": "user",
+      "ts": 1783049400.3599997,
+      "kind": "constraint",
+      "evidence": [
+        {
+          "ts": 1782963900.2999997,
+          "decision": "ACCEPT",
+          "gist": "标准你已经知道了,按老规矩来就行。"
+        },
+        {
+          "ts": 1782963900.9199991,
+          "decision": "REJECT",
+          "gist": "这两条我要分开引用,别合并。"
+        },
+        {
+          "ts": 1783049400.2199998,
+          "decision": "REJECT",
+          "gist": "老规矩,低于千字 300 的约稿一律不接。"
+        }
+      ],
+      "strength": 0.49999999999999994,
       "status": "confirmed",
       "explicit": true,
       "applies": {
@@ -1153,7 +995,25 @@
         "role": ""
       }
     },
-    "freshness_ts": 1783068000.5599995,
+    "freshness_ts": 1783166400.2199998,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 1783170600.02,
+    "recall_count": 1
+  },
+  {
+    "content": "用户运营「小林撰稿工作室」业务域,涉及转派写作助手出稿的协作流程",
+    "provenance": {
+      "source": "conversation",
+      "agent": "user",
+      "ts": 1783179000.02,
+      "trace_ref": "",
+      "kind": "fact",
+      "provisional": true
+    },
+    "freshness_ts": 1783179000.02,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
@@ -1162,93 +1022,16 @@
     "recall_count": 0
   },
   {
-    "content": "内容平台的『佃农陷阱』指写作者拥有内容生产权,但读者关系与定价权被平台默认持有,长期处于替平台种田却拿不到关键生产资料的位置——类似农业佃农制下地主管水渠、佃农管庄稼的不对称结构。",
+    "content": "用户有一项写作商单:让写作助手接一条 500 字带货口播稿,报价千字 150",
     "provenance": {
-      "source": "fed",
+      "source": "conversation",
       "agent": "user",
-      "ts": 1783128000.1799998,
+      "ts": 1783179000.02,
       "trace_ref": "",
-      "kind": "knowledge",
-      "title": "佃农陷阱结构",
-      "source_ref": "text:f2ccfb2b26860988"
+      "kind": "fact",
+      "provisional": true
     },
-    "freshness_ts": 1783128000.1799998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783170600.02,
-    "recall_count": 4
-  },
-  {
-    "content": "判断创作者是否陷入佃农陷阱,可检验三件关键资产的归属:读者联系方式、定价权、内容分发渠道。三项全在平台手里 = 完全佃农;任一项在创作者自己手里,都意味着脱离了一定程度的依附。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1783128000.1799998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "三件资产归属检验",
-      "source_ref": "text:f2ccfb2b26860988"
-    },
-    "freshness_ts": 1783128000.1799998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783153200.04,
-    "recall_count": 3
-  },
-  {
-    "content": "一种内容分发策略:在公开平台写公开稿积累信任与流量(种田),把最核心的 10% 深度内容沉淀到自有渠道(自留地,通常为邮件列表)以承接高价值用户并直接变现(收成)——公开内容与自有渠道构成漏斗关系而非互斥关系。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1783128000.1799998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "平台种田自留地收成",
-      "source_ref": "text:f2ccfb2b26860988"
-    },
-    "freshness_ts": 1783128000.1799998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783170600.02,
-    "recall_count": 3
-  },
-  {
-    "content": "数据显示约 90% 的独立订阅在 18 个月内停更,主因是创作者需独自承担获客成本——这说明脱离平台后冷启动极难,独立订阅的失败多发生在流量与信任积累之前。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1783128000.1799998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "独立订阅停更率",
-      "source_ref": "text:f2ccfb2b26860988"
-    },
-    "freshness_ts": 1783128000.1799998,
-    "scope": "personal",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 1783146600.02,
-    "recall_count": 2
-  },
-  {
-    "content": "独立的核心不是收费方式,而是获客与触达是否依赖单一平台;冷启动阶段借平台积累信任与流量是合理的,成熟后必须建立独立触点,否则收费机制改变并不改变依附关系。",
-    "provenance": {
-      "source": "fed",
-      "agent": "user",
-      "ts": 1783128000.1799998,
-      "trace_ref": "",
-      "kind": "knowledge",
-      "title": "订阅制不等于独立",
-      "source_ref": "text:f2ccfb2b26860988"
-    },
-    "freshness_ts": 1783128000.1799998,
+    "freshness_ts": 1783179000.02,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
@@ -1257,17 +1040,16 @@
     "recall_count": 0
   },
   {
-    "content": "核心受众资产(尤其是订阅关系与联系方式)不能托管在平台内,否则随时面临限流、封号、规则变更导致资产归零的风险——这是创作者抗平台风险的最小保险原则。",
+    "content": "用户让写作助手给《写作者的自留地》按提纲写 800 字初稿",
     "provenance": {
-      "source": "fed",
+      "source": "conversation",
       "agent": "user",
-      "ts": 1783128000.1799998,
+      "ts": 1783179000.02,
       "trace_ref": "",
-      "kind": "knowledge",
-      "title": "粮仓必须在自己家",
-      "source_ref": "text:f2ccfb2b26860988"
+      "kind": "fact",
+      "provisional": true
     },
-    "freshness_ts": 1783128000.1799998,
+    "freshness_ts": 1783179000.02,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
@@ -1276,57 +1058,163 @@
     "recall_count": 0
   },
   {
-    "content": "平台算法优化的是短期互动指标(点击、完播、停留),而写作者长期复利来自可重复触达的自有受众——两者在时间尺度上结构性错配,决定了纯依赖平台的分发无法形成可积累的资产。",
+    "content": "用户本周阅读并做笔记的书:《技术与文明》第三、四章;《娱乐至死》第一、二章",
     "provenance": {
-      "source": "fed",
+      "source": "conversation",
       "agent": "user",
-      "ts": 1783128000.1799998,
+      "ts": 1783179000.02,
       "trace_ref": "",
-      "kind": "knowledge",
-      "title": "短期算法与长期复利的张力",
-      "source_ref": "text:f2ccfb2b26860988"
+      "kind": "fact",
+      "provisional": true
     },
-    "freshness_ts": 1783128000.1799998,
+    "freshness_ts": 1783179000.02,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783170600.02,
-    "recall_count": 4
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
   },
   {
-    "content": "算法在消费端压低深度内容价值,在生产端则系统性偏向『易传播但低沉淀』的写作——两端是同一结构问题的两面,理解创作者侧的依附关系是理解消费端偏见的前提。",
+    "content": "用户笔记里《技术与文明》的关键判断:时钟是关键机器、时间从经验变为可交易商品、技术分三阶段(始技术/古技术/新技术)、材料史就是文明史",
     "provenance": {
-      "source": "fed",
+      "source": "conversation",
       "agent": "user",
-      "ts": 1783128000.1799998,
+      "ts": 1783179000.02,
       "trace_ref": "",
-      "kind": "knowledge",
-      "title": "算法偏见的生产侧对偶",
-      "source_ref": "text:f2ccfb2b26860988"
+      "kind": "fact",
+      "provisional": true
     },
-    "freshness_ts": 1783128000.1799998,
+    "freshness_ts": 1783179000.02,
     "scope": "personal",
     "pinned": false,
     "invalid_at": null,
     "invalid_reason": "",
-    "last_recalled_ts": 1783170600.02,
-    "recall_count": 3
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
   },
   {
-    "content": "专栏提纲任务里,反常识角度必须用一句话锚死反直觉点(如「写得越好越像打工」),避免堆砌成平铺直叙的常识列表",
+    "content": "用户笔记里《娱乐至死》的关键判断:媒介即认识论、印刷术对应论证式/电视对应表演式、信息-行动比失衡、奥威尔怕被禁书/赫胥黎怕不再想读书",
+    "provenance": {
+      "source": "conversation",
+      "agent": "user",
+      "ts": 1783179000.02,
+      "trace_ref": "",
+      "kind": "fact",
+      "provisional": true
+    },
+    "freshness_ts": 1783179000.02,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "用户对时效性任务的资料处理方式是「先查证、查不到就坦白、不硬编」",
+    "provenance": {
+      "source": "conversation",
+      "agent": "user",
+      "ts": 1783179000.02,
+      "trace_ref": "",
+      "kind": "fact",
+      "provisional": true
+    },
+    "freshness_ts": 1783179000.02,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "用户要求小卡在时效性任务上做 web 查证,但对读书笔记这类非时效素材,不打时效提示、直接基于已有材料作答",
+    "provenance": {
+      "source": "decision_pref",
+      "agent": "user",
+      "ts": 1783179000.5599995,
+      "kind": "constraint",
+      "evidence": [],
+      "strength": 0.7,
+      "status": "provisional",
+      "explicit": true,
+      "applies": {
+        "domain": "",
+        "role": ""
+      }
+    },
+    "freshness_ts": 1783179000.5599995,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "用户强调「不编」:材料不足时必须坦白并给出可走选项(A/B/C),不得硬凑答案",
+    "provenance": {
+      "source": "decision_pref",
+      "agent": "user",
+      "ts": 1783179000.5799994,
+      "kind": "constraint",
+      "evidence": [],
+      "strength": 0.7,
+      "status": "provisional",
+      "explicit": true,
+      "applies": {
+        "domain": "",
+        "role": ""
+      }
+    },
+    "freshness_ts": 1783179000.5799994,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "用户要求出题遵循 Bloom 分类、一格一格爬、难度混合、跨书联动、事实/理解/应用三类各占 1-2 题,且先不给答案由用户自答",
+    "provenance": {
+      "source": "decision_pref",
+      "agent": "user",
+      "ts": 1783179000.5999994,
+      "kind": "constraint",
+      "evidence": [],
+      "strength": 0.7,
+      "status": "provisional",
+      "explicit": true,
+      "applies": {
+        "domain": "",
+        "role": ""
+      }
+    },
+    "freshness_ts": 1783179000.5999994,
+    "scope": "personal",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "写作助手在产出涉及外部事实的内容前,先尝试查证;沙箱公网出口被拦截时,应主动如实告知用户'查不到',而不是用占位符或模糊表述蒙混。",
     "provenance": {
       "source": "role_experience",
       "agent": "写作助手",
-      "ts": 1783146600.08,
+      "ts": 1782619800.08,
       "kind": "method",
       "trace_ref": "",
       "applies": {
-        "domain": "dom-3f68b28f",
+        "domain": "dom-1a46e096",
         "role": "写作助手"
       }
     },
-    "freshness_ts": 1783146600.08,
+    "freshness_ts": 1782619800.08,
     "scope": "domain",
     "pinned": false,
     "invalid_at": null,
@@ -1335,19 +1223,19 @@
     "recall_count": 0
   },
   {
-    "content": "专栏提纲每个部分要配一个可指名的真实创作者/出版物案例(如 Substack @derekthompson),不要让读者自己去查",
+    "content": "查不到核实来源时,案例位应显式标注'【待补,需核实来源】'并请用户提供可核实来源,不要为节奏或'爽感'牺牲准确。",
     "provenance": {
       "source": "role_experience",
       "agent": "写作助手",
-      "ts": 1783146600.08,
+      "ts": 1782619800.08,
       "kind": "method",
       "trace_ref": "",
       "applies": {
-        "domain": "dom-3f68b28f",
+        "domain": "dom-1a46e096",
         "role": "写作助手"
       }
     },
-    "freshness_ts": 1783146600.08,
+    "freshness_ts": 1782619800.08,
     "scope": "domain",
     "pinned": false,
     "invalid_at": null,
@@ -1356,40 +1244,19 @@
     "recall_count": 0
   },
   {
-    "content": "用户偏好反常识专栏:主标题必须藏一个直觉反转,字数压在 25 字以内以适配公众号/邮件列表/小红书多端",
+    "content": "用户偏好三段式骨架带明确的论点主线(本任务为'病灶→误诊→处方'),每段先给分论点再用要点展开,字数事先按段分配。",
     "provenance": {
       "source": "role_experience",
       "agent": "写作助手",
-      "ts": 1783146600.08,
+      "ts": 1782619800.08,
       "kind": "preference",
       "trace_ref": "",
       "applies": {
-        "domain": "dom-3f68b28f",
+        "domain": "dom-1a46e096",
         "role": "写作助手"
       }
     },
-    "freshness_ts": 1783146600.08,
-    "scope": "domain",
-    "pinned": false,
-    "invalid_at": 1783153200.1,
-    "invalid_reason": "superseded(update) by newer belief [role_experience]: 反常识角度的标题,锚点要从文章主线里现取,不要套用其他篇章已经验证过的反差结构",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "经典文本/创作方法论类命题可跳过 web_search 查证,直接用既有笔记当事实依据,但要在产出里显式声明「跳过查证」",
-    "provenance": {
-      "source": "role_experience",
-      "agent": "写作助手",
-      "ts": 1783146600.08,
-      "kind": "method",
-      "trace_ref": "",
-      "applies": {
-        "domain": "dom-3f68b28f",
-        "role": "写作助手"
-      }
-    },
-    "freshness_ts": 1783146600.08,
+    "freshness_ts": 1782619800.08,
     "scope": "domain",
     "pinned": false,
     "invalid_at": null,
@@ -1398,19 +1265,19 @@
     "recall_count": 0
   },
   {
-    "content": "提纲任务先把硬货(标题+三段+配例)放前面,自我说明/方法纪律/避撞车声明一律放后面,不要用元话语淹没提纲本体",
+    "content": "用户偏好提纲里的'反常识切入'子项——即在每段分论点下,要求给一个能制造张力的反直觉小钩子,而不是平铺直叙。",
     "provenance": {
       "source": "role_experience",
       "agent": "写作助手",
-      "ts": 1783146600.08,
-      "kind": "method",
+      "ts": 1782619800.08,
+      "kind": "preference",
       "trace_ref": "",
       "applies": {
-        "domain": "dom-3f68b28f",
+        "domain": "dom-1a46e096",
         "role": "写作助手"
       }
     },
-    "freshness_ts": 1783146600.08,
+    "freshness_ts": 1782619800.08,
     "scope": "domain",
     "pinned": false,
     "invalid_at": null,
@@ -1419,19 +1286,19 @@
     "recall_count": 0
   },
   {
-    "content": "同一作者的不同专栏要主动防撞车:同业务域已有《数字游民祛魅》《耳朵是新的眼睛》等旧作时,新提纲的角度、配例、金句都不能照搬旧作",
+    "content": "踩坑:沙箱里搜索引擎和主流站点都会被当成内网拦截,别反复重试 web_fetch 拉公网,直接转用记忆里已确认的论点并标注待补。",
     "provenance": {
       "source": "role_experience",
       "agent": "写作助手",
-      "ts": 1783146600.08,
+      "ts": 1782619800.08,
       "kind": "pitfall",
       "trace_ref": "",
       "applies": {
-        "domain": "dom-3f68b28f",
+        "domain": "dom-1a46e096",
         "role": "写作助手"
       }
     },
-    "freshness_ts": 1783146600.08,
+    "freshness_ts": 1782619800.08,
     "scope": "domain",
     "pinned": false,
     "invalid_at": null,
@@ -1440,103 +1307,82 @@
     "recall_count": 0
   },
   {
-    "content": "提纲任务最常见跑题是把「拟提纲」做成「拟候选标题」或「润色单段」,接到需求时必须先核对交付物形态(三段+配例 vs 标题候选 vs 段落润色)",
+    "content": "为《AI 替你写 X》类选题拟标题时,应打在'反常识的二阶判断'(如 AI 替你写、你替 AI 读)上,避开'AI 多强/取代谁'这类已沦为烂梗的一阶表述",
     "provenance": {
       "source": "role_experience",
       "agent": "写作助手",
-      "ts": 1783146600.08,
+      "ts": 1782790800.08,
+      "kind": "method",
+      "trace_ref": "",
+      "applies": {
+        "domain": "dom-1a46e096",
+        "role": "写作助手"
+      }
+    },
+    "freshness_ts": 1782790800.08,
+    "scope": "domain",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "写作类任务接到'必须锋利、避免平庸'的硬要求时,要先在产出里明确底层判断结构(五条标题共享同一钩子骨架),再逐条铺开,而不是各条独立想",
+    "provenance": {
+      "source": "role_experience",
+      "agent": "写作助手",
+      "ts": 1782790800.08,
+      "kind": "method",
+      "trace_ref": "",
+      "applies": {
+        "domain": "dom-1a46e096",
+        "role": "写作助手"
+      }
+    },
+    "freshness_ts": 1782790800.08,
+    "scope": "domain",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "用户在该域偏好候选标题后逐条做优劣点评,且按可量化维度打分(如愣住率、截图成活率、反驳燃料、渠道适配),而不是只给一句感性评语",
+    "provenance": {
+      "source": "role_experience",
+      "agent": "写作助手",
+      "ts": 1782790800.08,
+      "kind": "preference",
+      "trace_ref": "",
+      "applies": {
+        "domain": "dom-1a46e096",
+        "role": "写作助手"
+      }
+    },
+    "freshness_ts": 1782790800.08,
+    "scope": "domain",
+    "pinned": false,
+    "invalid_at": null,
+    "invalid_reason": "",
+    "last_recalled_ts": 0.0,
+    "recall_count": 0
+  },
+  {
+    "content": "候选标题里若出现具体平台名、产品名、年份数据等时效锚,务必标注'需补时效核验'——凭训练记忆铸的具体数字/事件不可信",
+    "provenance": {
+      "source": "role_experience",
+      "agent": "写作助手",
+      "ts": 1782790800.08,
       "kind": "pitfall",
       "trace_ref": "",
       "applies": {
-        "domain": "dom-3f68b28f",
+        "domain": "dom-1a46e096",
         "role": "写作助手"
       }
     },
-    "freshness_ts": 1783146600.08,
-    "scope": "domain",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "创作方法论类题目可跳过联网查证,但素材必须显式标注「未 verify」,发稿前提示核实关键数据",
-    "provenance": {
-      "source": "role_experience",
-      "agent": "写作助手",
-      "ts": 1783153200.1,
-      "kind": "method",
-      "trace_ref": "",
-      "applies": {
-        "domain": "dom-3f68b28f",
-        "role": "写作助手"
-      }
-    },
-    "freshness_ts": 1783153200.1,
-    "scope": "domain",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "同一作者/同一系列的多篇文章,标题必须围绕各自主线重算,不能复用前篇的角度、金句或核心比喻,串味词要在产出里主动标记备选替换",
-    "provenance": {
-      "source": "role_experience",
-      "agent": "写作助手",
-      "ts": 1783153200.1,
-      "kind": "method",
-      "trace_ref": "",
-      "applies": {
-        "domain": "dom-3f68b28f",
-        "role": "写作助手"
-      }
-    },
-    "freshness_ts": 1783153200.1,
-    "scope": "domain",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "数据钩在标题里比纯概念钩点击率更稳,概念型标题要补一条数据子标题兜底",
-    "provenance": {
-      "source": "role_experience",
-      "agent": "写作助手",
-      "ts": 1783153200.1,
-      "kind": "method",
-      "trace_ref": "",
-      "applies": {
-        "domain": "dom-3f68b28f",
-        "role": "写作助手"
-      }
-    },
-    "freshness_ts": 1783153200.1,
-    "scope": "domain",
-    "pinned": false,
-    "invalid_at": null,
-    "invalid_reason": "",
-    "last_recalled_ts": 0.0,
-    "recall_count": 0
-  },
-  {
-    "content": "反常识角度的标题,锚点要从文章主线里现取,不要套用其他篇章已经验证过的反差结构",
-    "provenance": {
-      "source": "role_experience",
-      "agent": "写作助手",
-      "ts": 1783153200.1,
-      "kind": "method",
-      "trace_ref": "",
-      "applies": {
-        "domain": "dom-3f68b28f",
-        "role": "写作助手"
-      }
-    },
-    "freshness_ts": 1783153200.1,
+    "freshness_ts": 1782790800.08,
     "scope": "domain",
     "pinned": false,
     "invalid_at": null,
