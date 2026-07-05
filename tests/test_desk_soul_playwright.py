@@ -181,6 +181,12 @@ _PENDING_FIXTURE = {
     ]
 }
 
+# 本周纪念物真实契约形状(GET /api/desk/memento,零 LLM 从 Trace/账本投影)
+_MEMENTO_FIXTURE = {
+    "week_label": "W27", "tasks_done": 12, "skills_new": 3,
+    "decisions": 5, "tokens_total": 48200,
+}
+
 _CARRY_PROBE = """
     window.__carrySeen = false;
     (function probe() {
@@ -263,6 +269,10 @@ def test_desk_first_open_default_layout(console_url):
         page.route("**/api/proposals/pending",
                    lambda route: route.fulfill(status=200, content_type="application/json",
                                                body=json.dumps(_PENDING_FIXTURE)))
+        # 造本周纪念物 → 验它退到角落、**不压大时间**(bug1 曾居中 top:22 盖住时钟顶)
+        page.route("**/api/desk/memento",
+                   lambda route: route.fulfill(status=200, content_type="application/json",
+                                               body=json.dumps(_MEMENTO_FIXTURE)))
         page.goto(console_url, wait_until="domcontentloaded")
         page.wait_for_selector("#view-opt-desk", timeout=10000)
         page.click("#view-opt-desk")
@@ -318,7 +328,37 @@ def test_desk_first_open_default_layout(console_url):
         assert page.is_visible("#desk-karvy-pixel")
         assert page.evaluate("document.getElementById('desk-wall-btn') !== null"), "dock 应有 🌗 壁纸换挡"
 
-        # 截图①:默认空旷态(给人工看主次分明/不拥挤)
+        # ⑤ 视觉断言(Hardy 2026-07-05 修 5 bug,不只验存在还验**不遮挡/不重叠**):
+        #   bug1 = 大时间锚点必须有清晰垂直空间(chat 在其下不盖时钟底,memento 在角不压时钟)。
+        page.wait_for_selector("#desk-memento", state="visible", timeout=3000)   # 纪念物真渲染(才验得了不遮挡)
+        rects = page.evaluate("""() => {
+            const R = s => { const e=document.querySelector(s); return e?e.getBoundingClientRect().toJSON():null; };
+            return {clock:R('#desk-clock'), memento:R('#desk-memento'), chat:R('#chat-modal .chat-panel'),
+                    dock:R('#desk-dock')};
+        }""")
+        def _overlap(a, b):
+            if not a or not b:
+                return False
+            return not (a["right"] <= b["left"] or b["right"] <= a["left"]
+                        or a["bottom"] <= b["top"] or b["bottom"] <= a["top"])
+        clock = rects["clock"]
+        assert clock, "大时间应在(桌面锚点)"
+        assert not _overlap(rects["memento"], clock), \
+            f"bug1: 本周纪念物不许压在大时间上(时钟顶被夹): memento={rects['memento']} clock={clock}"
+        chat = rects["chat"]
+        assert chat["top"] >= clock["bottom"], \
+            f"bug1: 精简聊天窗顶必须落在时钟底之下(不夹时钟底部): chat.top={chat['top']} clock.bottom={clock['bottom']}"
+        #   bug5 = 折叠标签卡两两矩形无重叠(collapsed 定位算错会互相叠、字串一起)。
+        note_rects = page.evaluate("""() => [...document.querySelectorAll('.cockpit-grid .cockpit-col.col-collapsed')]
+            .map(c => ({k:[...c.classList].find(x=>x.indexOf('col-')===0), r:c.getBoundingClientRect().toJSON()}))
+            .sort((a,b) => a.r.top - b.r.top)""")
+        assert len(note_rects) >= 2, "默认应有多张收起标签卡"
+        for i in range(len(note_rects) - 1):
+            a, b = note_rects[i]["r"], note_rects[i + 1]["r"]
+            assert b["top"] >= a["bottom"] - 1, \
+                f"bug5: 折叠卡 {note_rects[i]['k']} 与 {note_rects[i+1]['k']} 重叠了(top={b['top']} <= bottom={a['bottom']})"
+
+        # 截图①:默认空旷态(给人工看主次分明/不拥挤 + 时钟完整 + 折叠卡整齐)
         page.screenshot(path=os.path.join(_SHOTS_DIR, "01-default-empty.png"))
 
         # 点 📋 摊开看板 → 四标签全展开(召唤才出),截个板态确认功能没删
@@ -459,5 +499,91 @@ def test_desk_wallpaper_day_night(console_url):
         assert page.evaluate(
             "!document.body.classList.contains('desk-wall-day') && !document.body.classList.contains('desk-wall-night')"
         ), "离开桌面应摘光壁纸类"
+        browser.close()
+    assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
+
+
+# ============================================================================
+# 5-bug 修复回归(Hardy 2026-07-05 实拍):弹窗不被 dock 遮挡 + 窗口标题栏可拖
+# ============================================================================
+
+def test_desk_popup_not_hidden_under_dock(console_url):
+    """bug3:弹窗/窗口(小林 demo 面板等)开着时底部不许钻进 dock 底下、内容被盖。
+    验:demo 面板矩形底 ≤ dock 顶(留出 dock 空间);同时精简聊天窗底也在 dock 之上。截图存档。"""
+    os.makedirs(_SHOTS_DIR, exist_ok=True)
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        # 用略矮的视口更容易暴露"钻进 dock"(1600×720)
+        page = browser.new_page(viewport={"width": 1600, "height": 720})
+        _wire(page, errors, desk_boot=True)
+        page.goto(console_url, wait_until="domcontentloaded")
+        page.wait_for_function("document.body.classList.contains('desk-view')", timeout=10000)
+        page.wait_for_selector("#desk-dock", state="visible", timeout=5000)
+
+        dock_top = page.evaluate("document.getElementById('desk-dock').getBoundingClientRect().top")
+        # 精简聊天窗底 ≤ dock 顶
+        chat_bottom = page.evaluate("document.querySelector('#chat-modal .chat-panel').getBoundingClientRect().bottom")
+        assert chat_bottom <= dock_top + 1, \
+            f"bug3: 精简聊天窗底({chat_bottom})不许钻进 dock(顶 {dock_top})"
+
+        # 打开小林 demo 面板(👀 入口)→ 面板底 ≤ dock 顶
+        page.click("#demo-open")
+        page.wait_for_selector("#mgmt-modal .modal", state="visible", timeout=5000)
+        page.wait_for_timeout(300)
+        demo_bottom = page.evaluate("document.querySelector('#mgmt-modal .modal').getBoundingClientRect().bottom")
+        assert demo_bottom <= dock_top + 1, \
+            f"bug3: 小林 demo 面板底({demo_bottom})必须留在 dock(顶 {dock_top})之上,不被遮挡"
+        page.screenshot(path=os.path.join(_SHOTS_DIR, "03-demo-clears-dock.png"))
+        browser.close()
+    assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
+
+
+def test_desk_window_drag_by_title_bar(console_url):
+    """bug4:窗口应能抓标题栏拖动改位置(聊天窗 / demo 面板)。
+    验:标题栏 mousedown → move → up 后窗口 left/top 变了 + 落盘(karvyloop_desk.v1)。"""
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1600, "height": 900})
+        _wire(page, errors, desk_boot=True)
+        page.goto(console_url, wait_until="domcontentloaded")
+        page.wait_for_function("document.body.classList.contains('desk-view')", timeout=10000)
+        page.wait_for_selector("#chat-modal .chat-panel-head", state="visible", timeout=5000)
+
+        def _rect(sel):
+            return page.evaluate(f"() => {{ const r=document.querySelector('{sel}').getBoundingClientRect(); return {{left:r.left, top:r.top}}; }}")
+
+        def _drag(handle_sel, panel_sel, dx, dy):
+            before = _rect(panel_sel)
+            box = page.query_selector(handle_sel).bounding_box()
+            # 抓标题栏**中段空白拖柄**(避开左侧头像/标题与右侧 ✕/─/⤢ 按钮 —— 压按钮不该拖=正确行为)。
+            # 命中测试确保落点不是按钮/链接/头像图(否则 4px 死区外仍不启动,是产品意图)。
+            gx = box["x"] + box["width"] * 0.42
+            gy = box["y"] + box["height"] / 2
+            hit = page.evaluate("([x,y]) => { const e=document.elementFromPoint(x,y); return e && e.closest && e.closest('button,a,input,select,textarea,img,[contenteditable]') ? 'blocked' : 'ok'; }", [gx, gy])
+            assert hit == "ok", f"标题栏中段应是干净拖柄(不是按钮/图),实际命中被挡:{handle_sel}"
+            page.mouse.move(gx, gy)
+            page.mouse.down()
+            page.mouse.move(gx + dx, gy + dy, steps=12)
+            page.mouse.up()
+            page.wait_for_timeout(150)
+            return before, _rect(panel_sel)
+
+        # 聊天窗:抓标题栏拖 → left/top 变
+        cb, ca = _drag("#chat-modal .chat-panel-head", "#chat-modal .chat-panel", -180, 90)
+        assert abs(ca["left"] - cb["left"]) > 30 or abs(ca["top"] - cb["top"]) > 30, \
+            f"bug4: 抓聊天窗标题栏应能拖动: before={cb} after={ca}"
+        # 落盘:karvyloop_desk.v1 里 chat 位置更新了
+        saved = page.evaluate("() => { try { return JSON.parse(localStorage.getItem('karvyloop_desk.v1')); } catch(e) { return null; } }")
+        assert saved and saved.get("windows", {}).get("chat"), "bug4: 拖过的聊天窗位置应落盘(karvyloop_desk.v1)"
+
+        # demo/mgmt 面板:开一个,抓标题栏拖 → 也能动
+        page.click("#demo-open")
+        page.wait_for_selector("#mgmt-modal .modal-head", state="visible", timeout=5000)
+        page.wait_for_timeout(300)
+        mb, ma = _drag("#mgmt-modal .modal-head", "#mgmt-modal .modal", 140, 120)
+        assert abs(ma["left"] - mb["left"]) > 30 or abs(ma["top"] - mb["top"]) > 30, \
+            f"bug4: 抓 demo/mgmt 面板标题栏应能拖动: before={mb} after={ma}"
         browser.close()
     assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"

@@ -187,15 +187,41 @@ body.desk-view .chat-host .chat-panel {
   left: 0;
   top: 0;
   width: min(560px, 44%);
-  height: min(560px, 66%);
+  /* 高度留出顶部大时间锚点区(~200)与底部 dock 带(84):compact 窄窗不盖时钟、不钻 dock。 */
+  height: min(560px, calc(100vh - 300px));
   max-width: none;
   max-height: none;
   pointer-events: auto;
   animation: none;           /* chat-pop 的 transform 动画会打架,桌面下禁 */
   box-shadow: var(--win-shadow);
 }
-/* compact:藏左侧会话列表(单窗口聊天形态) */
+/* compact:藏左侧会话列表(单窗口聊天形态)。
+   ⚠ styles.css 的 .chat-panel-body 是 grid: 200px minmax(0,1fr) —— side 仅 display:none
+   会**留下 200px 空列**(chat-log 被挤到 358px 宽、右侧一大片空白,Hardy 实拍 bug)。
+   compact 下把 body 折成单列(1fr)→ chat-log 铺满整窗;side 不占位。 */
+body.desk-view:not(.desk-chat-expanded):not(.desk-chat-full) .chat-host .chat-panel-body {
+  grid-template-columns: minmax(0, 1fr);
+}
 body.desk-view:not(.desk-chat-expanded):not(.desk-chat-full) .chat-host .chat-panel-side { display: none; }
+/* 空态(无消息):正经空态,不是决策卡压着空白 —— chat-log 空时浮一句"跟小卡说点什么"。
+   纯 CSS(:has + ::before),内容由 i18n 写进 data-empty(applyStatic);有任一条消息即隐。 */
+body.desk-view .chat-host .chat-panel-main:has(#chat-log:empty) #chat-log::before {
+  content: attr(data-empty);
+  display: block;
+  margin: auto;
+  padding: 24px 20px;
+  max-width: 80%;
+  text-align: center;
+  font-size: var(--fs-14, 14px);
+  line-height: 1.6;
+  color: var(--text-dim);
+  opacity: 0.82;
+}
+body.desk-view .chat-host #chat-log:empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 /* expanded:完整(会话列表回来,大窗) */
 body.desk-view.desk-chat-expanded .chat-host .chat-panel {
   width: min(760px, 64%);
@@ -262,7 +288,10 @@ body.desk-view #mgmt-modal .modal {
   top: 0;
   pointer-events: auto;
   width: min(680px, calc(100vw - 48px));
-  max-height: 80vh;
+  /* dock 悬浮在底部(bottom:10px + height:56px = 底部 66px 占用带)。max-height 必须同时为
+     顶部落位(topbar ~56 + 内边距 48)与 dock 带留空,否则面板底部钻进 dock 底下、内容被盖
+     (Hardy 实拍 bug):视口高 − 顶部约 112 − dock 带 84 ≈ 100vh − 196。 */
+  max-height: calc(100vh - 196px);
   box-shadow: var(--win-shadow);
 }
 body.desk-view #mgmt-modal .modal-head {
@@ -270,6 +299,12 @@ body.desk-view #mgmt-modal .modal-head {
   user-select: none;
   touch-action: none;
 }
+/* 标题栏拖柄可抓面积:styles.css 的 justify-content:space-between 会把注入的 ─/⤢/✕ 三个按钮
+   **均摊铺开**在整条 head 上(标题左、按钮散布中右)→ 想抓"标题栏中段"却总压到按钮、拖不动
+   (Hardy 实拍"拖拽失效")。桌面下改成:标题占左 + margin-right:auto 把按钮全推到右端聚拢,
+   中间一大片空白成为干净可抓拖柄。 */
+body.desk-view #mgmt-modal .modal-head { justify-content: flex-start; gap: 4px; }
+body.desk-view #mgmt-modal .modal-head .modal-title { margin-right: auto; }
 body.desk-view #mgmt-modal .modal-head.dragging { cursor: grabbing; }
 body.desk-view #mgmt-modal .modal-head:focus-visible {
   outline: 2px solid var(--border-focus);
@@ -810,14 +845,16 @@ body.desk-view .desk-recent-knowledge .desk-recent-item {
 }
 body.desk-view .desk-recent-knowledge .desk-recent-item:hover { border-color: var(--accent); }
 
-/* ---- vignette ⑤:本周纪念物瓷砖(桌上一枚小奖章,周报数字)---- */
+/* ---- vignette ⑤:本周纪念物瓷砖(桌上一枚小奖章,周报数字)----
+   ⚠ 曾居中 top:22px —— 正好压在居中大时间(.desk-focus top:26px)头上,夹住时钟顶部
+   (Hardy 实拍 bug)。挪到左上角:大时间居中、时钟垂直空间完全让给它,纪念物退到角落不抢锚点。 */
 .desk-memento { display: none; }
 body.desk-view .desk-memento {
   position: absolute;
   display: block;
-  left: 50%;
-  top: 22px;
-  transform: translateX(-50%);
+  left: 18px;
+  top: 18px;
+  transform: none;
   padding: 8px 14px 10px;
   background: linear-gradient(160deg, var(--note-yellow, #fff6da), rgba(255, 255, 255, 0.92));
   border: 1px solid var(--note-line, var(--border));

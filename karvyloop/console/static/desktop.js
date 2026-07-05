@@ -111,6 +111,7 @@
     const HANDLE_MIN_W = 48;
     const HANDLE_MIN_H = 32;
     const KEY_STEP = 8;
+    const DOCK_BAND = 84;
     let _zTop = BASE_Z;
     let _entered = false;
     let _wired = false;
@@ -190,10 +191,14 @@
       const p = par.getBoundingClientRect();
       if (!(d.width > 0) || !(d.height > 0)) return { x, y };
       const w = el.offsetWidth || HANDLE_MIN_W;
+      const h = el.offsetHeight || HANDLE_MIN_H;
       const minX = d.left - p.left - Math.max(0, w - HANDLE_MIN_W);
       const maxX = Math.max(minX, d.right - p.left - HANDLE_MIN_W);
       const minY = d.top - p.top;
-      const maxY = Math.max(minY, d.bottom - p.top - HANDLE_MIN_H);
+      const floorTop = d.bottom - DOCK_BAND;
+      const maxYWhole = floorTop - p.top - h;
+      const maxYHandle = floorTop - p.top - HANDLE_MIN_H;
+      const maxY = Math.max(minY, maxYWhole >= minY ? maxYWhole : maxYHandle);
       return { x: Math.min(Math.max(x, minX), maxX), y: Math.min(Math.max(y, minY), maxY) };
     }
     function persistPos(kind, pos) {
@@ -1215,7 +1220,15 @@
       if (!(d.width > 0)) return { x: 18, y: 18 };
       const w = cp.offsetWidth || Math.min(560, d.width * 0.44);
       const x = Math.max(12, (d.width - w) / 2);
-      const y = Math.max(150, d.height * 0.2);
+      const clock = document.getElementById("desk-clock");
+      let y = Math.max(150, d.height * 0.24);
+      if (clock) {
+        const c = clock.getBoundingClientRect();
+        if (c.height > 0) y = Math.max(y, c.bottom - d.top + 48);
+      }
+      const h = cp.offsetHeight || Math.min(560, d.height * 0.66);
+      const yMax = Math.max(150, d.height - h - DOCK_BAND);
+      if (y > yMax) y = yMax;
       return clampPos(cp, x, y);
     }
     function setChatMode(mode, silent) {
@@ -1321,16 +1334,23 @@
     }
     const KARVY_ZONE = { h: 200 };
     const DOCK_NOTE_W = 236;
-    const DOCK_NOTE_H = 40;
-    const DOCK_NOTE_GAP = 10;
+    const DOCK_NOTE_H_FALLBACK = 44;
+    const DOCK_NOTE_GAP = 12;
     const DOCK_LANE_TOP = 150;
-    function computeNoteDock(_col, idx) {
+    function collapsedNoteH() {
+      const first = document.querySelector(".cockpit-grid .cockpit-col.col-collapsed");
+      const h = first ? first.getBoundingClientRect().height : 0;
+      return h > 0 ? Math.round(h) : DOCK_NOTE_H_FALLBACK;
+    }
+    function computeNoteDock(_col, idx, step) {
+      const lane = step > 0 ? step : DOCK_NOTE_H_FALLBACK + DOCK_NOTE_GAP;
       const desk = deskEl();
-      if (!desk) return { x: 12, y: DOCK_LANE_TOP + idx * (DOCK_NOTE_H + DOCK_NOTE_GAP) };
+      if (!desk) return { x: 12, y: DOCK_LANE_TOP + idx * lane };
       const d = desk.getBoundingClientRect();
       const x = d.width > 0 ? Math.max(12, d.width - DOCK_NOTE_W - 18) : 12;
-      const floorMax = d.height > 0 ? d.height - KARVY_ZONE.h - DOCK_NOTE_H : Infinity;
-      let y = DOCK_LANE_TOP + idx * (DOCK_NOTE_H + DOCK_NOTE_GAP);
+      const noteH = lane - DOCK_NOTE_GAP;
+      const floorMax = d.height > 0 ? d.height - KARVY_ZONE.h - noteH : Infinity;
+      let y = DOCK_LANE_TOP + idx * lane;
       if (isFinite(floorMax) && y > floorMax) y = Math.max(DOCK_LANE_TOP, floorMax);
       return { x, y };
     }
@@ -1374,9 +1394,9 @@
       _store = loadStore();
       _entered = true;
       _zTop = BASE_Z;
-      noteEls().forEach((col, idx) => {
+      const cols = noteEls();
+      cols.forEach((col) => {
         const k = noteKey(col);
-        const saved = _store.notes[k];
         let collapsed = true;
         try {
           const v = localStorage.getItem("karvy.rail." + k);
@@ -1384,10 +1404,18 @@
         } catch {
         }
         col.classList.toggle("col-collapsed", collapsed);
-        const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDock(col, idx);
+      });
+      const laneStep = collapsedNoteH() + DOCK_NOTE_GAP;
+      cols.forEach((col, idx) => {
+        const saved = _store.notes[noteKey(col)];
+        const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDock(col, idx, laneStep);
         applyPos(col, pos.x, pos.y);
         col.style.zIndex = String(++_zTop);
       });
+      ensureFocusDom();
+      clockStart();
+      refreshPending();
+      updateBoardBadge();
       const cw = _store.windows.chat;
       const cp = chatPanel();
       setChatMode(_store.chatMode || "compact", true);
@@ -1410,10 +1438,8 @@
         cx.setAttribute("aria-label", t("desk.min"));
       }
       updateDockIndicators();
-      ensureFocusDom();
-      clockStart();
-      refreshPending();
-      updateBoardBadge();
+      const clog = document.getElementById("chat-log");
+      if (clog) clog.setAttribute("data-empty", t("desk.chat_empty"));
       wallStart();
       enterSoul();
     }

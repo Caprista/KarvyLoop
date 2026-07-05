@@ -33,6 +33,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   const HANDLE_MIN_W = 48;     // 任何时候标题栏至少 48×32 可见(防拖丢)
   const HANDLE_MIN_H = 32;
   const KEY_STEP = 8;          // 键盘方向键步进(a11y)
+  const DOCK_BAND = 84;        // 底部 dock 悬浮带(bottom:10 + height:56 + 呼吸)——窗口底不许钻进去
 
   let _zTop = BASE_Z;
   let _entered = false;
@@ -113,10 +114,16 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     const p = par.getBoundingClientRect();
     if (!(d.width > 0) || !(d.height > 0)) return { x, y };   // 无布局环境(测试/隐藏)不 clamp
     const w = el.offsetWidth || HANDLE_MIN_W;
+    const h = el.offsetHeight || HANDLE_MIN_H;
     const minX = d.left - p.left - Math.max(0, w - HANDLE_MIN_W);
     const maxX = Math.max(minX, d.right - p.left - HANDLE_MIN_W);
     const minY = d.top - p.top;                                // 标题栏永不拖出画布上沿
-    const maxY = Math.max(minY, d.bottom - p.top - HANDLE_MIN_H);
+    // 底部边界让出 dock 悬浮带:先争取**整窗**落在 dock 之上(bottom ≤ 画布底 − dock 带);
+    // 窗太高塞不下时,退而至少保证标题栏在 dock 之上可抓(不把整条 header 埋进 dock)。
+    const floorTop = d.bottom - DOCK_BAND;                      // dock 带顶(画布坐标)
+    const maxYWhole = floorTop - p.top - h;                     // 整窗在 dock 之上
+    const maxYHandle = floorTop - p.top - HANDLE_MIN_H;         // 至少标题栏在 dock 之上
+    const maxY = Math.max(minY, maxYWhole >= minY ? maxYWhole : maxYHandle);
     return { x: Math.min(Math.max(x, minX), maxX), y: Math.min(Math.max(y, minY), maxY) };
   }
 
@@ -1135,7 +1142,17 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     if (!(d.width > 0)) return { x: 18, y: 18 };
     const w = cp.offsetWidth || Math.min(560, d.width * 0.44);
     const x = Math.max(12, (d.width - w) / 2);
-    const y = Math.max(150, d.height * 0.20);   // 大时间下方
+    // 聊天窗顶必须清清楚楚落在**大时间之下**(不盖时钟底部,Hardy 实拍 bug):量时钟真实
+    // bottom + 舒适间距当锚;量不到回退 24% 高度。再夹上限保证窗底留在 dock 之上。
+    const clock = document.getElementById("desk-clock");
+    let y = Math.max(150, d.height * 0.24);
+    if (clock) {
+      const c = clock.getBoundingClientRect();
+      if (c.height > 0) y = Math.max(y, c.bottom - d.top + 48);
+    }
+    const h = cp.offsetHeight || Math.min(560, d.height * 0.66);
+    const yMax = Math.max(150, d.height - h - DOCK_BAND);   // 窗底不进 dock 带
+    if (y > yMax) y = yMax;
     return clampPos(cp, x, y);
   }
   function setChatMode(mode: ChatMode, silent?: boolean): void {
@@ -1241,17 +1258,28 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
   // 右下 220×200 仍是卡皮巴拉地盘,停靠条止步于它之上。用户挪过某张便签(存档里有)则尊重存档。
   const KARVY_ZONE = { w: 220, h: 200 };
   const DOCK_NOTE_W = 236;                                  // 收起态停靠便签宽(desktop.css .col-collapsed)
-  const DOCK_NOTE_H = 40;                                   // 收起态高(标题条)
-  const DOCK_NOTE_GAP = 10;
+  const DOCK_NOTE_H_FALLBACK = 44;                          // 收起态高兜底(无布局环境;真高优先量)
+  const DOCK_NOTE_GAP = 12;
   const DOCK_LANE_TOP = 150;                                // 从大时间下方起(时钟区 ~130px)
-  // 收起态停靠位:右侧一竖条,自上而下;停在卡皮巴拉地盘之上(挤不下就压回最后一格,不侵入)。
-  function computeNoteDock(_col: HTMLElement, idx: number): Pos {
+  // 收起态标题条真实高度(≠ 40px 的老魔数 —— .col-head padding+13px 字实测 ~65px;
+  // 用魔数当步长 → 卡片行距 < 卡高 → 两两重叠、字串一起,Hardy 实拍 bug)。量第一张收起卡的真高,
+  // 全部同高,一处量了当步长即可;量不到(隐藏/测试)回退 fallback。
+  function collapsedNoteH(): number {
+    const first = document.querySelector<HTMLElement>(".cockpit-grid .cockpit-col.col-collapsed");
+    const h = first ? first.getBoundingClientRect().height : 0;
+    return h > 0 ? Math.round(h) : DOCK_NOTE_H_FALLBACK;
+  }
+  // 收起态停靠位:右侧一竖条,自上而下、**行距=真卡高+间距**(不重叠);停在卡皮巴拉地盘之上
+  // (挤不下就压回最后一格,不侵入)。step 由调用方量一次传入,避免每张卡各量一次(布局抖动)。
+  function computeNoteDock(_col: HTMLElement, idx: number, step: number): Pos {
+    const lane = step > 0 ? step : DOCK_NOTE_H_FALLBACK + DOCK_NOTE_GAP;
     const desk = deskEl();
-    if (!desk) return { x: 12, y: DOCK_LANE_TOP + idx * (DOCK_NOTE_H + DOCK_NOTE_GAP) };
+    if (!desk) return { x: 12, y: DOCK_LANE_TOP + idx * lane };
     const d = desk.getBoundingClientRect();
     const x = d.width > 0 ? Math.max(12, d.width - DOCK_NOTE_W - 18) : 12;
-    const floorMax = d.height > 0 ? d.height - KARVY_ZONE.h - DOCK_NOTE_H : Infinity;
-    let y = DOCK_LANE_TOP + idx * (DOCK_NOTE_H + DOCK_NOTE_GAP);
+    const noteH = lane - DOCK_NOTE_GAP;
+    const floorMax = d.height > 0 ? d.height - KARVY_ZONE.h - noteH : Infinity;
+    let y = DOCK_LANE_TOP + idx * lane;
     if (isFinite(floorMax) && y > floorMax) y = Math.max(DOCK_LANE_TOP, floorMax);
     return { x, y };
   }
@@ -1290,20 +1318,31 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     _zTop = BASE_Z;
     // 便签:默认**收起、停靠右侧一竖条**(标题+角标即可,不铺满);存过位置(用户挪过)则尊重存档。
     // 收起态由 col-collapsed 控(CSS);没显式存过展开偏好的便签,进桌面默认收起(空旷)。
-    noteEls().forEach((col, idx) => {
+    // 两趟:先全部落定 col-collapsed 类(让 CSS 生效),再量一次真实收起高当停靠步长,
+    // 最后逐张摆位 —— 停靠条行距 = 真卡高 + 间距,两两不重叠(Hardy 实拍 bug 修复)。
+    const cols = noteEls();
+    cols.forEach((col) => {
       const k = noteKey(col);
-      const saved = _store.notes[k];
-      // 默认收起;用户若显式展开过某张(rail.<col> = "0")则尊重,否则收起
       let collapsed = true;
       try {
         const v = localStorage.getItem("karvy.rail." + k);
         if (v === "0") collapsed = false;
       } catch { /* 无 localStorage → 默认收起 */ }
       col.classList.toggle("col-collapsed", collapsed);
-      const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDock(col, idx);
+    });
+    const laneStep = collapsedNoteH() + DOCK_NOTE_GAP;   // 量一次真高(全部同高),当停靠行距
+    cols.forEach((col, idx) => {
+      const saved = _store.notes[noteKey(col)];
+      const pos = saved ? clampPos(col, saved.x, saved.y) : computeNoteDock(col, idx, laneStep);
       applyPos(col, pos.x, pos.y);
       col.style.zIndex = String(++_zTop);
     });
+    // 空旷单焦点先立:大时间 + 待处理条(桌面锚点)——**必须在聊天摆位之前**,
+    // 否则 chatDefaultPos 量不到 .desk-focus 的真实高度,聊天窗会盖住时钟底部(Hardy 实拍 bug)。
+    ensureFocusDom();   // 大时间 + 待处理任务轻量条(桌面锚点)
+    clockStart();       // 大时间:进场对一次 + 分钟级低频重判(复用壁纸同款低频,不上高频 timer)
+    refreshPending();   // 待处理任务项(极简条目,读现有 h2a/task DOM,不喧宾)
+    updateBoardBadge(); // 看板 dock 图标角标(有没有新数据)
     // 聊天窗:默认开、**居中精简态**(单窗口无会话列表);记住上次位置/最小化态/放大态
     const cw = _store.windows.chat;
     const cp = chatPanel();
@@ -1326,10 +1365,9 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     const cx = document.getElementById("chat-modal-close");
     if (cx) { cx.setAttribute("title", t("desk.min")); cx.setAttribute("aria-label", t("desk.min")); }
     updateDockIndicators();
-    ensureFocusDom();   // 空旷单焦点:大时间 + 待处理任务轻量条(桌面锚点)
-    clockStart();       // 大时间:进场对一次 + 分钟级低频重判(复用壁纸同款低频,不上高频 timer)
-    refreshPending();   // 待处理任务项(极简条目,读现有 h2a/task DOM,不喧宾)
-    updateBoardBadge(); // 看板 dock 图标角标(有没有新数据)
+    // 精简聊天空态文案(chat-log 空时 CSS ::before 显示;有消息即隐)——正经空态,不是决策卡压空白
+    const clog = document.getElementById("chat-log");
+    if (clog) clog.setAttribute("data-empty", t("desk.chat_empty"));
     wallStart();   // 日/夜壁纸:进场判定一次 + 分钟级低频重判
     enterSoul();   // P1.5 灵魂:工位区 + 像素小卡 + 只读 WS(desk 进场才活)
   }

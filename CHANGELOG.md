@@ -202,6 +202,30 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   locked by smoke + browser tests.
 
 ### Fixed
+- **Desktop view: five real layout bugs from the calm single-focus screenshots.** All caught
+  visually (the previous Playwright tests asserted existence/z-index but never *saw* occlusion) and
+  now locked with rect-level visual assertions + screenshots:
+  (1) **The big clock is no longer squeezed.** The weekly-memento tile used to sit dead-centre on
+  top of the clock and the compact chat crept up under it — the clock is the desktop anchor and got
+  clipped top and bottom. The memento moved to the top-left corner and the chat's default top is
+  measured to land clearly *below* the clock, so the anchor keeps its own clear vertical space.
+  (2) **The compact chat shows the conversation, not a squished card over a blank void.** The chat
+  body is a `200px + 1fr` grid; hiding the conversation list with `display:none` left the 200px
+  column reserved, so `chat-log` was crushed to ~200px with a huge blank area beside it. Compact
+  mode now collapses the body to a single column so the message flow fills the window, and an empty
+  `chat-log` shows a proper "Say something to Karvy" placeholder instead of blank.
+  (3) **Pop-up windows no longer hide under the dock.** The Lin demo panel (and any window) could
+  extend its bottom beneath the floating dock. Window `max-height` now reserves the dock band, and
+  clamp/positioning keep every window's bottom above the dock.
+  (4) **Windows drag by their title bar again.** The injected minimise/expand/close buttons were
+  spread across the whole management title bar by `space-between`, so grabbing the bar usually
+  landed on a button and refused to drag. The buttons now group tight on the right, leaving a large
+  clean drag handle; dragged positions still persist to `karvyloop_desk.v1`. (Mobile keeps no drag.)
+  (5) **Collapsed side notes stack cleanly.** The docked-note lane stepped by a stale 40px constant
+  while the real collapsed cards are ~65px tall, so each card overlapped the next and text bled
+  together. The lane step is now measured from the real collapsed height, giving clean vertical
+  spacing. Locked by browser tests (clock ∩ memento/chat empty, demo bottom ≤ dock top, title-bar
+  drag moves left/top, collapsed cards pairwise non-overlapping) and archived day/night screenshots.
 - **The global Karvy (bottom-right capybara) can no longer be covered by a panel.** On the desktop
   it used to sit *below* windows and panels (z-index 210), so an open management panel or the board
   could hide it. It now stays pinned on top (z-index 9550 — above the dock and every window/note),
