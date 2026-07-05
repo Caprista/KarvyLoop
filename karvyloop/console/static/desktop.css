@@ -140,24 +140,92 @@ body.desk-view .cockpit-col.col-collapsed .col-head {
 /* 收起态便签不摆胶带(窄条不需要),展开态才有 */
 body.desk-view .cockpit-col.col-collapsed::after { display: none; }
 
-/* ---- 看板召唤态(body.desk-board-open):四张便签全展开 + 居中大态铺开看全部 ----
-   点 dock 📋 或待办条 → 摊开;再点关。不再右侧铺满 —— 召唤才出。 */
-body.desk-view.desk-board-open .cockpit-col {
-  width: 304px;
-  max-height: 42vh;
-}
-body.desk-view.desk-board-open .cockpit-col.col-collapsed { width: 304px; opacity: 1; }
-body.desk-view.desk-board-open .cockpit-col.col-collapsed::after { display: block; }
-/* 看板召唤态压一层半透遮罩,聚焦四标签(点遮罩外由 JS 不处理,dock 📋 关) */
+/* ============================================================================
+   看板 = 一个整体(Hardy 2026-07-05):折起 = 一张缩略卡(#desk-board-fold),
+   点开 = 一整块 2×2 看板。4 象限**在网格里排布**,不再各自绝对定位 —— 从根上不可能重叠。
+   ============================================================================ */
+/* 折起态(默认):4 象限全藏,桌面右上只留缩略卡 */
+body.desk-view:not(.desk-board-open) .cockpit-col { display: none; }
+/* 召唤态:半透遮罩聚焦看板(点遮罩空白处 = 关,JS 兜) */
 body.desk-view.desk-board-open .cockpit::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: rgba(30, 22, 14, 0.18);
+  background: rgba(30, 22, 14, 0.30);
   z-index: 215;
   pointer-events: none;
 }
-body.desk-view.desk-board-open .cockpit-col { z-index: 240 !important; }
+/* 网格壳复位(桌面下本是 display:contents):居中浮层,2×2,一整块铺开。
+   用 position:fixed(视口坐标)—— .cockpit 本身在 topbar 下偏移,若用 absolute 则 top/max-height
+   会漏算这段偏移、底行钻进 dock(实测底 1034 > dock 顶 1014)。fixed 直接按视口算,dock 让位准。 */
+body.desk-view.desk-board-open .cockpit-grid {
+  display: grid;
+  position: fixed;
+  left: 50%;
+  top: 88px;
+  transform: translateX(-50%);
+  width: min(960px, 94vw);
+  max-height: calc(100vh - 88px - 96px);   /* 视口:顶 topbar 之下 88 + 底 dock 带 96 留空 */
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  z-index: 240;
+  padding: 2px;
+  overflow: auto;
+}
+/* 象限进网格:退掉绝对定位 + JS 的 translate/tilt,规规矩矩占格子(等高、无胶带、标题非拖柄) */
+body.desk-view.desk-board-open .cockpit-col {
+  position: static !important;
+  transform: none !important;
+  width: auto !important;
+  max-width: none;
+  max-height: min(44vh, 430px);
+  margin: 0 !important;
+  opacity: 1 !important;
+  z-index: auto !important;
+}
+body.desk-view.desk-board-open .cockpit-col::after { display: none; }
+body.desk-view.desk-board-open .cockpit-col .col-head { cursor: default; }
+/* 摊开时缩略卡 + 待办速览 + 聊天窗全让位(整块看板是唯一焦点,不许聊天窗从遮罩里透出来盖看板) */
+body.desk-view.desk-board-open #desk-board-fold { display: none; }
+body.desk-view.desk-board-open .desk-pending { display: none; }
+body.desk-view.desk-board-open #chat-modal.chat-host { display: none !important; }
+
+/* 看板缩略卡:桌面右上一张,🗂 + 标题 + 提示 + 待办角标;点它 = 摊成一整块看板 */
+.desk-board-fold { display: none; }
+body.desk-view .desk-board-fold {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  position: absolute;
+  top: 92px;
+  right: 22px;
+  z-index: 210;
+  padding: 12px 16px;
+  min-width: 210px;
+  background: var(--accent-light);
+  border: 1px solid var(--accent-line);
+  border-radius: 14px;
+  box-shadow: 0 8px 22px rgba(142, 95, 60, 0.18);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
+}
+body.desk-view .desk-board-fold:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(142, 95, 60, 0.26); }
+body.desk-view .desk-board-fold-ico { font-size: 22px; line-height: 1; }
+body.desk-view .desk-board-fold-body { display: flex; flex-direction: column; gap: 2px; }
+body.desk-view .desk-board-fold-title { font-size: var(--fs-14, 14px); font-weight: 700; color: var(--accent-strong); }
+body.desk-view .desk-board-fold-hint { font-size: var(--fs-12, 12px); color: var(--text-dim); }
+body.desk-view .desk-board-fold-badge {
+  margin-left: auto;
+  min-width: 20px; height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--rose, #d8527c);
+  color: #fff;
+  font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+body.desk-view.desk-wall-night .desk-board-fold-hint { color: #e8ddce; }
 
 /* ⚖ 新决策卡到达:边框玫红呼吸 2 次(fail-loud 推回决策舱,docs/51 §4.2) */
 body.desk-view .cockpit-col.note-alert {
@@ -930,6 +998,11 @@ body.desk-view .desk-pending {
   max-width: min(560px, 60vw);
   pointer-events: auto;
 }
+/* 聊天窗开着 = 你在聚焦对话:中央只留大时钟 + 聊天窗(空旷单焦点)。待办速览此刻会被聊天窗
+   压住下半(chat z220 盖 pending z1,Hardy 实拍"覆盖"),故藏起——它在右栏卡与 dock 徽章都还在。 */
+body.desk-view .desk-pending { display: none; }
+/* 聊天窗最小化进 dock = 桌面转待命面板:待办速览回来供扫一眼(此时无聊天窗遮挡,与大时钟干净纵列)。 */
+body.desk-view:has(#chat-modal.desk-min) .desk-pending { display: flex; }
 body.desk-view .desk-pending-head {
   font-size: var(--fs-12);
   font-weight: 700;

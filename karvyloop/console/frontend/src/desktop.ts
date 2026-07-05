@@ -1043,6 +1043,38 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     }
   }
 
+  // 看板缩略卡(Hardy 2026-07-05:4 块看板做成一个整体 —— 折起 = 一张缩略卡,点开 = 一整块看板)。
+  // 桌面默认只露这一张卡(不再铺 4 张绝对定位便签、免"对齐 4 张"的重叠地狱);点它 = openBoard 摊成 2×2。
+  function ensureBoardFold(): void {
+    const desk = deskEl();
+    if (!desk) return;
+    if (document.getElementById("desk-board-fold")) return;
+    const card = document.createElement("button");
+    card.id = "desk-board-fold";
+    card.className = "desk-board-fold";
+    card.setAttribute("data-tip", t("desk.board_open"));
+    card.setAttribute("title", t("desk.board_open"));
+    const ico = document.createElement("span"); ico.className = "desk-board-fold-ico"; ico.textContent = "🗂";
+    const body = document.createElement("span"); body.className = "desk-board-fold-body";
+    const title = document.createElement("span"); title.className = "desk-board-fold-title"; title.textContent = t("desk.board_fold_title");
+    const hint = document.createElement("span"); hint.className = "desk-board-fold-hint"; hint.textContent = t("desk.board_fold_hint");
+    body.appendChild(title); body.appendChild(hint);
+    card.appendChild(ico); card.appendChild(body);
+    card.addEventListener("click", (e) => { e.stopPropagation(); openBoard(true); });   // 别冒泡到 desk 的关闭handler
+    desk.appendChild(card);
+    // 摊开态:点看板外的遮罩空白 = 收起(点看板内部/象限不关)。一次性挂在 desk 上。
+    if (!_boardDismissWired) {
+      _boardDismissWired = true;
+      desk.addEventListener("click", (e) => {
+        if (!boardOpen()) return;
+        const tgt = e.target as HTMLElement | null;
+        if (tgt && tgt.closest && tgt.closest(".cockpit-grid")) return;   // 点看板内部不关
+        openBoard(false);
+      });
+    }
+  }
+  let _boardDismissWired = false;
+
   function paintClock(now?: Date): void {
     const el = document.getElementById("desk-clock");
     if (!el) return;
@@ -1223,6 +1255,19 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
       if (badge) badge.remove();
       btn.classList.remove("has-new");
     }
+    // 缩略卡角标(与 dock 徽章同源:有几项待你处理)
+    const fold = document.getElementById("desk-board-fold");
+    if (fold) {
+      let fb = fold.querySelector<HTMLElement>(".desk-board-fold-badge");
+      if (n > 0) {
+        if (!fb) { fb = document.createElement("span"); fb.className = "desk-board-fold-badge"; fold.appendChild(fb); }
+        fb.textContent = n > 99 ? "99+" : String(n);
+        fold.classList.add("has-new");
+      } else {
+        if (fb) fb.remove();
+        fold.classList.remove("has-new");
+      }
+    }
   }
   function boardOpen(): boolean { return document.body.classList.contains("desk-board-open"); }
   function openBoard(on: boolean): void {
@@ -1284,6 +1329,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     return { x, y };
   }
 
+
   // ---- enter / leave(视图切换的唯一入口;幂等)----
   function wireAll(): void {
     if (_wired) return;
@@ -1340,6 +1386,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     // 空旷单焦点先立:大时间 + 待处理条(桌面锚点)——**必须在聊天摆位之前**,
     // 否则 chatDefaultPos 量不到 .desk-focus 的真实高度,聊天窗会盖住时钟底部(Hardy 实拍 bug)。
     ensureFocusDom();   // 大时间 + 待处理任务轻量条(桌面锚点)
+    ensureBoardFold();  // 看板缩略卡(折起态唯一露出的那张;点开 = 一整块看板)
     clockStart();       // 大时间:进场对一次 + 分钟级低频重判(复用壁纸同款低频,不上高频 timer)
     refreshPending();   // 待处理任务项(极简条目,读现有 h2a/task DOM,不喧宾)
     updateBoardBadge(); // 看板 dock 图标角标(有没有新数据)

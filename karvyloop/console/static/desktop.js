@@ -1112,6 +1112,46 @@
         desk.insertBefore(wrap, desk.firstChild);
       }
     }
+    function ensureBoardFold() {
+      const desk = deskEl();
+      if (!desk) return;
+      if (document.getElementById("desk-board-fold")) return;
+      const card = document.createElement("button");
+      card.id = "desk-board-fold";
+      card.className = "desk-board-fold";
+      card.setAttribute("data-tip", t("desk.board_open"));
+      card.setAttribute("title", t("desk.board_open"));
+      const ico = document.createElement("span");
+      ico.className = "desk-board-fold-ico";
+      ico.textContent = "🗂";
+      const body = document.createElement("span");
+      body.className = "desk-board-fold-body";
+      const title = document.createElement("span");
+      title.className = "desk-board-fold-title";
+      title.textContent = t("desk.board_fold_title");
+      const hint = document.createElement("span");
+      hint.className = "desk-board-fold-hint";
+      hint.textContent = t("desk.board_fold_hint");
+      body.appendChild(title);
+      body.appendChild(hint);
+      card.appendChild(ico);
+      card.appendChild(body);
+      card.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openBoard(true);
+      });
+      desk.appendChild(card);
+      if (!_boardDismissWired) {
+        _boardDismissWired = true;
+        desk.addEventListener("click", (e) => {
+          if (!boardOpen()) return;
+          const tgt = e.target;
+          if (tgt && tgt.closest && tgt.closest(".cockpit-grid")) return;
+          openBoard(false);
+        });
+      }
+    }
+    let _boardDismissWired = false;
     function paintClock(now) {
       const el = document.getElementById("desk-clock");
       if (!el) return;
@@ -1299,6 +1339,22 @@
         if (badge) badge.remove();
         btn.classList.remove("has-new");
       }
+      const fold = document.getElementById("desk-board-fold");
+      if (fold) {
+        let fb = fold.querySelector(".desk-board-fold-badge");
+        if (n > 0) {
+          if (!fb) {
+            fb = document.createElement("span");
+            fb.className = "desk-board-fold-badge";
+            fold.appendChild(fb);
+          }
+          fb.textContent = n > 99 ? "99+" : String(n);
+          fold.classList.add("has-new");
+        } else {
+          if (fb) fb.remove();
+          fold.classList.remove("has-new");
+        }
+      }
     }
     function boardOpen() {
       return document.body.classList.contains("desk-board-open");
@@ -1413,6 +1469,7 @@
         col.style.zIndex = String(++_zTop);
       });
       ensureFocusDom();
+      ensureBoardFold();
       clockStart();
       refreshPending();
       updateBoardBadge();
