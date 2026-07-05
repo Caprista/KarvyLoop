@@ -233,3 +233,170 @@ async def test_ingest_without_cache_makes_no_concept_call(tmp_path):
     gw = _GW()
     await ingest_material("我喜欢深色配色", gateway=gw, mem=mem)
     assert "concepts" not in gw.calls
+
+
+# ---- 反向标签(Hardy,受控词表 reuse-first)+ 同义收敛 + 摄入调和 ----
+
+def test_synonym_tag_fragments_converge_via_alias(tmp_path):
+    """同义标签碎片场景:两条认知打了同义**异名**标签("深色主题" vs "夜间模式"),
+    标签重叠匹配互相看不见;daily 收敛并进别名表后 → 同一 query 两条都可见。
+    老标签保留为 alias 继续可匹配,历史 beliefs 的标签**没被重写**(resolve 原始视图不变)。"""
+    cc = ConceptCache(tmp_path / "cc.json")
+    mem = MemoryManager(concept_cache=cc)
+    a = "用户偏好深色主题的界面配色"
+    b = "屏幕亮度晚上要调低一档"
+    mem.write(_belief(a))
+    mem.write(_belief(b))
+    cc.put(a, ["深色主题"])
+    cc.put(b, ["夜间模式"])
+    assert overlap_score("夜间模式", a) == 0          # 自证:A 只有靠标签层才可见
+    before = mem.recall_block("夜间模式", scope="personal", limit=8)
+    assert b in before and a not in before            # 收敛前:碎片,互相看不见
+    assert cc.add_alias("夜间模式", "深色主题", via="test") is True
+    after = mem.recall_block("夜间模式", scope="personal", limit=8)
+    assert a in after and b in after                  # 收敛后:同 query 两条都可见
+    raw, _ = cc.resolve([a, b])
+    assert raw == [["深色主题"], ["夜间模式"]]         # 原始视图未重写(审计不变)
+    # supersede 候选侧同吃别名展开(匹配面变厚)
+    from karvyloop.cognition.conflict import find_supersede_candidates
+    olds = [mem.index.get(a)]
+    cands = find_supersede_candidates("夜间模式下的显示偏好", olds,
+                                      concepts=[cc.tags_for(a)])
+    assert cands == [0]
+
+
+class _ReuseGW:
+    """reuse-first 打标桩:记录收到的 user 消息,按脚本回标签对象。"""
+
+    def __init__(self, reply: str):
+        self.reply = reply
+        self.user_msgs = []
+
+    def resolve_model(self, scope):
+        return "stub"
+
+    async def complete(self, messages, tools, model_ref, *, system=None):
+        self.user_msgs.append(messages[0]["content"])
+        yield TextDelta(self.reply)
+
+
+@pytest.mark.asyncio
+async def test_reuse_first_offers_candidates_and_reuses(tmp_path):
+    """reuse-first 断言:词表候选被带进 prompt(不是全靠模型凭空打);模型复用既有标签 →
+    不产生 tag_created 事件(复用不算新建)。"""
+    from karvyloop.cognition.concepts import TAG_VOCAB_TASK_ID, assign_tags
+    from karvyloop.cognition.trace import TraceStore
+    cc = ConceptCache(tmp_path / "cc.json")
+    cc.put("既有条:界面配色的偏好记录", ["深色主题"])   # 词表里已有「深色主题」
+    gw = _ReuseGW(json.dumps({"tags": [["深色主题"]], "created": {}}, ensure_ascii=False))
+    trace = TraceStore()
+    got = await assign_tags(["用户偏好夜间模式的配色"], cache=cc, gateway=gw, trace=trace)
+    assert got == [["深色主题"]]
+    assert "已有标签" in gw.user_msgs[0] and "深色主题" in gw.user_msgs[0]   # 候选真进了 prompt
+    assert cc.tags_for("用户偏好夜间模式的配色") == ["深色主题"]
+    assert trace.query(TAG_VOCAB_TASK_ID, kind="tag_created") == []          # 复用 ≠ 新建
+
+
+@pytest.mark.asyncio
+async def test_new_tag_is_explicit_trace_event(tmp_path):
+    """护栏②:新建标签是显式事件 —— 确定性判定(不信 LLM 自报)落 Trace kind=tag_created,
+    带 LLM 给的新建理由;词表不许悄悄发散。"""
+    from karvyloop.cognition.concepts import TAG_VOCAB_TASK_ID, assign_tags
+    from karvyloop.cognition.trace import TraceStore
+    cc = ConceptCache(tmp_path / "cc.json")
+    cc.put("既有条:界面配色的偏好记录", ["深色主题"])
+    gw = _ReuseGW(json.dumps({"tags": [["羽毛球拍"]],
+                              "created": {"羽毛球拍": "候选里没有运动器材类标签"}},
+                             ensure_ascii=False))
+    trace = TraceStore()
+    await assign_tags(["新买的球拍手感不错"], cache=cc, gateway=gw, trace=trace)
+    evs = trace.query(TAG_VOCAB_TASK_ID, kind="tag_created")
+    assert len(evs) == 1
+    assert evs[0].payload["tag"] == "羽毛球拍"
+    assert evs[0].payload["reason"] == "候选里没有运动器材类标签"
+
+
+class _SupersedeGW:
+    """摄入路径桩:编译器回一条固定新知识;一致性审查器回脚本给的 pairs;概念口回空。"""
+
+    def __init__(self, new_content: str, pairs_json: str):
+        self.new_content = new_content
+        self.pairs_json = pairs_json
+
+    def resolve_model(self, scope):
+        return "stub"
+
+    async def complete(self, messages, tools, model_ref, *, system=None):
+        sys_text = "\n".join(getattr(system, "static", []) or []) if system else ""
+        if "一致性审查" in sys_text:
+            yield TextDelta(self.pairs_json)
+        elif "核心概念" in sys_text:
+            yield TextDelta("[[]]")
+        else:
+            yield TextDelta(json.dumps([{"title": "t", "content": self.new_content,
+                                         "kind": "fact"}], ensure_ascii=False))
+
+
+@pytest.mark.asyncio
+async def test_duplicate_auto_merge_leaves_audit_trail(tmp_path):
+    """摄入调和(Hardy 点头的半步):高置信 duplicate **自动合并** = 失效不删输方,
+    审计痕在 invalid_reason(duplicate(auto-merged))+ Trace belief_auto_merged。"""
+    from karvyloop.cognition.ingest import ingest_material
+    from karvyloop.cognition.trace import TraceStore
+    mem = MemoryManager()
+    old = _belief("用户偏好深色主题的界面配色")
+    mem.write(old)
+    gw = _SupersedeGW("用户界面配色偏好深色主题",
+                      '{"pairs":[{"new":0,"old":0,"relation":"duplicate"}]}')
+    trace = TraceStore()
+    res = await ingest_material("材料", gateway=gw, mem=mem, trace=trace)
+    assert res.written == 1
+    assert old.invalid_at is not None                       # 输方失效不删(仍留库可翻案)
+    assert old.invalid_reason.startswith("duplicate(auto-merged)")
+    evs = trace.query("memory_reconcile", kind="belief_auto_merged")
+    assert len(evs) == 1 and "深色主题" in evs[0].payload["winner"]
+    assert res.extends == []                                # 高置信不升卡(已自动并)
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_duplicate_downgrades_to_card(tmp_path):
+    """LLM 判 duplicate 但词面/标签佐证不足(分 < 高置信门)→ **不自动动库**,
+    降级为 extends 素材升 H2A 卡(LLM 一家之言不许直接改护城河资产)。"""
+    from karvyloop.cognition.ingest import ingest_material
+    mem = MemoryManager()
+    old = _belief("喜欢喝拿铁")
+    mem.write(old)
+    gw = _SupersedeGW("拿铁比美式更合口味",
+                      '{"pairs":[{"new":0,"old":0,"relation":"duplicate"}]}')
+    res = await ingest_material("材料", gateway=gw, mem=mem)
+    assert old.invalid_at is None                           # 库没被自动动
+    assert len(res.extends) == 1 and res.extends[0]["old"] == "喜欢喝拿铁"
+
+
+@pytest.mark.asyncio
+async def test_extends_still_raises_h2a_card(tmp_path):
+    """extends 仍出卡:同主题补充新信息 → IngestResult.extends 带 LLM merged 建议,
+    console 侧 raise_extends_cards 升 merge_knowledge 卡(ACCEPT 才合并,人拍板)。"""
+    from types import SimpleNamespace
+    from karvyloop.cognition.ingest import ingest_material
+    from karvyloop.console.proposals import raise_extends_cards
+    mem = MemoryManager()
+    mem.write(_belief("用户偏好深色主题的界面配色"))
+    gw = _SupersedeGW(
+        "深色主题的界面配色要配上高对比度字体",
+        json.dumps({"pairs": [{"new": 0, "old": 0, "relation": "extends",
+                               "merged": "用户偏好深色主题界面配色,且要配高对比度字体"}]},
+                   ensure_ascii=False))
+    res = await ingest_material("材料", gateway=gw, mem=mem)
+    assert len(res.extends) == 1
+    assert res.extends[0]["merged"] == "用户偏好深色主题界面配色,且要配高对比度字体"
+    registered = []
+    app = SimpleNamespace(state=SimpleNamespace(
+        proposal_registry=SimpleNamespace(register=lambda c: registered.append(c)),
+        ws_clients=set()))
+    n = await raise_extends_cards(app, res.extends)
+    assert n == 1 and len(registered) == 1
+    card = registered[0]
+    assert card.kind == "merge_knowledge"
+    assert card.payload["merged_content"] == "用户偏好深色主题界面配色,且要配高对比度字体"
+    assert "用户偏好深色主题的界面配色" in card.payload["member_contents"]
