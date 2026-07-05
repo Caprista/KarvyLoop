@@ -374,6 +374,15 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 知识概念标签:补 {bres['tagged']} 条")
                         except Exception as ie:
                             _maintenance_item_failed(app, "belief_tags_tick", ie)
+                        # 反向标签护栏③:同义标签收敛进别名表(标签是派生数据,可自动合并;
+                        # 审计=别名表 via/ts + Trace tag_merged。watermark=词表指纹,零变零 LLM)
+                        try:
+                            from karvyloop.console.tag_merge_tick import tag_merge_tick
+                            mres = await tag_merge_tick(app)
+                            if mres.get("merged"):
+                                logger.info(f"[karvyloop console] 同义标签收敛:并 {mres['merged']} 对(别名表)")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "tag_merge_tick", ie)
                     except asyncio.CancelledError:
                         break
                     except Exception as e:

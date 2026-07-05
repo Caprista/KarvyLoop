@@ -1654,8 +1654,15 @@ async def maybe_auto_distill(app: Any, mgr: Any) -> Optional[dict]:
         return None
     try:
         # §11 P1b:同一次 LLM 调用 piggyback —— 抽 facts(写记忆)+ decisions(显式陈述源)。
+        _trace = getattr(getattr(app.state, "main_loop", None), "trace", None)
         res, decisions = await distill_turns_with_decisions(
-            new_turns, gateway=gw, mem=mem, model_ref=rk.get("model_ref", ""))
+            new_turns, gateway=gw, mem=mem, model_ref=rk.get("model_ref", ""), trace=_trace)
+        if getattr(res, "extends", None):
+            try:   # 摄入调和 extends 半边:蒸馏产物与旧条同主题加信息 → 升合并建议卡(人拍板)
+                from karvyloop.console.proposals import raise_extends_cards
+                await raise_extends_cards(app, res.extends)
+            except Exception as e:
+                logger.debug(f"[auto_distill] extends 升卡失败(不影响蒸馏): {e}")
         if decisions:
             try:
                 from karvyloop.console.decision_wire import crystallize_candidates

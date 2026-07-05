@@ -48,13 +48,33 @@ async def api_memory_ingest(req: MemoryIngestRequest, request: Request) -> dict[
     from karvyloop.cognition.ingest import ingest_material
     try:
         res = await ingest_material(req.material, gateway=gw, mem=mem,
-                                    model_ref=rk.get("model_ref", ""), agent_id=req.agent_id)
+                                    model_ref=rk.get("model_ref", ""), agent_id=req.agent_id,
+                                    trace=_main_trace(request.app))
     except Exception as e:
         logger.warning(f"[memory/ingest] 摄入失败: {e}")
         return {"ok": False, "reason": f"摄入失败: {e}"}
+    await _raise_extends(request.app, res)
     return {"ok": True, "written": res.written, "skipped": res.skipped,
             "beliefs": [b.content for b in res.beliefs],
             "skip_reasons": res.skip_reasons[:5]}
+
+
+def _main_trace(app: Any):
+    """Trace 底座句柄(标签词表事件/摄入调和审计落这里);--no-llm/无 main_loop → None(照跑)。"""
+    return getattr(getattr(app.state, "main_loop", None), "trace", None)
+
+
+async def _raise_extends(app: Any, res: Any) -> None:
+    """摄入调和 extends 半边:IngestResult.extends → merge_knowledge H2A 卡。失败不阻断摄入回执。"""
+    try:
+        ext = getattr(res, "extends", None) or []
+        if ext:
+            from karvyloop.console.proposals import raise_extends_cards
+            n = await raise_extends_cards(app, ext)
+            if n:
+                logger.info(f"[memory] 摄入调和:升 {n} 张 extends 合并建议卡")
+    except Exception as e:
+        logger.warning(f"[memory] extends 升卡失败(摄入不受影响): {e}")
 
 
 # ---- 认知库沉淀工作流(Hardy):喂料→抓取分析→知识自生长框架结构化→交流→你拍板沉淀/拒绝 ----
@@ -220,7 +240,8 @@ async def api_memory_distill_decide(req: DistillDecideRequest, request: Request)
 
     async def _try_ingest():
         return await ingest_knowledge(material, gateway=gw, mem=mem,
-                                      model_ref=rk.get("model_ref", ""), source="fed", source_ref=sref)
+                                      model_ref=rk.get("model_ref", ""), source="fed",
+                                      source_ref=sref, trace=_main_trace(app))
     try:
         res = await _try_ingest()
         # 边界/偏薄材料上,严格知识抽取是**概率性**的(同一份料这次抽 0、下次抽出 → 用户会看到"失败了、
@@ -240,6 +261,7 @@ async def api_memory_distill_decide(req: DistillDecideRequest, request: Request)
                           "多半是没抓到正文——在上面跟小卡补充几句关键点(会一起沉淀),然后重试沉淀。"}
     # 写成功 → 删掉本次之前该来源的旧版(supersede;只删 ts<_t0 的旧,保住刚写的新)
     superseded = mem.purge_source_ref(sref, before_ts=_t0) if sref else 0
+    await _raise_extends(app, res)   # 摄入调和:extends 升合并建议卡(人拍板)
     store.close()
     return {"ok": True, "decision": "persist", "written": res.written, "superseded": superseded}
 

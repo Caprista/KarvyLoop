@@ -88,6 +88,43 @@ async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = T
     return sent
 
 
+async def raise_extends_cards(app: Any, extends: list, *, now: Optional[float] = None) -> int:
+    """摄入调和的 extends 半边升卡(#61 研判③):新沉淀的知识与库里旧条讲同一主题、
+    **补充了新信息** → 升 merge_knowledge H2A 卡(ACCEPT 才 apply_belief_merge,复用
+    knowledge_tick 同一套卡机制/handler,不另造)。duplicate 高置信的自动合并在
+    conflict.run_supersede_pass 里已做,这里只处理"加信息、人拍板"的那半。
+
+    素材来自 IngestResult.extends(cognition 不依赖 console,升卡在这层)。merged 空
+    (LLM 没给/低置信 duplicate 降级)→ 确定性拼接兜底(两条原文都已在库,拼接不投毒)。
+    proposal_id 按成员内容稳定哈希 → 同对幂等,不唠叨。返回升卡数;单条失败跳过不阻断。
+    """
+    if not extends:
+        return 0
+    import time as _time
+    if now is None:
+        now = _time.time()
+    n = 0
+    for e in extends:
+        try:
+            old_c = str(e.get("old") or "").strip()
+            new_c = str(e.get("new") or "").strip()
+            if not old_c or not new_c or old_c == new_c:
+                continue
+            merged = str(e.get("merged") or "").strip() or f"{old_c}(补充:{new_c})"
+            from karvyloop.karvy.proposal_registry import proposal_for_merge_knowledge
+            card = proposal_for_merge_knowledge(
+                member_contents=[old_c, new_c],
+                member_titles=[str(e.get("old_title") or ""), str(e.get("new_title") or "")],
+                merged_content=merged,
+                reason="新沉淀的知识点与库里这条讲同一主题且补充了新信息(摄入调和)",
+                ts=now)
+            await broadcast_proposal(app, card)   # register 咽喉在 broadcast 里(含静音判定)
+            n += 1
+        except Exception as ex:
+            logger.warning(f"[proposals] extends 升卡失败(跳过该对): {ex}")
+    return n
+
+
 async def proactive_from_state(app: Any):
     """loop-step2b:小卡基于**持久化状态**(任务看板)主动产一条建议并广播。
 

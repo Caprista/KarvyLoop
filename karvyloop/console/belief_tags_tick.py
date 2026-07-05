@@ -98,17 +98,19 @@ async def belief_tags_tick(app: Any, *, state_path: Optional[Path] = None,
         return {"ran": False, "tagged": 0,
                 "reason": f"没有待打标签的知识(watermark,缓存已覆盖 {done}/{len(contents)} 条)"}
 
-    from karvyloop.cognition.concepts import extract_concepts_batch
+    # 反向标签(reuse-first):回填也走受控词表路径 —— 既有标签候选带进 prompt,能复用就复用,
+    # 新建落 Trace tag_created(与写入路径 tag_beliefs 同一实现 assign_tags,别漂移)。
+    from karvyloop.cognition.concepts import assign_tags
     from karvyloop.llm.token_ledger import token_source
+    trace = getattr(getattr(app.state, "main_loop", None), "trace", None)
     with token_source("belief_tags"):
-        tag_lists = await extract_concepts_batch(
-            todo, gateway=gw, model_ref=rk.get("model_ref", ""))
+        tag_lists = await assign_tags(todo, cache=cc, gateway=gw,
+                                      model_ref=rk.get("model_ref", ""), trace=trace)
 
     tagged = 0
     for content, tags in zip(todo, tag_lists):
         if tags:
-            cc.put(content, tags)   # 落缓存:下一次召回/图谱/supersede 立刻可用
-            tagged += 1
+            tagged += 1            # assign_tags 已 put 进缓存:下一次召回/图谱/supersede 立刻可用
         else:
             state.setdefault("empty", {})[_key(content)] = now   # 空结果记冷却
     _save_state(state, state_path)

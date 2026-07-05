@@ -43,6 +43,8 @@ _KNOWN_ENTRIES = {
     "skill_tags_tick.json": "daily skill-tagging watermark state",
     "belief_tags_tick.json": "daily belief-tagging (concept backfill) watermark state",
     "concept_cache.json": "precomputed concept tags (semantic recall layer + graph edges)",
+    "concept_cache_aliases.json": "tag synonym aliases (vocabulary convergence, audit trail)",
+    "tag_merge_tick.json": "daily tag-synonym-merge watermark state",
 }
 
 
