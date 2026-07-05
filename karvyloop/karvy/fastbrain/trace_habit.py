@@ -377,6 +377,16 @@ def _strip_code_fences(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+# 解析器基建天花板(context engineering 基建,镜像 budget.LLM_MATERIAL_TOKENS 的思路):
+# 每个 `[` 起点都要 raw_decode 一次(O(剩余长度)),所以 `[` 越多、文本越长,总功
+# 是 O(起点数 × 长度) ≈ O(n²)。正常 LLM 输出 `[` 少、长度小,完全碰不到这两个上限;
+# 只有病态输出(散文里密布方括号、思考型模型烧掉整窗口、翻译内容多条堆叠)才会撞。
+# 一旦超限就**只扫头部 + 只试前若干起点**——宁可解析退化成"看头部",绝不静默烧 CPU
+# 30 分钟(fail-safe,不 fail-loud:解析器是增益不是命脉,退化=退回词面,不投毒)。
+_MAX_PARSE_CHARS = 200_000   # 扫描窗口上限(≈50k token;真数组一定在可见输出前部)
+_MAX_BRACKET_STARTS = 512    # 最多尝试多少个 `[` 起点(挡"方括号海"的病态输入)
+
+
 def _extract_json_array(text: str) -> str:
     """从 LLM 文本里抽出第一个**能整体 json.loads 的**数组(裁掉前后散文)。
 
@@ -388,12 +398,21 @@ def _extract_json_array(text: str) -> str:
     数组都没有,再退回截断兜底,最后退回第一个合法数组。
     仍是严格 JSON(宁空勿毒:不抽 prose,只找**完整合法**的数组);找不到返原文
     (让 json.loads 自己报错,调用方 warning)。
+
+    **硬护栏(防 O(n²) 烧 CPU)**:每个 `[` 起点各扫一次,故功随「起点数 × 文本长度」
+    平方级涨;病态输出(散文里方括号海 / 翻译内容多条堆叠)曾让本函数烧 30+ 分钟 CPU、
+    零输出(daily belief_tags/tag_merge tick 挂死)。这里对**扫描窗口**和**起点数**各设
+    确定性上限:超限即退化成"只看头部前若干起点",绝不无界自旋。
     """
     cleaned = _strip_code_fences(text)
+    if len(cleaned) > _MAX_PARSE_CHARS:
+        cleaned = cleaned[:_MAX_PARSE_CHARS]   # 只扫头部:真数组在可见输出前部,尾部散文不值得烧
     decoder = json.JSONDecoder()
     first_any: Optional[str] = None
     idx = cleaned.find("[")
-    while idx != -1:
+    starts = 0
+    while idx != -1 and starts < _MAX_BRACKET_STARTS:
+        starts += 1
         try:
             obj, _end = decoder.raw_decode(cleaned, idx)
             if isinstance(obj, list):
@@ -401,8 +420,8 @@ def _extract_json_array(text: str) -> str:
                     return json.dumps(obj, ensure_ascii=False)   # 全 dict 项 = 真数组,绝对优先
                 if first_any is None:
                     first_any = json.dumps(obj, ensure_ascii=False)
-        except json.JSONDecodeError:
-            pass
+        except (json.JSONDecodeError, RecursionError):
+            pass   # RecursionError:方括号海把 json 递归打爆,当解析失败跳过,别让它冒出去炸调用方
         idx = cleaned.find("[", idx + 1)
     # 没有完整的全-dict 数组 → 截断兜底(真模型思考烧掉 max_tokens,数组尾被截是常态);
     # 兜底同样只认 dict 项,所以排在"第一个合法数组"之前(被截的真数组 > 散文里的 [1,2])。
@@ -425,7 +444,9 @@ def _salvage_truncated_array(cleaned: str) -> Optional[str]:
     decoder = json.JSONDecoder()
     n = len(cleaned)
     start = cleaned.find("[")
-    while start != -1:
+    starts = 0
+    while start != -1 and starts < _MAX_BRACKET_STARTS:   # 同 _extract_json_array:挡方括号海 O(n²)
+        starts += 1
         idx = start + 1
         items: list = []
         while idx < n:
@@ -435,8 +456,8 @@ def _salvage_truncated_array(cleaned: str) -> Optional[str]:
                 break
             try:
                 obj, idx = decoder.raw_decode(cleaned, idx)
-            except json.JSONDecodeError:
-                break
+            except (json.JSONDecodeError, RecursionError):
+                break   # RecursionError:嵌套过深(方括号海),当作到此为止
             items.append(obj)
         if items and all(isinstance(it, dict) for it in items):
             return json.dumps(items, ensure_ascii=False)
