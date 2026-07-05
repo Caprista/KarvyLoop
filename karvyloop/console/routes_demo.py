@@ -172,6 +172,7 @@ def _taste_progress(d: Path) -> dict:
         "wilson_lb": wilson_lower_bound(hits, n) if n else 0.0,
         "gate_min_n": SILENCE_MIN_N,
         "gate_min_wilson_lb": SILENCE_MIN_WILSON_LB,
+        "need_more": max(0, SILENCE_MIN_N - n),   # 离静音门还差几个样本(诚实:26)
         "earned": False,   # 诚实:7 天样本远不够 n≥35,静音没挣到(见 manifest.honest_notes)
     }
 
@@ -197,6 +198,74 @@ def _conversations_meta(d: Path) -> dict:
         except Exception:
             continue
     return {"count": count, "turns": turns}
+
+
+def _workspace_files(d: Path) -> dict[str, dict]:
+    """随包 workspace/ 里小林产出的稿件片段(只读、截断)——每日卡『产出』可点开看一眼。
+
+    key = 文件名(task_ledger 里的 intent 靠标题模糊匹配到它);value = {name, snippet, bytes}。
+    """
+    root = d / "workspace"
+    if not root.is_dir():
+        return {}
+    out: dict[str, dict] = {}
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        try:
+            raw = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        out[p.name] = {
+            "name": p.name,
+            "snippet": raw[:600],
+            "bytes": p.stat().st_size,
+        }
+    return out
+
+
+def _daily_timeline(man: dict) -> list[dict]:
+    """把 manifest.task_ledger 按天分组 → 7 张每日卡的数据(做了什么/聊了什么/沉淀什么)。
+
+    纯读 manifest(builder 写的地面真相),零推导、零 sqlite —— 与 effort_curve 同源对齐。
+    每天:entries(intent/vtime/channel/写入几条/是否纠正/H2A 决策) + effort(亲手轮数/纠正数)。
+    """
+    ledger = man.get("task_ledger") or []
+    curve = {int(e.get("day") or 0): e for e in (man.get("stats", {}).get("effort_curve") or [])}
+    days: dict[int, dict] = {}
+    for row in ledger:
+        if not isinstance(row, dict):
+            continue
+        day = int(row.get("day") or 0)
+        if day <= 0:
+            continue
+        bucket = days.setdefault(day, {"day": day, "day_label": "", "entries": []})
+        eff = curve.get(day) or {}
+        bucket["day_label"] = eff.get("day_label", "") or bucket["day_label"]
+        entry = {
+            "vtime": row.get("vtime", ""),
+            "channel": row.get("channel", ""),
+            "intent": row.get("intent", ""),
+            "written": row.get("written"),           # 晨读喂料:沉淀几条知识
+            "correction": bool(row.get("correction")),
+            "routed": bool(row.get("routed")),
+            "skill": row.get("skill", ""),
+            "decision": row.get("decision", ""),      # H2A 卡:ACCEPT / REJECT
+            "reason": row.get("reason", ""),
+            "decision_mode": row.get("decision_mode", ""),
+        }
+        bucket["entries"].append(entry)
+    out = []
+    for day in sorted(days):
+        eff = curve.get(day) or {}
+        b = days[day]
+        b["hands_on_turns"] = eff.get("hands_on_turns")
+        b["corrections"] = eff.get("corrections")
+        b["decision_modes"] = list(eff.get("decision_modes") or [])
+        b["new_skills"] = list(eff.get("new_skills") or [])
+        b["silence_progress"] = eff.get("silence_progress", "")
+        out.append(b)
+    return out
 
 
 @router.get("/demo/instances")
@@ -266,6 +335,12 @@ def api_demo_instance(iid: str) -> dict[str, Any]:
     day1_extra = {"knowledge": sum(1 for b in knowledge if _ts_of(b) <= day1_end),
                   "prefs": sum(1 for b in prefs if _ts_of(b) <= day1_end)}
     day7_extra = {"knowledge": len(knowledge), "prefs": len(prefs)}
+
+    # 每日时间线(做了什么/聊了什么/产出/沉淀) + 参与递减曲线 —— 都是 manifest 地面真相,只读透出
+    stats = man.get("stats", {}) if isinstance(man.get("stats"), dict) else {}
+    effort_curve = list(stats.get("effort_curve") or [])
+    timeline = _daily_timeline(man)
+    workspace = _workspace_files(d)
     return {
         "ok": True,
         "id": iid,
@@ -279,6 +354,12 @@ def api_demo_instance(iid: str) -> dict[str, Any]:
             "builder": man.get("builder", ""),
             "localization_note": man.get("localization_note", ""),
         },
+        # —— 高潮:参与递减曲线(D1 亲手5/纠正2 → D7 亲手2/纠正0 + 决策模式 冷→预对齐)
+        "effort_curve": effort_curve,
+        # —— 主体:7 张每日卡(每天做了什么/聊了什么/产出/沉淀)
+        "timeline": timeline,
+        # —— 产出:workspace 稿件片段(每日卡『产出』可点开看一眼),按文件名索引
+        "workspace": workspace,
         "growth": growth,
         "day1": growth[0] if growth else {},
         "day7": growth[-1] if growth else {},

@@ -38,15 +38,29 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   "nothing to tidy" instead of an invented plan. Verified end-to-end in a real browser
   (Playwright: referral ACCEPT → chip → plan card → ACCEPT → files actually moved,
   out-of-whitelist canary untouched) and on the real-key rig (R3).
-- **A demo instance that's already lived a week — see the flywheel before you've turned it.** A
-  read-only bundled instance ("Lin", a freelance writer) whose skills, growth curve, decision
-  preferences and role experience are the **real output of a real seven-workday run** (compressed
-  in wall-clock, not faked) — so a first-time visitor can watch what "more like you with every
-  use" looks like at day 7 instead of starting from zero. Browsable via a 👀 entry (GET-only API,
-  405 on any write); guaranteed zero-pollution of your own instance (a tree-hash test asserts the
-  package files never mutate on browse); every growth number is derived read-only from the bundled
-  Trace by the same production `build_curves`, not hand-typed; a disclosure banner marks it as a
-  demo throughout. Ships zh first (Lin); the English translation is a planned next step.
+- **A demo instance that's already lived a week — a readable daily timeline + a declining
+  participation curve.** A read-only bundled instance ("Lin", a freelance writer) whose skills,
+  growth curve, decision preferences and role experience are the **real output of a real
+  seven-workday run** (compressed in wall-clock, not faked) — so a first-time visitor can watch
+  what "more like you with every use" looks like at day 7 instead of starting from zero. The panel
+  now leads with **the person** (Lin's persona is the headline; the honest "fictional demo" notice
+  is a footnote, not the star) and its centerpiece is a **declining effort curve**: hands-on turns
+  fall from 5 to 2 a day, corrections from 2 to 0, and the decision mode shifts from cold
+  deliberation to a pre-aligned glance — the from-heads-down-doing-to-a-glance arc rendered as a
+  mini bar chart plus a six-cell before→after strip. Below it, **seven day-by-day cards** show what
+  Lin did / talked about / produced / deposited each day (draft snippets open inline; H2A cards
+  show the ACCEPT/REJECT and her reason). The earned-silence gate is shown honestly as *9/35, 26 to
+  go — never auto-pilot* (H2A never breaks). The old unreadable belief-fragment dump is gone;
+  beliefs/knowledge/skills are collapsed detail sections you can expand on demand, not the first
+  screen. The panel also enlarges/fullscreens (⤢ three-state, reusing the desktop body-class
+  seam). Browsable via a 👀 entry (GET-only API, 405 on any write; the new timeline/effort-curve
+  fields are read-only, zero new accounting); guaranteed zero-pollution of your own instance (a
+  tree-hash test asserts the package files never mutate on browse); every growth number is derived
+  read-only from the bundled Trace by the same production `build_curves`, not hand-typed; a
+  disclosure footnote marks it as a demo throughout. Verified in a real browser (Playwright:
+  persona headline dwarfs the disclosure, 7 daily cards, the curve's first bar taller than its
+  last, beliefs stay folded until opened, ⤢ three-state, zero console errors). Ships zh first
+  (Lin); the English translation is a planned next step.
   LLM tagging fragments the vocabulary over time — one memory gets tagged "夜间模式", a synonymous
   one "深色主题", and tag-overlap matching goes blind between them. Tag assignment is now
   **reuse-first**: the existing tag vocabulary is pre-filtered (content token overlap + frequency
