@@ -365,6 +365,7 @@ def recall(
                 "sig": entry.sig,
                 # §13:SkillIndex 不存 result_reuse,从盘上 frontmatter 读(否则恒 dynamic、stable 永不回放)
                 "result_reuse": _fm.result_reuse or "dynamic",
+                "source": getattr(entry, "source", "user") or "user",
             })
     else:
         for c in _load_skill_index(skills_dir):
@@ -416,7 +417,10 @@ def recall(
         # 独立验据标(断⑭"诚实结晶"):简易 YAML 解析回来是字符串,"true" 才算有独立验据;
         # 缺标(老技能/未验)与 false 同级 —— 都是"没有独立验据",不追溯惩罚也不伪造资历。
         verified_rank = 1.0 if str((c.get("raw") or {}).get("verified", "")).strip().lower() == "true" else 0.0
-        key = (primary, secondary, verified_rank)
+        # 平手最后一级:用户技能胜随包系统技能(与索引"同名冲突用户胜"同一语义)——
+        # 随包技能描述里的通用词(text/notes)不该在打平时截胡用户自己结晶的技能。
+        user_rank = 0.0 if str(c.get("source", "user")).lower() == "system" else 1.0
+        key = (primary, secondary, verified_rank, user_rank)
         # Top-K 组合候选池:记下每个过门候选的 overlap 与"意图覆盖度"(len(overlap)/len(intent)),
         # 供选主命中后挑支持技能(不含 prefer 加权 —— 覆盖度看的是与意图的真实相关,别被绑定加权虚高)。
         intent_cov = len(overlap) / max(1, len(intent_tokens))
