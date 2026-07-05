@@ -58,13 +58,18 @@ class MemoryManager:
     - write 必带 provenance + freshness_ts(scope 必填)
     """
 
-    def __init__(self, *, index: Optional[MemoryIndex] = None, store: object = None) -> None:
+    def __init__(self, *, index: Optional[MemoryIndex] = None, store: object = None,
+                 concept_cache: object = None) -> None:
         self._index = index or MemoryIndex()
         self._builtin = BuiltinProvider(self._index)
         self._externals: list[MemoryProvider] = []
         self._lock = threading.Lock()
         # loop step4b 地基:可选落盘(重启不丢)。store=BeliefStore;启动加载,write 后持久。
         self._store = store
+        # #61 研判①:概念标签缓存(ConceptCache,写入侧 LLM 打一次、召回侧只读)。
+        # 接了 → recall_block 的种子多一层"语义标签重叠"(同义改写能召回)、
+        # supersede 候选筛选带标签;没接/老库无标签 → 纯词面,行为不回归。
+        self.concept_cache = concept_cache
         # fail-loud(闭环审计断⑥):最近一次落盘失败的原因(成功清 None)——
         # 上层(routes/doctor/调用方)能感知"记忆没存上",不再静默丢。
         self.persist_error: Optional[str] = None
@@ -347,12 +352,24 @@ class MemoryManager:
         if not beliefs:
             return ""
         # 认知网状检索:**激活扩散 / Personalized PageRank**(spread.py)——种子=query 相关度
-        # (仍用共享的 overlap_score,含 CJK bigram,不跟决策标准召回漂移),再沿认知图谱(共享概念/
-        # 词面边)一跳跳扩散,把"弱字面命中但强关联命中点"的知识抬上来(多跳关联,非只字面命中)。
-        # 无边/无命中时严格退化为扁平 overlap / freshness(不回归)。零 LLM(图用词面/缓存概念边)。
+        # (词面切分共享 relevance,含 CJK bigram + IDF,不跟决策标准召回漂移),再沿认知图谱
+        # (共享概念/词面边)一跳跳扩散,把"弱字面命中但强关联命中点"的知识抬上来(多跳关联)。
+        # 无边/无命中时严格退化为扁平 overlap / 返空(不回归)。零 LLM(图用词面/缓存概念边)。
         from karvyloop.cognition.spread import spreading_activation_recall
 
-        ranked = spreading_activation_recall(beliefs, query, top_k=max(0, limit))
+        # #61 研判①c:预计算概念标签进种子(语义层)——同义改写("夜间模式"↔库里"深色主题")
+        # 零词面交集也能召回(实测 recall@8 0.00→1.00)。只读缓存(memo 化,零 LLM 零盘 IO);
+        # 缓存没接/老库没标签 → None,纯词面不回归(渐进增强,daily 慢侧补抽)。
+        concepts = None
+        cc = getattr(self, "concept_cache", None)
+        if cc is not None:
+            try:
+                concepts = [cc.tags_for(b.content) for b in beliefs]
+            except Exception:
+                concepts = None   # 标签层是增益不是命脉:读缓存失败退回纯词面,不挂召回
+
+        ranked = spreading_activation_recall(beliefs, query, concepts=concepts,
+                                             top_k=max(0, limit))
         # 使用信号:命中即刷(fire-and-forget,内存置脏;落盘搭下次 write / flush_usage 的车,
         # 绝不在 drive 热路径写盘/算分 —— last_recalled_ts 不参与排序)。
         if ranked:

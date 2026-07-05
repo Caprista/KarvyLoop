@@ -213,6 +213,18 @@ async def ingest_material(
         from karvyloop.cognition.conflict import run_supersede_pass
         await run_supersede_pass(written, mem=mem, gateway=gateway,
                                  model_ref=model_ref, now=now)
+        # 标签预计算(#61 研判①a):新条批量抽概念标签入 ConceptCache —— 召回种子的语义层/
+        # supersede 候选筛选读的就是它。与 supersede 同节奏(写入侧异步,打字热路径零 LLM
+        # 铁律不动);失败自吞(标签是增益不是命脉,daily 慢侧 belief_tags_tick 会回填)。
+        cc = getattr(mem, "concept_cache", None)
+        if cc is not None:
+            try:
+                from karvyloop.cognition.concepts import tag_beliefs
+                from karvyloop.llm.token_ledger import token_source
+                with token_source("belief_tags"):
+                    await tag_beliefs(written, cache=cc, gateway=gateway, model_ref=model_ref)
+            except Exception:
+                pass
     return IngestResult(written=len(written), beliefs=written,
                         skipped=len(reasons), skip_reasons=reasons,
                         raw=f"compiled {len(facts)} fact(s)")

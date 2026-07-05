@@ -166,10 +166,16 @@ def parse_supersede_pairs(text: str, n_new: int, n_old: int) -> list[dict]:
 def find_supersede_candidates(new_content: str, olds: list, *, top_k: int = _SUPERSEDE_TOP_K,
                               concepts: Optional[list] = None) -> list[int]:
     """用**已有召回栈**(overlap_score 词面+CJK bigram;有缓存概念标签再加语义重叠)
-    找与新条最相似的旧条下标,按分降序取 top_k。零命中 → [](零 LLM)。**无向量**(铁律)。"""
+    找与新条最相似的旧条下标,按分降序取 top_k。零命中 → [](零 LLM)。**无向量**(铁律)。
+
+    标签命中规则共用 `graph.count_tag_hits`(与召回种子③同一条,别漂移)。旧版
+    `tags & _tokens(new_content)` 要求标签**恰好等于**一个 bigram/整词 —— 多字 CJK 标签
+    (如"夜间模式")永远不等于 2 字 bigram,语义层形同虚设(独立对抗验收揪出)。"""
     from karvyloop.context.relevance import overlap_score
-    from karvyloop.cognition.graph import _tokens
+    from karvyloop.cognition.graph import _tokens, count_tag_hits
     new_keys = _tokens(new_content or "")
+    new_lower = (new_content or "").lower()
+    memo: dict = {}
     scored: list[tuple[float, int]] = []
     for j, b in enumerate(olds):
         c = getattr(b, "content", "") or ""
@@ -178,8 +184,7 @@ def find_supersede_candidates(new_content: str, olds: list, *, top_k: int = _SUP
         # 概念标签重叠(LLM 创建时打一次的缓存标签;缺就纯词面,不引向量)
         cs = concepts[j] if (concepts and j < len(concepts) and concepts[j]) else None
         if cs:
-            tags = {str(t).strip() for t in cs if str(t).strip()}
-            s += 2.0 * len(tags & new_keys)   # 标签命中权重高于单个词面命中
+            s += 2.0 * count_tag_hits(cs, new_lower, new_keys, memo)   # 权重高于单个词面命中
         if s > 0:
             scored.append((s, j))
     scored.sort(key=lambda x: (-x[0], x[1]))
@@ -225,10 +230,20 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                 olds.append(b)
         if not olds:
             return empty
+        # #61 研判①d:旧条的缓存概念标签传进候选筛选(打分公式里的 2.0×标签命中一直在,
+        # 此前全仓无人传参 = 语义层空转)。只读缓存零 LLM;没接/没标签 → None 纯词面。
+        old_concepts: Optional[list] = None
+        cc = getattr(mem, "concept_cache", None)
+        if cc is not None:
+            try:
+                old_concepts = [cc.tags_for(getattr(b, "content", "") or "") for b in olds]
+            except Exception:
+                old_concepts = None
         # 每条新知识取 top-k 相似旧条;并集封顶 _SUPERSEDE_MAX_OLD(一次 LLM 判整批)
         cand_idx: list[int] = []
         for nb in news:
-            for j in find_supersede_candidates(nb.content, olds, top_k=top_k):
+            for j in find_supersede_candidates(nb.content, olds, top_k=top_k,
+                                               concepts=old_concepts):
                 if j not in cand_idx:
                     cand_idx.append(j)
         cand_idx = cand_idx[:_SUPERSEDE_MAX_OLD]

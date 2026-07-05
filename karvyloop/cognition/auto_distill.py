@@ -172,6 +172,17 @@ async def distill_turns_with_decisions(
         from karvyloop.cognition.conflict import run_supersede_pass
         await run_supersede_pass(written, mem=mem, gateway=gateway,
                                  model_ref=model_ref, now=now)
+        # 标签预计算(#61 研判①a,与 ingest_material 同一接缝):蒸馏产物措辞高度模板化,
+        # 语义标签是同义改写召回的唯一救场层;失败自吞,daily 慢侧回填。
+        cc = getattr(mem, "concept_cache", None)
+        if cc is not None:
+            try:
+                from karvyloop.cognition.concepts import tag_beliefs
+                from karvyloop.llm.token_ledger import token_source
+                with token_source("belief_tags"):
+                    await tag_beliefs(written, cache=cc, gateway=gateway, model_ref=model_ref)
+            except Exception:
+                pass
     return IngestResult(written=len(written), raw=f"facts={len(facts)} decisions={len(decisions)}"), decisions
 
 

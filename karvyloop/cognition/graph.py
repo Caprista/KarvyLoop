@@ -36,6 +36,35 @@ def _tokens(s: str) -> set:
     return words | bigrams
 
 
+def count_tag_hits(tags, text_lower: str, text_tokens: set, memo: dict = None) -> int:
+    """概念标签 × 文本 的词面命中数(召回种子③ 与 supersede 候选**共用这一条规则**,别漂移)。
+
+    规则(独立对抗验收揪出两坑后收敛):
+    - 含 CJK 且 ≥2 字的标签:整串子串命中文本,或标签 token(bigram/整词)与文本 token 交集;
+    - 纯拉丁/数字标签:只按**整词 token**命中 —— 不做子串(否则 "AI" 命中 "email"/"detail",
+      一个热门标签能把 top-k 灌满无关条,重开投毒洞);
+    - 单字符标签:不命中(无区分度)。
+    零 LLM 纯词面;`memo`(tag → (tokens, has_cjk))供批量调用复用,免得同一标签在
+    万条库上反复跑正则(热路径实测:标签层是线性大头,memo 后趋平)。
+    """
+    if not tags:
+        return 0
+    hits = 0
+    for t in tags:
+        tl = str(t).strip().lower()
+        if len(tl) < 2:
+            continue
+        cached = memo.get(tl) if memo is not None else None
+        if cached is None:
+            cached = (_tokens(tl), bool(_CJK.search(tl)))
+            if memo is not None:
+                memo[tl] = cached
+        toks, has_cjk = cached
+        if (toks & text_tokens) or (has_cjk and tl in text_lower):
+            hits += 1
+    return hits
+
+
 def concept_graph(beliefs: list, concepts: list) -> dict:
     """语义版认知图谱(Hardy 选 B):边 = 两节点**共享概念**(LLM 在沉淀/查图时抽的)。
 
@@ -74,4 +103,4 @@ def concept_graph(beliefs: list, concepts: list) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
-__all__ = ["concept_graph"]
+__all__ = ["concept_graph", "count_tag_hits"]
