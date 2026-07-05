@@ -12,6 +12,28 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **Residents: the empty house gets its first tenant.** A fresh install used to greet you with an
+  empty role library. Now, on the first visit with zero roles, Karvy raises a **referral decision
+  card** introducing the first resident — the **📁 File Butler** — and nothing happens until you
+  say so: ACCEPT actually creates the role (its identity, temperament, verification gates and the
+  seeded collaboration contract are all plain files you can open and edit — a working example of
+  how to constrain an agent); REJECT means it never asks again; DEFER just keeps the card. No
+  preset subsystem was built: residents are read-only in-package mirrors
+  (`karvyloop/system_residents/`), and moving in is a normal `RoleRegistry` instantiation — your
+  instance is never overwritten by upgrades.
+  - **📁 File Butler** ships with a *method*, not canned answers: a `file-butler` system skill
+    (PARA / GTD inbox-zero / Johnny.Decimal / ISO naming / size-then-hash dedupe, sources named)
+    plus a human-owned `filing-preferences` template that grows into *your* filing rules. Safety
+    lives in the deterministic layer, not in prose: folder access is a hard whitelist
+    (Desktop / Downloads / Documents) recorded in the fs-grants ledger (visible, revocable),
+    deletion always requires explicit confirmation with a backup first, and sensitive paths are
+    immune to any grant. Deliberately absent: vector indexes, OCR, self-owned cron.
+  - **🎙️ meeting-notes system skill** (pure asset, alongside data-analyst): transcript → minutes
+    with the three-bucket method (decisions / action items as who-what-by-when / open questions),
+    and a glossary gate — unknown terms are checked against a **human-owned team glossary**
+    template and flagged "needs confirmation", never expanded by guessing. Honest input contract:
+    it consumes text; it does not transcribe audio (no ASR is promised). Growth stays real: the
+    glossary file getting longer is the metric — no invented percentages.
 - **"Unlock more capabilities" panel — degraded features now guide instead of hiding.** Graceful
   degradation had a blind spot: if you never configure MCP, push channels or attachment parsing,
   nothing ever tells you they exist ("if you don't guide users, they genuinely don't know the
