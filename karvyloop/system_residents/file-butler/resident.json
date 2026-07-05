@@ -1,0 +1,17 @@
+{
+  "id": "file-butler",
+  "emoji": "📁",
+  "nickname": {"en": "File Butler", "zh": "文件管家"},
+  "title": {},
+  "pitch": {
+    "en": "📁 File Butler — tidies your Desktop, Downloads and Documents with a preview-first method (inventory → proposal → your confirmation → execute → receipt). It works only inside those three folders — a hard whitelist, not a promise — and deleting anything always needs your explicit confirmation, with a backup made first.",
+    "zh": "📁 文件管家 —— 用「先预览后动手」的方法(盘点→提案→你确认→执行→回执)收拾你的桌面、下载和文档。TA 只在这三个目录内干活 —— 这是硬白名单,不是口头承诺;删除任何东西都必须你亲手确认,而且先备份。"
+  },
+  "first_task": {
+    "en": "Tidy up my Downloads folder",
+    "zh": "帮我收拾一下下载文件夹"
+  },
+  "skills": ["file-butler"],
+  "grant_dirs": ["Desktop", "Downloads", "Documents"],
+  "grant_ops": ["read", "write"]
+}

@@ -89,6 +89,7 @@ karvyloop = [
                                # 只收 *.csv:目录曾被真模型压测写进游离分析脚本(W1),
                                # 脏树 build 时宽 glob 会把垃圾一并打进 wheel。
     "system_contracts/**/*",   # 包内只读系统契约(尽责下属默认协作契约;同 reset 动不到)
+    "system_residents/**/*",   # 包内只读原住民镜像(docs/60:灵魂文件正文 + resident.json 清单)
     "console/static/**/*",     # 本地 HTML 控制台前端(html/js/css/vendor/assets)
 ]
 
