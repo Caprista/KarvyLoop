@@ -287,6 +287,7 @@ karvyloop/                    ← 全部源码
   registry/       工具/技能注册表 + 第三方技能导入/沙箱执行
   crystallize/    ⭐ 楔子:技能结晶 + 决策接口结晶
   system_skills/  包内只读的系统技能/原子(随产品发布;清数据动不到)
+  system_residents/  包内只读的原住民镜像(📁 文件管家;入住=你 ACCEPT 引荐卡后的一次普通角色实例化)
   cognition/      Belief / Pursuit / Trace + 激活扩散网状召回(图,无向量库)
   domain/ a2a/ karvy/   协作:业务域 / A2A 协议 / 小卡
   roles/ paradigm/ wizard/ adapter/   身份与范式层

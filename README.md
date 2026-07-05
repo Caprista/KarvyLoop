@@ -287,6 +287,7 @@ karvyloop/                    ← all source
   registry/       tool/skill registry + third-party skill import/sandbox-exec
   crystallize/    ⭐ the wedge: skill crystallization + decision-interface crystallization
   system_skills/  bundled, read-only system skills/atoms (ship with the product; a data reset never touches them)
+  system_residents/  bundled, read-only resident mirrors (📁 File Butler; moving in = you accept a referral card, then a normal role instantiation)
   cognition/      Belief / Pursuit / Trace + spreading-activation mesh recall (graph, no vector DB)
   domain/ a2a/ karvy/   collaboration: business domains / A2A protocol / Karvy
   roles/ paradigm/ wizard/ adapter/   identity & paradigm layers
