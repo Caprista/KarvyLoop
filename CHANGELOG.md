@@ -12,7 +12,41 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
-- **Reverse tagging: the vocabulary classifies the new note, not the other way around.** Free-form
+- **Onboarding intake: 4 questions whose answers immediately change behavior.** At the start of
+  the first-10-minutes journey (after the key is configured, before the first demo chip), the
+  journey bar asks 4 quick questions — conclusion-first vs process-first output, ask-me vs
+  draft-first when unsure, direct vs measured tone, file-by-type vs file-by-time. Each answer is
+  seeded into the **existing decision-preference mechanism** (an explicit, confirmed
+  `decision_pref` Belief with `origin=user_explicit` + `intake_q/intake_opt` provenance, persisted
+  to `beliefs.json`) — no new storage, and the seeds flow into pre-alignment and the violation
+  gate the moment they land. Skipping plants nothing and costs nothing; replaying the journey
+  re-opens the intake, and re-answering **replaces** the old seed for that question. Old
+  instances never see it (it lives inside the journey's existing fresh-stage gate). Copy
+  discipline: the receipt says your standards are *written down and kept at hand, pre-aligned* —
+  it never claims "I understand you" (locked by test).
+- **File Butler's first lesson: referral → read-only scan → preview card → your call → real
+  execution.** Accepting the resident-referral card now hands you a first-task chip: let the
+  butler scan your Desktop & Downloads (read-only, whitelist-enforced via the fs-grants ledger,
+  sensitive-path floor immune) and draft a tidy-up plan. The scan/plan/dedup chain is
+  **deterministic, zero LLM**: type or time buckets (the grouping mode is decided by your intake
+  answer — the first place an intake seed visibly changes behavior), duplicates verified by
+  content hash (reported only, never deleted), space hogs reported only. The plan arrives as an
+  H2A preview card with the spotlight treatment — nothing moves until you approve, and "just
+  looking" (reject) is an explicitly legitimate choice. On accept it executes exactly the plan:
+  moves only, never a delete, never an overwrite (conflicts are skipped and reported), every move
+  journaled in `butler_moves.json` so the whole job is reversible. Empty folders get an honest
+  "nothing to tidy" instead of an invented plan. Verified end-to-end in a real browser
+  (Playwright: referral ACCEPT → chip → plan card → ACCEPT → files actually moved,
+  out-of-whitelist canary untouched) and on the real-key rig (R3).
+- **A demo instance that's already lived a week — see the flywheel before you've turned it.** A
+  read-only bundled instance ("Lin", a freelance writer) whose skills, growth curve, decision
+  preferences and role experience are the **real output of a real seven-workday run** (compressed
+  in wall-clock, not faked) — so a first-time visitor can watch what "more like you with every
+  use" looks like at day 7 instead of starting from zero. Browsable via a 👀 entry (GET-only API,
+  405 on any write); guaranteed zero-pollution of your own instance (a tree-hash test asserts the
+  package files never mutate on browse); every growth number is derived read-only from the bundled
+  Trace by the same production `build_curves`, not hand-typed; a disclosure banner marks it as a
+  demo throughout. Ships zh first (Lin); the English translation is a planned next step.
   LLM tagging fragments the vocabulary over time — one memory gets tagged "夜间模式", a synonymous
   one "深色主题", and tag-overlap matching goes blind between them. Tag assignment is now
   **reuse-first**: the existing tag vocabulary is pre-filtered (content token overlap + frequency

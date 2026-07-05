@@ -84,7 +84,7 @@ include = ["karvyloop*"]
 # sample_data 是纯数据目录,**不许**被 namespace-package 自动发现(find 默认 namespaces=true):
 # 否则脏树里的游离 *.py(真模型压测写过分析脚本,W1 实捕)会被当"模块"打进 wheel,
 # 绕过下面 package-data 只收 *.csv 的收窄。演示 CSV 走 package-data 照常随包。
-exclude = ["karvyloop.sample_data*"]
+exclude = ["karvyloop.sample_data*", "karvyloop.demo_instances*"]  # 纯数据目录:不当 namespace 包发现,随 package-data 走
 
 # 非 .py 运行时资产必须随包发布,否则 pip/Nuitka 安装后这些文件消失(源码树里在、装出来没)——
 # 独立对抗验收实测:不声明则 wheel 只含 .py,system_skills/ 与 console/static/ 全丢,
@@ -98,6 +98,7 @@ karvyloop = [
     "system_contracts/**/*",   # 包内只读系统契约(尽责下属默认协作契约;同 reset 动不到)
     "system_residents/**/*",   # 包内只读原住民镜像(docs/60:灵魂文件正文 + resident.json 清单)
     "console/static/**/*",     # 本地 HTML 控制台前端(html/js/css/vendor/assets)
+    "demo_instances/**/*",     # 随包只读演示实例(「小林/Lin」满级号,真机制产物;console 只读浏览)
 ]
 
 [tool.pytest.ini_options]

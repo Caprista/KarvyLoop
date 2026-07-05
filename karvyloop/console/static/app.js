@@ -149,6 +149,10 @@
       // D5:回显兑现结果(让 ACCEPT 不再是"空响应")
       const d = msg.payload && msg.payload.dispatch;
       if (d) pushChatLine("system", t("proposal.dispatch", { kind: d.kind, detail: tB(d.detail) }));
+      // 文件管家第一课:引荐卡 ACCEPT 真入住成功 → 顺势递上第一任务 chip(wow 时刻入口)
+      if (d && d.ok && d.kind === "resident_referral" && msg.payload.decision === "ACCEPT") {
+        _butlerOfferFirstLesson();
+      }
       // 决策已发 → **只撤刚拍的那张卡**(带 proposal_id),保留还挂着的兄弟卡(多卡不覆盖);
       // 若兑现产了执行后回报卡,就地追加"它到底验过没";列真空了才回填"已处置"空态。
       const pid = (msg.payload && (msg.payload.proposal_id || (d && d.proposal_id))) || "";
@@ -776,7 +780,47 @@
         box.appendChild(el("div", { class: "inbox-hint", text: t("inbox.decision_hint") }));
       }
       card.appendChild(box);
+    } else if (payload.kind === "butler_plan") {
+      // 文件管家第一课方案卡:moves 预览(封顶 12 条,余量如实计数,绝不静默漏)+
+      // 查重/占位大户发现。数据全来自后端确定性扫描(payload.plan JSON,零 LLM)——
+      // 卡上每一行都能在磁盘上核对;解析失败只降级(通用 summary/basis 仍在,不瞎画)。
+      let plan = null;
+      try { plan = JSON.parse(p.plan || "{}"); } catch (e) { plan = null; }
+      if (plan && plan.moves) {
+        const box = el("div", { class: "butler-plan" });
+        box.appendChild(el("div", { class: "butler-plan-title", text: "📁 " + t("butler.plan_title") }));
+        const moves = plan.moves || [];
+        const CAP = 12;
+        moves.slice(0, CAP).forEach((m) => {
+          box.appendChild(el("div", { class: "butler-plan-move",
+            text: (m.name || "?") + " → " + (m.bucket || "?") + "/" }));
+        });
+        if (moves.length > CAP) {
+          box.appendChild(el("div", { class: "butler-plan-more",
+            text: t("butler.plan_more", { n: moves.length - CAP }) }));
+        }
+        const dups = plan.duplicates || [];
+        if (dups.length) {
+          box.appendChild(el("div", { class: "butler-plan-sec", text: t("butler.plan_dups") }));
+          dups.slice(0, 5).forEach((g) => box.appendChild(el("div", { class: "butler-plan-dup",
+            text: (g.names || []).join(" = ") })));
+        }
+        const hogs = plan.hogs || [];
+        if (hogs.length) {
+          box.appendChild(el("div", { class: "butler-plan-sec", text: t("butler.plan_hogs") }));
+          hogs.forEach((h) => box.appendChild(el("div", { class: "butler-plan-hog",
+            text: (h.name || "?") + " (" + _butlerFmtBytes(h.size || 0) + ")" })));
+        }
+        box.appendChild(el("div", { class: "butler-plan-hint", text: t("butler.plan_hint") }));
+        card.appendChild(box);
+      }
     }
+  }
+  function _butlerFmtBytes(n) {
+    if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(1) + "GB";
+    if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + "MB";
+    if (n >= 1024) return (n / 1024).toFixed(1) + "KB";
+    return n + "B";
   }
 
   function renderProposal(payload, opts) {
@@ -3254,6 +3298,13 @@
       return;
     }
     if (_journey.stage === "fresh") {
+      // 人格采集器(第一个 chip 前):4 问种下第一批决策标准。可跳过可重来(旅程重看一致)。
+      if (_journey.intake && _journey.intake.questions &&
+          _journey.intake.questions.length && !_journey.intake.done) {
+        _renderIntake(bar);
+        _journeySpotMoment("intake");   // 引导时刻⓪:采集器(蒙版聚光,同 chip 待遇)
+        return;
+      }
       bar.appendChild(el("div", { class: "journey-desc", text: t("journey.desc") }));
       bar.appendChild(_journeyChip("journey.chip1", () => _journeyRunTask(1)));
       _journeySpotMoment("chip1");   // 引导时刻①:跑第一个演示任务(蒙版聚光,躲不开)
@@ -3263,6 +3314,70 @@
       _journeySpotMoment("chip2");   // 引导时刻②:再跑一次同类 → 亲眼看方法复用
     }
   }
+  // ============ 人格采集器(旅程开头、第一个 chip 前的 4 问)============
+  // 每个答案 = 一条决策偏好种子(explicit/confirmed;POST /api/onboarding/intake 真种进
+  // 认知库 → 落盘 beliefs.json,prealign/违背即拦立即认它)。跳过 = 零种子,不惩罚。
+  // 文案纪律:回执说"记下你的标准、拍板时摆你手边"(预对齐),**绝不说"我懂你了"**。
+  let _intakeIdx = 0;
+  const _intakeAnswers = {};
+  function _intakeQs() {
+    return (_journey && _journey.intake && _journey.intake.questions) || [];
+  }
+  function _intakeLoc(d) {
+    const lang = (T.getLang && T.getLang() === "zh") ? "zh" : "en";
+    return (d && (d[lang] || d.en)) || "";
+  }
+  function _renderIntake(bar) {
+    const qs = _intakeQs();
+    if (!qs.length || _intakeIdx >= qs.length) { _intakeSubmit(); return; }
+    const q = qs[_intakeIdx];
+    bar.appendChild(el("div", { class: "journey-desc", text: t("intake.lead") }));
+    const box = el("div", { class: "intake-q" });
+    box.appendChild(el("div", { class: "intake-progress",
+      text: t("intake.progress", { i: _intakeIdx + 1, n: qs.length }) }));
+    box.appendChild(el("div", { class: "intake-question", text: _intakeLoc(q.question) }));
+    const opts = el("div", { class: "intake-options" });
+    (q.options || []).forEach((o) => {
+      opts.appendChild(el("button", { class: "journey-chip intake-opt", text: _intakeLoc(o.label),
+        onClick: () => { _intakeAnswers[q.id] = o.id; _intakeNext(); } }));
+    });
+    box.appendChild(opts);
+    const skips = el("div", { class: "intake-skips" });
+    skips.appendChild(el("button", { class: "intake-skip", text: t("intake.skip_q"),
+      onClick: () => { delete _intakeAnswers[q.id]; _intakeNext(); } }));
+    skips.appendChild(el("button", { class: "intake-skip", text: t("intake.skip_all"),
+      onClick: () => { _intakeIdx = qs.length; _intakeSubmit(); } }));
+    box.appendChild(skips);
+    bar.appendChild(box);
+  }
+  function _intakeNext() {
+    _intakeIdx += 1;
+    if (_intakeIdx >= _intakeQs().length) { _intakeSubmit(); return; }
+    _renderJourneyBar();
+  }
+  let _intakePosting = false;
+  async function _intakeSubmit() {
+    if (_intakePosting || !_journey || !_journey.intake || _journey.intake.done) return;
+    _intakePosting = true;
+    try {
+      const r = await _postJSON("/api/onboarding/intake", { answers: _intakeAnswers });
+      if (!r.ok) {   // 诚实:没种上就不说记下了;答案还在,重渲染可重试
+        pushChatLine("system", "⚠ " + t("intake.fail"));
+        _intakeIdx = 0;
+        return;
+      }
+      const n = (r.data && r.data.seeded_n) || 0;
+      pushChatLine("system", n > 0 ? t("intake.receipt", { n: n }) : t("intake.receipt_skip"));
+      // 后端断⑥ fail-loud:种进内存但没落盘 → 别只说"记下了",诚实告知重启会丢
+      if (r.data && r.data.persist_error) pushChatLine("system", t("intake.persist_warn"));
+      _journey.intake.done = true;   // 本地即时收起(权威状态已落后端)
+      _journeySpotKey = "";          // 采集完毕 → 下一时刻(chip1)重新聚光
+    } finally {
+      _intakePosting = false;
+      _renderJourneyBar();
+    }
+  }
+
   async function _journeyRunTask(n) {
     if (_journeyAwait) return;
     const taskText = _journeyTaskText(n);
@@ -3340,6 +3455,48 @@
     // 引导时刻③:方法复用回执 = 10 分钟 wow 的主菜,同一套蒙版聚光。
     // 诚实红线:真 recall 命中(reused)才聚 —— 没命中不拿蒙版庆祝空气。
     if (reused && receipt) _spotlightEl(receipt);
+  }
+
+  // ============ 文件管家第一课(引荐 ACCEPT → 第一任务 chip → 方案预览卡)============
+  // 只有本地运行时能做的 wow:扫你**真实**的桌面/下载(只读,白名单内)→ H2A 方案预览卡
+  // (你拍板才动手;"只看看不动"= REJECT,同样合法)。聚光蒙版待遇(旅程时刻同款)。
+  function _butlerOfferFirstLesson() {
+    const log = document.getElementById("chat-log");
+    if (!log || document.getElementById("butler-lesson-offer")) return;   // 幂等,不重复递
+    const notice = el("div", { class: "chat-notice butler-lesson", id: "butler-lesson-offer" });
+    notice.appendChild(document.createTextNode(t("butler.lesson_offer") + " "));
+    notice.appendChild(el("button", { class: "journey-chip", text: t("butler.lesson_chip"),
+      onClick: () => { _spotlightDismiss(); _butlerRunFirstLesson(); } }));
+    log.appendChild(notice);
+    log.scrollTop = log.scrollHeight;
+    _spotlightEl(notice);   // 入住后的第一课入口别被错过(Esc/点蒙版即撤,撤了不追)
+  }
+  let _butlerLessonBusy = false;
+  async function _butlerRunFirstLesson() {
+    if (_butlerLessonBusy) return;
+    _butlerLessonBusy = true;
+    try {
+      const r = await _postJSON("/api/butler/first_lesson", {});
+      if (!r.ok) {
+        pushChatLine("system", "⚠ " + t("butler.lesson_fail") +
+          (r.data && r.data.reason ? " (" + r.data.reason + ")" : ""));
+        return;
+      }
+      if (r.data && r.data.empty) {   // 空桌面/空下载:诚实说没啥可整理 + 替代建议,不硬凑
+        pushChatLine("system", t("butler.lesson_empty"));
+        return;
+      }
+      // 方案卡已经 WS h2a_proposal 广播进聊天流/决策列 → 对聊天流里的那张卡聚光
+      const pid = r.data && r.data.proposal_id;
+      if (pid) {
+        setTimeout(() => {
+          const cardLine = document.querySelector('#chat-log [data-proposal-id="' + pid + '"]');
+          if (cardLine) _spotlightEl(cardLine);
+        }, 350);
+      }
+    } finally {
+      _butlerLessonBusy = false;
+    }
   }
 
   // ============ 语音输入 v1(Hardy ⑪)============
@@ -3567,8 +3724,15 @@
     const journeyBtn = document.getElementById("journey-replay");
     if (journeyBtn) journeyBtn.addEventListener("click", async () => {
       _journeyAwait = 0;
+      // 重看必须把采集器状态清回起点:后端 stage=fresh 会重置 intake.done,但前端 _intakeIdx
+      // 仍停在上轮末尾(=qs.length),否则 _renderIntake 短路 → 拿旧答案静默重播种、4 问不再露面。
+      _intakeIdx = 0;
+      Object.keys(_intakeAnswers).forEach((k) => delete _intakeAnswers[k]);
       await _postJSON("/api/onboarding/journey", { stage: "fresh" });
       await _initJourney();
+      // _initJourney 的"无变化不重渲"守卫看 stage(fresh→fresh 未变)会跳过重渲,但 intake.done
+      // 刚从 true 翻回 false —— 必须强制重渲一次,否则采集器 4 问不再露面(BREAK #9 的第二半)。
+      _renderJourneyBar();
       openChatModal();
     });
     _decorateStaticEmpties();

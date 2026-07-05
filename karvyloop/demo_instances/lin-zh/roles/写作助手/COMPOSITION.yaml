@@ -1,0 +1,7 @@
+<!-- step_id: COMPOSITION -->
+role: 写作助手
+created_by: console
+atoms:
+  # (暂未挑原子;以后从公共原子库加)
+skills:
+  # (暂未挑技能;可从技能库引用或导入第三方)

@@ -1,0 +1,21 @@
+[
+  {
+    "id": "dom-3f68b28f",
+    "name": "小林撰稿工作室",
+    "created_by": "user:lin",
+    "created_at": "2026-07-05T06:39:21.908584+00:00",
+    "lifecycle": "active",
+    "value_md": "# 价值观\n- 观点要犀利,拒绝温吞\n- 比喻要狠、要新,不用陈词滥调\n- 永远先找反常识的角度\n- 事实核查优先,不为爽感牺牲准确",
+    "deontic": {
+      "forbid": [],
+      "oblige": [],
+      "permit": []
+    },
+    "member_query": "user:lin AND agent:写作助手 AND agent:资料管家",
+    "routine": {
+      "daily": [],
+      "weekly": []
+    },
+    "parent_id": null
+  }
+]

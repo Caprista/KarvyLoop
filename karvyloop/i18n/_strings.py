@@ -217,6 +217,33 @@ _EN = {
     "residents.referral.no_registry": "Role registry is not wired — cannot move a resident in.",
     "residents.referral.none_found": "No resident mirror found in this install (packaging issue?) — nothing was created.",
     "residents.referral.failed": "Moving in \"{name}\" failed: {error}",
+    # butler first lesson(文件管家第一课:方案预览卡 + 兑现回执;卡文案出卡时按 locale 定稿)
+    "butler.lesson.summary": (
+        "📁 File Butler's first job — a tidy-up plan for {dirs}: {n} move(s), previewed below. "
+        "Nothing moves until you approve."
+    ),
+    "butler.lesson.basis_scan": "Read-only scan: {n} file(s) inventoried in {dirs} (metadata only, nothing touched).",
+    "butler.lesson.mode_by_type": "Grouping: by type (Images / Documents / Installers…).",
+    "butler.lesson.mode_by_time": "Grouping: by time (year-month folders).",
+    "butler.lesson.mode_from_intake": "— following the filing habit you picked during onboarding.",
+    "butler.lesson.basis_dups": (
+        "Duplicates found: {n} group(s) with byte-identical content (hash-verified). Reported only — "
+        "the first lesson never deletes; removing duplicates would be a separate decision of yours."
+    ),
+    "butler.lesson.basis_hogs": "Biggest space users: {top}. Reported only, not moved.",
+    "butler.lesson.basis_truncated": "Note: a folder exceeded {cap} entries — this plan covers the first {cap}.",
+    "butler.lesson.basis_safety": (
+        "ACCEPT = execute exactly this plan: moves only, within these folders, never a delete, never an "
+        "overwrite (existing targets are skipped and reported), every move journaled and reversible. "
+        "REJECT = just looking — nothing moves, and that's a perfectly fine choice."
+    ),
+    "butler.lesson.receipt": (
+        "Done: {moved} file(s) filed into place, {skipped} skipped (target existed / vanished / out of "
+        "bounds — listed honestly, never forced). Nothing was deleted; every move is journaled in "
+        "butler_moves.json, so it can be undone."
+    ),
+    "butler.lesson.receipt_none": "Nothing needed doing — the plan was already satisfied.",
+    "butler.lesson.bad_plan": "The plan on this card is unreadable — refusing to touch any file (rescan to get a fresh plan).",
 }
 
 # ---- 中文 ----
@@ -414,6 +441,26 @@ _ZH = {
     "residents.referral.no_registry": "角色库未接线 —— 没法安排入住。",
     "residents.referral.none_found": "这个安装包里找不到原住民镜像(打包问题?)—— 没有建任何东西。",
     "residents.referral.failed": "「{name}」入住失败:{error}",
+    # butler first lesson(文件管家第一课:方案预览卡 + 兑现回执;卡文案出卡时按 locale 定稿)
+    "butler.lesson.summary": "📁 文件管家的第一单 —— {dirs} 的整理方案:{n} 项移动,预览在下面。你拍板之前,一个文件都不会动。",
+    "butler.lesson.basis_scan": "只读盘点:{dirs} 里清点了 {n} 个文件(只读元数据,没碰任何东西)。",
+    "butler.lesson.mode_by_type": "分桶方式:按类型(图片/文档/安装包…)。",
+    "butler.lesson.mode_by_time": "分桶方式:按时间(年-月文件夹)。",
+    "butler.lesson.mode_from_intake": "—— 按你入门问答里选的整理习惯。",
+    "butler.lesson.basis_dups": "查重发现:{n} 组内容完全相同的文件(hash 核实过)。只报告 —— 第一课绝不删除,要不要清重复得你另行拍板。",
+    "butler.lesson.basis_hogs": "占位大户:{top}。只报告,不挪动。",
+    "butler.lesson.basis_truncated": "注:有文件夹超过 {cap} 项 —— 本方案只覆盖前 {cap} 项。",
+    "butler.lesson.basis_safety": (
+        "ACCEPT = 严格按这份方案执行:只移动、只在这些文件夹之内,绝不删除、绝不覆盖"
+        "(目标已存在就跳过并如实报),每一步都记台账、可撤回。"
+        "REJECT = 只看看不动 —— 什么都不会发生,这也是完全合法的选择。"
+    ),
+    "butler.lesson.receipt": (
+        "完成:{moved} 个文件已归位,{skipped} 个跳过(目标已存在/中途消失/越界 —— 如实列账,绝不硬来)。"
+        "没有删除任何文件;每一步移动都记在 butler_moves.json 台账里,随时可以撤回。"
+    ),
+    "butler.lesson.receipt_none": "没什么需要动的 —— 方案已经满足了。",
+    "butler.lesson.bad_plan": "这张卡上的方案读不出来 —— 拒绝碰任何文件(重扫一次拿新方案)。",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

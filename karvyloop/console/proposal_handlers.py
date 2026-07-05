@@ -749,6 +749,9 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
     # resident_referral(原住民引荐卡,docs/60):ACCEPT → 真入住(RoleRegistry.create 契约
     # seed + fs_grants 目录白名单);REJECT 后由 residents 状态文件保证永不纠缠。
     from karvyloop.karvy.residents import KIND_RESIDENT_REFERRAL, make_resident_referral_handler
+    # butler_plan(文件管家第一课方案卡):ACCEPT → 按卡上方案真执行(只 move,绝不删/覆盖,
+    # 全量台账可逆)。这里注册保证**重启后恢复的待决卡**也能兑现(路由层 setdefault 只兜运行时)。
+    from karvyloop.karvy.butler_lesson import KIND_BUTLER_PLAN, make_butler_plan_handler
     from karvyloop.karvy.silence import KIND_SILENCE_GRANT, KIND_SILENCE_REVOKED
     # inbox_pipe(收件箱→决策卡管道):inbox_decision(需拍板,记台账)/ inbox_reply(代拟草稿,存台账+
     # 显示,不代发)。handler 结构上只写本地台账,零外部副作用(未经确认绝不外发是硬规矩)。
@@ -757,6 +760,7 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
     return {
         KIND_COCREATE_FINALIZE: make_cocreate_finalize_handler(app),
         KIND_RESIDENT_REFERRAL: make_resident_referral_handler(app),
+        KIND_BUTLER_PLAN: make_butler_plan_handler(app),
         KIND_REVISE_SKILL: partial(apply_revision_proposal, trace=getattr(_ml, "trace", None)),
         KIND_CRYSTALLIZE_SKILL: _crystallize_skill_handler,
         KIND_ROUTE_TO_ROLE: _route_to_role_handler(app),

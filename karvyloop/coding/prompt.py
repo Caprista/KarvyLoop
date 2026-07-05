@@ -53,9 +53,13 @@ def _hash(s: str) -> str:
 def _git_diff(root: str, max_chars: int) -> Optional[str]:
     """git diff 摘要(char 截断)。"""
     try:
+        # encoding 必须显式 utf-8:git 输出 UTF-8,Windows 默认 locale(如 GBK)在 text=True
+        # 下解码会在 subprocess reader 线程里炸(UnicodeDecodeError)→ diff 静默丢失 + 脏堆栈
+        # (小林演示实例构建时实捕)。errors=replace:混杂编码的 diff 也不崩,宁可替换字符。
         r = subprocess.run(
             ["git", "diff", "--no-color", "--no-ext-diff"],
             cwd=root, capture_output=True, text=True, timeout=5,
+            encoding="utf-8", errors="replace",
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
         return None

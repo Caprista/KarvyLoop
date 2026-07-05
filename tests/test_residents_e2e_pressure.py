@@ -6,6 +6,8 @@
   R1 空角色库 → 引荐卡(H2A #1)→ ACCEPT → 文件管家真入住(契约 seed + 白名单落台账)
   R2 委派卡(H2A #2)→ ACCEPT → **真模型**整理 tmp 演示目录(route_to_role 生产路径)
      → 白名单外一字未动 + 演示文件内容零丢失(VERIFY 门第 5 条的机器可验版)
+  R3 第一课全链(入住后的第一任务):/api/butler/first_lesson 生产路径 → 扫白名单
+     Desktop/Downloads → 方案预览卡(H2A #3)→ ACCEPT 真执行 → 边界 + 零丢失 + 台账
 
 **CI 自动跳过**(无真 key 配置);本机/VM 有 key 按需跑:
 `pytest tests/test_residents_e2e_pressure.py -s`。真模型整理结果的"好看程度"不设门
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import pathlib
 import sys
 import types
@@ -175,3 +178,49 @@ def test_r2_butler_tidies_demo_dir_within_bounds(rig):
 
     # 诚实门:兑现必须给了人话回执(成功=整理回执;失败=不可行报告/基础能力,同样是合法回执)
     assert res.detail.strip(), "兑现回执为空(决策 loop 哑火)"
+
+
+# ---- R3:第一课全链(入住后的第一任务;链本身确定性零 LLM,跑在真 key 环境验缝合)----
+
+def test_r3_first_lesson_full_chain(rig):
+    """引荐入住(R1)之后的第一课:扫白名单 Desktop/Downloads → 方案卡 → ACCEPT 真执行。
+
+    走 /api/butler/first_lesson **生产路径**(含 broadcast/handler 注入的全部缝);
+    硬门:①只动白名单内 ②零丢失(只 move 不删)③金丝雀不动 ④move 全量台账。
+    """
+    from karvyloop.karvy.butler_lesson import KIND_BUTLER_PLAN
+    from karvyloop.console.routes_butler import api_butler_first_lesson
+
+    app = rig.app
+    home = rig.tmp / "home"
+    desk, down = home / "Desktop", home / "Downloads"
+    desk.mkdir(parents=True, exist_ok=True)
+    down.mkdir(parents=True, exist_ok=True)
+    (desk / "screenshot.png").write_text("img marker-R3A\n", encoding="utf-8")
+    (down / "invoice.pdf").write_text("pdf marker-R3B\n", encoding="utf-8")
+    (down / "invoice copy.pdf").write_text("pdf marker-R3B\n", encoding="utf-8")   # 重复对
+    before = _collect_hashes(home)
+
+    app.state.butler_journal_path = rig.tmp / "butler_moves.json"
+    req = types.SimpleNamespace(app=app)
+    r = asyncio.run(api_butler_first_lesson(req))
+    assert r["ok"] is True and r["empty"] is False, f"第一课扫描/出卡失败: {r}"
+    card = [p for p in app.state.proposal_registry.pending()
+            if getattr(p, "kind", "") == KIND_BUTLER_PLAN][0]
+    res = app.state.proposal_registry.decide(card.proposal_id, "ACCEPT",
+                                             handlers=app.state.proposal_handlers)
+    assert res is not None and res.ok, f"第一课兑现失败: {res and res.detail}"
+    print(f"\n[R3] 第一课回执: {res.detail[:160]}")
+
+    # 硬门①③:金丝雀(白名单外)一字未动
+    assert rig.canary.read_text(encoding="utf-8") == "勿动 marker-CANARY\n", "金丝雀被改(边界破)"
+    # 硬门②:零丢失 —— 每份内容(hash)份数不减(重复对两份都得在:第一课绝不删除)
+    after = _collect_hashes(home)
+    for h, n in before.items():
+        assert after.get(h, 0) >= n, f"有内容丢失/被删: hash={h[:8]}"
+    # 归位真发生 + 硬门④:全量台账(第一课版回收站兜底)
+    assert not (down / "invoice.pdf").exists() and list(down.rglob("invoice.pdf")), \
+        "invoice.pdf 没被归位(第一课没真执行)"
+    journal = json.loads((rig.tmp / "butler_moves.json").read_text(encoding="utf-8"))
+    assert journal and journal[-1]["origin"] == "butler_first_lesson" \
+        and len(journal[-1]["moved"]) >= 3, "move 台账缺笔(可逆性破)"

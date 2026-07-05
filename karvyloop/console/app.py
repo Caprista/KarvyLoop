@@ -33,7 +33,9 @@ from .routes_budget import router as budget_router
 from .routes_capability import router as capability_router
 from .routes_conversations import router as conversations_router
 from .routes_decision_prefs import router as decision_prefs_router
+from .routes_demo import router as demo_router
 from .routes_domain import router as domain_router
+from .routes_butler import router as butler_router
 from .routes_files import router as files_router
 from .routes_lines import router as lines_router
 from .routes_memory import router as memory_router
@@ -642,7 +644,9 @@ def build_console_app(
     app.include_router(system_router)      # /api/tasks,/task/*,/decisions/*,/proposals/pending,/setup_status,/health,/lang(P2-② 从 routes.py 拆出)
     app.include_router(conversations_router)  # /api/conversation*,/api/conversations(P2-② 从 routes.py 拆出)
     app.include_router(peers_router)       # /api/peers,/api/peer/switch(P2-② 从 routes.py 拆出)
-    app.include_router(onboarding_router)  # /api/onboarding/*(「第一个 10 分钟」新手旅程)
+    app.include_router(onboarding_router)  # /api/onboarding/*(「第一个 10 分钟」新手旅程 + 人格采集器)
+    app.include_router(demo_router)        # /api/demo/*(随包演示实例「小林/Lin」只读浏览,GET-only)
+    app.include_router(butler_router)      # /api/butler/*(文件管家第一课:扫描→方案预览卡)
     app.include_router(ws_router)
 
     # 静态资源禁用浏览器**强缓存**(no-cache = 每次带 ETag 条件请求 → 没变 304、变了 200)。

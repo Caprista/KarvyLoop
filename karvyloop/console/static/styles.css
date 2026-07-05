@@ -907,6 +907,33 @@ html, body {
 .journey-chip:hover { background: rgba(201, 165, 122, 0.26); }
 .journey-finale .journey-chip { display: inline-block; margin-left: 6px; padding: 3px 10px; font-size: 12px; }
 
+/* 人格采集器(旅程开头 4 问;选项即 chip,一次一题) */
+.intake-q { display: flex; flex-direction: column; gap: 6px; }
+.intake-progress { font-size: 11px; color: var(--text-dim); }
+.intake-question { font-size: 13px; font-weight: 700; color: var(--text); }
+.intake-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.intake-options .intake-opt { align-self: auto; }
+.intake-skips { display: flex; gap: 12px; }
+.intake-skip {
+  padding: 2px 4px; font-size: 11.5px; cursor: pointer;
+  color: var(--text-dim); background: none; border: none; text-decoration: underline;
+}
+.intake-skip:hover { color: var(--text); }
+
+/* 文件管家第一课:引荐 ACCEPT 后的第一任务 chip + 方案预览卡 */
+.butler-lesson .journey-chip { display: inline-block; margin-left: 6px; padding: 3px 10px; font-size: 12px; }
+.butler-plan {
+  margin-top: 6px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(122, 165, 201, 0.08); border: 1px solid var(--accent-line);
+  font-size: 12px; line-height: 1.5; text-align: left;
+}
+.butler-plan-title { font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.butler-plan-move { color: var(--text-dim); font-family: ui-monospace, monospace; font-size: 11.5px; }
+.butler-plan-more { color: var(--text-dim); font-style: italic; margin-top: 2px; }
+.butler-plan-sec { font-weight: 700; color: var(--text); margin-top: 6px; }
+.butler-plan-dup, .butler-plan-hog { color: var(--text-dim); font-family: ui-monospace, monospace; font-size: 11.5px; }
+.butler-plan-hint { margin-top: 6px; color: var(--text-dim); }
+
 /* ch4 #3:圆桌起桌弹窗(主题 + 勾选参与者)*/
 .rt-setup-label { display: block; font-size: 12px; font-weight: 700; color: var(--text); margin: 12px 0 5px; }
 .rt-topic {
@@ -2225,3 +2252,17 @@ button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outl
 }
 .unlock-links a { color: var(--accent-deep); text-decoration: underline; }
 .unlock-links a:hover { color: var(--accent); }
+
+/* ---- 👀 演示实例面板(demo_panel.js):诚实 banner + 对比/成长表 ---- */
+.demo-banner {
+  border: 1px solid var(--accent-deep); border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 10px; background: rgba(255, 180, 84, .08);
+}
+.demo-banner-title { font-weight: 700; margin-bottom: 4px; }
+.demo-switch { margin-bottom: 8px; display: flex; gap: 8px; }
+.demo-table { border-collapse: collapse; margin-top: 6px; font-size: var(--fs-12); }
+.demo-table th, .demo-table td {
+  border: 1px solid var(--line, #e5decf); padding: 3px 10px; text-align: left;
+}
+.demo-table th { font-weight: 600; }
+.demo-section .mc-meta { margin-top: 3px; }

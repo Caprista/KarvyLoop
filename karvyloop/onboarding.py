@@ -21,12 +21,17 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Optional
 
 #: 旅程阶段(唯一合法集合;前端/路由都以此为准)
 JOURNEY_STAGES = ("fresh", "step1", "step2", "done", "skipped")
+
+#: 状态文件写锁:stage 与 intake 同住 onboarding.json,两个写函数都做 read-modify-write。
+#: 无锁则并发写(如采集器提交与旅程推进同请求周期撞上)会 lost-update 掉一个兄弟键。
+_STATE_LOCK = threading.Lock()
 
 #: 随包样例数据文件名(虚构数据,几十行,见 sample_data/)
 SAMPLE_NAME = "quarterly_sales.csv"
@@ -100,21 +105,61 @@ def read_stage(path: Optional[Path] = None, *, has_runs: bool = False) -> str:
     return "done" if has_runs else "fresh"
 
 
+def _read_state_dict(p: Path) -> dict:
+    """状态文件整体读成 dict(损坏/缺失 → {},绝不炸)。stage 之外还住着 intake(人格采集器)。"""
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def write_stage(stage: str, path: Optional[Path] = None) -> bool:
-    """持久化旅程阶段(合法集合外一律拒,返 False)。写失败 fail-soft 返 False。"""
+    """持久化旅程阶段(合法集合外一律拒,返 False)。写失败 fail-soft 返 False。
+
+    合并写(不整文件覆盖):intake 等兄弟键保留。唯一例外 —— 写 "fresh"(「重看旅程」)
+    时**连 intake 一起重置**:可跳过可重来,采集器与旅程重看一致(重答会替换旧种子)。
+    """
     if stage not in JOURNEY_STAGES:
         return False
     p = path or default_state_path()
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"stage": stage, "ts": time.time()}), encoding="utf-8")
-        return True
-    except OSError:
-        return False
+    with _STATE_LOCK:   # RMW 全程持锁,防与 write_intake 并发丢兄弟键
+        try:
+            state = _read_state_dict(p)
+            state.update({"stage": stage, "ts": time.time()})
+            if stage == "fresh":
+                state.pop("intake", None)   # 重看旅程 = 采集器也重来(一致语义)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            return True
+        except OSError:
+            return False
+
+
+def read_intake(path: Optional[Path] = None) -> dict:
+    """人格采集器状态({"done": bool, "answers": {...}, "ts": float} 或 {});与旅程同文件。"""
+    p = path or default_state_path()
+    d = _read_state_dict(p).get("intake")
+    return d if isinstance(d, dict) else {}
+
+
+def write_intake(intake: dict, path: Optional[Path] = None) -> bool:
+    """持久化采集器状态(合并写,stage 等兄弟键保留)。写失败 fail-soft 返 False。"""
+    p = path or default_state_path()
+    with _STATE_LOCK:   # RMW 全程持锁,防与 write_stage 并发丢兄弟键
+        try:
+            state = _read_state_dict(p)
+            state["intake"] = dict(intake or {})
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            return True
+        except OSError:
+            return False
 
 
 __all__ = [
     "JOURNEY_STAGES", "JOURNEY_TASKS", "SAMPLE_NAME",
     "sample_data_dir", "load_sample", "compose_task_intent",
     "default_state_path", "read_stage", "write_stage",
+    "read_intake", "write_intake",
 ]

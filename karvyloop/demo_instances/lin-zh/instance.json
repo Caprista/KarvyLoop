@@ -1,0 +1,1011 @@
+{
+ "id": "lin-zh",
+ "lang": "zh",
+ "schema": 1,
+ "persona": {
+  "name": "小林",
+  "name_en": "Lin",
+  "age": 28,
+  "title": "自由撰稿人",
+  "title_en": "Freelance writer",
+  "beat": "科技+文化",
+  "beat_en": "Tech x culture",
+  "style": "犀利、爱用比喻、喜欢找反常识角度",
+  "style_en": "Sharp voice, loves metaphors, always hunts the counter-intuitive angle",
+  "routine": "早上读资讯、中午写稿、下午改稿、晚上看书",
+  "routine_en": "Reads news in the morning, drafts at noon, revises in the afternoon, reads at night"
+ },
+ "disclosure": {
+  "zh": "这是演示实例:人物「小林」为虚构,时间戳为演示用虚拟日历日;全部记忆/技能/曲线/决策偏好均由 KarvyLoop 真实机制 + 真模型跑出,无一手写。",
+  "en": "Demo instance: the persona 'Lin' is fictional and timestamps sit on virtual calendar days for the demo; every memory, skill, curve point and decision preference was produced by KarvyLoop's real mechanisms running a real model — nothing hand-written."
+ },
+ "built_at": "2026-07-05T15:03:16",
+ "builder": "_local/build_demo_lin.py",
+ "model": "minimax/MiniMax-M3",
+ "virtual_days": [
+  "2026-06-28",
+  "2026-06-29",
+  "2026-06-30",
+  "2026-07-01",
+  "2026-07-02",
+  "2026-07-03",
+  "2026-07-04"
+ ],
+ "day0_ts": 1782576000.0,
+ "end_ts": 1783179000.7599993,
+ "build_elapsed_s": 1435.1,
+ "honest_notes": {
+  "zh": [
+   "静音门要求 n≥35 且 Wilson 下界≥0.90,7 天到不了——这里只展示命中率在爬向门槛。",
+   "虚拟时钟只注入在构建 harness 层(patch time.time),生产代码的时钟未动。"
+  ],
+  "en": [
+   "The earned-silence gate needs n>=35 with Wilson LB>=0.90 — 7 days can't get there; we only show the hit-rate climbing toward the gate.",
+   "The virtual clock was injected at the build-harness layer only; production code keeps its own clock."
+  ]
+ },
+ "stats": {
+  "growth_first": {
+   "day": "2026-06-28",
+   "ts": 1782662400.0,
+   "skills_total": 0,
+   "promotions": 0,
+   "revisions": 0,
+   "runs_total": 4,
+   "avg_success_rate": 1.0,
+   "hit_rate": 0.25
+  },
+  "growth_last": {
+   "day": "2026-07-04",
+   "ts": 1783179000.7599993,
+   "skills_total": 1,
+   "promotions": 1,
+   "revisions": 0,
+   "runs_total": 24,
+   "avg_success_rate": 1.0,
+   "hit_rate": 0.5
+  },
+  "growth_points": [
+   {
+    "day": "2026-06-28",
+    "ts": 1782662400.0,
+    "skills_total": 0,
+    "promotions": 0,
+    "revisions": 0,
+    "runs_total": 4,
+    "avg_success_rate": 1.0,
+    "hit_rate": 0.25
+   },
+   {
+    "day": "2026-06-29",
+    "ts": 1782748800.0,
+    "skills_total": 1,
+    "promotions": 1,
+    "revisions": 0,
+    "runs_total": 7,
+    "avg_success_rate": 1.0,
+    "hit_rate": 0.2857
+   },
+   {
+    "day": "2026-06-30",
+    "ts": 1782835200.0,
+    "skills_total": 1,
+    "promotions": 1,
+    "revisions": 0,
+    "runs_total": 11,
+    "avg_success_rate": 1.0,
+    "hit_rate": 0.3636
+   },
+   {
+    "day": "2026-07-01",
+    "ts": 1782921600.0,
+    "skills_total": 1,
+    "promotions": 1,
+    "revisions": 0,
+    "runs_total": 15,
+    "avg_success_rate": 1.0,
+    "hit_rate": 0.5333
+   },
+   {
+    "day": "2026-07-02",
+    "ts": 1783008000.0,
+    "skills_total": 1,
+    "promotions": 1,
+    "revisions": 0,
+    "runs_total": 18,
+    "avg_success_rate": 1.0,
+    "hit_rate": 0.5
+   },
+   {
+    "day": "2026-07-03",
+    "ts": 1783094400.0,
+    "skills_total": 1,
+    "promotions": 1,
+    "revisions": 0,
+    "runs_total": 20,
+    "avg_success_rate": 1.0,
+    "hit_rate": 0.5
+   },
+   {
+    "day": "2026-07-04",
+    "ts": 1783179000.7599993,
+    "skills_total": 1,
+    "promotions": 1,
+    "revisions": 0,
+    "runs_total": 24,
+    "avg_success_rate": 1.0,
+    "hit_rate": 0.5
+   }
+  ],
+  "skills_user": [
+   "craft-counterintuitive-outline"
+  ],
+  "skills_curve": [
+   {
+    "sig": "f67296802457a687",
+    "name": "craft-counterintuitive-outline",
+    "points": 6,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 11,
+     "success_count": 11,
+     "usage_score": 10.599,
+     "success_rate": 1.0,
+     "promote_progress": 1.0,
+     "reruns": 8,
+     "crystallized": true
+    }
+   },
+   {
+    "sig": "system:file-butler",
+    "name": "file-butler",
+    "points": 3,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 2,
+     "success_count": 2,
+     "usage_score": 1.7611,
+     "success_rate": 1.0,
+     "promote_progress": 0.587,
+     "reruns": 2,
+     "crystallized": false
+    }
+   },
+   {
+    "sig": "2c462047e6913d3d",
+    "name": "",
+    "points": 2,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 1,
+     "success_count": 1,
+     "usage_score": 0.6524,
+     "success_rate": 1.0,
+     "promote_progress": 0.2175,
+     "reruns": 0,
+     "crystallized": false
+    }
+   },
+   {
+    "sig": "088dee336b9a54b2",
+    "name": "",
+    "points": 3,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 3,
+     "success_count": 3,
+     "usage_score": 2.9713,
+     "success_rate": 1.0,
+     "promote_progress": 0.9904,
+     "reruns": 0,
+     "crystallized": false
+    }
+   },
+   {
+    "sig": "system:study-buddy",
+    "name": "study-buddy",
+    "points": 3,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 2,
+     "success_count": 2,
+     "usage_score": 1.4728,
+     "success_rate": 1.0,
+     "promote_progress": 0.4909,
+     "reruns": 2,
+     "crystallized": false
+    }
+   },
+   {
+    "sig": "a9c735d3189c347a",
+    "name": "",
+    "points": 3,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 2,
+     "success_count": 2,
+     "usage_score": 1.7442,
+     "success_rate": 1.0,
+     "promote_progress": 0.5814,
+     "reruns": 0,
+     "crystallized": false
+    }
+   },
+   {
+    "sig": "7d401452525b1969",
+    "name": "",
+    "points": 2,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 1,
+     "success_count": 1,
+     "usage_score": 0.7815,
+     "success_rate": 1.0,
+     "promote_progress": 0.2605,
+     "reruns": 0,
+     "crystallized": false
+    }
+   },
+   {
+    "sig": "c94ccb71a102b9cc",
+    "name": "",
+    "points": 2,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 1,
+     "success_count": 1,
+     "usage_score": 0.5279,
+     "success_rate": 1.0,
+     "promote_progress": 0.176,
+     "reruns": 0,
+     "crystallized": false
+    }
+   },
+   {
+    "sig": "f135d75dc23b8303",
+    "name": "",
+    "points": 1,
+    "last": {
+     "day": "2026-07-04",
+     "ts": 1783179000.7599993,
+     "usage_count": 1,
+     "success_count": 1,
+     "usage_score": 0.9709,
+     "success_rate": 1.0,
+     "promote_progress": 0.3236,
+     "reruns": 0,
+     "crystallized": false
+    }
+   }
+  ],
+  "beliefs_total": 75,
+  "knowledge": 51,
+  "decision_prefs": [
+   {
+    "content": "动笔写稿之前必须先有定稿的选题/提纲;没有定选题的方向时不要直接转给写作助手开写。",
+    "kind": "constraint",
+    "strength": 0.7999999999999999,
+    "status": "confirmed"
+   },
+   {
+    "content": "不可逆/批操作(如文件归档、move)必须先盘点、先提议、得到用户点头才能动手,不擅自归类",
+    "kind": "constraint",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "Study Buddy 账本(进度/错题清单)由用户拥有和写入,助手不替用户偷偷建账本,做完题后以\"待用户点头才入账\"形式呈交",
+    "kind": "constraint",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "出题前先尝试调取 study-ledger 看进度,基于\"未测过/上次答错\"优先抽题,而不是随机抽",
+    "kind": "taste",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "命题严格以用户笔记为唯一事实依据,不替用户编造材料,越出笔记范围不出题",
+    "kind": "constraint",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "题目先不给答案,等用户答完后逐条对照笔记打分,对不上的地方直接指出,不替用户圆场",
+    "kind": "constraint",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "混合出题按 Bloom 梯子从事实(L1)→理解(L2)→应用/迁移(L3)递进,且每条题明确告知用户它落在哪一档和设计意图",
+    "kind": "taste",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "经典文本(非时效信息)的命题任务跳过 web_search 查证,直接用笔记当唯一事实依据,但要在回复中显式说明跳过了查证",
+    "kind": "taste",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "写作/出题前主动声明正在遵循哪条方法纪律,不省略前置澄清(如\"业务域\"\"时效触发\"\"账本不存在\"等都要先讲清)",
+    "kind": "taste",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "工具故障时主动给出多条备选路径(换 shell/换路径/挂起任务)让用户选,不擅自重试或绕过去",
+    "kind": "taste",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "业务域任务(如稿件撰写)涉及跨角色协作时先问用户是否转交给对应角色(如\"写作助手\"),不直接代劳",
+    "kind": "constraint",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "接稿/约稿存在报价底线:低于千字 300 的不接;这类底线要让助手记住并坚守",
+    "kind": "standing",
+    "strength": 0.7,
+    "status": "provisional"
+   },
+   {
+    "content": "知识合并去重只在你判断需要时做,当用户明确说要分开引用某几条时,即使表面近重复也不合并",
+    "kind": "constraint",
+    "strength": 0.7999999999999999,
+    "status": "confirmed"
+   }
+  ],
+  "role_experiences": [
+   {
+    "content": "专栏提纲任务里,反常识角度必须用一句话锚死反直觉点(如「写得越好越像打工」),避免堆砌成平铺直叙的常识列表",
+    "role": "写作助手",
+    "kind": "method"
+   },
+   {
+    "content": "专栏提纲每个部分要配一个可指名的真实创作者/出版物案例(如 Substack @derekthompson),不要让读者自己去查",
+    "role": "写作助手",
+    "kind": "method"
+   },
+   {
+    "content": "用户偏好反常识专栏:主标题必须藏一个直觉反转,字数压在 25 字以内以适配公众号/邮件列表/小红书多端",
+    "role": "写作助手",
+    "kind": "preference"
+   },
+   {
+    "content": "经典文本/创作方法论类命题可跳过 web_search 查证,直接用既有笔记当事实依据,但要在产出里显式声明「跳过查证」",
+    "role": "写作助手",
+    "kind": "method"
+   },
+   {
+    "content": "提纲任务先把硬货(标题+三段+配例)放前面,自我说明/方法纪律/避撞车声明一律放后面,不要用元话语淹没提纲本体",
+    "role": "写作助手",
+    "kind": "method"
+   },
+   {
+    "content": "同一作者的不同专栏要主动防撞车:同业务域已有《数字游民祛魅》《耳朵是新的眼睛》等旧作时,新提纲的角度、配例、金句都不能照搬旧作",
+    "role": "写作助手",
+    "kind": "pitfall"
+   },
+   {
+    "content": "提纲任务最常见跑题是把「拟提纲」做成「拟候选标题」或「润色单段」,接到需求时必须先核对交付物形态(三段+配例 vs 标题候选 vs 段落润色)",
+    "role": "写作助手",
+    "kind": "pitfall"
+   },
+   {
+    "content": "创作方法论类题目可跳过联网查证,但素材必须显式标注「未 verify」,发稿前提示核实关键数据",
+    "role": "写作助手",
+    "kind": "method"
+   },
+   {
+    "content": "同一作者/同一系列的多篇文章,标题必须围绕各自主线重算,不能复用前篇的角度、金句或核心比喻,串味词要在产出里主动标记备选替换",
+    "role": "写作助手",
+    "kind": "method"
+   },
+   {
+    "content": "数据钩在标题里比纯概念钩点击率更稳,概念型标题要补一条数据子标题兜底",
+    "role": "写作助手",
+    "kind": "method"
+   },
+   {
+    "content": "反常识角度的标题,锚点要从文章主线里现取,不要套用其他篇章已经验证过的反差结构",
+    "role": "写作助手",
+    "kind": "method"
+   }
+  ],
+  "taste": {
+   "taste_n": 8,
+   "taste_hit_rate": null,
+   "taste_prev_rate": null,
+   "taste_trend": null,
+   "taste_enough": false,
+   "taste_need_more": 2
+  },
+  "tokens_total": {
+   "input": 266972,
+   "output": 73545,
+   "cache_read": 226285,
+   "cache_write": 0,
+   "total": 340517,
+   "calls": 216
+  },
+  "tokens_by_source": [
+   {
+    "source": "forge",
+    "input": 142539,
+    "output": 41457,
+    "cache_read": 161643,
+    "cache_write": 0,
+    "total": 183996,
+    "calls": 62
+   },
+   {
+    "source": "unknown",
+    "input": 49588,
+    "output": 12083,
+    "cache_read": 7488,
+    "cache_write": 0,
+    "total": 61671,
+    "calls": 51
+   },
+   {
+    "source": "atom_quality",
+    "input": 24949,
+    "output": 3188,
+    "cache_read": 4726,
+    "cache_write": 0,
+    "total": 28137,
+    "calls": 27
+   },
+   {
+    "source": "consolidate_auto",
+    "input": 11284,
+    "output": 9747,
+    "cache_read": 768,
+    "cache_write": 0,
+    "total": 21031,
+    "calls": 6
+   },
+   {
+    "source": "checker",
+    "input": 13811,
+    "output": 5141,
+    "cache_read": 45320,
+    "cache_write": 0,
+    "total": 18952,
+    "calls": 20
+   },
+   {
+    "source": "taste_predict",
+    "input": 15077,
+    "output": 415,
+    "cache_read": 4018,
+    "cache_write": 0,
+    "total": 15492,
+    "calls": 32
+   },
+   {
+    "source": "belief_tags",
+    "input": 6687,
+    "output": 1402,
+    "cache_read": 1682,
+    "cache_write": 0,
+    "total": 8089,
+    "calls": 13
+   },
+   {
+    "source": "lesson_distill",
+    "input": 1946,
+    "output": 87,
+    "cache_read": 128,
+    "cache_write": 0,
+    "total": 2033,
+    "calls": 1
+   },
+   {
+    "source": "tag_merge",
+    "input": 907,
+    "output": 12,
+    "cache_read": 384,
+    "cache_write": 0,
+    "total": 919,
+    "calls": 3
+   },
+   {
+    "source": "skill_tags",
+    "input": 184,
+    "output": 13,
+    "cache_read": 128,
+    "cache_write": 0,
+    "total": 197,
+    "calls": 1
+   }
+  ],
+  "day_labels": [
+   "2026-06-28",
+   "2026-06-29",
+   "2026-06-30",
+   "2026-07-01",
+   "2026-07-02",
+   "2026-07-03",
+   "2026-07-04"
+  ],
+  "end_ts": 1783179000.7599993
+ },
+ "task_ledger": [
+  {
+   "day": 1,
+   "vtime": "06-28 08:40",
+   "channel": "晨读",
+   "intent": "喂料《AI 编码代理的『生产力悖论』》",
+   "written": 5
+  },
+  {
+   "day": 1,
+   "vtime": "06-28 12:05",
+   "channel": "写作助手",
+   "intent": "给专栏《AI 替你写代码,你还剩下什么》拟一份 800 字的提纲:三个部分,每部分配一个具体例子,角度要反常识。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "我先查一下「AI 编码代理从补全工具到独立执行者」这条线的最新事实,免得用陈年旧闻当新论据。搜索被环境拦截了。试一下换个引擎直接 fetch 已知来源。通道被 "
+  },
+  {
+   "day": 1,
+   "vtime": "06-28 12:40",
+   "channel": "写作助手",
+   "intent": "第二部分的例子太平了,换一个反常识的例子,最好来自开发者社区的真实争论。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。先按规矩出站查证,免得又给你一个\"听上去对、其实查无此案\"的配例。搜索通道照旧被 SSRF 拦死(上一轮就报过这个状况)。换 `web_fetch` 直接"
+  },
+  {
+   "day": 1,
+   "vtime": "06-28 15:10",
+   "channel": "写作助手",
+   "intent": "给这篇《AI 替你写代码,你还剩下什么》起 5 个候选标题,要有反常识角度,别温吞。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。先把规矩办了:按提示,我必须先搜,不能凭印象起标题——尤其这种\"反常识标题\"最容易翻车(自以为犀利,其实是个被用烂的老梗)。\n\n但上一轮已经报过状况:**"
+  },
+  {
+   "day": 1,
+   "vtime": "06-28 21:15",
+   "channel": "小卡",
+   "intent": "我今晚在读《技术与文明》,用我下面的笔记出 3 道检验理解的问题,先别给答案:\n《技术与文明》第三章笔记\n芒福德:时钟(而非蒸汽机)才是工业时代的关键机器——它把时间从经验变成了可交易的商品。修道院的祈祷钟声是最早的『时间管理』;工厂只是继承了修道院的纪律。技术的社会后果往往来自最不起眼的发明。",
+   "brain": "Brain.SLOW",
+   "skill": "study-buddy",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "好嘞，今晚《技术与文明》第三章。我先按方法走第一步——读你的笔记，然后用它当唯一事实依据来命题；题出在前面，答案绝不先露，符合\"先检索再对答案\"的纪律。\n\n**"
+  },
+  {
+   "day": 2,
+   "vtime": "06-29 08:35",
+   "channel": "晨读",
+   "intent": "喂料《注意力经济的『反向定价』》",
+   "written": 6
+  },
+  {
+   "day": 2,
+   "vtime": "06-29 11:50",
+   "channel": "小卡",
+   "intent": "让写作助手直接把《注意力经济》这个选题写一段 200 字开头,今天就要。",
+   "brain": "SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": true,
+   "error": "",
+   "reply_head": "这件事属于业务域「小林撰稿工作室」 — 要不要转给「写作助手」去做?(到 🤝 H2A 处置)"
+  },
+  {
+   "day": 2,
+   "vtime": "06-29 11:50",
+   "channel": "H2A",
+   "intent": "[route_to_role] 把「让写作助手直接把《注意力经济》这个选题写一段 200 字开头,今天就要。」转给业务域「小林撰稿工作室」的「写作助手」",
+   "decision": "REJECT",
+   "reason": "选题还没定稿,没定选题之前不要直接动笔写稿;先给我选题方向。",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 2,
+   "vtime": "06-29 12:20",
+   "channel": "写作助手",
+   "intent": "给专栏《短视频正在重塑注意力》拟一份 800 字的提纲:三个部分,每部分配一个具体例子,角度要反常识。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": true,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。按提示,涉及\"短视频/注意力\"这种时效议题必须先联网查证,我先出站撞一圈,把\"短视频重塑注意力\"这条线上 2024-2025 的最新事实和争论打捞一遍,再"
+  },
+  {
+   "day": 2,
+   "vtime": "06-29 15:05",
+   "channel": "写作助手",
+   "intent": "给这篇《短视频正在重塑注意力》起 5 个候选标题,要有反常识角度,别温吞。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。先按规矩出站撞一圈,把\"短视频/注意力\"这条线上 2024-2025 的最新事实和争论打捞一遍,再下笔——尤其\"反常识标题\"最容易翻车(自以为犀利,其实是"
+  },
+  {
+   "day": 2,
+   "vtime": "06-29 21:30",
+   "channel": "小卡",
+   "intent": "继续《技术与文明》,用这段笔记出 3 道理解题,先别给答案:\n《技术与文明》第四章笔记\n『始技术/古技术/新技术』三阶段:水与木、煤与铁、电与合金。每个阶段不只是动力源变了,整个社会的组织方式、城市形态、甚至审美都跟着换血。材料史就是文明史。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "好嘞，第四章来了——这一章讲的是芒福德的三阶段划分（水与木→煤与铁→电与合金），核心论点其实就一句：**材料换的不是燃料，是整个文明的底层操作系统**。\n\n延续"
+  },
+  {
+   "day": 3,
+   "vtime": "06-30 08:30",
+   "channel": "晨读",
+   "intent": "喂料《数字游民的祛魅时刻》",
+   "written": 7
+  },
+  {
+   "day": 3,
+   "vtime": "06-30 11:55",
+   "channel": "写作助手",
+   "intent": "给专栏《数字游民的祛魅》拟一份 800 字的提纲:三个部分,每部分配一个具体例子,角度要反常识。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。先按规矩出站撞一圈——这次任务撞的是\"数字游民祛魅\"这条线,记忆背景里**已经有这条主线**(`平均停留周期从 6 个月 → 6 周`、`nomad bu"
+  },
+  {
+   "day": 3,
+   "vtime": "06-30 14:40",
+   "channel": "小卡",
+   "intent": "让写作助手给《数字游民的祛魅》写一段 300 字的开头初稿,按上午定的提纲来。",
+   "brain": "SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": true,
+   "error": "",
+   "reply_head": "这件事属于业务域「小林撰稿工作室」 — 要不要转给「写作助手」去做?(到 🤝 H2A 处置)"
+  },
+  {
+   "day": 3,
+   "vtime": "06-30 14:40",
+   "channel": "H2A",
+   "intent": "[route_to_role] 把「让写作助手给《数字游民的祛魅》写一段 300 字的开头初稿,按上午定的提纲来。」转给业务域「小林撰稿工作室」的「写作",
+   "decision": "ACCEPT",
+   "reason": "",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 3,
+   "vtime": "06-30 14:40",
+   "channel": "H2A",
+   "intent": "[merge_knowledge] 🧹 合并 3 条近重复知识 → 「推荐算法下短期价值与长期留存倒挂」",
+   "decision": "ACCEPT",
+   "reason": "确实是同一个点,合并后更干净。",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 3,
+   "vtime": "06-30 16:00",
+   "channel": "写作助手",
+   "intent": "开头这个比喻太软了,换个狠的——要那种读者第一眼会愣一下、想反驳又反驳不了的比喻。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。先按规矩出站撞墙——你这个任务表面是\"换个比喻\",但它**直接踩在记忆背景里那条被反复用烂的母题上**(\"短视频/注意力/算法\"),不带新数据兜底,任何比"
+  },
+  {
+   "day": 3,
+   "vtime": "06-30 17:10",
+   "channel": "写作助手",
+   "intent": "给这篇《数字游民的祛魅》起 5 个候选标题,要有反常识角度,别温吞。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。先按规矩出站撞墙——这次任务撞的是\"《数字游民的祛魅》候选标题\",记忆背景里**这条主线很完整**(`平均停留 6 月→6 周`、`nomad burno"
+  },
+  {
+   "day": 4,
+   "vtime": "07-01 08:45",
+   "channel": "晨读",
+   "intent": "喂料《开源模型的『免费午餐』账单》",
+   "written": 5
+  },
+  {
+   "day": 4,
+   "vtime": "07-01 10:30",
+   "channel": "小卡",
+   "intent": "把工作区根目录里散落的素材文件整理归档:按主题建子目录,文件挪进去,给我一份归档清单。",
+   "brain": "Brain.SLOW",
+   "skill": "file-butler",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "好，先按你说的方法走第 1 步：把工作区读一遍，建一份只读的盘点（类型/大小/最后修改时间），**不碰任何文件**。在这一步结束之前，绝不动手归类——因为没有你"
+  },
+  {
+   "day": 4,
+   "vtime": "07-01 12:10",
+   "channel": "写作助手",
+   "intent": "给专栏《开源模型的免费午餐》拟一份 800 字的提纲:三个部分,每部分配一个具体例子,角度要反常识。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。这次撞的是**《开源模型的免费午餐》**——和你刚才给的当前任务**完全一致**,记忆背景里那条\"送你一头免费的大象\"(象体/象房/象粮/驯象师四件套、`"
+  },
+  {
+   "day": 4,
+   "vtime": "07-01 15:20",
+   "channel": "写作助手",
+   "intent": "给这篇《开源模型的免费午餐》起 5 个候选标题,要有反常识角度,别温吞。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。这次轮到了**起 5 个候选标题**——比 800 字提纲轻,但**反而更不能温吞**:标题是这篇专栏的门面,反常识角度全押在这里。\n\n---\n\n## ⚠"
+  },
+  {
+   "day": 4,
+   "vtime": "07-01 21:20",
+   "channel": "小卡",
+   "intent": "用我这几天《技术与文明》的笔记抽查我一次:混合出 3 道题,一道事实、一道理解、一道应用,先别给答案。",
+   "brain": "Brain.SLOW",
+   "skill": "study-buddy",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "好嘞，按 Study Buddy 的方法走——先读你的笔记，再命题，答案不先露。\n\n不过开始之前我先做一件对的事：**先调出 study-ledger 看看你今"
+  },
+  {
+   "day": 4,
+   "vtime": "07-01 21:20",
+   "channel": "H2A",
+   "intent": "[confirm_decision_pref] 记成你的默认偏好吗?[约束] 动笔写稿之前必须先有定稿的选题/提纲;没有定选题的方向时不要直接转给写作助手开写。",
+   "decision": "ACCEPT",
+   "reason": "",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 5,
+   "vtime": "07-02 08:35",
+   "channel": "晨读",
+   "intent": "喂料《『读书变少』是个测量错觉?》",
+   "written": 6
+  },
+  {
+   "day": 5,
+   "vtime": "07-02 11:45",
+   "channel": "小卡",
+   "intent": "让写作助手给《耳朵是新的眼睛》写一版 800 字初稿,平实一点,四平八稳交差就行。",
+   "brain": "SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": true,
+   "error": "",
+   "reply_head": "这件事属于业务域「小林撰稿工作室」 — 要不要转给「写作助手」去做?(到 🤝 H2A 处置)"
+  },
+  {
+   "day": 5,
+   "vtime": "07-02 11:45",
+   "channel": "H2A",
+   "intent": "[route_to_role] 把「让写作助手给《耳朵是新的眼睛》写一版 800 字初稿,平实一点,四平八稳交差就行。」转给业务域「小林撰稿工作室」的「",
+   "decision": "ACCEPT",
+   "reason": "可以写,但『四平八稳』不行——按我的标准来。",
+   "edits": true,
+   "dispatch": true
+  },
+  {
+   "day": 5,
+   "vtime": "07-02 11:45",
+   "channel": "H2A",
+   "intent": "[merge_knowledge] 🧹 合并 2 条近重复知识 → 「「短期广告价值 vs 用户 LTV 倒挂」是可跨」",
+   "decision": "REJECT",
+   "reason": "这两条我要分开引用,别合并。",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 5,
+   "vtime": "07-02 15:30",
+   "channel": "写作助手",
+   "intent": "给这篇《耳朵是新的眼睛》起 5 个候选标题,要有反常识角度,别温吞。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。这次轮到了**起 5 个候选标题**——比 800 字提纲轻,但**反而更不能温吞**:标题是这篇专栏的门面,反常识角度全押在这里。\n\n---\n\n## ⚠"
+  },
+  {
+   "day": 5,
+   "vtime": "07-02 21:25",
+   "channel": "小卡",
+   "intent": "今晚开新书《娱乐至死》,用我的笔记出 3 道理解题,先别给答案:\n《娱乐至死》第一二章笔记\n波兹曼:媒介即认识论——印刷术时代的公共话语是论证式的,电视时代变成了表演式的。『信息-行动比』失衡:我们知道得越多,能做的越少。奥威尔怕我们被禁书,赫胥黎怕我们不再想读书。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到，按 Study Buddy 的方法走——先读你的笔记，再命题，答案不先露。\n\n不过开始之前先说清一件事：\n\n【时效提示触发了一下，但你这条任务**不涉及时"
+  },
+  {
+   "day": 6,
+   "vtime": "07-03 09:10",
+   "channel": "晨读",
+   "intent": "喂料《科技写作的『翻译者困境』》",
+   "written": 6
+  },
+  {
+   "day": 6,
+   "vtime": "07-03 11:30",
+   "channel": "小卡",
+   "intent": "有个商单:让写作助手接一条 500 字的带货口播稿,报价千字 150。",
+   "brain": "SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": true,
+   "error": "",
+   "reply_head": "这件事属于业务域「小林撰稿工作室」 — 要不要转给「写作助手」去做?(到 🤝 H2A 处置)"
+  },
+  {
+   "day": 6,
+   "vtime": "07-03 11:30",
+   "channel": "H2A",
+   "intent": "[route_to_role] 把「有个商单:让写作助手接一条 500 字的带货口播稿,报价千字 150。」转给业务域「小林撰稿工作室」的「写作助手」",
+   "decision": "REJECT",
+   "reason": "报价太低,低于千字 300 的约稿一律不接;帮我记住这个底线。",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 6,
+   "vtime": "07-03 11:30",
+   "channel": "H2A",
+   "intent": "[merge_knowledge] 🧹 合并 2 条近重复知识 → 「AI 让执行环节变得廉价时，瓶颈会向验证/信任环」",
+   "decision": "ACCEPT",
+   "reason": "合并,保留信息量大的那条表述。",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 6,
+   "vtime": "07-03 14:20",
+   "channel": "写作助手",
+   "intent": "把《数字游民的祛魅》初稿的第二段改得更犀利:删掉所有『可能』『也许』这类含糊词,观点直给。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。这次轮到了**把《数字游民的祛魅》第二段改得更犀利**——比 5 个候选标题轻(它是单段润色,不是生成新选题),但**反而更需要先讲方法纪律**,因为这直"
+  },
+  {
+   "day": 6,
+   "vtime": "07-03 16:40",
+   "channel": "资料管家",
+   "intent": "这周新增的稿子和素材再归档一轮:初稿、废稿、采访记录分开放,给我一份目录树。",
+   "brain": "Brain.SLOW",
+   "skill": "file-butler",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "我先按方法纪律来——**业务域(素材归档)、不可逆操作前必须先盘点先提议**。在动手前需要做几件事:\n\n1. 找你的归档偏好文件(`filing-prefere"
+  },
+  {
+   "day": 6,
+   "vtime": "07-03 16:40",
+   "channel": "H2A",
+   "intent": "[confirm_decision_pref] 记成你的默认偏好吗?[约束] 知识合并去重只在你判断需要时做,当用户明确说要分开引用某几条时,即使表面近重复也不合并",
+   "decision": "ACCEPT",
+   "reason": "",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 7,
+   "vtime": "07-04 09:20",
+   "channel": "晨读",
+   "intent": "喂料《平台化写作的『佃农陷阱』》",
+   "written": 8
+  },
+  {
+   "day": 7,
+   "vtime": "07-04 11:40",
+   "channel": "写作助手",
+   "intent": "给专栏《写作者的自留地》拟一份 800 字的提纲:三个部分,每部分配一个具体例子,角度要反常识。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。这次轮到了**《写作者的自留地》三段 800 字提纲**——比《数字游民的祛魅》单段润色更重,但**比《耳朵是新的眼睛》起标题需要更硬的骨架**:提纲是结"
+  },
+  {
+   "day": 7,
+   "vtime": "07-04 14:30",
+   "channel": "写作助手",
+   "intent": "给这篇《写作者的自留地》起 5 个候选标题,要有反常识角度,别温吞。",
+   "brain": "Brain.SLOW",
+   "skill": "craft-counterintuitive-outline",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到。这次轮到了**《写作者的自留地》5 个候选标题**——上一轮《耳朵是新的眼睛》跑过同款题型(轻量、门面活),**有现成打法**:反常识锚点 + 数据钩 +"
+  },
+  {
+   "day": 7,
+   "vtime": "07-04 16:20",
+   "channel": "小卡",
+   "intent": "这一周喂给你的资讯里,哪三个观点最值得我下周展开写?说说理由。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到，先按方法走第一步——但这次我必须先跟你把一件事说清楚，因为这关系到答案靠不靠谱：\n\n【时效触发 · 必须先查证】\n你问的是\"这一周喂给我的资讯里\"——但*"
+  },
+  {
+   "day": 7,
+   "vtime": "07-04 20:00",
+   "channel": "H2A",
+   "intent": "[weekly_digest] 周报 2026-06-27→2026-07-04:跑了 25 次任务(成 25/败 0),烧了 319,019 toke",
+   "decision": "ACCEPT",
+   "reason": "",
+   "edits": false,
+   "dispatch": true
+  },
+  {
+   "day": 7,
+   "vtime": "07-04 21:10",
+   "channel": "小卡",
+   "intent": "用这一周全部读书笔记给我出一套 5 题的周测,难度混合,先别给答案。",
+   "brain": "Brain.SLOW",
+   "skill": "",
+   "crystallized": false,
+   "routed": false,
+   "error": "",
+   "reply_head": "收到，但开题前必须先把两件事跟你交代清楚——一条是事实层面的，一条是工具层面的，都影响这套题能不能真的\"基于你这一周的笔记\"。\n\n---\n\n**【事实层面】今晚"
+  }
+ ],
+ "bugs_observed": []
+}
