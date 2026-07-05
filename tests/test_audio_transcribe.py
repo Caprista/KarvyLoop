@@ -219,12 +219,18 @@ def test_unlocks_has_asr_row():
     assert got_on["asr"]["status"] == "on"
 
 
-# ----------------------------- 5. 真模型冒烟(本机装了 [asr] 才跑;CI 自动跳过)
+# ----------------------------- 5. 真模型冒烟(显式开关才跑;CI/日常 pytest 自动跳过)
 
-def test_real_faster_whisper_smoke():
+def test_real_faster_whisper_smoke(monkeypatch):
     """真引擎吃合成 wav:只验「跑得通、返回 ExtractResult、不装死」,不断言内容
-    (正弦音没有人声;首次跑需联网下模型,失败按 asr_failed 收敛也算通过接线)。"""
+    (正弦音没有人声)。**双门**:装了 [asr] 且 KARVYLOOP_ASR_REAL_TEST=1 才跑 ——
+    首次跑要联网下模型,绝不让普通 `pytest` 意外触发几十 MB 下载。"""
     pytest.importorskip("faster_whisper")
+    import os
+    if os.environ.get("KARVYLOOP_ASR_REAL_TEST") != "1":
+        pytest.skip("真模型冒烟要显式 KARVYLOOP_ASR_REAL_TEST=1(涉及模型下载)")
+    monkeypatch.setenv(audio_transcribe.MODEL_ENV, "tiny")   # 最小模型(≈75MB),够验接线
+    monkeypatch.setattr(audio_transcribe, "_MODEL", None)    # 别吃到别的测试的缓存
     r = audio_transcribe.transcribe(_wav_bytes(1.0))
     assert r.kind == "audio"
     assert r.ok or r.error in ("asr_failed", "bad_file")   # 断网/无模型 → 诚实降级
