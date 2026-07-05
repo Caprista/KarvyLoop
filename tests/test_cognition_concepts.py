@@ -86,6 +86,58 @@ def test_concept_cache_persists(tmp_path):
     assert concepts2[0] == ["Foo概念"] and missing2 == [1]
 
 
+# ---- tags_for:召回热路径的只读口(零 LLM,memo 化)----
+def test_tags_for_reads_and_memo_invalidates_on_put(tmp_path):
+    cc = ConceptCache(tmp_path / "cc.json")
+    assert cc.tags_for("没抽过的") == []              # 未命中 → 空(调用方退词面)
+    cc.put("foo", ["Foo概念"])
+    assert cc.tags_for("foo") == ["Foo概念"]
+    cc.put("foo", ["新概念"])                          # put 后 memo 失效,读到新标签
+    assert cc.tags_for("foo") == ["新概念"]
+    # 跨实例(重启)也读得到
+    assert ConceptCache(tmp_path / "cc.json").tags_for("foo") == ["新概念"]
+
+
+# ---- tag_beliefs:写入路径批量打标(watermark + 抽空不落缓存)----
+class _Bf:
+    def __init__(self, content):
+        self.content = content
+
+
+class _CountingGW(_FakeGW):
+    def __init__(self, text):
+        super().__init__(text)
+        self.n_calls = 0
+
+    async def complete(self, messages, tools, ref, *, system=None):
+        self.n_calls += 1
+        yield TextDelta(text=self._text)
+
+
+@pytest.mark.asyncio
+async def test_tag_beliefs_caches_and_watermarks(tmp_path):
+    from karvyloop.cognition.concepts import tag_beliefs
+    cc = ConceptCache(tmp_path / "cc.json")
+    gw = _CountingGW('[["夜间模式"],["烘焙点心"]]')
+    n = await tag_beliefs([_Bf("深色主题"), _Bf("烤箱面包")], cache=cc, gateway=gw)
+    assert n == 2 and gw.n_calls == 1                 # 一次 batch 打两条
+    assert cc.tags_for("深色主题") == ["夜间模式"]
+    # watermark:都抽过 → 第二次零 LLM
+    n2 = await tag_beliefs([_Bf("深色主题"), _Bf("烤箱面包")], cache=cc, gateway=gw)
+    assert n2 == 0 and gw.n_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_tag_beliefs_empty_result_not_cached(tmp_path):
+    # 抽空/失败(宁空勿毒解析返全空)→ **不落缓存**,留给 daily 回填重试
+    from karvyloop.cognition.concepts import tag_beliefs
+    cc = ConceptCache(tmp_path / "cc.json")
+    n = await tag_beliefs([_Bf("深色主题")], cache=cc, gateway=_FakeGW("散文垃圾输出"))
+    assert n == 0
+    _, missing = cc.resolve(["深色主题"])
+    assert missing == [0]                             # 仍算"没抽过"
+
+
 # ---- 端点:抽概念 → 缓存 → 概念边 ----
 def test_memory_graph_endpoint(tmp_path):
     from karvyloop.console import build_console_app

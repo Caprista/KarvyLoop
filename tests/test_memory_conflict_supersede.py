@@ -106,6 +106,17 @@ def test_find_candidates_overlap_no_vectors():
     assert find_supersede_candidates("kubernetes operator", [belief("完全无关的一条")]) == []
 
 
+def test_find_candidates_multichar_cjk_tag_matches():
+    # #61 研判①d 补:概念标签层要真起作用 —— 多字 CJK 标签("夜间模式")在新条里
+    # 整串出现就该把旧条抬进候选(旧规则 tags & bigrams 恒不中,语义层空转,对抗验收揪出)。
+    olds = [belief("偏好深色界面配色"), belief("常喝拿铁")]
+    idx = find_supersede_candidates("现已切换到夜间模式", olds,
+                                    concepts=[["夜间模式"], []])
+    assert idx == [0]                     # 零词面交集,纯靠标签抬进候选
+    # 无标签时同一对零候选(对照:确证上面是标签层的功劳)
+    assert find_supersede_candidates("现已切换到夜间模式", olds) == []
+
+
 # ============ ①③④ 写入矛盾 → 旧失效不删 + 召回过滤(真 MemoryManager) ============
 
 def test_supersede_invalidates_old_keeps_audit_and_recall_filters(tmp_path):

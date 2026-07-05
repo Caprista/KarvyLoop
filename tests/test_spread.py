@@ -79,3 +79,56 @@ def test_dense_cluster_does_not_bury_isolated_hit():
 def test_empty_and_topk_zero():
     assert spreading_activation_recall([], "q") == []
     assert spreading_activation_recall([_B("minimax")], "minimax", top_k=0) == []
+
+
+def test_tag_seed_rescues_paraphrase():
+    # #61 研判①:query 与内容**零词面交集**(同义改写),预计算标签命中 → 进种子 → 召回。
+    # 标签只当"边"救不了零种子——这正是修的接线缺口。
+    target = _B("用户偏好深色主题的界面配色")
+    junk = _B("档案室编号每季度轮换一次")
+    out = spreading_activation_recall([target, junk], "夜间模式",
+                                      concepts=[["夜间模式", "界面外观"], []], top_k=8)
+    assert target in out
+    assert junk not in out
+
+
+def test_tag_seed_no_match_stays_empty():
+    # 标签也不沾边 → 仍返回空(标签层不放宽"不投毒"的地板)
+    b = _B("用户偏好深色主题的界面配色")
+    out = spreading_activation_recall([b], "完全无关词组",
+                                      concepts=[["夜间模式"]], top_k=8)
+    assert out == []
+
+
+def test_ascii_tag_requires_whole_token_not_substring():
+    # 独立对抗验收揪出的投毒洞:纯拉丁短标签若按子串匹配,"AI" 会命中 "email"/"detail",
+    # 一个热门标签能把 top-k 灌满无关条。规则:纯拉丁标签只按整词 token 命中。
+    noise = [_B(f"神经网络调参结论第{i}篇") for i in range(7)]
+    out = spreading_activation_recall(noise, "帮我整理一下 email 附件",
+                                      concepts=[["AI"]] * len(noise), top_k=8)
+    assert out == []                                  # "AI" ⊄ "email"(整词才算)
+    # 整词出现时照常命中(规则收紧不误伤真命中;query 与内容零词面交集,纯靠标签)
+    out2 = spreading_activation_recall([_B("神经网络模型的结论")], "ai 方案怎么选",
+                                       concepts=[["AI"]], top_k=8)
+    assert len(out2) == 1
+
+
+def test_hub_token_does_not_spread():
+    # #61 研判②:出现在超过 max(64, N/100) 条里的 hub token 不当边——
+    # 只靠 hub 词面与命中点"相连"的点,不再被扩散捞进来(高频词无区分度,
+    # 无界时还会把万条级高重复库的 BFS 拖到秒级)。
+    n = 70   # > _POSTINGS_CAP=64 → "共通/通词/词汇" 三个 bigram 成 hub
+    seed = _B("alpha 共通词汇")                      # 命中 query 的种子
+    hub_only = _B("共通词汇 别的内容")               # 与种子只共享 hub bigram(≥2 个)
+    fillers = [_B(f"共通词汇 第{i}批次") for i in range(n - 2)]
+    out = spreading_activation_recall([seed, hub_only] + fillers, "alpha", top_k=8)
+    assert seed in out
+    assert hub_only not in out    # 无界时会经 hub 边被捞进来(回归即红)
+
+
+def test_idf_demotes_template_words():
+    # IDF:全库都有的模板词(如"用户偏好")不再与实体词同权——实体词命中的排前
+    entity = _B("用户偏好 星轨望远镜 的型号")
+    template_only = [_B(f"用户偏好 第{i}条流程") for i in range(6)]
+    out = spreading_activation_recall([entity] + template_only, "星轨望远镜 用户偏好", top_k=3)
+    assert out and out[0] is entity
