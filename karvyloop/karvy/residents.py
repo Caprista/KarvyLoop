@@ -9,7 +9,8 @@
   (IDENTITY/SOUL/USER/MEMORY/VERIFY 正文 + resident.json 清单),与
   `system_skills/`、`system_contracts/` 同发版语义(随包升级、数据 reset 动不到)。
 - 入住 = 实例化 = `RoleRegistry.create()` 落 `~/.karvyloop/roles/<id>/`,
-  **尽责下属契约由 create 统一 seed**(三入口同一份,镜像里刻意不放 COMMITMENT)。
+  **尽责下属契约由 create 统一 seed**(三入口同一份;镜像的 COMMITMENT.md 只放
+  「本角色自己的承诺」,入住时填进契约的可编辑区,不另起炉灶)。
   从这一刻起它是你的实例,升级只更新镜像、绝不覆写你养出来的那一个。
 - 安全边界在确定性层:入住时按清单把目录白名单落 `fs_grants` 台账
   (能力总览可见、可撤),不是 prompt 约束 —— 安全是地基。
@@ -110,6 +111,9 @@ def load_resident(resident_id: str, residents_dir: Optional[Path] = None) -> Opt
         "user": _read_slot(d, "USER.md"),
         "memory": _read_slot(d, "MEMORY.md"),
         "verify": _read_slot(d, "VERIFY.md"),
+        # 注意:这**不是**契约 —— 契约由 RoleRegistry.create 统一 seed(三入口同一份)。
+        # 镜像的 COMMITMENT.md 只放「本角色自己的承诺」正文,入住时填进 seed 出的可编辑区。
+        "commitment_own": _read_slot(d, "COMMITMENT.md"),
     }
 
 
@@ -221,7 +225,8 @@ def instantiate_resident(res: dict, *, role_registry: Any, fs_grants: Any = None
                          home: Optional[Path] = None) -> dict:
     """入住一个原住民:镜像 → 实例(`RoleRegistry.create` + VERIFY/MEMORY 种子 + fs 白名单)。
 
-    - COMMITMENT(尽责下属契约)由 create 统一 seed —— 引荐不是第四入口,镜像里没有它。
+    - COMMITMENT(尽责下属契约)由 create 统一 seed —— 引荐不是第四入口;镜像只带
+      「本角色自己的承诺」正文,填进契约的可编辑区(契约正文一字不动)。
     - 已存在同名角色 → 复用(幂等,不覆写你的实例);白名单仍确保在台账(record 幂等)。
     - VERIFY 走 update_soul(可编辑灵魂槽);MEMORY 是运行时文件,入住时**一次性**
       写入镜像种子(领域常识索引)—— 之后归结晶/记忆管线,系统不再覆写。
@@ -256,6 +261,22 @@ def instantiate_resident(res: dict, *, role_registry: Any, fs_grants: Any = None
                              user_desc=res.get("user", ""), nickname=nickname, title=title)
     if res.get("verify"):
         role_registry.update_soul(rid, "VERIFY", res["verify"])
+    # 「本角色自己的承诺」:填进 create seed 出的契约**可编辑区**(打样=把所有文件写满)。
+    # 契约正文原样保留(单一真理源不动);找不到可编辑区标记(契约格式变了)→ 追加到文末,
+    # 绝不整文件覆写。
+    if res.get("commitment_own"):
+        try:
+            p = role_registry.root / rid / "COMMITMENT.md"
+            txt = p.read_text(encoding="utf-8")
+            marker = "## This role's own commitments\n\n(待充实)"
+            filled = "## This role's own commitments\n\n" + res["commitment_own"]
+            if marker in txt:
+                txt = txt.replace(marker, filled, 1)
+            else:
+                txt = txt.rstrip() + "\n\n" + filled + "\n"
+            p.write_text(txt, encoding="utf-8")
+        except Exception as e:
+            logger.warning("[residents] 本角色承诺区填充失败(契约已 seed,可后补): %s", e)
     if res.get("memory"):
         try:
             (role_registry.root / rid / "MEMORY.md").write_text(

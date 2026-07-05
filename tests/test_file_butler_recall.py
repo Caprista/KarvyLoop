@@ -92,7 +92,7 @@ def test_shipped_mirror_and_skill_assets_complete():
     res = load_resident("file-butler")
     assert res is not None, "包内缺 file-butler 原住民镜像"
     assert (system_residents_dir() / "file-butler" / "resident.json").exists()
-    for key in ("identity", "soul", "user", "memory", "verify"):
+    for key in ("identity", "soul", "user", "memory", "verify", "commitment_own"):
         assert res[key], f"镜像灵魂文件 {key} 是空的(打样=把文件写满)"
     assert res["skills"] == ["file-butler"]
     assert res["grant_dirs"] == ["Desktop", "Downloads", "Documents"]
@@ -146,6 +146,10 @@ def test_referral_accept_with_shipped_package(tmp_path):
     assert view.skill_ids == ["file-butler"], "COMPOSITION 该引用随包技能(用不拥有)"
     commitment = (tmp_path / "roles" / "file-butler" / "COMMITMENT.md").read_text(encoding="utf-8")
     assert "resourceful subordinate" in commitment, "尽责契约没 seed"
+    # 打样=写满:契约可编辑区被镜像的「本角色自己的承诺」填上(契约正文一字不动)
+    assert "This role's own commitments" in commitment
+    assert "(待充实)" not in commitment, "文件管家的自述承诺区还空着(打样要求把所有文件写满)"
+    assert "dry-run plan" in commitment, "自述承诺没从镜像填进来"
     verify = (tmp_path / "roles" / "file-butler" / "VERIFY.md").read_text(encoding="utf-8")
     assert "dry-run" in verify, "VERIFY 门没从镜像写满"
     # 三目录白名单落台账(按角色)
