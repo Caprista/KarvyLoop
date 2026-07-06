@@ -780,32 +780,45 @@ var KarvyMemoryPanelBundle = (function(exports) {
   }
   async function _renderKnowledgeArea(wrap) {
     wrap.innerHTML = "";
-    wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("knowledge.entry") }));
-    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("knowledge.entry_desc") }));
     const debt = await _getJSON("/api/knowledge/debt");
     const sessions = debt && debt.sessions || [];
-    const chips = el("div", { class: "kchat-sessions" });
-    const plus = el("button", { class: "kchat-chip kchat-new" + (_kSession ? "" : " active"), text: t("kchat.new") });
-    plus.addEventListener("click", () => {
+    const side = el("div", { class: "kchat-side" });
+    side.appendChild(el("div", {
+      class: "kchat-side-head",
+      text: t("kchat.side_head", { n: sessions.length }),
+      title: t("knowledge.entry_desc")
+    }));
+    const mkRow = (label, active, cls, onclick) => {
+      const r = el("button", { class: "kchat-sess" + (active ? " active" : "") + cls, text: label });
+      r.addEventListener("click", onclick);
+      side.appendChild(r);
+    };
+    mkRow(t("kchat.new"), !_kSession, " kchat-sess-new", () => {
       _kSession = "";
-      _renderKnowledgeArea(wrap);
+      void _renderKnowledgeArea(wrap);
     });
-    chips.appendChild(plus);
     for (const s of sessions) {
-      const label = (s.snippet || t("conv.untitled")) + " · " + t("conv.turns", { n: s.turn_count });
-      const chip = el("button", { class: "kchat-chip" + (s.id === _kSession ? " active" : ""), text: "📥 " + label });
-      chip.addEventListener("click", () => {
-        _kSession = s.id;
-        _renderKnowledgeArea(wrap);
-      });
-      chips.appendChild(chip);
+      mkRow(
+        "📥 " + (s.snippet || t("conv.untitled")),
+        s.id === _kSession,
+        "",
+        () => {
+          _kSession = s.id;
+          void _renderKnowledgeArea(wrap);
+        }
+      );
     }
-    if (sessions.length) {
-      wrap.appendChild(el("div", { class: "kchat-debt-head", text: t("kchat.debt", { n: sessions.length }) }));
-    }
-    wrap.appendChild(chips);
+    const main = el("div", { class: "kchat-main" });
     const log = el("div", { class: "kchat-log" });
-    wrap.appendChild(log);
+    try {
+      const d = await _getJSON("/api/memory/distill");
+      if (d && d.pending) {
+        const pw = el("div", { class: "distill-area kchat-pending" });
+        _renderDistillPending(pw, d.pending);
+        log.appendChild(pw);
+      }
+    } catch {
+    }
     if (_kSession) {
       try {
         const sess = await _getJSON("/api/knowledge/session?id=" + encodeURIComponent(_kSession));
@@ -899,8 +912,11 @@ var KarvyMemoryPanelBundle = (function(exports) {
       });
     });
     const bar = el("div", { class: "kchat-bar" }, cin, send, conv);
-    wrap.appendChild(bar);
-    wrap.appendChild(msg);
+    main.appendChild(log);
+    main.appendChild(bar);
+    main.appendChild(msg);
+    wrap.appendChild(side);
+    wrap.appendChild(main);
   }
   let _memTab = "sediment";
   async function renderMemoryPanel() {
@@ -921,13 +937,11 @@ var KarvyMemoryPanelBundle = (function(exports) {
     mkTab("sediment", t("mem.tab_sediment"));
     mkTab("library", t("mem.tab_library"));
     body.appendChild(tabs);
+    body.classList.toggle("kchat-mode", _memTab === "sediment");
     if (_memTab === "sediment") {
       const kWrap = el("div", { class: "kchat-area" });
       body.appendChild(kWrap);
       await _renderKnowledgeArea(kWrap);
-      const distillWrap = el("div", { class: "distill-area" });
-      body.appendChild(distillWrap);
-      await _reloadDistill(distillWrap);
       return;
     }
     body.appendChild(el("div", { class: "mgmt-section-title", text: t("mem.graph") }));

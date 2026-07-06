@@ -2542,3 +2542,31 @@ body.demo-modal-full .demo-hero-grid { grid-template-columns: repeat(6, 1fr); }
 .kchat-btn.kchat-converge { background: #fff; color: var(--accent-strong, #8a5a2b);
   border: 1px solid var(--accent-line, #d9bf9d); }
 .kchat-typing .distill-bd { color: var(--text-dim, #8a7a66); font-style: italic; }
+
+/* docs/66 §F 布局终版:沉淀页 = 整窗 IM(左栏会话切换 | 记录唯一滚动 | 底部输入条) */
+.modal-body.kchat-mode { display: flex; flex-direction: column; overflow: hidden; flex: 1; min-height: 0; }
+.modal-body.kchat-mode .mem-tabs { flex: none; }
+/* 聊天页把模态撑满(高度不随内容抖;桌面视图的 max-height 上限照旧生效) */
+#mgmt-modal .modal:has(.modal-body.kchat-mode) { height: 86vh; }
+body.desk-view #mgmt-modal .modal:has(.modal-body.kchat-mode) { height: calc(100vh - 196px); }
+.kchat-area { flex: 1; min-height: 0; display: flex; gap: 0; margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+.kchat-side {
+  flex: 0 0 208px; min-width: 0; overflow-y: auto;
+  border-right: 1px solid var(--border, #ddd0be);
+  padding: 4px 10px 4px 0; margin-right: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.kchat-side-head { font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text-dim, #8a7a66); font-weight: 700; margin: 2px 0 4px; }
+.kchat-sess {
+  border: 1px solid transparent; background: transparent; border-radius: 9px;
+  font-size: 12px; padding: 7px 10px; cursor: pointer; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.kchat-sess:hover { background: rgba(255, 255, 255, 0.7); }
+.kchat-sess.active { background: var(--accent-light, #f6ead9); border-color: var(--accent-line, #d9bf9d); font-weight: 700; }
+.kchat-sess-new { color: var(--accent-strong, #8a5a2b); font-weight: 700; }
+.kchat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.kchat-main .kchat-log { flex: 1; min-height: 0; max-height: none; overflow-y: auto; margin: 0 0 8px; }
+.kchat-main .kchat-log:empty { display: block; }   /* 空聊天也占满(别塌成一条缝) */
+.kchat-pending { margin-bottom: 10px; }

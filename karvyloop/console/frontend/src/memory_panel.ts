@@ -637,28 +637,34 @@ function _renderSedimentCard(host: HTMLElement, card: any, onDone: () => void): 
 
 async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
   wrap.innerHTML = "";
-  wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("knowledge.entry") }));
-  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("knowledge.entry_desc") }));
-  // 待处理知识(欠账列表:每段一行,点行续聊;➕ 新开一段)
+  // 整窗 IM 布局(Hardy:"给你一个完整的窗口做聊天"):左栏=会话切换(➕新开一段 + 每段一行),
+  // 右侧=聊天记录占满(**唯一滚动区**)+ 底部输入条(输入|发|⚗️收敛)。没有内外双滚动条。
   const debt = await _getJSON("/api/knowledge/debt");
   const sessions = (debt && debt.sessions) || [];
-  const chips = el("div", { class: "kchat-sessions" });
-  const plus = el("button", { class: "kchat-chip kchat-new" + (_kSession ? "" : " active"), text: t("kchat.new") });
-  plus.addEventListener("click", () => { _kSession = ""; _renderKnowledgeArea(wrap); });
-  chips.appendChild(plus);
+  const side = el("div", { class: "kchat-side" });
+  side.appendChild(el("div", { class: "kchat-side-head", text: t("kchat.side_head", { n: sessions.length }),
+    title: t("knowledge.entry_desc") }));
+  const mkRow = (label: string, active: boolean, cls: string, onclick: () => void) => {
+    const r = el("button", { class: "kchat-sess" + (active ? " active" : "") + cls, text: label });
+    r.addEventListener("click", onclick);
+    side.appendChild(r);
+  };
+  mkRow(t("kchat.new"), !_kSession, " kchat-sess-new", () => { _kSession = ""; void _renderKnowledgeArea(wrap); });
   for (const s of sessions) {
-    const label = (s.snippet || t("conv.untitled")) + " · " + t("conv.turns", { n: s.turn_count });
-    const chip = el("button", { class: "kchat-chip" + (s.id === _kSession ? " active" : ""), text: "📥 " + label });
-    chip.addEventListener("click", () => { _kSession = s.id; _renderKnowledgeArea(wrap); });
-    chips.appendChild(chip);
+    mkRow("📥 " + (s.snippet || t("conv.untitled")), s.id === _kSession, "",
+          () => { _kSession = s.id; void _renderKnowledgeArea(wrap); });
   }
-  if (sessions.length) {
-    wrap.appendChild(el("div", { class: "kchat-debt-head", text: t("kchat.debt", { n: sessions.length }) }));
-  }
-  wrap.appendChild(chips);
-  // 聊天区(续聊时装历史)
+  const main = el("div", { class: "kchat-main" });
   const log = el("div", { class: "kchat-log" });
-  wrap.appendChild(log);
+  // 旧喂料流的**待审条目**(有才显示,浮在记录顶部随流滚动;喂料入口已由聊天替代——丢进来就是喂)
+  try {
+    const d = await _getJSON("/api/memory/distill");
+    if (d && d.pending) {
+      const pw = el("div", { class: "distill-area kchat-pending" });
+      _renderDistillPending(pw, d.pending);
+      log.appendChild(pw);
+    }
+  } catch { /* 无待审 → 纯聊天 */ }
   if (_kSession) {
     try {
       const sess = await _getJSON("/api/knowledge/session?id=" + encodeURIComponent(_kSession));
@@ -729,8 +735,11 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
     });
   });
   const bar = el("div", { class: "kchat-bar" }, cin, send, conv);
-  wrap.appendChild(bar);
-  wrap.appendChild(msg);
+  main.appendChild(log);
+  main.appendChild(bar);
+  main.appendChild(msg);
+  wrap.appendChild(side);
+  wrap.appendChild(main);
 }
 
 // 双标签(Hardy:"知识库和知识沉淀做在 2 个标签页,免得聊天视图不纯粹")
@@ -747,14 +756,14 @@ async function renderMemoryPanel(): Promise<void> {
   mkTab("sediment", t("mem.tab_sediment"));
   mkTab("library", t("mem.tab_library"));
   body.appendChild(tabs);
+  // 沉淀页 = 整窗 IM(body 停止滚动,唯一滚动区在聊天记录里 —— 不许内外双滚动条)
+  body.classList.toggle("kchat-mode", _memTab === "sediment");
   if (_memTab === "sediment") {
-    // 标签页①「聊知识 · 沉淀」:馆员聊天(待处理列表+聊天框+收敛)+ 喂料工作流
+    // 标签页①「聊知识 · 沉淀」:左栏会话切换 + 聊天记录 + 底部输入条(喂料入口已由聊天替代:
+    // 丢进来就是喂;旧喂料流的待审条目浮在记录顶部,有才显示)
     const kWrap = el("div", { class: "kchat-area" });
     body.appendChild(kWrap);
     await _renderKnowledgeArea(kWrap);
-    const distillWrap = el("div", { class: "distill-area" });
-    body.appendChild(distillWrap);
-    await _reloadDistill(distillWrap);
     return;
   }
   // 标签页②「知识库」:图谱 + 已知列表(纯浏览,不混聊天)

@@ -76,9 +76,12 @@ assert.equal(title.textContent, "mgmt.memory_title", "标题应是 mgmt.memory_t
 const body = dom.window.document.getElementById("mgmt-body");
 // 双标签(Hardy):默认「聊知识·沉淀」页 = 馆员聊天框 + 喂料;「知识库」页 = 图谱 + 已知列表
 assert.ok(body.querySelector(".mem-tabs"), "面板应有双标签栏");
+assert.ok(body.classList.contains("kchat-mode"), "沉淀页 body 应停止滚动(kchat-mode,唯一滚动在记录里)");
 assert.ok(body.querySelector(".kchat-area"), "沉淀页应有馆员聊天区");
-assert.ok(body.querySelector(".kchat-bar .kchat-in"), "聊天框应是横排 bar 里的 textarea");
-assert.ok(body.querySelector(".distill-area textarea"), "无待办应渲染喂料 textarea");
+assert.ok(body.querySelector(".kchat-side .kchat-sess-new"), "左栏应有会话切换(➕新开一段)");
+assert.ok(body.querySelector(".kchat-main .kchat-log"), "右侧应是聊天记录区");
+assert.ok(body.querySelector(".kchat-main .kchat-bar .kchat-in"), "底部应是横排输入条(textarea)");
+assert.ok(!body.querySelector(".kchat-area ~ .distill-area textarea"), "喂料入口已由聊天替代(不再单独渲染 textarea)");
 // 切到「知识库」标签页再验列表
 await switchTab("mem.tab_library");
 const libBody = dom.window.document.getElementById("mgmt-body");
@@ -182,7 +185,7 @@ pendingMode = true;
 await M.open();
 await switchTab("mem.tab_sediment");
 const body2 = dom.window.document.getElementById("mgmt-body");
-assert.ok(body2.querySelector(".distill-decide .distill-yes"), "有待办应渲染'沉淀'拍板按钮");
+assert.ok(body2.querySelector(".kchat-log .kchat-pending .distill-decide .distill-yes"), "待审条目应浮在聊天记录顶部(拍板按钮在)");
 assert.ok(body2.querySelector(".distill-chat-in"), "有待办应能跟小卡继续交流");
 
 // Bug2:整理相似知识 —— 点按钮 → 出合并建议(把 2 条并成 1)→ 点合并 → apply
