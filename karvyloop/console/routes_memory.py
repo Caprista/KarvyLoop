@@ -65,9 +65,14 @@ def _main_trace(app: Any):
 
 
 async def _raise_extends(app: Any, res: Any) -> None:
-    """摄入调和 extends 半边:IngestResult.extends → merge_knowledge H2A 卡。失败不阻断摄入回执。"""
+    """摄入调和 extends 半边:IngestResult.extends → merge_knowledge H2A 卡。失败不阻断摄入回执。
+
+    素材不丢的兜底在**产生端**(conflict.run_supersede_pass 落 Trace belief_extends_found,
+    P0 修复⑤):这里升卡失败/进程崩,素材仍可审计。本层只加 REJECT 记忆过滤(拒过的对不再弹);
+    待决期间同对去重靠现成机制(幂等 proposal_id + registry 同 id 覆盖),不另造。"""
     try:
         ext = getattr(res, "extends", None) or []
+        ext = _filter_rejected_extends(app, ext)
         if ext:
             from karvyloop.console.proposals import raise_extends_cards
             n = await raise_extends_cards(app, ext)
@@ -75,6 +80,42 @@ async def _raise_extends(app: Any, res: Any) -> None:
                 logger.info(f"[memory] 摄入调和:升 {n} 张 extends 合并建议卡")
     except Exception as e:
         logger.warning(f"[memory] extends 升卡失败(摄入不受影响): {e}")
+
+
+def _filter_rejected_extends(app: Any, ext: list) -> list:
+    """REJECT 记忆(P0 修复⑤):用户拒过的同对 extends 合并建议,下次不再弹。
+
+    "已拒"状态**不新造存储**——就住在 decision_log(H2A 拍板回看流水,entry 接线时已落盘):
+    REJECT 时 record_decision_signals 记下 proposal_id,而 extends 素材的幂等键与
+    merge_knowledge 卡 proposal_id 同一派生(conflict.extends_idem_key,测试锁不漂移),
+    按键查一次即得。decision_log 未接/查询失败 → 不过滤(宁多弹一张卡,勿静默丢建议)。
+    留存边界:decision_log 只保最近 5000 条拍板,更老的拒绝自然过期(拒不是永久封杀)。"""
+    if not ext:
+        return []
+    log = getattr(app.state, "decision_log", None)
+    if log is None:
+        return list(ext)
+    try:
+        rejected = {str(e.get("proposal_id") or "")
+                    for e in log.query(decision="REJECT", limit=5000)}
+        rejected.discard("")
+    except Exception as e:
+        logger.debug(f"[memory] REJECT 记忆查询失败(不过滤): {e}")
+        return list(ext)
+    if not rejected:
+        return list(ext)
+    from karvyloop.cognition.conflict import extends_idem_key
+    kept: list = []
+    for rec in ext:
+        try:
+            key = str(rec.get("idem_key") or "") or extends_idem_key(
+                str(rec.get("old") or ""), str(rec.get("new") or ""))
+        except Exception:
+            key = ""
+        if key and key in rejected:
+            continue   # 你拒过这对合并 → 不再唠叨(素材痕迹仍在 Trace,可审计)
+        kept.append(rec)
+    return kept
 
 
 # ---- 认知库沉淀工作流(Hardy):喂料→抓取分析→知识自生长框架结构化→交流→你拍板沉淀/拒绝 ----

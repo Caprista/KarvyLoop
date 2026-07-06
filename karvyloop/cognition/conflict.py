@@ -22,6 +22,7 @@ ingest/auto_distill 写入新 Belief 后被调——用已有召回栈(overlap_s
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -293,7 +294,9 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
             rel = p["relation"]
             if rel == "extends":
                 # 加信息的合并不自动动库:收给 console 升 H2A 卡(ACCEPT 才 apply_belief_merge)
-                extends_out.append(_extends_record(nb, ob, p.get("merged", "")))
+                rec = _extends_record(nb, ob, p.get("merged", ""))
+                extends_out.append(rec)
+                _trace_extends(trace, rec)   # P0⑤:产生即留痕(console 升卡失败素材不失踪)
                 continue
             if getattr(ob, "invalid_at", None) is not None:
                 continue   # 同批里已被失效过
@@ -301,7 +304,9 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                 score = pair_score.get((p["new"], cand_idx[p["old"]]), 0.0)
                 if score < _DUPLICATE_AUTO_MIN_SCORE:
                     # LLM 判 duplicate 但词面/标签佐证不足 → 不够高置信,降级升卡(不自动动库)
-                    extends_out.append(_extends_record(nb, ob, ""))
+                    rec = _extends_record(nb, ob, "")
+                    extends_out.append(rec)
+                    _trace_extends(trace, rec)   # P0⑤:降级的这半同样产生即留痕
                     continue
                 # 高置信自动合并:信息量相同,不需要写合并条 —— 失效不删输的一方即是合并
                 # (审计痕:invalid_reason 全文可查 + Trace belief_auto_merged;两条都留库可翻案)
@@ -329,10 +334,25 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                         pass
                 continue
             if provenance_rank(nb.provenance) >= provenance_rank(ob.provenance):
-                # 新条权威不低于旧条 → 旧条失效(Graphiti 式失效不删)
+                # 新条权威不低于旧条 → 旧条失效(Graphiti 式失效不删)。
+                # ④时间语义(docs/66:valid_from 只有明确来源才填,**绝不猜**):
+                # invalid_at 默认 = 发现时刻(now)。唯一例外:新条 provenance 带**明确来源**的
+                # valid_from(仅 converge.sediment_confirmed 从用户明说的绝对日期解析而来)且
+                # 早于 now → 旧条"世界里不再为真"的时刻有据可依,invalid_at 回填成它——否则
+                # as_of 在 [valid_from, 发现) 窗口新旧两真并存;发现时刻留在 reason 里可审计。
+                # 没有明确来源 → 保持 now,绝不编世界时刻(test_valid_from_contract 锁)。
+                inv_ts, backfilled = now, False
+                vf = (nb.provenance or {}).get("valid_from")
+                try:
+                    if vf is not None and float(vf) < now:
+                        inv_ts, backfilled = float(vf), True
+                except (TypeError, ValueError):
+                    pass   # 坏时间戳当不可判,不回填(与 as_of 谓词同口径)
                 reason = (f"superseded({rel}) by newer belief "
                           f"[{(nb.provenance or {}).get('source', '?')}]: {nb.content[:80]}")
-                ok = mem.invalidate(ob, reason=reason, now=now)
+                if backfilled:
+                    reason += f" [world-time backfilled from explicit valid_from; discovered@{now:.0f}]"
+                ok = mem.invalidate(ob, reason=reason, now=inv_ts)
                 inv_old += 1
                 applied.append({"loser": ob.content[:60], "winner": nb.content[:60],
                                 "relation": rel, "persisted": bool(ok)})
@@ -353,16 +373,50 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
         return empty
 
 
+def extends_idem_key(old_content: str, new_content: str) -> str:
+    """extends 升卡素材的幂等键 —— 与 merge_knowledge 卡的 proposal_id **同一派生**
+    (成员内容 strip 后排序哈希,proposal_registry.proposal_for_merge_knowledge 同式;
+    test_extends_trace_and_reject 锁两边不漂移)。同一对 (old,new) 永远同键:
+    - 待决期间重复出现 → registry 同 id 覆盖(现成去重,不另造);
+    - 用户 REJECT 过 → decision_log 按此键查得到,console 消费端不再弹。"""
+    members = sorted(((old_content or "").strip(), (new_content or "").strip()))
+    return "merge_knowledge-" + hashlib.sha1("\n".join(members).encode("utf-8")).hexdigest()[:8]
+
+
 def _extends_record(nb: Belief, ob: Belief, merged: str) -> dict:
     """extends / 低置信 duplicate 的升卡素材(console 用它建 merge_knowledge 卡)。
     merged 空 → console 侧用确定性拼接兜底(两条原文都在库里,拼接不投毒)。"""
+    old_c = getattr(ob, "content", "") or ""
+    new_c = getattr(nb, "content", "") or ""
     return {
-        "old": getattr(ob, "content", "") or "",
-        "new": getattr(nb, "content", "") or "",
+        "old": old_c,
+        "new": new_c,
         "merged": (merged or "").strip()[:2000],
         "old_title": (getattr(ob, "provenance", {}) or {}).get("title", ""),
         "new_title": (getattr(nb, "provenance", {}) or {}).get("title", ""),
+        # P0⑤:素材从产生起就带幂等键(= 升卡后的 proposal_id),Trace/去重/REJECT 记忆共用
+        "idem_key": extends_idem_key(old_c, new_c),
     }
+
+
+def _trace_extends(trace: Any, rec: dict) -> None:
+    """extends 素材**产生即落 Trace**(kind=belief_extends_found)—— P0 修复⑤:
+    升卡在 console 侧(handler 异常/进程崩即丢,且此前无任何持久痕迹);Trace=唯一数据源
+    院规要求产生端先留痕:幂等键+素材摘要可审计、可恢复(两边原文本就都在库里,没被动过)。
+    失败自吞(同 belief_auto_merged:审计痕是增益不是命脉,绝不拖垮写入主流程)。"""
+    if trace is None:
+        return
+    try:
+        from karvyloop.cognition.trace import TraceEntry
+        trace.append(TraceEntry(
+            task_id="memory_reconcile", kind="belief_extends_found",
+            payload={"idem_key": rec.get("idem_key", ""),
+                     "old": (rec.get("old") or "")[:120],
+                     "new": (rec.get("new") or "")[:120],
+                     "merged": (rec.get("merged") or "")[:200]},
+            source="conflict"))
+    except Exception:
+        pass
 
 
 def _is_decision_pref(b: Belief) -> bool:
@@ -402,5 +456,5 @@ __all__ = [
     "PROVENANCE_RANK", "provenance_rank",
     "ConflictReport", "resolve", "detect_conflict",
     "SUPERSEDE_SYSTEM", "parse_supersede_pairs", "find_supersede_candidates",
-    "run_supersede_pass",
-]   # _scored_supersede_candidates/_extends_record 是内部件,不出模块
+    "run_supersede_pass", "extends_idem_key",
+]   # _scored_supersede_candidates/_extends_record/_trace_extends 是内部件,不出模块

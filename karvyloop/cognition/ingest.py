@@ -198,6 +198,12 @@ async def ingest_material(
         if not content:
             reasons.append("empty content")
             continue
+        # ④时间语义契约(docs/66 §技术底):这里**故意不写** provenance.valid_from ——
+        # valid_from = 事实在世界里"何时起为真",**只有明确来源才填、绝不猜**(全库唯一写点
+        # 是 converge.sediment_confirmed:用户明说的绝对日期);摄入只知道"何时学到"(ts)。
+        # recall 的 as_of 谓词缺省退 provenance.ts(memory.recall_block),契约由缺省闭合;
+        # 补写 valid_from=ts 纯冗余,且把"记录时刻"冒充"世界时刻"=编时间(红线)。
+        # 有测试锁:test_valid_from_contract.py。
         prov = {"source": source, "agent": agent_id, "ts": now,
                 "trace_ref": trace_ref, "kind": f.get("kind", "fact"),
                 "title": (f.get("title") or "").strip(),   # 短标题:图谱节点/列表可读
