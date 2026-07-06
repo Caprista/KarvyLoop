@@ -445,3 +445,57 @@ def test_knowledge_line_never_routes(app_with_mgr, mgr):
     mgr.set_peer(knowledge_peer())
     out = _a.run(maybe_route_to_role(app_with_mgr, mgr, "让几个角色开圆桌讨论这个说法"))
     assert out is None
+
+
+class _CaptureGateway:
+    """记录喂给模型的 messages(验丢即读:链接正文真的进了模型上下文)。"""
+    def __init__(self) -> None:
+        self.messages = None
+
+    def resolve_model(self, scope):  # noqa: ANN001
+        return "fake"
+
+    async def complete(self, messages, tools, ref, system=None):  # noqa: ANN001
+        self.messages = messages
+        yield TextDelta("读完了,这仓库讲的是 loop 工程。")
+
+
+def test_knowledge_chat_fetches_url_content(app_with_mgr, mgr, monkeypatch):
+    """丢即读(Hardy:"我给你资料你本身就要读的呀"):消息带链接 → 服务端抓正文喂模型;
+    落盘的 user_intent 仍是原话(抓的正文不进转录)。"""
+    import karvyloop.console.routes_memory as rm
+    async def _fake_fetch(url, **kw):  # noqa: ANN001
+        assert "github.com" in url
+        return "KarvyLoop: a loop-native agent runtime. README 正文……"
+    monkeypatch.setattr(rm, "_fetch_url", _fake_fetch)
+    gw = _CaptureGateway()
+    app_with_mgr.state.runtime_kwargs = {"gateway": gw, "model_ref": ""}
+    app_with_mgr.state.memory = _FakeMem()
+    client = TestClient(app_with_mgr)
+    r = client.post("/api/knowledge/chat", json={
+        "session_id": "", "message": "https://github.com/Caprista/KarvyLoop 帮我消化下"})
+    body = r.json()
+    assert body["ok"] is True
+    last = gw.messages[-1]["content"]
+    assert "链接正文" in last and "loop-native agent runtime" in last   # 正文真进了模型
+    # 落盘干净:存原话不存抓取物
+    sess = client.get("/api/knowledge/session", params={"id": body["session_id"]}).json()
+    assert sess["turns"][0]["user_intent"] == "https://github.com/Caprista/KarvyLoop 帮我消化下"
+
+
+def test_knowledge_chat_fetch_fail_instructs_honesty(app_with_mgr, mgr, monkeypatch):
+    """抓不到 → 给模型的消息里带"老实说没读到,绝不凭 URL 瞎猜"指令(馆员把仓库名猜成
+    印度金融集团 = 真机实拍事故,这条锁死)。"""
+    import karvyloop.console.routes_memory as rm
+    async def _fake_fetch(url, **kw):  # noqa: ANN001
+        return ""
+    monkeypatch.setattr(rm, "_fetch_url", _fake_fetch)
+    gw = _CaptureGateway()
+    app_with_mgr.state.runtime_kwargs = {"gateway": gw, "model_ref": ""}
+    app_with_mgr.state.memory = _FakeMem()
+    client = TestClient(app_with_mgr)
+    r = client.post("/api/knowledge/chat", json={
+        "session_id": "", "message": "看看这个 https://example.com/x"})
+    assert r.json()["ok"] is True
+    last = gw.messages[-1]["content"]
+    assert "抓取失败" in last and "绝不凭 URL 字面猜" in last

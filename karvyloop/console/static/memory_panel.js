@@ -816,37 +816,53 @@ var KarvyMemoryPanelBundle = (function(exports) {
       } catch {
       }
     }
-    const cin = el("input", { type: "text", class: "distill-chat-in", placeholder: t("kchat.ph") });
-    const send = el("button", { class: "mgmt-submit", text: t("kchat.send") });
+    const cin = el("textarea", { class: "kchat-in", rows: "1", placeholder: t("kchat.ph") });
+    const send = el("button", { type: "button", class: "kchat-btn kchat-send", text: t("kchat.send") });
     const conv = el("button", {
-      class: "mgmt-submit kchat-converge",
+      type: "button",
+      class: "kchat-btn kchat-converge",
       text: t("kchat.converge"),
       title: t("btn.converge.title")
     });
     const msg = _formMsg();
-    send.addEventListener("click", async () => {
+    let _busy = false;
+    const typingLine = () => {
+      const ln = el("div", { class: "distill-line karvy kchat-typing" });
+      ln.appendChild(el("span", { class: "distill-who", text: t("knowledge.speaker") }));
+      ln.appendChild(el("div", { class: "distill-bd", text: t("kchat.thinking") }));
+      log.appendChild(ln);
+      log.scrollTop = log.scrollHeight;
+      return ln;
+    };
+    const doSend = async () => {
       const m = cin.value.trim();
       if (!m) return;
-      cin.value = "";
+      if (_busy) {
+        _setMsg(msg, false, t("kchat.busy"));
+        return;
+      }
+      _busy = true;
       send.disabled = true;
-      conv.disabled = true;
+      cin.value = "";
       _kLine(log, "you", m);
-      _setMsg(msg, true, t("kchat.thinking"));
+      const tl = typingLine();
       const res = await _postJSON("/api/knowledge/chat", { session_id: _kSession, message: m });
+      tl.remove();
+      _busy = false;
       send.disabled = false;
-      conv.disabled = false;
       if (res.ok && res.data && res.data.ok) {
         _kSession = res.data.session_id;
         _setMsg(msg, true, "");
         _kLine(log, "karvy", res.data.reply);
       } else {
-        _setMsg(msg, false, res.data && res.data.reason || String(res.status));
+        _kLine(log, "karvy", "(" + t("kchat.failed", { reason: res.data && res.data.reason || String(res.status) }) + ")");
       }
-    });
+    };
+    send.addEventListener("click", doSend);
     cin.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        send.click();
+        void doSend();
       }
     });
     conv.addEventListener("click", async () => {
@@ -854,47 +870,66 @@ var KarvyMemoryPanelBundle = (function(exports) {
         _setMsg(msg, false, t("kchat.nothing_yet"));
         return;
       }
+      if (_busy) {
+        _setMsg(msg, false, t("kchat.busy"));
+        return;
+      }
+      _busy = true;
       conv.disabled = true;
       send.disabled = true;
-      _setMsg(msg, true, t("kchat.converging"));
+      const tl = typingLine();
+      tl.querySelector(".distill-bd").textContent = t("kchat.converging");
       const res = await _postJSON("/api/knowledge/converge", { session_id: _kSession });
+      tl.remove();
+      _busy = false;
       conv.disabled = false;
       send.disabled = false;
       if (!res.ok || !(res.data && res.data.ok)) {
-        _setMsg(msg, false, res.data && res.data.reason || String(res.status));
+        _kLine(log, "karvy", "(" + t("kchat.failed", { reason: res.data && res.data.reason || String(res.status) }) + ")");
         return;
       }
-      _setMsg(msg, true, "");
       const card = res.data.card;
       if (!card || !card.n) {
-        _setMsg(msg, true, t("sediment.none"));
+        _kLine(log, "karvy", t("sediment.none"));
         return;
       }
       _renderSedimentCard(log, card, () => {
         _kSession = "";
-        _renderKnowledgeArea(wrap);
         void renderMemoryPanel();
       });
     });
-    wrap.appendChild(el(
-      "form",
-      { class: "mgmt-form kchat-form", onsubmit: (e) => e.preventDefault() },
-      cin,
-      send,
-      conv,
-      msg
-    ));
+    const bar = el("div", { class: "kchat-bar" }, cin, send, conv);
+    wrap.appendChild(bar);
+    wrap.appendChild(msg);
   }
+  let _memTab = "sediment";
   async function renderMemoryPanel() {
     const body = mgmtBody();
     if (!body) return;
     body.innerHTML = "";
-    const kWrap = el("div", { class: "kchat-area" });
-    body.appendChild(kWrap);
-    await _renderKnowledgeArea(kWrap);
-    const distillWrap = el("div", { class: "distill-area" });
-    body.appendChild(distillWrap);
-    await _reloadDistill(distillWrap);
+    const tabs = el("div", { class: "mem-tabs" });
+    const mkTab = (key, label) => {
+      const b = el("button", { class: "mem-tab" + (_memTab === key ? " active" : ""), text: label });
+      b.addEventListener("click", () => {
+        if (_memTab !== key) {
+          _memTab = key;
+          void renderMemoryPanel();
+        }
+      });
+      tabs.appendChild(b);
+    };
+    mkTab("sediment", t("mem.tab_sediment"));
+    mkTab("library", t("mem.tab_library"));
+    body.appendChild(tabs);
+    if (_memTab === "sediment") {
+      const kWrap = el("div", { class: "kchat-area" });
+      body.appendChild(kWrap);
+      await _renderKnowledgeArea(kWrap);
+      const distillWrap = el("div", { class: "distill-area" });
+      body.appendChild(distillWrap);
+      await _reloadDistill(distillWrap);
+      return;
+    }
     body.appendChild(el("div", { class: "mgmt-section-title", text: t("mem.graph") }));
     const graphBox = el("div", { class: "mem-graph-box" });
     body.appendChild(graphBox);

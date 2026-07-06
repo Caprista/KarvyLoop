@@ -668,62 +668,96 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
       }
     } catch { /* 读不到当新会话 */ }
   }
-  // 输入 + 发送 + ⚗️收敛
-  const cin = el("input", { type: "text", class: "distill-chat-in", placeholder: t("kchat.ph") }) as HTMLInputElement;
-  const send = el("button", { class: "mgmt-submit", text: t("kchat.send") }) as HTMLButtonElement;
-  const conv = el("button", { class: "mgmt-submit kchat-converge", text: t("kchat.converge"),
+  // 正经聊天框(Hardy:"我跟你说是聊天框"):底部一行横排 [textarea|发|⚗️收敛],绝不竖叠。
+  // 反馈纪律(Hardy:"他不理我!"):你的话立即上流 + 流内 typing 行;忙时再发**不静默吞**;
+  // 失败在流里说原因(不是角落小字)。textarea:Enter 发,Shift+Enter 换行(粘长文没障碍)。
+  const cin = el("textarea", { class: "kchat-in", rows: "1", placeholder: t("kchat.ph") }) as HTMLTextAreaElement;
+  const send = el("button", { type: "button", class: "kchat-btn kchat-send", text: t("kchat.send") }) as HTMLButtonElement;
+  const conv = el("button", { type: "button", class: "kchat-btn kchat-converge", text: t("kchat.converge"),
     title: t("btn.converge.title") }) as HTMLButtonElement;
   const msg = _formMsg();
-  send.addEventListener("click", async () => {
+  let _busy = false;
+  const typingLine = (): HTMLElement => {
+    const ln = el("div", { class: "distill-line karvy kchat-typing" });
+    ln.appendChild(el("span", { class: "distill-who", text: t("knowledge.speaker") }));
+    ln.appendChild(el("div", { class: "distill-bd", text: t("kchat.thinking") }));
+    log.appendChild(ln); log.scrollTop = log.scrollHeight;
+    return ln;
+  };
+  const doSend = async () => {
     const m = cin.value.trim();
     if (!m) return;
-    cin.value = ""; send.disabled = true; conv.disabled = true;
+    if (_busy) { _setMsg(msg, false, t("kchat.busy")); return; }   // 忙时不吞:明说等一下,保住输入
+    _busy = true; send.disabled = true;
+    cin.value = "";
     _kLine(log, "you", m);
-    _setMsg(msg, true, t("kchat.thinking"));
+    const tl = typingLine();
     const res = await _postJSON("/api/knowledge/chat", { session_id: _kSession, message: m });
-    send.disabled = false; conv.disabled = false;
+    tl.remove();
+    _busy = false; send.disabled = false;
     if (res.ok && res.data && res.data.ok) {
       _kSession = res.data.session_id;
       _setMsg(msg, true, "");
       _kLine(log, "karvy", res.data.reply);
     } else {
-      _setMsg(msg, false, (res.data && res.data.reason) || String(res.status));
+      // 失败在流里说(像个人),不是角落小字
+      _kLine(log, "karvy", "(" + t("kchat.failed", { reason: (res.data && res.data.reason) || String(res.status) }) + ")");
     }
+  };
+  send.addEventListener("click", doSend);
+  cin.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void doSend(); }
   });
-  cin.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); send.click(); } });
   conv.addEventListener("click", async () => {
     if (!_kSession) { _setMsg(msg, false, t("kchat.nothing_yet")); return; }
-    conv.disabled = true; send.disabled = true;
-    _setMsg(msg, true, t("kchat.converging"));
+    if (_busy) { _setMsg(msg, false, t("kchat.busy")); return; }
+    _busy = true; conv.disabled = true; send.disabled = true;
+    const tl = typingLine();
+    tl.querySelector(".distill-bd")!.textContent = t("kchat.converging");
     const res = await _postJSON("/api/knowledge/converge", { session_id: _kSession });
-    conv.disabled = false; send.disabled = false;
+    tl.remove();
+    _busy = false; conv.disabled = false; send.disabled = false;
     if (!res.ok || !(res.data && res.data.ok)) {
-      _setMsg(msg, false, (res.data && res.data.reason) || String(res.status)); return;
+      _kLine(log, "karvy", "(" + t("kchat.failed", { reason: (res.data && res.data.reason) || String(res.status) }) + ")");
+      return;
     }
-    _setMsg(msg, true, "");
     const card = res.data.card;
-    if (!card || !card.n) { _setMsg(msg, true, t("sediment.none")); return; }
+    if (!card || !card.n) { _kLine(log, "karvy", t("sediment.none")); return; }
     _renderSedimentCard(log, card, () => {
       _kSession = "";                       // 沉了就关这段 → 回到"新开一段"态,列表里那行消失
-      _renderKnowledgeArea(wrap);
-      void renderMemoryPanel();             // 已知列表里立刻能看到新沉的(异步刷不阻塞)
+      void renderMemoryPanel();             // 整面板刷新(待处理列表+已知列表都更新)
     });
   });
-  wrap.appendChild(el("form", { class: "mgmt-form kchat-form", onsubmit: (e: Event) => e.preventDefault() },
-    cin, send, conv, msg));
+  const bar = el("div", { class: "kchat-bar" }, cin, send, conv);
+  wrap.appendChild(bar);
+  wrap.appendChild(msg);
 }
+
+// 双标签(Hardy:"知识库和知识沉淀做在 2 个标签页,免得聊天视图不纯粹")
+let _memTab: "sediment" | "library" = "sediment";
 
 async function renderMemoryPanel(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
-  // docs/66 §F:「聊知识」区(认知聊天住这,不在主聊天)
-  const kWrap = el("div", { class: "kchat-area" });
-  body.appendChild(kWrap);
-  await _renderKnowledgeArea(kWrap);
-  // ch4 #2:沉淀工作流(喂料→分析→交流→你拍板)。有待办那条就接着聊,否则喂料。
-  const distillWrap = el("div", { class: "distill-area" });
-  body.appendChild(distillWrap);
-  await _reloadDistill(distillWrap);
-  // 🕸 认知图谱(网状视图,ch4 pillar 3)
+  const tabs = el("div", { class: "mem-tabs" });
+  const mkTab = (key: "sediment" | "library", label: string) => {
+    const b = el("button", { class: "mem-tab" + (_memTab === key ? " active" : ""), text: label });
+    b.addEventListener("click", () => { if (_memTab !== key) { _memTab = key; void renderMemoryPanel(); } });
+    tabs.appendChild(b);
+  };
+  mkTab("sediment", t("mem.tab_sediment"));
+  mkTab("library", t("mem.tab_library"));
+  body.appendChild(tabs);
+  if (_memTab === "sediment") {
+    // 标签页①「聊知识 · 沉淀」:馆员聊天(待处理列表+聊天框+收敛)+ 喂料工作流
+    const kWrap = el("div", { class: "kchat-area" });
+    body.appendChild(kWrap);
+    await _renderKnowledgeArea(kWrap);
+    const distillWrap = el("div", { class: "distill-area" });
+    body.appendChild(distillWrap);
+    await _reloadDistill(distillWrap);
+    return;
+  }
+  // 标签页②「知识库」:图谱 + 已知列表(纯浏览,不混聊天)
   body.appendChild(el("div", { class: "mgmt-section-title", text: t("mem.graph") }));
   const graphBox = el("div", { class: "mem-graph-box" });
   body.appendChild(graphBox);

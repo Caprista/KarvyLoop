@@ -133,6 +133,18 @@ async def api_knowledge_chat(req: KnowledgeChatRequest, request: Request) -> dic
     conv = store.load(peer, req.session_id) if req.session_id else None
     if conv is None:
         conv = store.new(peer)
+    # 丢即读(Hardy:"我给你资料你本身就要读的呀"):消息里有链接 → 服务端先抓正文喂馆员;
+    # 抓不到 → 明说没读到,**严禁**凭 URL 字面瞎猜(真机实拍:馆员把 KarvyLoop 猜成印度金融集团)。
+    from .routes_memory import _extract_url, _fetch_url
+    model_message = req.message
+    _url = _extract_url(req.message)
+    if _url:
+        fetched = await _fetch_url(_url)
+        if fetched:
+            model_message = (req.message + "\n\n【链接正文(服务端已抓取,这就是你读到的材料)】\n" + fetched)
+        else:
+            model_message = (req.message + "\n\n【链接抓取失败:没拿到内容。老实告诉用户你没读到,"
+                             "问 ta 贴正文进来;绝不凭 URL 字面猜内容】")
     # 系统提示 = 馆员人设 + 知识库召回(馆员手边有你的库,对照新旧的底气)
     sys_parts = [KNOWLEDGE_PERSONA]
     mem = getattr(request.app.state, "memory", None)
@@ -149,7 +161,7 @@ async def api_knowledge_chat(req: KnowledgeChatRequest, request: Request) -> dic
             msgs.append({"role": "user", "content": turn.user_intent})
         if turn.agent_response:
             msgs.append({"role": "assistant", "content": turn.agent_response})
-    msgs.append({"role": "user", "content": req.message})
+    msgs.append({"role": "user", "content": model_message})   # 抓到的正文只喂模型;落盘存原话
     from karvyloop.gateway import ResolveScope
     from karvyloop.gateway.system import SystemPrompt
     from karvyloop.llm.token_ledger import token_source

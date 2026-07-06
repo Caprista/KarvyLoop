@@ -2513,3 +2513,32 @@ body.demo-modal-full .demo-hero-grid { grid-template-columns: repeat(6, 1fr); }
 .kchat-form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .kchat-form .distill-chat-in { flex: 1 1 240px; }
 .kchat-converge { background: var(--accent-strong, #8a5a2b); }
+
+/* docs/66 §F 四连修:双标签 + 正经聊天框(横排,绝不竖叠) */
+.mem-tabs { display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 2px solid var(--border, #ddd0be); }
+.mem-tab {
+  border: none; background: transparent; cursor: pointer;
+  font-size: var(--fs-14, 14px); font-weight: 700; color: var(--text-dim, #8a7a66);
+  padding: 8px 14px; border-bottom: 2px solid transparent; margin-bottom: -2px;
+}
+.mem-tab.active { color: var(--accent-strong, #8a5a2b); border-bottom-color: var(--accent-strong, #8a5a2b); }
+.mem-tab:hover { color: var(--accent-strong, #8a5a2b); }
+
+.kchat-bar { display: flex; gap: 8px; align-items: flex-end; flex-wrap: nowrap; margin-top: 6px; }
+.kchat-in {
+  flex: 1 1 auto; min-width: 0;
+  min-height: 40px; max-height: 120px; resize: none;
+  padding: 9px 12px; font-size: var(--fs-13, 13px); line-height: 1.5;
+  border: 1px solid var(--border, #ddd0be); border-radius: 10px;
+  font-family: inherit; box-sizing: border-box;
+}
+.kchat-in:focus { outline: none; border-color: var(--accent-line, #d9bf9d); }
+.kchat-btn {
+  flex: none; border: none; border-radius: 9px; padding: 9px 14px; cursor: pointer;
+  font-size: var(--fs-13, 13px); font-weight: 700; white-space: nowrap;
+  background: var(--accent-strong, #8a5a2b); color: #fff;
+}
+.kchat-btn:disabled { opacity: 0.55; cursor: default; }
+.kchat-btn.kchat-converge { background: #fff; color: var(--accent-strong, #8a5a2b);
+  border: 1px solid var(--accent-line, #d9bf9d); }
+.kchat-typing .distill-bd { color: var(--text-dim, #8a7a66); font-style: italic; }
