@@ -2121,6 +2121,11 @@
   const BACKEND_ZH_EN: Record<string, string> = {
     "memory 未接": "memory not wired",
     "memory 未接(--no-llm?)": "memory not wired (--no-llm?)",
+    "无 gateway,无法收敛(--no-llm?)": "no gateway — cannot converge (--no-llm?)",
+    "无当前会话": "no current conversation",
+    "这段对话还没聊呢": "nothing said in this conversation yet",
+    "收敛/沉淀只在「聊知识」模式可用 —— 从知识库进入(工作对话不会被关闭)":
+      "Converge/sediment only works in Knowledge chat mode — enter it from the Knowledge Base (work chats are never closed)",
     "memory/gateway 未接(--no-llm?)": "memory/gateway not wired (--no-llm?)",
     "memory/gateway 未接,沉淀失败(待办保留,可重试)": "memory/gateway not wired; distill failed (kept as pending, retryable)",
     "memory/gateway/proposal_registry 未接": "memory/gateway/proposal_registry not wired",
