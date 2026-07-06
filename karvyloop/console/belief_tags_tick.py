@@ -64,9 +64,13 @@ async def belief_tags_tick(app: Any, *, state_path: Optional[Path] = None,
     cc = getattr(mem, "concept_cache", None) if mem is not None else None
     if cc is None:
         cc = getattr(app.state, "concept_cache", None)
-    if mem is None or gw is None or cc is None:
-        # reason 复用既有 i18n key(concept_cache 属 memory 接线的一部分,不另造新串)
+    if mem is None or gw is None:
+        # reason 复用既有 i18n key(不另造新串)
         return {"ran": False, "tagged": 0, "reason": "memory/gateway 未接(--no-llm?)"}
+    if cc is None:
+        # P0③ 精确报因:memory/gateway 都在、单缺概念缓存 → 复用 tag_merge_tick 的既有
+        # i18n 串(en/zh 表已有,零新串),daily 面上能看出"标签层没接",不再误报 memory/gateway。
+        return {"ran": False, "tagged": 0, "reason": "gateway/concept_cache 未接(--no-llm?)"}
 
     # 候选:两 scope 全量、仍有效、内容非空(index 双 key 去重 by id,同 recall_block 的坑)
     beliefs, seen = [], set()

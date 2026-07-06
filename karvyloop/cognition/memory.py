@@ -59,7 +59,7 @@ class MemoryManager:
     """
 
     def __init__(self, *, index: Optional[MemoryIndex] = None, store: object = None,
-                 concept_cache: object = None) -> None:
+                 concept_cache: object = None, trace: object = None) -> None:
         self._index = index or MemoryIndex()
         self._builtin = BuiltinProvider(self._index)
         self._externals: list[MemoryProvider] = []
@@ -70,22 +70,41 @@ class MemoryManager:
         # 接了 → recall_block 的种子多一层"语义标签重叠"(同义改写能召回)、
         # supersede 候选筛选带标签;没接/老库无标签 → 纯词面,行为不回归。
         self.concept_cache = concept_cache
+        if store is not None and concept_cache is None:
+            # P0③ 断接可见性:持久化形态(store 接了 = 生产样)却没接概念标签缓存 →
+            # 语义标签层整体缺席:新条永无标签、同义改写召回退化纯词面、daily 回填
+            # (belief_tags_tick)也无处可写。构造时响一次(不刷屏;纯内存测试形态不响)。
+            # 不默认自建 —— 缓存路径归入口定(console=config 目录 / cli=~/.karvyloop),
+            # 在这儿猜路径会造出第二份缓存,两入口就漂移了。
+            logger.warning("[memory] concept_cache 未接:新沉淀的知识不会有概念标签,"
+                           "同义改写召回退化为纯词面(daily 标签回填也无处可写)")
+        # trace 句柄(可选,P0②审计面):_persist 失败时落一条 Trace(belief_persist_failed);
+        # 没接 = 只 log + persist_error + 返回值,契约不变。
+        self.trace = trace
         # fail-loud(闭环审计断⑥):最近一次落盘失败的原因(成功清 None)——
         # 上层(routes/doctor/调用方)能感知"记忆没存上",不再静默丢。
         self.persist_error: Optional[str] = None
         # 使用信号脏标(recall_block 轻量刷 last_recalled_ts/recall_count 后置位;
         # 不在召回热路径落盘 —— 靠下一次 write 的全量 _persist 顺带带上,或 flush_usage 批量刷)。
         self._usage_dirty: bool = False
+        # P0② 重试标脏:_persist 失败置位、成功清位。取舍 = **失败不回滚内存**(进程内
+        # 召回/失效行为一致),但必须标脏 —— 否则失效/归档若之后再无新写,就永远只活在
+        # 内存里,重启即"复活"(supersede 幽灵循环)。flush_usage(daily 慢侧)兜底重试。
+        self._persist_dirty: bool = False
         if store is not None:
             for belief, pinned in store.load_all():
                 self._index.put(belief, pinned=pinned)
 
-    def _persist(self) -> bool:
+    def _persist(self, *, op: str = "write") -> bool:
         """把当前 index 全量写盘(write/archive 后调)。无 store 则 noop(True)。
 
         去重 by id(b):MemoryIndex.put 把同一 belief 存在两个 key 下(provenance['id'] 与
         content),index.all 会返回**同一对象两次** → 不去重会落盘 2N 条、召回也重复
         (独立 checker 抓到的 CRITICAL 地雷:今天 ingest 不带 id 故潜伏,带 id 立刻发作)。
+
+        失败(P0② fail-loud 不静默):①log.error 带上下文(op + 条数)②置 _persist_dirty
+        (内存态不回滚;flush_usage / 下次任意写路径全量重写自愈)③有 trace 句柄时落一条
+        kind=belief_persist_failed。成功清 error + 清脏。
         """
         if self._store is None:
             return True
@@ -100,12 +119,25 @@ class MemoryManager:
         try:
             self._store.save_all(items)
             self.persist_error = None
+            self._persist_dirty = False
             return True
         except Exception as e:
             # 落盘失败不阻塞主流程(内存态仍在),但**重启即丢** —— 必须响(断⑥):
             # logger.error + persist_error 供上层感知(write/archive 也把结果返给调用方)。
             self.persist_error = f"{type(e).__name__}: {e}"
-            logger.error(f"[memory] Belief 落盘失败(内存态仍在,**重启会丢这批记忆**): {e}")
+            self._persist_dirty = True   # 标脏:等 flush_usage/下次写盘重试(盘恢复即自愈)
+            logger.error(f"[memory] Belief 落盘失败(op={op},{len(items)} 条;内存态仍在,"
+                         f"**重启会丢这批记忆**;已标脏待重试): {e}")
+            tr = getattr(self, "trace", None)
+            if tr is not None:
+                try:
+                    from karvyloop.cognition.trace import TraceEntry
+                    tr.append(TraceEntry(
+                        task_id="memory_persist", kind="belief_persist_failed",
+                        payload={"op": op, "error": self.persist_error, "items": len(items)},
+                        source="memory"))
+                except Exception:
+                    pass   # Trace 是审计不是命脉:落不进不改变返回契约
             return False
 
     def invalidate(self, belief: Belief, *, reason: str = "", now: Optional[float] = None) -> bool:
@@ -114,21 +146,27 @@ class MemoryManager:
         条目**留在库里**(recent/审计面还查得到、可翻案),但召回(recall_block/recall/
         prefetch_all)默认过滤。supersede 消解与"过时归档"H2A 卡的兑现都走这里——
         物理删除只保留给 purge/remove_by_content 等既有显式路径。返回落盘是否成功(断⑥)。
+        失败语义(P0②):内存态**不回滚**(进程内召回立即看不见它),但已响(log/Trace/返 False)
+        + 标脏 —— flush_usage(daily)或下次任意写路径重试,盘恢复后失效标记自动补上盘。
         """
         if now is None:
             now = time.time()
         with self._lock:
             belief.invalid_at = float(now)
             belief.invalid_reason = (reason or "").strip()[:300]
-            return self._persist()
+            return self._persist(op="invalidate")
 
     def flush_usage(self) -> bool:
         """把召回使用信号(last_recalled_ts/recall_count)批量落盘(daily 慢侧调;
-        热路径 recall_block 只改内存置脏标,绝不在每次召回写盘)。无脏 → noop True。"""
-        if not self._usage_dirty:
+        热路径 recall_block 只改内存置脏标,绝不在每次召回写盘)。无脏 → noop True。
+
+        兼任 P0② 落盘失败的重试兜底:上次 _persist 失败(_persist_dirty)也从这里全量重写
+        —— invalidate/归档失败后,daily 一到、盘恢复即自愈,失效标记不再只活在内存
+        (否则重启"复活"、knowledge_tick 读脏 recall_count 误判"一年无用")。"""
+        if not (self._usage_dirty or self._persist_dirty):
             return True
         with self._lock:
-            ok = self._persist()
+            ok = self._persist(op="flush_usage")
             if ok:
                 self._usage_dirty = False
             return ok
@@ -137,7 +175,7 @@ class MemoryManager:
         """归档(从 index 移除)+ 落盘。distill 的 MEMORY_ARCHIVE 走这里,否则归档不持久
         → 重启复活(独立 checker 抓到的 MEDIUM:持久化契约洞)。返回落盘是否成功(断⑥)。"""
         self._index.remove(belief)
-        return self._persist()
+        return self._persist(op="archive")
 
     def purge_domain(self, domain: str) -> int:
         """§2.6 ⑤:删/归档业务域时,清掉**该域的私有认知层**(applies.domain==domain 的 Belief)。
@@ -157,7 +195,7 @@ class MemoryManager:
             for b in victims:
                 self._index.remove(b)
             if victims:
-                self._persist()
+                self._persist(op="purge_domain")
         return len(victims)
 
     def count_source_ref(self, source_ref: str) -> int:
@@ -197,7 +235,7 @@ class MemoryManager:
             for b in victims:
                 self._index.remove(b)
             if victims:
-                self._persist()
+                self._persist(op="purge_source_ref")
         return len(victims)
 
     def count_beliefs_by_content(self, contents: set) -> int:
@@ -230,7 +268,7 @@ class MemoryManager:
             for b in victims:
                 self._index.remove(b)
             if victims:
-                self._persist()
+                self._persist(op="remove_by_content")
         return len(victims)
 
     @property
@@ -320,7 +358,7 @@ class MemoryManager:
         # _persist 不自锁 → 这里持锁安全(不重入)。
         with self._lock:
             self._index.put(belief, pinned=pinned)
-            return self._persist()
+            return self._persist(op="write")
 
     def recall_block(self, query: str, *, scope: str = "personal", limit: int = 8,
                      domain: str = "", include_invalid: bool = False,
