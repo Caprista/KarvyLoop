@@ -565,25 +565,160 @@ async function _runConsolidate(): Promise<void> {
   }
 }
 
+// ============================================================================
+// docs/66 §F(Hardy 三次收敛):认知聊天**整个住在知识库模块里**。
+// 「聊知识」区 = 待处理知识列表(每段没沉淀的会话一行)+ 知识馆员聊天 + ⚗️收敛 →
+// 逐条确认(收/改/不要,没动的不沉)→ 只沉确认的 → 关会话(欠账清一笔)。主聊天零耦合。
+// ============================================================================
+let _kSession = "";   // 当前打开的知识会话 id("" = 下一句话新开一段)
+
+function _kLine(log: HTMLElement, who: "you" | "karvy", text: string): void {
+  const line = el("div", { class: "distill-line " + who });
+  line.appendChild(el("span", { class: "distill-who", text: who === "you" ? t("chat.you") : t("knowledge.speaker") }));
+  const bd = el("div", { class: "distill-bd" });
+  _md(bd, text || "");
+  line.appendChild(bd);
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+// 沉淀确认卡(面板内渲染):逐条 收/改/不要;没动的 = 未确认 = 不沉;depth≥4 带 ⚠。
+function _renderSedimentCard(host: HTMLElement, card: any, onDone: () => void): void {
+  const box = el("div", { class: "sediment-card" });
+  box.appendChild(el("div", { class: "sediment-head", text: t("sediment.card_title") }));
+  box.appendChild(el("div", { class: "sediment-note", text: t("sediment.card_note") }));
+  const states: Record<string, { action: string; content?: string }> = {};
+  const submit = el("button", { type: "button", class: "sediment-submit" }) as HTMLButtonElement;
+  const updateSubmit = () => {
+    const n = Object.values(states).filter((x) => x.action !== "drop").length;
+    submit.textContent = n > 0 ? t("sediment.submit", { n }) : t("sediment.submit_zero");
+  };
+  for (const it of card.items || []) {
+    const row = el("div", { class: "sediment-row depth-" + (it.depth || 1) });
+    const content = el("span", { class: "sediment-content", text: it.content });
+    const setState = (cls: string) => {
+      row.classList.remove("is-keep", "is-edit", "is-drop");
+      if (cls) row.classList.add("is-" + cls);
+      updateSubmit();
+    };
+    const bKeep = el("button", { type: "button", class: "sediment-act keep", text: t("sediment.keep") });
+    bKeep.addEventListener("click", () => {
+      const editing = content.getAttribute("contenteditable") === "true";
+      const txt = (content.textContent || "").trim();
+      if (editing && txt && txt !== it.content) { states[it.id] = { action: "edit", content: txt }; setState("edit"); }
+      else { states[it.id] = { action: "accept" }; setState("keep"); }
+      content.setAttribute("contenteditable", "false");
+    });
+    const bEdit = el("button", { type: "button", class: "sediment-act edit", text: t("sediment.edit") });
+    bEdit.addEventListener("click", () => { content.setAttribute("contenteditable", "true"); (content as HTMLElement).focus(); });
+    const bDrop = el("button", { type: "button", class: "sediment-act drop", text: t("sediment.drop") });
+    bDrop.addEventListener("click", () => { states[it.id] = { action: "drop" }; content.setAttribute("contenteditable", "false"); setState("drop"); });
+    const acts = el("span", { class: "sediment-acts" }, bKeep, bEdit, bDrop);
+    row.appendChild(el("span", { class: "sediment-chip", text: t("layer." + it.layer) }));
+    row.appendChild(content); row.appendChild(acts);
+    if (it.needs_attention) row.appendChild(el("div", { class: "sediment-warn", text: t("sediment.attention") }));
+    box.appendChild(row);
+  }
+  const cancel = el("button", { type: "button", class: "sediment-cancel", text: t("sediment.cancel") });
+  cancel.addEventListener("click", () => box.remove());
+  submit.addEventListener("click", async () => {
+    submit.disabled = true;
+    const res = await _postJSON("/api/knowledge/sediment", {
+      conversation_id: card.conversation_ref, items: card.items, decisions: states });
+    if (!res.ok || !(res.data && res.data.ok)) { submit.disabled = false; return; }
+    box.remove();
+    onDone();
+  });
+  updateSubmit();
+  box.appendChild(el("div", { class: "sediment-foot" }, cancel, submit));
+  host.appendChild(box);
+  host.scrollTop = host.scrollHeight;
+}
+
+async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
+  wrap.innerHTML = "";
+  wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("knowledge.entry") }));
+  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("knowledge.entry_desc") }));
+  // 待处理知识(欠账列表:每段一行,点行续聊;➕ 新开一段)
+  const debt = await _getJSON("/api/knowledge/debt");
+  const sessions = (debt && debt.sessions) || [];
+  const chips = el("div", { class: "kchat-sessions" });
+  const plus = el("button", { class: "kchat-chip kchat-new" + (_kSession ? "" : " active"), text: t("kchat.new") });
+  plus.addEventListener("click", () => { _kSession = ""; _renderKnowledgeArea(wrap); });
+  chips.appendChild(plus);
+  for (const s of sessions) {
+    const label = (s.snippet || t("conv.untitled")) + " · " + t("conv.turns", { n: s.turn_count });
+    const chip = el("button", { class: "kchat-chip" + (s.id === _kSession ? " active" : ""), text: "📥 " + label });
+    chip.addEventListener("click", () => { _kSession = s.id; _renderKnowledgeArea(wrap); });
+    chips.appendChild(chip);
+  }
+  if (sessions.length) {
+    wrap.appendChild(el("div", { class: "kchat-debt-head", text: t("kchat.debt", { n: sessions.length }) }));
+  }
+  wrap.appendChild(chips);
+  // 聊天区(续聊时装历史)
+  const log = el("div", { class: "kchat-log" });
+  wrap.appendChild(log);
+  if (_kSession) {
+    try {
+      const sess = await _getJSON("/api/knowledge/session?id=" + encodeURIComponent(_kSession));
+      for (const turn of (sess && sess.turns) || []) {
+        if (turn.user_intent) _kLine(log, "you", turn.user_intent);
+        if (turn.agent_response) _kLine(log, "karvy", turn.agent_response);
+      }
+    } catch { /* 读不到当新会话 */ }
+  }
+  // 输入 + 发送 + ⚗️收敛
+  const cin = el("input", { type: "text", class: "distill-chat-in", placeholder: t("kchat.ph") }) as HTMLInputElement;
+  const send = el("button", { class: "mgmt-submit", text: t("kchat.send") }) as HTMLButtonElement;
+  const conv = el("button", { class: "mgmt-submit kchat-converge", text: t("kchat.converge"),
+    title: t("btn.converge.title") }) as HTMLButtonElement;
+  const msg = _formMsg();
+  send.addEventListener("click", async () => {
+    const m = cin.value.trim();
+    if (!m) return;
+    cin.value = ""; send.disabled = true; conv.disabled = true;
+    _kLine(log, "you", m);
+    _setMsg(msg, true, t("kchat.thinking"));
+    const res = await _postJSON("/api/knowledge/chat", { session_id: _kSession, message: m });
+    send.disabled = false; conv.disabled = false;
+    if (res.ok && res.data && res.data.ok) {
+      _kSession = res.data.session_id;
+      _setMsg(msg, true, "");
+      _kLine(log, "karvy", res.data.reply);
+    } else {
+      _setMsg(msg, false, (res.data && res.data.reason) || String(res.status));
+    }
+  });
+  cin.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); send.click(); } });
+  conv.addEventListener("click", async () => {
+    if (!_kSession) { _setMsg(msg, false, t("kchat.nothing_yet")); return; }
+    conv.disabled = true; send.disabled = true;
+    _setMsg(msg, true, t("kchat.converging"));
+    const res = await _postJSON("/api/knowledge/converge", { session_id: _kSession });
+    conv.disabled = false; send.disabled = false;
+    if (!res.ok || !(res.data && res.data.ok)) {
+      _setMsg(msg, false, (res.data && res.data.reason) || String(res.status)); return;
+    }
+    _setMsg(msg, true, "");
+    const card = res.data.card;
+    if (!card || !card.n) { _setMsg(msg, true, t("sediment.none")); return; }
+    _renderSedimentCard(log, card, () => {
+      _kSession = "";                       // 沉了就关这段 → 回到"新开一段"态,列表里那行消失
+      _renderKnowledgeArea(wrap);
+      void renderMemoryPanel();             // 已知列表里立刻能看到新沉的(异步刷不阻塞)
+    });
+  });
+  wrap.appendChild(el("form", { class: "mgmt-form kchat-form", onsubmit: (e: Event) => e.preventDefault() },
+    cin, send, conv, msg));
+}
+
 async function renderMemoryPanel(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
-  // docs/66 §F:「聊知识」收集模式入口 —— 知识线专属(收敛/沉淀/欠账只活在那;工作对话不受影响)。
-  // 欠账 = 开着且聊过的知识会话数(你还有几份料没沉下心沉淀)。
-  let _kDebt = 0;
-  try { _kDebt = ((await _getJSON("/api/conversation/knowledge_debt")) || {}).unsettled || 0; } catch { /* 降级 0 */ }
-  const kOpen = el("button", { class: "mem-knowledge-open",
-    text: _kDebt > 0 ? t("knowledge.entry_open_n", { n: _kDebt }) : t("knowledge.entry_open") });
-  kOpen.addEventListener("click", () => {
-    const kc = (window as unknown as { KarvyKnowledgeChat?: { open: () => void } }).KarvyKnowledgeChat;
-    const km = (window as unknown as { KarvyModal?: { closeMgmtModal?: () => void } }).KarvyModal;
-    if (km && km.closeMgmtModal) km.closeMgmtModal();
-    if (kc && kc.open) kc.open();
-  });
-  body.appendChild(el("div", { class: "mem-knowledge-entry" },
-    el("div", { class: "mc-main" },
-      el("div", { class: "mc-name", text: t("knowledge.entry") }),
-      el("div", { class: "mc-meta", text: t("knowledge.entry_desc") })),
-    kOpen));
+  // docs/66 §F:「聊知识」区(认知聊天住这,不在主聊天)
+  const kWrap = el("div", { class: "kchat-area" });
+  body.appendChild(kWrap);
+  await _renderKnowledgeArea(kWrap);
   // ch4 #2:沉淀工作流(喂料→分析→交流→你拍板)。有待办那条就接着聊,否则喂料。
   const distillWrap = el("div", { class: "distill-area" });
   body.appendChild(distillWrap);

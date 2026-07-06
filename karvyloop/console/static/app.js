@@ -1284,6 +1284,7 @@
       if (karvy) addRow(dBody, karvy, false);
       agents.forEach((p) => addRow(dBody, p, true));
       // 群聊(结构性,全显、不可 X)
+      // (docs/66 §F Hardy 三次收敛:认知聊天整个住在知识库模块里 —— 聊天列表不加知识分类)
       const gBody = addSection("chat.sec_group", groups.length);
       groups.forEach((p) => addRow(gBody, p, false));
       // 工作流 / 圆桌(运行产物卡:主题 + 发起群;可 X)
@@ -1309,7 +1310,6 @@
     // 群场(Karvy World / 业务域群)是**多人**,标题就是群名,不是"你 & 某人"(那是 1:1 的框)。
     if (peer && peer.is_world) { ttl.textContent = "👥 Karvy World"; _chatSpeaker = ""; return; }
     if (peer && peer.is_group) { ttl.textContent = "👥 " + (peer.domain_name || peer.role || ""); _chatSpeaker = ""; return; }
-    if (_isKnowledgePeer(peer)) { ttl.textContent = "📚 " + t("chat.you") + " & " + t("knowledge.speaker"); _chatSpeaker = t("knowledge.speaker"); return; }
     const isKarvy = !peer || peer.is_private || peer.domain_id === "l0";
     const who = isKarvy ? t("chat.karvy") : (_peerLabel() || peer.role || t("chat.karvy"));
     ttl.textContent = "💬 " + t("chat.you") + " & " + who;
@@ -1336,7 +1336,6 @@
       _currentPeer = peer;   // ch4:记住当前场(圆桌按钮按它显隐)
       _setChatTitle(peer);   // #4:标题 + 回复方身份随场更新
       _toggleRoundtableBtn(peer);
-      _toggleConvergeBtn(peer);   // docs/66 §F:⚗️ 只在知识线
       _loadGroupRoster(peer);   // ch4 #1:进群场 → 拉名册供 @ 选择
       _ceClear();               // 切场 → 输入框清空(@ 属于上一个场)
       _hideMentionPop();
@@ -1373,38 +1372,17 @@
         opt.textContent = `${label} · ${t("conv.turns", { n: c.turn_count })}${closed}${c.id === data.current_id ? t("conv.current") : ""}`;
         sel.appendChild(opt);
       }
-      // 开着的会话数 = 没沉淀的欠账;只欠当前这 1 段(或 0)不打扰,≥2 才亮
-      const badge = document.getElementById("conv-unsettled");
-      if (badge) {
-        const n = data.unsettled || 0;
-        // docs/66 §F:欠账是知识线的概念,别的线不亮
-        badge.classList.toggle("hidden", n < 2 || !_isKnowledgePeer(_currentPeer));
-        if (n >= 2) badge.textContent = t("conv.unsettled", { n });
-      }
     } catch (e) {
       console.warn("[conv] list failed", e);
     }
   }
 
-  // ============ docs/66 §F:「聊知识」模式(收敛/沉淀只活在知识线,工作对话不受影响) ============
-  const _KNOWLEDGE_PEER = { domain_id: "l0", role: "librarian", agent_id: "karvy-knowledge", is_group: false };
-  function _isKnowledgePeer(p) {
-    return !!p && p.role === "librarian" && (p.agent_id || "") === "karvy-knowledge";
-  }
-  // ⚗️ + 欠账徽章只在知识线显示(Hardy:全局一收敛把工作会话关了 = 逻辑错乱)
-  function _toggleConvergeBtn(peer) {
-    const on = _isKnowledgePeer(peer);
-    const btn = document.getElementById("conv-converge-btn");
-    if (btn) btn.classList.toggle("hidden", !on);
-    const badge = document.getElementById("conv-unsettled");
-    if (badge && !on) badge.classList.add("hidden");
-  }
-  function openKnowledgeChat() { switchPeer(JSON.stringify(_KNOWLEDGE_PEER)); }
-  window.KarvyKnowledgeChat = { open: openKnowledgeChat, peer: _KNOWLEDGE_PEER };
-  // 全局聊天唯一的联动:你说"聊点新知识/认知…"→ 小卡**问**要不要开收集模式,你点开启才切换。
+  // ============ docs/66 §F(Hardy 三次收敛):认知聊天住在知识库模块里 ============
+  // 全局聊天唯一联动 = 意图提示条:你说"聊点新知识/认知…"→ 问一句"要打开知识库·聊知识吗?"
+  // 你点开启才打开知识库面板(H2A:问,不自动);馆员/收敛/沉淀/欠账全在面板里,主聊天零耦合。
   let _kHintShown = false;
   function _maybeKnowledgeHint(text) {
-    if (_kHintShown || _isKnowledgePeer(_currentPeer)) return;
+    if (_kHintShown) return;
     if (!/(聊|学|讲)[点些一]{0,2}(个)?(新)?(知识|认知)|新知识|开启知识(库)?(收集)?模式/.test(text || "")) return;
     _kHintShown = true;   // 一次会话只提一次,不追着问
     const log = document.getElementById("chat-log");
@@ -1412,131 +1390,12 @@
     const box = el("div", { class: "chat-notice knowledge-hint" });
     box.appendChild(el("span", { text: t("knowledge.hint") + " " }));
     const yes = el("button", { type: "button", class: "khint-btn khint-yes", text: t("knowledge.hint_open") });
-    yes.addEventListener("click", () => { box.remove(); openKnowledgeChat(); });
+    yes.addEventListener("click", () => { box.remove(); if (window.KarvyMemoryPanel) window.KarvyMemoryPanel.open(); });
     const no = el("button", { type: "button", class: "khint-btn", text: t("knowledge.hint_skip") });
     no.addEventListener("click", () => box.remove());
     box.appendChild(yes); box.appendChild(no);
     log.appendChild(box);
     log.scrollTop = log.scrollHeight;
-  }
-
-  // ============ docs/66:收敛 → 分层确认卡 → 只沉确认的 → 会话关闭(知识线内) ============
-
-  async function convergeConversation() {
-    const btn = document.getElementById("conv-converge-btn");
-    if (btn) btn.disabled = true;
-    try {
-      const r = await fetch("/api/conversation/converge", { method: "POST" });
-      const data = await r.json();
-      if (!r.ok || !data.ok) {
-        pushChatLine("system", t("sediment.failed", { reason: (data && data.reason) || r.status }));
-        return;
-      }
-      if (!data.card || !data.card.n) {
-        pushChatLine("system", t("sediment.none"));
-        return;
-      }
-      renderSedimentCard(data.card);
-    } catch (e) {
-      pushChatLine("system", t("sediment.failed", { reason: String(e) }));
-    } finally {
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  // 沉淀确认卡:逐条 收/改/不要(没动的 = 未确认 = 不沉)。深层(校正/涌现)带 ⚠ 提示。
-  function renderSedimentCard(card) {
-    const log = document.getElementById("chat-log");
-    if (!log) return;
-    const box = el("div", { class: "sediment-card" });
-    box.appendChild(el("div", { class: "sediment-head", text: t("sediment.card_title") }));
-    box.appendChild(el("div", { class: "sediment-note", text: t("sediment.card_note") }));
-    const states = {};   // id → {action, content}
-    for (const it of card.items || []) {
-      const row = el("div", { class: "sediment-row depth-" + (it.depth || 1) });
-      const chip = el("span", { class: "sediment-chip", text: t("layer." + it.layer) });
-      const content = el("span", { class: "sediment-content", text: it.content });
-      const acts = el("span", { class: "sediment-acts" });
-      const bKeep = el("button", { type: "button", class: "sediment-act keep", text: t("sediment.keep") });
-      const bEdit = el("button", { type: "button", class: "sediment-act edit", text: t("sediment.edit") });
-      const bDrop = el("button", { type: "button", class: "sediment-act drop", text: t("sediment.drop") });
-      const setState = (cls) => {
-        row.classList.remove("is-keep", "is-edit", "is-drop");
-        if (cls) row.classList.add("is-" + cls);
-        updateSubmit();
-      };
-      bKeep.addEventListener("click", () => {
-        const editing = content.getAttribute("contenteditable") === "true";
-        const txt = (content.textContent || "").trim();
-        if (editing && txt && txt !== it.content) {
-          states[it.id] = { action: "edit", content: txt };   // 改过再收 = 沉你改后的话
-          setState("edit");
-        } else {
-          states[it.id] = { action: "accept" };
-          setState("keep");
-        }
-        content.setAttribute("contenteditable", "false");
-      });
-      bEdit.addEventListener("click", () => {
-        content.setAttribute("contenteditable", "true");
-        content.focus();   // 改完还得按「收」——改而不收不算确认
-      });
-      bDrop.addEventListener("click", () => {
-        states[it.id] = { action: "drop" };
-        content.setAttribute("contenteditable", "false");
-        setState("drop");
-      });
-      acts.appendChild(bKeep); acts.appendChild(bEdit); acts.appendChild(bDrop);
-      row.appendChild(chip); row.appendChild(content); row.appendChild(acts);
-      if (it.needs_attention) {
-        row.appendChild(el("div", { class: "sediment-warn", text: t("sediment.attention") }));
-      }
-      box.appendChild(row);
-    }
-    const foot = el("div", { class: "sediment-foot" });
-    const submit = el("button", { type: "button", class: "sediment-submit" });
-    const cancel = el("button", { type: "button", class: "sediment-cancel", text: t("sediment.cancel") });
-    function updateSubmit() {
-      const n = Object.values(states).filter((s) => s.action !== "drop").length;
-      submit.textContent = n > 0 ? t("sediment.submit", { n }) : t("sediment.submit_zero");
-    }
-    updateSubmit();
-    cancel.addEventListener("click", () => box.remove());   // 接着聊:卡撤走,不沉、不关
-    submit.addEventListener("click", async () => {
-      submit.disabled = true;
-      try {
-        const r = await fetch("/api/conversation/sediment", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversation_id: card.conversation_ref,
-            items: card.items,
-            decisions: states,
-          }),
-        });
-        const data = await r.json();
-        if (!r.ok || !data.ok) {
-          pushChatLine("system", t("sediment.failed", { reason: (data && data.reason) || r.status }));
-          submit.disabled = false;
-          return;
-        }
-        box.remove();
-        // 会话已关、新会话已开:清屏 + 回执(镜像 newConversation 行为)
-        const log2 = document.getElementById("chat-log");
-        if (log2) log2.innerHTML = "";
-        pushChatLine("system", data.written > 0 ? t("sediment.done", { n: data.written }) : t("sediment.done_zero"));
-        if (data.needs_recheck) pushChatLine("system", t("sediment.recheck"));
-        refreshConversations();
-      } catch (e) {
-        pushChatLine("system", t("sediment.failed", { reason: String(e) }));
-        submit.disabled = false;
-      }
-    });
-    foot.appendChild(cancel); foot.appendChild(submit);
-    box.appendChild(foot);
-    const follow = isNearBottom(log);
-    log.appendChild(box);
-    if (follow) log.scrollTop = log.scrollHeight;
   }
 
   async function newConversation() {
@@ -2831,6 +2690,10 @@
     const m = document.getElementById("chat-modal");
     if (!m) return;
     m.classList.remove("hidden");
+    // 桌面视图最小化态(desk-min):任何"去聊天"路径都要能拉起窗(Hardy 实拍:知识库点进去拉不起;
+    // 12 处调用方全走这儿,一处修全修)。restoreWin 会同步持久化 min:false,别只删 class。
+    const _kd = window.KarvyDesktop;
+    if (_kd && _kd.restoreChat && m.classList.contains("desk-min")) _kd.restoreChat();
     if (!_chatDocked()) document.body.classList.add("chat-open");   // 弹层态:FAB 让位(CSS)
     const input = document.getElementById("chat-input");
     if (input) setTimeout(() => input.focus(), 30);
@@ -3009,7 +2872,7 @@
     // 乐观渲染:**真**显示发了什么(缩略图/文档块),不再只写"(带了 N 个附件)"
     if (_manifest.length) _pushUserWithAttachments(_qText, _manifest);
     else pushChatLine("user", text);
-    _maybeKnowledgeHint(text);   // docs/66 §F:说到聊新知识 → 问要不要开收集模式(你说是才切)
+    _maybeKnowledgeHint(text);   // docs/66 §F:说到聊新知识 → 问要不要打开知识库聊知识(你点开启才开面板)
     showBusy();
     // ch4 圆桌对话式对齐(Hardy:少按钮)—— 待对齐圆桌里,你的话走 /align;小卡聊清了自己开始。
     if (_pendingRoundtable) {
@@ -3859,9 +3722,6 @@
     // 9.1d:绑对话控件(➕新对话 / 🕘历史)
     const newBtn = document.getElementById("conv-new-btn");
     if (newBtn) newBtn.addEventListener("click", newConversation);
-    // docs/66:⚗️ 收敛(总结→逐条确认→只沉确认的→关会话)
-    const convergeBtn = document.getElementById("conv-converge-btn");
-    if (convergeBtn) convergeBtn.addEventListener("click", convergeConversation);
     const histSel = document.getElementById("conv-history");
     if (histSel) histSel.addEventListener("change", (e) => {
       const v = e.target.value; e.target.selectedIndex = 0;   // 选完复位成 🕘 图标,不显长标题

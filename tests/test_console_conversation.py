@@ -251,11 +251,11 @@ def test_static_has_conversation_controls():
     assert "/api/conversations" in js
 
 
-# ---- docs/66 §E:会话=临时存放区(沉淀关闭 / 开数=欠账)+ 收敛/沉淀端点 ----
+# ---- docs/66 §E/§F:知识模块(/api/knowledge/*)—— 会话=存放区,按 id 操作,主聊天零耦合 ----
 
 import json as _json  # noqa: E402
 
-from karvyloop.cognition.conversation import karvy_world_peer  # noqa: E402
+from karvyloop.cognition.conversation import Turn, karvy_world_peer  # noqa: E402
 from karvyloop.cognition.knowledge_chat import knowledge_peer  # noqa: E402
 
 
@@ -264,7 +264,7 @@ class TextDelta:  # 名字必须叫 TextDelta(代码按 type().__name__ 收)
         self.text = text
 
 
-class _SedimentFakeGateway:
+class _ConvergeFakeGateway:
     """收敛端点用:吐一张两层候选(经历+涌现)的严格 JSON。"""
     def __init__(self) -> None:
         self.calls = 0
@@ -281,6 +281,19 @@ class _SedimentFakeGateway:
         yield TextDelta(out)
 
 
+class _ChatFakeGateway:
+    """馆员聊天端点用:回一句固定话;记录收到的 system(验人设注入)。"""
+    def __init__(self) -> None:
+        self.systems = []
+
+    def resolve_model(self, scope):  # noqa: ANN001
+        return "fake"
+
+    async def complete(self, messages, tools, ref, system=None):  # noqa: ANN001
+        self.systems.append(system)
+        yield TextDelta("馆员消化好了:这说法的隐含假设是 X。")
+
+
 class _FakeMem:
     def __init__(self) -> None:
         self.written = []
@@ -290,17 +303,26 @@ class _FakeMem:
         self.written.append(b)
         return True
 
+    def recall_block(self, q, **kw):  # noqa: ANN001
+        return ""
+
+
+def _kconv(mgr, *turns):
+    """直接在知识线建一段会话(不动 mgr 当前态,和端点同一路径)。"""
+    store = mgr._store
+    conv = store.new(knowledge_peer())
+    for u, a in turns:
+        store.append_turn(conv, Turn(user_intent=u, agent_response=a, brain="slow"))
+    return conv
+
 
 def test_store_close_tombstone_idempotent_and_meta(tmp_path):
     store = ConversationStore(tmp_path / "conv")
     peer = karvy_world_peer()
     conv = store.new(peer, "t")
-    mgr2 = ConversationManager(store)
-    mgr2.start()
     ts1 = store.close(conv)
     ts2 = store.close(conv)                     # 幂等:第二次不再追加
     assert ts1 == ts2 and conv.closed_at == ts1
-    # 墓碑持久化:重载读回 closed_at,且不算轮
     loaded = store.load(peer, conv.id)
     assert loaded.closed_at == ts1 and loaded.turn_count == 0
     meta = [m for m in store.list_conversations(peer) if m.id == conv.id][0]
@@ -321,37 +343,55 @@ def test_manager_close_current_opens_new_and_counts(mgr):
     assert metas[cur.id].closed_at is None
 
 
-def test_converge_endpoint_returns_card(app_with_mgr, mgr):
-    gw = _SedimentFakeGateway()
+def test_knowledge_chat_creates_session_and_injects_persona(app_with_mgr, mgr):
+    gw = _ChatFakeGateway()
     app_with_mgr.state.runtime_kwargs = {"gateway": gw, "model_ref": ""}
-    mgr.set_peer(knowledge_peer())   # 收敛只在「聊知识」线可用(docs/66 §F)
-    mgr.record_turn("我从 React 换到了 Vue", "为什么切换?")
+    app_with_mgr.state.memory = _FakeMem()
     client = TestClient(app_with_mgr)
-    r = client.post("/api/conversation/converge")
-    assert r.status_code == 200
+    r = client.post("/api/knowledge/chat", json={"session_id": "", "message": "帮我消化一个说法"})
+    body = r.json()
+    assert r.status_code == 200 and body["ok"] is True
+    sid = body["session_id"]
+    assert sid and body["turn_count"] == 1 and "馆员消化好了" in body["reply"]
+    # 人设真注入(馆员不是裸模型)
+    sys_text = str(getattr(gw.systems[0], "static", gw.systems[0]))
+    assert "知识馆员" in sys_text
+    # 同一 session 续聊:轮数累计
+    r2 = client.post("/api/knowledge/chat", json={"session_id": sid, "message": "再展开说说"})
+    assert r2.json()["session_id"] == sid and r2.json()["turn_count"] == 2
+    # 主聊天当前会话没被碰(零耦合)
+    assert mgr.current().turn_count == 0
+
+
+def test_knowledge_converge_by_id_returns_card(app_with_mgr, mgr):
+    gw = _ConvergeFakeGateway()
+    app_with_mgr.state.runtime_kwargs = {"gateway": gw, "model_ref": ""}
+    conv = _kconv(mgr, ("我从 React 换到了 Vue", "为什么切换?"))
+    client = TestClient(app_with_mgr)
+    r = client.post("/api/knowledge/converge", json={"session_id": conv.id})
     body = r.json()
     assert body["ok"] is True and gw.calls == 1
     card = body["card"]
-    assert card["kind"] == "sediment" and card["n"] == 2
-    assert card["conversation_ref"] == mgr.current().id
+    assert card["kind"] == "sediment" and card["n"] == 2 and card["conversation_ref"] == conv.id
     assert card["items"][-1]["layer"] == "emergent" and card["items"][-1]["needs_attention"] is True
 
 
-def test_converge_empty_conversation_refuses(app_with_mgr, mgr):
-    app_with_mgr.state.runtime_kwargs = {"gateway": _SedimentFakeGateway(), "model_ref": ""}
-    mgr.set_peer(knowledge_peer())
+def test_knowledge_converge_empty_or_missing_refuses(app_with_mgr, mgr):
+    app_with_mgr.state.runtime_kwargs = {"gateway": _ConvergeFakeGateway(), "model_ref": ""}
     client = TestClient(app_with_mgr)
-    r = client.post("/api/conversation/converge")
-    assert r.status_code == 200 and r.json()["ok"] is False   # 没聊过 → 拒,不烧 LLM
+    conv = _kconv(mgr)   # 没聊过
+    assert client.post("/api/knowledge/converge", json={"session_id": conv.id}).json()["ok"] is False
+    assert client.post("/api/knowledge/converge", json={"session_id": "no-such"}).json()["ok"] is False
 
 
-def test_sediment_endpoint_writes_confirmed_closes_and_counts(app_with_mgr, mgr):
+def test_knowledge_sediment_by_id_closes_only_that_session(app_with_mgr, mgr):
+    """核心结构性保证(Hardy 三次收敛):沉淀只关那段知识会话,主聊天当前会话动都不动。"""
     mem = _FakeMem()
     app_with_mgr.state.memory = mem
     app_with_mgr.state.runtime_kwargs = {"gateway": None, "model_ref": ""}
-    mgr.set_peer(knowledge_peer())   # 沉淀只在「聊知识」线可用(docs/66 §F)
-    mgr.record_turn("我从 React 换到了 Vue", "为什么切换?")
-    conv_id = mgr.current().id
+    mgr.record_turn("正常聊工作", "好的")            # 主聊天先有一段工作会话
+    work = mgr.current()
+    conv = _kconv(mgr, ("我从 React 换到了 Vue", "为什么切换?"))
     client = TestClient(app_with_mgr)
     from karvyloop.cognition.converge import CognitionCandidate
     items = [
@@ -360,63 +400,46 @@ def test_sediment_endpoint_writes_confirmed_closes_and_counts(app_with_mgr, mgr)
     ]
     decisions = {items[0]["id"]: {"action": "accept"},
                  items[1]["id"]: {"action": "edit", "content": "跨域套用认知前先刨隐含假设"}}
-    r = client.post("/api/conversation/sediment", json={
-        "conversation_id": conv_id, "items": items, "decisions": decisions})
-    assert r.status_code == 200
+    r = client.post("/api/knowledge/sediment", json={
+        "conversation_id": conv.id, "items": items, "decisions": decisions})
     body = r.json()
-    assert body["ok"] is True and body["written"] == 2
-    assert body["closed_at"] is not None
-    assert body["new_conversation_id"] and body["new_conversation_id"] != conv_id
-    # 只沉确认的、user_explicit、带理解出处;edit 沉改后的话
+    assert body["ok"] is True and body["written"] == 2 and body["closed_at"] is not None
+    assert body["unsettled"] == 0
+    # 只沉确认的、user_explicit、edit 沉改后的话
     assert all(b.provenance["source"] == "user_explicit" for b in mem.written)
     assert {b.content for b in mem.written} == {"从 React 换到了 Vue", "跨域套用认知前先刨隐含假设"}
-    assert all(b.provenance["learned_via"] == f"conversation:{conv_id}" for b in mem.written)
-    # 关了的不算欠账
-    metas = {m.id: m for m in mgr.list_conversations()}
-    assert metas[conv_id].closed_at is not None
-    r2 = client.get("/api/conversations")
-    assert r2.json()["unsettled"] == 0                        # 顺势新开的空会话不算欠账(没料)
+    # 主聊天当前会话:还是那段工作会话、没被关、轮数没变(结构性零耦合)
+    assert mgr.current().id == work.id
+    assert mgr.current().closed_at is None and mgr.current().turn_count == 1
+    # 那段知识会话真关了
+    assert mgr._store.load(knowledge_peer(), conv.id).closed_at is not None
 
 
-def test_sediment_wrong_conversation_409(app_with_mgr, mgr):
+def test_knowledge_sediment_missing_session_404(app_with_mgr):
     app_with_mgr.state.memory = _FakeMem()
-    mgr.set_peer(knowledge_peer())
-    mgr.record_turn("x", "y")
     client = TestClient(app_with_mgr)
-    r = client.post("/api/conversation/sediment", json={
-        "conversation_id": "not-current", "items": [], "decisions": {}})
-    assert r.status_code == 409
+    r = client.post("/api/knowledge/sediment", json={
+        "conversation_id": "no-such", "items": [], "decisions": {}})
+    assert r.status_code == 404
 
 
-def test_converge_denied_on_work_line(app_with_mgr, mgr):
-    """Hardy 纠正的核心:正常聊工作的线,收敛/沉淀必须被拒 —— 工作会话永远不会被它关掉。"""
-    app_with_mgr.state.runtime_kwargs = {"gateway": _SedimentFakeGateway(), "model_ref": ""}
-    app_with_mgr.state.memory = _FakeMem()
-    mgr.record_turn("正常聊工作", "好的")          # 默认线 = 私聊小卡(工作)
+def test_knowledge_debt_and_session_endpoints(app_with_mgr, mgr):
     client = TestClient(app_with_mgr)
-    r = client.post("/api/conversation/converge")
-    assert r.status_code == 200 and r.json()["ok"] is False
-    assert "聊知识" in r.json()["reason"]
-    r2 = client.post("/api/conversation/sediment", json={
-        "conversation_id": mgr.current().id, "items": [], "decisions": {}})
-    assert r2.status_code == 200 and r2.json()["ok"] is False
-    # 工作会话没有被关
-    assert mgr.current().closed_at is None
-
-
-def test_knowledge_debt_endpoint(app_with_mgr, mgr):
-    client = TestClient(app_with_mgr)
-    assert client.get("/api/conversation/knowledge_debt").json()["unsettled"] == 0
-    mgr.set_peer(knowledge_peer())
-    mgr.record_turn("丢一份资料", "读好了")         # 知识线开着且聊过 = 欠 1
-    assert client.get("/api/conversation/knowledge_debt").json()["unsettled"] == 1
-    mgr.close_conversation(mgr.current().id)
-    assert client.get("/api/conversation/knowledge_debt").json()["unsettled"] == 0
+    assert client.get("/api/knowledge/debt").json() == {"unsettled": 0, "sessions": []}
+    conv = _kconv(mgr, ("丢一份资料进来先存着", "读好了,随时聊"))
+    debt = client.get("/api/knowledge/debt").json()
+    assert debt["unsettled"] == 1
+    assert debt["sessions"][0]["id"] == conv.id
+    assert debt["sessions"][0]["snippet"].startswith("丢一份资料")   # 首句当脸
+    sess = client.get("/api/knowledge/session", params={"id": conv.id}).json()
+    assert sess["id"] == conv.id and len(sess["turns"]) == 1
+    assert client.get("/api/knowledge/session", params={"id": "no-such"}).status_code == 404
+    mgr._store.close(mgr._store.load(knowledge_peer(), conv.id))
+    assert client.get("/api/knowledge/debt").json()["unsettled"] == 0
 
 
 def test_knowledge_line_never_routes(app_with_mgr, mgr):
-    """知识线豁免路由层(docs/66 §F):馆员自己接。真机实拍病根:"帮我消化一个说法"
-    被路由层截胡成"拉俩角色开圆桌"提案,馆员根本没答。最强触发词也不许路由。"""
+    """知识线豁免路由层(docs/66 §F,防御性保留):馆员自己接,最强触发词也不路由。"""
     import asyncio as _a
     from karvyloop.console.routes import maybe_route_to_role
     mgr.set_peer(knowledge_peer())

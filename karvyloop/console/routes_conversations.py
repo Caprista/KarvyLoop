@@ -84,27 +84,106 @@ def api_conversation_resume(req: ResumeRequest, request: Request) -> dict[str, A
     }
 
 
-# ---- docs/66 §F:收敛 → 分层确认 → 只沉确认的 → 会话关闭(=欠账清一笔)。
-#      整套生命周期**只活在「聊知识」线**(Hardy:全局一收敛把工作会话关了=逻辑错乱)----
+# ============================================================================
+# docs/66 §F(Hardy 三次收敛):认知聊天**整个住在知识库模块里** —— 不是聊天模块的一个分类。
+# /api/knowledge/*:按会话 id 操作知识线(l0/librarian)的会话,**完全不碰主聊天的当前会话**
+# (结构上就不可能误关工作对话)。生命周期:聊 → 收敛 → 逐条确认 → 只沉确认的 → 关会话(欠账清一笔)。
+# ============================================================================
 
-def _require_knowledge_line(mgr) -> Optional[str]:
-    """收敛/沉淀只在知识线可用;其他线返回拒绝理由(工作会话永远不会被它关掉)。"""
-    from karvyloop.cognition.knowledge_chat import is_knowledge_peer
-    peer = mgr.current_peer() if mgr is not None else None
-    if not is_knowledge_peer(peer):
-        return "收敛/沉淀只在「聊知识」模式可用 —— 从知识库进入(工作对话不会被关闭)"
-    return None
+def _kstore(mgr):
+    """知识会话直取存储(不经 mgr 的"当前会话"状态机 —— 知识模块与主聊天零耦合)。"""
+    return getattr(mgr, "_store", None) if mgr is not None else None
 
 
-@router.post("/conversation/converge")
-async def api_conversation_converge(request: Request) -> dict[str, Any]:
-    """收敛当前会话:对话 → 分层认知候选(经历/推理/原则/校正/涌现)→ 沉淀确认卡。
-    **不写库**——只产候选;你逐条确认后走 /conversation/sediment 才沉(理解关)。"""
+def _kload(mgr, session_id: str):
+    from karvyloop.cognition.knowledge_chat import knowledge_peer
+    store = _kstore(mgr)
+    if store is None or not session_id:
+        return None
+    return store.load(knowledge_peer(), session_id)
+
+
+def _kdebt(mgr) -> tuple[int, list]:
+    """(欠账数, metas):开着**且聊过**的知识会话(空会话没有料不算)。"""
+    from karvyloop.cognition.knowledge_chat import knowledge_peer
+    metas = [m for m in (mgr.list_conversations(knowledge_peer()) if mgr is not None else [])
+             if m.closed_at is None and m.turn_count > 0]
+    return len(metas), metas
+
+
+class KnowledgeChatRequest(BaseModel):
+    session_id: str = Field(default="", max_length=64)   # 空 = 新开一段(临时存放区)
+    message: str = Field(..., min_length=1, max_length=20000)
+
+
+@router.post("/knowledge/chat")
+async def api_knowledge_chat(req: KnowledgeChatRequest, request: Request) -> dict[str, Any]:
+    """知识馆员聊天(在知识库面板里):丢料/讨论 → 馆员消化回话(人设+知识库召回)。
+    session_id 空 = 新开一段;每段就是一份待沉淀的料(docs/66 §E 临时存放区)。"""
     mgr = getattr(request.app.state, "conversation_manager", None)
-    deny = _require_knowledge_line(mgr)
-    if deny:
-        return {"ok": False, "reason": deny}
-    conv = mgr.current() if mgr is not None else None
+    store = _kstore(mgr)
+    if store is None:
+        return {"ok": False, "reason": "未接对话编排器"}
+    rk = getattr(request.app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    if gw is None:
+        return {"ok": False, "reason": "无 gateway(--no-llm?)"}
+    from karvyloop.cognition.knowledge_chat import KNOWLEDGE_PERSONA, knowledge_peer
+    peer = knowledge_peer()
+    conv = store.load(peer, req.session_id) if req.session_id else None
+    if conv is None:
+        conv = store.new(peer)
+    # 系统提示 = 馆员人设 + 知识库召回(馆员手边有你的库,对照新旧的底气)
+    sys_parts = [KNOWLEDGE_PERSONA]
+    mem = getattr(request.app.state, "memory", None)
+    if mem is not None:
+        try:
+            block = mem.recall_block(req.message, scope="personal", limit=8)
+            if block:
+                sys_parts.append(block)
+        except Exception:
+            pass
+    msgs: list[dict] = []
+    for turn in conv.turns[-12:]:
+        if turn.user_intent:
+            msgs.append({"role": "user", "content": turn.user_intent})
+        if turn.agent_response:
+            msgs.append({"role": "assistant", "content": turn.agent_response})
+    msgs.append({"role": "user", "content": req.message})
+    from karvyloop.gateway import ResolveScope
+    from karvyloop.gateway.system import SystemPrompt
+    from karvyloop.llm.token_ledger import token_source
+    try:
+        ref = gw.resolve_model(ResolveScope(atom_model=rk.get("model_ref") or None))
+    except Exception:
+        ref = rk.get("model_ref", "")
+    out = ""
+    try:
+        with token_source("knowledge_chat"):
+            async for ev in gw.complete(msgs, [], ref,
+                                        system=SystemPrompt(static=["\n\n".join(sys_parts)])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
+    except Exception as e:
+        return {"ok": False, "reason": f"馆员没回上话: {e}"}
+    reply = out.strip()
+    if not reply:
+        return {"ok": False, "reason": "馆员没回上话(空回复)"}
+    from karvyloop.cognition.conversation import Turn
+    store.append_turn(conv, Turn(user_intent=req.message, agent_response=reply, brain="slow"))
+    return {"ok": True, "session_id": conv.id, "reply": reply, "turn_count": conv.turn_count}
+
+
+class KnowledgeConvergeRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=64)
+
+
+@router.post("/knowledge/converge")
+async def api_knowledge_converge(req: KnowledgeConvergeRequest, request: Request) -> dict[str, Any]:
+    """收敛指定知识会话:对话 → 分层认知候选(经历/推理/原则/校正/涌现)→ 沉淀确认卡。
+    **不写库**——只产候选;你逐条确认后走 /knowledge/sediment 才沉(理解关)。"""
+    mgr = getattr(request.app.state, "conversation_manager", None)
+    conv = _kload(mgr, req.session_id)
     if conv is None:
         return {"ok": False, "reason": "无当前会话"}
     if not conv.turns:
@@ -128,17 +207,15 @@ class SedimentRequest(BaseModel):
     decisions: dict[str, dict] = Field(default_factory=dict)
 
 
-@router.post("/conversation/sediment")
-async def api_conversation_sediment(req: SedimentRequest, request: Request) -> dict[str, Any]:
-    """沉淀你确认的候选(user_explicit)→ **关闭会话**(欠账清一笔)。
-    不在 decisions 里的候选 = 未确认 = 不沉;盲拍(全收零改零删)进反投降闸,越深计分越重。"""
+@router.post("/knowledge/sediment")
+async def api_knowledge_sediment(req: SedimentRequest, request: Request) -> dict[str, Any]:
+    """沉淀你确认的候选(user_explicit)→ **关闭该知识会话**(欠账清一笔)。
+    不在 decisions 里的候选 = 未确认 = 不沉;盲拍(全收零改零删)进反投降闸,越深计分越重。
+    只按 id 操作知识线会话 —— 主聊天的当前会话动都不动。"""
     mgr = getattr(request.app.state, "conversation_manager", None)
-    deny = _require_knowledge_line(mgr)
-    if deny:
-        return {"ok": False, "reason": deny}
-    conv = mgr.current() if mgr is not None else None
-    if conv is None or conv.id != req.conversation_id:
-        raise HTTPException(status_code=409, detail="不是当前会话(先 resume 再沉淀)")
+    conv = _kload(mgr, req.conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="知识会话不存在")
     mem = getattr(request.app.state, "memory", None)
     if mem is None:
         return {"ok": False, "reason": "memory 未接(--no-llm?)"}
@@ -173,14 +250,12 @@ async def api_conversation_sediment(req: SedimentRequest, request: Request) -> d
     max_depth = max((c.depth for c in accepted), default=1)
     tracker.record(accepted_any=bool(accepted), engaged=engaged, max_depth=max_depth)
     # 沉淀了才关(docs/66 §E);一条没沉(全删/全没确认)也算"处理过了"→ 同样关,欠账清
-    closed_at = mgr.close_conversation(conv.id, reason="sedimented" if res["written"] else "settled_empty")
-    metas = mgr.list_conversations()
+    store = _kstore(mgr)
+    closed_at = store.close(conv, reason="sedimented" if res["written"] else "settled_empty")
+    n, _metas = _kdebt(mgr)
     return {
         "ok": True, "written": res["written"], "closed_at": closed_at,
-        "unsettled": sum(1 for m in metas
-                         if getattr(m, "closed_at", None) is None and m.turn_count > 0),
-        "needs_recheck": tracker.needs_recheck(),
-        "new_conversation_id": (mgr.current().id if mgr.current() is not None else None),
+        "unsettled": n, "needs_recheck": tracker.needs_recheck(),
     }
 
 
@@ -189,14 +264,44 @@ def _conv_trace(app: Any):
     return getattr(getattr(app.state, "main_loop", None), "trace", None)
 
 
-@router.get("/conversation/knowledge_debt")
+@router.get("/knowledge/session")
+def api_knowledge_session(id: str, request: Request) -> dict[str, Any]:
+    """读一段知识会话的完整轮记录(面板点「待处理知识」行续聊时装历史)。"""
+    mgr = getattr(request.app.state, "conversation_manager", None)
+    conv = _kload(mgr, id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="知识会话不存在")
+    return {"id": conv.id, "closed_at": conv.closed_at,
+            "turns": [{"user_intent": t.user_intent, "agent_response": t.agent_response}
+                      for t in conv.turns]}
+
+
+@router.get("/knowledge/debt")
 def api_knowledge_debt(request: Request) -> dict[str, Any]:
-    """知识线欠账:开着**且聊过**的知识会话数(docs/66 §E/§F,给知识库面板入口显示)。"""
+    """知识欠账(docs/66 §E/§F):开着**且聊过**的知识会话 —— 「待处理知识」列表
+    (Hardy:欠账要一眼看见的**列表**,每段一行;都住在知识库面板里)。
+    每段带首句摘要(没起名的会话拿第一句用户话当脸)。"""
     mgr = getattr(request.app.state, "conversation_manager", None)
     if mgr is None:
-        return {"unsettled": 0}
+        return {"unsettled": 0, "sessions": []}
     from karvyloop.cognition.knowledge_chat import knowledge_peer
     try:
-        return {"unsettled": mgr.open_count(knowledge_peer())}
+        n, metas = _kdebt(mgr)
+        peer = knowledge_peer()
+        store = _kstore(mgr)
+        sessions = []
+        for m in metas:
+            snippet = (m.title or "").strip()
+            if not snippet and store is not None:
+                try:
+                    conv = store.load(peer, m.id)
+                    first = next((t.user_intent for t in (conv.turns if conv else []) if t.user_intent), "")
+                    snippet = first.strip().replace("\n", " ")[:42]
+                except Exception:
+                    snippet = ""
+            sessions.append({"id": m.id, "snippet": snippet, "turn_count": m.turn_count,
+                             "last_active_at": m.last_active_at})
+        sessions.sort(key=lambda s: s["last_active_at"], reverse=True)
+        return {"unsettled": n, "sessions": sessions}
     except Exception:
-        return {"unsettled": 0}
+        return {"unsettled": 0, "sessions": []}

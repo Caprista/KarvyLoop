@@ -1646,6 +1646,9 @@
       leave,
       notifyH2A,
       resetLayout,
+      restoreChat: () => {
+        if (deskView()) restoreWin("chat");
+      },
       // P1.5 测试接缝(smoke/Playwright 喂真实事件形状,不开真 socket;生产路径 = soulConnect 的 onmessage)
       _soul: {
         handle: soulHandle,

@@ -12,7 +12,9 @@
  *
  * 拖拽自写 pointer events(业界桌面隐喻常见做法:标题栏拖拽、点击聚焦置顶、
  * taskbar 指示),零新依赖;位置持久化 localStorage("karvyloop_desk.v1")。
- * 对外契约:window.KarvyDesktop = { enter, leave, notifyH2A, resetLayout }。
+ * 对外契约:window.KarvyDesktop = { enter, leave, notifyH2A, resetLayout, restoreChat }。
+ *   restoreChat:app.js openChatModal 的桌面接缝 —— 聊天窗 desk-min(最小化)时任何"去聊天"路径
+ *   (知识库入口/回复弹窗/看板按钮/切场)都要能把窗拉起来(Hardy 实拍 bug:拉不起)。
  *
  * P1.5 灵魂(docs/53):卡皮巴拉工位区 + 小卡壁炉化/叼卡 + 署名便签 + 工作证摊桌。
  *   - 全部渲染只由真实事件驱动(task_status/task_step/role_presence/h2a_*),没有一帧假戏
@@ -1536,6 +1538,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
 
   const KarvyDesktop = {
     enter, leave, notifyH2A, resetLayout,
+    restoreChat: () => { if (deskView()) restoreWin("chat"); },
     // P1.5 测试接缝(smoke/Playwright 喂真实事件形状,不开真 socket;生产路径 = soulConnect 的 onmessage)
     _soul: { handle: soulHandle, refreshPresence, refreshRecentKnowledge, refreshMemento,
              stationCount: () => _stations.size },

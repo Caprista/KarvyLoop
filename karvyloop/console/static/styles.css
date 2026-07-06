@@ -2496,3 +2496,20 @@ body.demo-modal-full .demo-hero-grid { grid-template-columns: repeat(6, 1fr); }
   font-size: 12px; padding: 3px 10px; margin-left: 6px; cursor: pointer;
 }
 .knowledge-hint .khint-yes { background: var(--accent-strong, #8a5a2b); color: #fff; border-color: transparent; }
+
+/* docs/66 §F(三次收敛):知识库面板「聊知识」区 —— 待处理列表 chips + 馆员聊天 */
+.kchat-area { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px dashed var(--border, #ddd0be); }
+.kchat-debt-head { font-size: var(--fs-12, 12px); font-weight: 700; color: var(--rose, #b8577b); margin: 6px 0 2px; }
+.kchat-sessions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+.kchat-chip {
+  border: 1px solid var(--border, #ddd0be); background: #fff; border-radius: 14px;
+  font-size: 12px; padding: 4px 11px; cursor: pointer; max-width: 300px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kchat-chip.active { background: var(--accent-light, #f6ead9); border-color: var(--accent-line, #d9bf9d); font-weight: 700; }
+.kchat-chip:hover { border-color: var(--accent-line, #d9bf9d); }
+.kchat-log { max-height: 300px; overflow-y: auto; margin: 4px 0; }
+.kchat-log:empty { display: none; }
+.kchat-form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.kchat-form .distill-chat-in { flex: 1 1 240px; }
+.kchat-converge { background: var(--accent-strong, #8a5a2b); }

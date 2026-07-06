@@ -115,6 +115,7 @@ const code = readFileSync(resolve(here, "../../static/desktop.js"), "utf8");
 const KD = dom.window.KarvyDesktop;
 assert.ok(KD && ["enter", "leave", "notifyH2A", "resetLayout"].every((k) => typeof KD[k] === "function"),
   "window.KarvyDesktop = { enter, leave, notifyH2A, resetLayout } 契约缺失");
+assert.ok(typeof KD.restoreChat === "function", "KarvyDesktop.restoreChat 契约缺失(去聊天拉起最小化窗)");
 
 // ---- dock 同构渲染:11 个 data-panel(与侧栏一致)+ 💰 = 12 入口,右段窗口指示 + ↺ ----
 const dock = document.getElementById("desk-dock");
