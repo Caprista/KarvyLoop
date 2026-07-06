@@ -323,7 +323,8 @@ class MemoryManager:
             return self._persist()
 
     def recall_block(self, query: str, *, scope: str = "personal", limit: int = 8,
-                     domain: str = "", include_invalid: bool = False) -> str:
+                     domain: str = "", include_invalid: bool = False,
+                     as_of: Optional[float] = None) -> str:
         """**同步**召回(只读 index)→ 围栏块,供 drive 前注入上下文(token 纪律:封顶 limit 条)。
 
         简化打分:query 词与 belief.content 的字符重叠命中加分,平手按 freshness 新的优先。
@@ -336,13 +337,28 @@ class MemoryManager:
         **失效过滤(冲突消解接线)**:`invalid_at` 已置的 Belief(被 supersede/归档失效)
         默认**不召回**——过时记忆不再顶掉新事实;`include_invalid=True` 才带上(审计/翻案面)。
         命中条顺带轻量刷使用信号(last_recalled_ts/recall_count,只改内存置脏标,不写盘)。
+
+        **`as_of` 时点召回(docs/66 §技术底,Graphiti 双时态的薄版)**:给了 → 按"T 时刻它算数吗"
+        过滤:`valid_from ≤ T`(缺省退 provenance.ts)且(未失效 或 `invalid_at > T`)。
+        回答"我三月对 X 的看法"——当时还没学到/已被推翻的不出现;整个能力就这一个谓词,
+        不建时点查询语言(个人尺度够用即止)。None(默认)= 今天的行为,一字不变。
         """
         # 去重 by id(b):index.all 因双 key 可能返回同一对象两次(同 _persist 的坑)
         beliefs, _seen = [], set()
         for b in self._index.all(scope):
             if id(b) in _seen:
                 continue
-            if not include_invalid and b.invalid_at is not None:
+            if as_of is not None:
+                prov = b.provenance or {}
+                vf = prov.get("valid_from", prov.get("ts"))
+                try:
+                    if vf is not None and float(vf) > as_of:
+                        continue   # T 时刻还没成立/还没学到
+                except (TypeError, ValueError):
+                    pass           # 坏时间戳当不可判,不因此丢条
+                if b.invalid_at is not None and b.invalid_at <= as_of:
+                    continue       # T 时刻已被推翻
+            elif not include_invalid and b.invalid_at is not None:
                 continue   # 失效不删:留库可审计,但默认不进召回
             bd = (b.provenance.get("applies") or {}).get("domain", "") if b.provenance else ""
             if bd and bd != domain:
