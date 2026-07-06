@@ -302,3 +302,23 @@ def test_full_chain_card_to_sediment():
     edited = next(b for b in mem.written if b.provenance["layer"] == "emergent")
     assert edited.content == "跨域套用认知前,先刨出它的隐含假设"   # 沉的是你改后的话
     assert trace.entries[0].payload["n"] == 2                      # Trace 只记确认沉淀的
+
+
+def test_parse_salvages_truncated_array():
+    """真机实拍:思考型模型烧掉 max_tokens,数组尾被截 → 打捞完整项,别整包丢弃误报"没什么可沉"。"""
+    full = json.dumps([
+        {"content": "完整的第一条", "layer": "experience", "why": "", "when": None},
+        {"content": "完整的第二条", "layer": "principle", "why": "", "when": None},
+    ], ensure_ascii=False)
+    truncated = full[:-1] + ', {"content": "被截断的第三'   # 合法尾巴被截
+    cands = parse_candidates(truncated)
+    assert [c.content for c in cands] == ["完整的第一条", "完整的第二条"]
+
+
+def test_parse_extracts_array_wrapped_in_prose():
+    """真模型偶发把数组裹在散文里 → 提取数组本体,不整包判废。"""
+    payload = json.dumps([{"content": "裹在散文里", "layer": "emergent", "why": "", "when": None}],
+                         ensure_ascii=False)
+    wrapped = "好的,我把这段对话收敛成以下认知候选:\n" + payload + "\n以上,请逐条确认。"
+    cands = parse_candidates(wrapped)
+    assert len(cands) == 1 and cands[0].content == "裹在散文里" and cands[0].layer == "emergent"

@@ -69,7 +69,12 @@ class CognitionCandidate:
 
 
 def parse_candidates(text: str) -> list[CognitionCandidate]:
-    """解析收敛总结输出 → 候选列表。宁空勿毒:非严格 JSON 数组 / 坏项 → 跳过或返 []。"""
+    """解析收敛总结输出 → 候选列表。宁空勿毒:非严格 JSON 数组 / 坏项 → 跳过或返 []。
+
+    真机实拍:真模型偶发把数组裹在散文里 / 思考烧掉 max_tokens 把数组尾截断 → 严格
+    json.loads 直接 [] → UI 误报"没什么可沉淀"。前置复用 trace_habit 的硬化提取器
+    (剥围栏/散文里找完整数组/截断打捞,自带 O(n²) 双上限),提取仍失败才落回严格解析。
+    """
     t = (text or "").strip()
     if not t:
         return []
@@ -81,6 +86,11 @@ def parse_candidates(text: str) -> list[CognitionCandidate]:
     cleaned = "\n".join(lines).strip()
     if not cleaned:
         return []
+    try:
+        from karvyloop.karvy.fastbrain.trace_habit import _extract_json_array
+        cleaned = _extract_json_array(cleaned)   # 找不到合法数组时原文返回,下方严格解析兜底
+    except Exception:
+        pass   # 提取器只是增益:任何意外退回严格解析,不因它挂
     try:
         data = json.loads(cleaned)
     except (json.JSONDecodeError, ValueError):
