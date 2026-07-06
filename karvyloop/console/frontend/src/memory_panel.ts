@@ -644,15 +644,30 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
   const side = el("div", { class: "kchat-side" });
   side.appendChild(el("div", { class: "kchat-side-head", text: t("kchat.side_head", { n: sessions.length }),
     title: t("knowledge.entry_desc") }));
-  const mkRow = (label: string, active: boolean, cls: string, onclick: () => void) => {
-    const r = el("button", { class: "kchat-sess" + (active ? " active" : "") + cls, text: label });
+  const mkRow = (label: string, active: boolean, cls: string, onclick: () => void, xId?: string) => {
+    const r = el("button", { class: "kchat-sess" + (active ? " active" : "") + cls });
+    r.appendChild(el("span", { class: "kchat-sess-nm", text: label }));
     r.addEventListener("click", onclick);
+    if (xId) {
+      // Hardy:鼠标移上去右边出现 ✕ → 点 ✕ 弹确认(没沉淀的会丢)→ 确认才关,取消不动
+      const x = el("span", { class: "kchat-sess-x", text: "✕", title: t("kchat.close_title") });
+      x.addEventListener("click", async (e: Event) => {
+        e.stopPropagation();   // 别顺带触发"切到这段"
+        if (!window.confirm(t("kchat.close_confirm", { s: label.slice(0, 30) }))) return;
+        const res = await _postJSON("/api/knowledge/discard", { session_id: xId });
+        if (res.ok && res.data && res.data.ok) {
+          if (_kSession === xId) _kSession = "";
+          void _renderKnowledgeArea(wrap);
+        }
+      });
+      r.appendChild(x);
+    }
     side.appendChild(r);
   };
   mkRow(t("kchat.new"), !_kSession, " kchat-sess-new", () => { _kSession = ""; void _renderKnowledgeArea(wrap); });
   for (const s of sessions) {
     mkRow("📥 " + (s.snippet || t("conv.untitled")), s.id === _kSession, "",
-          () => { _kSession = s.id; void _renderKnowledgeArea(wrap); });
+          () => { _kSession = s.id; void _renderKnowledgeArea(wrap); }, s.id);
   }
   const main = el("div", { class: "kchat-main" });
   const log = el("div", { class: "kchat-log" });

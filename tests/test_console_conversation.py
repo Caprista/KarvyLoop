@@ -499,3 +499,24 @@ def test_knowledge_chat_fetch_fail_instructs_honesty(app_with_mgr, mgr, monkeypa
     assert r.json()["ok"] is True
     last = gw.messages[-1]["content"]
     assert "抓取失败" in last and "绝不凭 URL 字面猜" in last
+
+
+def test_knowledge_discard_closes_without_sediment(app_with_mgr, mgr):
+    """X 掉一段(Hardy):没沉淀就关 = 丢;欠账回落;幂等;主聊天不动;404 兜底。"""
+    mgr.record_turn("正常聊工作", "好的")
+    work = mgr.current()
+    conv = _kconv(mgr, ("先存着的一段", "读好了"))
+    client = TestClient(app_with_mgr)
+    assert client.get("/api/knowledge/debt").json()["unsettled"] == 1
+    r = client.post("/api/knowledge/discard", json={"session_id": conv.id})
+    body = r.json()
+    assert body["ok"] is True and body["closed_at"] is not None and body["unsettled"] == 0
+    # 幂等:再关一次同一段,closed_at 不变
+    r2 = client.post("/api/knowledge/discard", json={"session_id": conv.id})
+    assert r2.json()["closed_at"] == body["closed_at"]
+    # 失效不删:转录还在(审计),只是关了
+    loaded = mgr._store.load(knowledge_peer(), conv.id)
+    assert loaded.closed_at is not None and loaded.turn_count == 1
+    # 主聊天当前会话没被碰
+    assert mgr.current().id == work.id and mgr.current().closed_at is None
+    assert client.post("/api/knowledge/discard", json={"session_id": "no-such"}).status_code == 404

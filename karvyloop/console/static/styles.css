@@ -2570,3 +2570,13 @@ body.desk-view #mgmt-modal .modal:has(.modal-body.kchat-mode) { height: calc(100
 .kchat-main .kchat-log { flex: 1; min-height: 0; max-height: none; overflow-y: auto; margin: 0 0 8px; }
 .kchat-main .kchat-log:empty { display: block; }   /* 空聊天也占满(别塌成一条缝) */
 .kchat-pending { margin-bottom: 10px; }
+
+/* 左栏会话行:hover 出 ✕(点 ✕ 弹确认关闭 —— 未沉淀会丢) */
+.kchat-sess { display: flex; align-items: center; gap: 4px; }
+.kchat-sess .kchat-sess-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kchat-sess .kchat-sess-x {
+  flex: none; display: none; padding: 0 4px; border-radius: 6px;
+  color: var(--text-dim, #8a7a66); font-size: 12px; line-height: 1.4;
+}
+.kchat-sess:hover .kchat-sess-x { display: inline-block; }
+.kchat-sess .kchat-sess-x:hover { background: #f7e3e6; color: var(--rose, #b8577b); }

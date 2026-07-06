@@ -788,9 +788,23 @@ var KarvyMemoryPanelBundle = (function(exports) {
       text: t("kchat.side_head", { n: sessions.length }),
       title: t("knowledge.entry_desc")
     }));
-    const mkRow = (label, active, cls, onclick) => {
-      const r = el("button", { class: "kchat-sess" + (active ? " active" : "") + cls, text: label });
+    const mkRow = (label, active, cls, onclick, xId) => {
+      const r = el("button", { class: "kchat-sess" + (active ? " active" : "") + cls });
+      r.appendChild(el("span", { class: "kchat-sess-nm", text: label }));
       r.addEventListener("click", onclick);
+      if (xId) {
+        const x = el("span", { class: "kchat-sess-x", text: "✕", title: t("kchat.close_title") });
+        x.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          if (!window.confirm(t("kchat.close_confirm", { s: label.slice(0, 30) }))) return;
+          const res = await _postJSON("/api/knowledge/discard", { session_id: xId });
+          if (res.ok && res.data && res.data.ok) {
+            if (_kSession === xId) _kSession = "";
+            void _renderKnowledgeArea(wrap);
+          }
+        });
+        r.appendChild(x);
+      }
       side.appendChild(r);
     };
     mkRow(t("kchat.new"), !_kSession, " kchat-sess-new", () => {
@@ -805,7 +819,8 @@ var KarvyMemoryPanelBundle = (function(exports) {
         () => {
           _kSession = s.id;
           void _renderKnowledgeArea(wrap);
-        }
+        },
+        s.id
       );
     }
     const main = el("div", { class: "kchat-main" });

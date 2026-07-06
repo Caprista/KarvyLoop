@@ -276,6 +276,24 @@ def _conv_trace(app: Any):
     return getattr(getattr(app.state, "main_loop", None), "trace", None)
 
 
+class KnowledgeDiscardRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=64)
+
+
+@router.post("/knowledge/discard")
+def api_knowledge_discard(req: KnowledgeDiscardRequest, request: Request) -> dict[str, Any]:
+    """X 掉一段知识会话(Hardy:左栏可关,关=这段没沉淀的就丢了)。
+    失效不删式关闭(reason=discarded,转录留档可审计);幂等;不碰主聊天。"""
+    mgr = getattr(request.app.state, "conversation_manager", None)
+    conv = _kload(mgr, req.session_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="知识会话不存在")
+    store = _kstore(mgr)
+    closed_at = store.close(conv, reason="discarded")
+    n, _metas = _kdebt(mgr)
+    return {"ok": True, "closed_at": closed_at, "unsettled": n}
+
+
 @router.get("/knowledge/session")
 def api_knowledge_session(id: str, request: Request) -> dict[str, Any]:
     """读一段知识会话的完整轮记录(面板点「待处理知识」行续聊时装历史)。"""
