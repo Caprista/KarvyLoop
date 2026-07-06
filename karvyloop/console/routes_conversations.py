@@ -84,13 +84,26 @@ def api_conversation_resume(req: ResumeRequest, request: Request) -> dict[str, A
     }
 
 
-# ---- docs/66:收敛 → 分层确认 → 只沉确认的 → 会话关闭(=欠账清一笔)----
+# ---- docs/66 §F:收敛 → 分层确认 → 只沉确认的 → 会话关闭(=欠账清一笔)。
+#      整套生命周期**只活在「聊知识」线**(Hardy:全局一收敛把工作会话关了=逻辑错乱)----
+
+def _require_knowledge_line(mgr) -> Optional[str]:
+    """收敛/沉淀只在知识线可用;其他线返回拒绝理由(工作会话永远不会被它关掉)。"""
+    from karvyloop.cognition.knowledge_chat import is_knowledge_peer
+    peer = mgr.current_peer() if mgr is not None else None
+    if not is_knowledge_peer(peer):
+        return "收敛/沉淀只在「聊知识」模式可用 —— 从知识库进入(工作对话不会被关闭)"
+    return None
+
 
 @router.post("/conversation/converge")
 async def api_conversation_converge(request: Request) -> dict[str, Any]:
     """收敛当前会话:对话 → 分层认知候选(经历/推理/原则/校正/涌现)→ 沉淀确认卡。
     **不写库**——只产候选;你逐条确认后走 /conversation/sediment 才沉(理解关)。"""
     mgr = getattr(request.app.state, "conversation_manager", None)
+    deny = _require_knowledge_line(mgr)
+    if deny:
+        return {"ok": False, "reason": deny}
     conv = mgr.current() if mgr is not None else None
     if conv is None:
         return {"ok": False, "reason": "无当前会话"}
@@ -120,6 +133,9 @@ async def api_conversation_sediment(req: SedimentRequest, request: Request) -> d
     """沉淀你确认的候选(user_explicit)→ **关闭会话**(欠账清一笔)。
     不在 decisions 里的候选 = 未确认 = 不沉;盲拍(全收零改零删)进反投降闸,越深计分越重。"""
     mgr = getattr(request.app.state, "conversation_manager", None)
+    deny = _require_knowledge_line(mgr)
+    if deny:
+        return {"ok": False, "reason": deny}
     conv = mgr.current() if mgr is not None else None
     if conv is None or conv.id != req.conversation_id:
         raise HTTPException(status_code=409, detail="不是当前会话(先 resume 再沉淀)")
@@ -171,3 +187,16 @@ async def api_conversation_sediment(req: SedimentRequest, request: Request) -> d
 def _conv_trace(app: Any):
     """Trace 底座句柄(沉淀审计落这);--no-llm/无 main_loop → None(照跑)。"""
     return getattr(getattr(app.state, "main_loop", None), "trace", None)
+
+
+@router.get("/conversation/knowledge_debt")
+def api_knowledge_debt(request: Request) -> dict[str, Any]:
+    """知识线欠账:开着**且聊过**的知识会话数(docs/66 §E/§F,给知识库面板入口显示)。"""
+    mgr = getattr(request.app.state, "conversation_manager", None)
+    if mgr is None:
+        return {"unsettled": 0}
+    from karvyloop.cognition.knowledge_chat import knowledge_peer
+    try:
+        return {"unsettled": mgr.open_count(knowledge_peer())}
+    except Exception:
+        return {"unsettled": 0}

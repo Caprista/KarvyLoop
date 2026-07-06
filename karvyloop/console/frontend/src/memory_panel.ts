@@ -567,6 +567,23 @@ async function _runConsolidate(): Promise<void> {
 
 async function renderMemoryPanel(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
+  // docs/66 §F:「聊知识」收集模式入口 —— 知识线专属(收敛/沉淀/欠账只活在那;工作对话不受影响)。
+  // 欠账 = 开着且聊过的知识会话数(你还有几份料没沉下心沉淀)。
+  let _kDebt = 0;
+  try { _kDebt = ((await _getJSON("/api/conversation/knowledge_debt")) || {}).unsettled || 0; } catch { /* 降级 0 */ }
+  const kOpen = el("button", { class: "mem-knowledge-open",
+    text: _kDebt > 0 ? t("knowledge.entry_open_n", { n: _kDebt }) : t("knowledge.entry_open") });
+  kOpen.addEventListener("click", () => {
+    const kc = (window as unknown as { KarvyKnowledgeChat?: { open: () => void } }).KarvyKnowledgeChat;
+    const km = (window as unknown as { KarvyModal?: { closeMgmtModal?: () => void } }).KarvyModal;
+    if (km && km.closeMgmtModal) km.closeMgmtModal();
+    if (kc && kc.open) kc.open();
+  });
+  body.appendChild(el("div", { class: "mem-knowledge-entry" },
+    el("div", { class: "mc-main" },
+      el("div", { class: "mc-name", text: t("knowledge.entry") }),
+      el("div", { class: "mc-meta", text: t("knowledge.entry_desc") })),
+    kOpen));
   // ch4 #2:沉淀工作流(喂料→分析→交流→你拍板)。有待办那条就接着聊,否则喂料。
   const distillWrap = el("div", { class: "distill-area" });
   body.appendChild(distillWrap);

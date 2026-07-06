@@ -1309,6 +1309,7 @@
     // 群场(Karvy World / 业务域群)是**多人**,标题就是群名,不是"你 & 某人"(那是 1:1 的框)。
     if (peer && peer.is_world) { ttl.textContent = "👥 Karvy World"; _chatSpeaker = ""; return; }
     if (peer && peer.is_group) { ttl.textContent = "👥 " + (peer.domain_name || peer.role || ""); _chatSpeaker = ""; return; }
+    if (_isKnowledgePeer(peer)) { ttl.textContent = "📚 " + t("chat.you") + " & " + t("knowledge.speaker"); _chatSpeaker = t("knowledge.speaker"); return; }
     const isKarvy = !peer || peer.is_private || peer.domain_id === "l0";
     const who = isKarvy ? t("chat.karvy") : (_peerLabel() || peer.role || t("chat.karvy"));
     ttl.textContent = "💬 " + t("chat.you") + " & " + who;
@@ -1335,6 +1336,7 @@
       _currentPeer = peer;   // ch4:记住当前场(圆桌按钮按它显隐)
       _setChatTitle(peer);   // #4:标题 + 回复方身份随场更新
       _toggleRoundtableBtn(peer);
+      _toggleConvergeBtn(peer);   // docs/66 §F:⚗️ 只在知识线
       _loadGroupRoster(peer);   // ch4 #1:进群场 → 拉名册供 @ 选择
       _ceClear();               // 切场 → 输入框清空(@ 属于上一个场)
       _hideMentionPop();
@@ -1375,7 +1377,8 @@
       const badge = document.getElementById("conv-unsettled");
       if (badge) {
         const n = data.unsettled || 0;
-        badge.classList.toggle("hidden", n < 2);
+        // docs/66 §F:欠账是知识线的概念,别的线不亮
+        badge.classList.toggle("hidden", n < 2 || !_isKnowledgePeer(_currentPeer));
         if (n >= 2) badge.textContent = t("conv.unsettled", { n });
       }
     } catch (e) {
@@ -1383,7 +1386,41 @@
     }
   }
 
-  // ============ docs/66:收敛 → 分层确认卡 → 只沉确认的 → 会话关闭 ============
+  // ============ docs/66 §F:「聊知识」模式(收敛/沉淀只活在知识线,工作对话不受影响) ============
+  const _KNOWLEDGE_PEER = { domain_id: "l0", role: "librarian", agent_id: "karvy-knowledge", is_group: false };
+  function _isKnowledgePeer(p) {
+    return !!p && p.role === "librarian" && (p.agent_id || "") === "karvy-knowledge";
+  }
+  // ⚗️ + 欠账徽章只在知识线显示(Hardy:全局一收敛把工作会话关了 = 逻辑错乱)
+  function _toggleConvergeBtn(peer) {
+    const on = _isKnowledgePeer(peer);
+    const btn = document.getElementById("conv-converge-btn");
+    if (btn) btn.classList.toggle("hidden", !on);
+    const badge = document.getElementById("conv-unsettled");
+    if (badge && !on) badge.classList.add("hidden");
+  }
+  function openKnowledgeChat() { switchPeer(JSON.stringify(_KNOWLEDGE_PEER)); }
+  window.KarvyKnowledgeChat = { open: openKnowledgeChat, peer: _KNOWLEDGE_PEER };
+  // 全局聊天唯一的联动:你说"聊点新知识/认知…"→ 小卡**问**要不要开收集模式,你点开启才切换。
+  let _kHintShown = false;
+  function _maybeKnowledgeHint(text) {
+    if (_kHintShown || _isKnowledgePeer(_currentPeer)) return;
+    if (!/(聊|学|讲)[点些一]{0,2}(个)?(新)?(知识|认知)|新知识|开启知识(库)?(收集)?模式/.test(text || "")) return;
+    _kHintShown = true;   // 一次会话只提一次,不追着问
+    const log = document.getElementById("chat-log");
+    if (!log) return;
+    const box = el("div", { class: "chat-notice knowledge-hint" });
+    box.appendChild(el("span", { text: t("knowledge.hint") + " " }));
+    const yes = el("button", { type: "button", class: "khint-btn khint-yes", text: t("knowledge.hint_open") });
+    yes.addEventListener("click", () => { box.remove(); openKnowledgeChat(); });
+    const no = el("button", { type: "button", class: "khint-btn", text: t("knowledge.hint_skip") });
+    no.addEventListener("click", () => box.remove());
+    box.appendChild(yes); box.appendChild(no);
+    log.appendChild(box);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ============ docs/66:收敛 → 分层确认卡 → 只沉确认的 → 会话关闭(知识线内) ============
 
   async function convergeConversation() {
     const btn = document.getElementById("conv-converge-btn");
@@ -2972,6 +3009,7 @@
     // 乐观渲染:**真**显示发了什么(缩略图/文档块),不再只写"(带了 N 个附件)"
     if (_manifest.length) _pushUserWithAttachments(_qText, _manifest);
     else pushChatLine("user", text);
+    _maybeKnowledgeHint(text);   // docs/66 §F:说到聊新知识 → 问要不要开收集模式(你说是才切)
     showBusy();
     // ch4 圆桌对话式对齐(Hardy:少按钮)—— 待对齐圆桌里,你的话走 /align;小卡聊清了自己开始。
     if (_pendingRoundtable) {

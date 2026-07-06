@@ -702,6 +702,32 @@ var KarvyMemoryPanelBundle = (function(exports) {
     const body = mgmtBody();
     if (!body) return;
     body.innerHTML = "";
+    let _kDebt = 0;
+    try {
+      _kDebt = (await _getJSON("/api/conversation/knowledge_debt") || {}).unsettled || 0;
+    } catch {
+    }
+    const kOpen = el("button", {
+      class: "mem-knowledge-open",
+      text: _kDebt > 0 ? t("knowledge.entry_open_n", { n: _kDebt }) : t("knowledge.entry_open")
+    });
+    kOpen.addEventListener("click", () => {
+      const kc = window.KarvyKnowledgeChat;
+      const km = window.KarvyModal;
+      if (km && km.closeMgmtModal) km.closeMgmtModal();
+      if (kc && kc.open) kc.open();
+    });
+    body.appendChild(el(
+      "div",
+      { class: "mem-knowledge-entry" },
+      el(
+        "div",
+        { class: "mc-main" },
+        el("div", { class: "mc-name", text: t("knowledge.entry") }),
+        el("div", { class: "mc-meta", text: t("knowledge.entry_desc") })
+      ),
+      kOpen
+    ));
     const distillWrap = el("div", { class: "distill-area" });
     body.appendChild(distillWrap);
     await _reloadDistill(distillWrap);

@@ -256,6 +256,7 @@ def test_static_has_conversation_controls():
 import json as _json  # noqa: E402
 
 from karvyloop.cognition.conversation import karvy_world_peer  # noqa: E402
+from karvyloop.cognition.knowledge_chat import knowledge_peer  # noqa: E402
 
 
 class TextDelta:  # 名字必须叫 TextDelta(代码按 type().__name__ 收)
@@ -323,6 +324,7 @@ def test_manager_close_current_opens_new_and_counts(mgr):
 def test_converge_endpoint_returns_card(app_with_mgr, mgr):
     gw = _SedimentFakeGateway()
     app_with_mgr.state.runtime_kwargs = {"gateway": gw, "model_ref": ""}
+    mgr.set_peer(knowledge_peer())   # 收敛只在「聊知识」线可用(docs/66 §F)
     mgr.record_turn("我从 React 换到了 Vue", "为什么切换?")
     client = TestClient(app_with_mgr)
     r = client.post("/api/conversation/converge")
@@ -335,8 +337,9 @@ def test_converge_endpoint_returns_card(app_with_mgr, mgr):
     assert card["items"][-1]["layer"] == "emergent" and card["items"][-1]["needs_attention"] is True
 
 
-def test_converge_empty_conversation_refuses(app_with_mgr):
+def test_converge_empty_conversation_refuses(app_with_mgr, mgr):
     app_with_mgr.state.runtime_kwargs = {"gateway": _SedimentFakeGateway(), "model_ref": ""}
+    mgr.set_peer(knowledge_peer())
     client = TestClient(app_with_mgr)
     r = client.post("/api/conversation/converge")
     assert r.status_code == 200 and r.json()["ok"] is False   # 没聊过 → 拒,不烧 LLM
@@ -346,6 +349,7 @@ def test_sediment_endpoint_writes_confirmed_closes_and_counts(app_with_mgr, mgr)
     mem = _FakeMem()
     app_with_mgr.state.memory = mem
     app_with_mgr.state.runtime_kwargs = {"gateway": None, "model_ref": ""}
+    mgr.set_peer(knowledge_peer())   # 沉淀只在「聊知识」线可用(docs/66 §F)
     mgr.record_turn("我从 React 换到了 Vue", "为什么切换?")
     conv_id = mgr.current().id
     client = TestClient(app_with_mgr)
@@ -376,8 +380,35 @@ def test_sediment_endpoint_writes_confirmed_closes_and_counts(app_with_mgr, mgr)
 
 def test_sediment_wrong_conversation_409(app_with_mgr, mgr):
     app_with_mgr.state.memory = _FakeMem()
+    mgr.set_peer(knowledge_peer())
     mgr.record_turn("x", "y")
     client = TestClient(app_with_mgr)
     r = client.post("/api/conversation/sediment", json={
         "conversation_id": "not-current", "items": [], "decisions": {}})
     assert r.status_code == 409
+
+
+def test_converge_denied_on_work_line(app_with_mgr, mgr):
+    """Hardy 纠正的核心:正常聊工作的线,收敛/沉淀必须被拒 —— 工作会话永远不会被它关掉。"""
+    app_with_mgr.state.runtime_kwargs = {"gateway": _SedimentFakeGateway(), "model_ref": ""}
+    app_with_mgr.state.memory = _FakeMem()
+    mgr.record_turn("正常聊工作", "好的")          # 默认线 = 私聊小卡(工作)
+    client = TestClient(app_with_mgr)
+    r = client.post("/api/conversation/converge")
+    assert r.status_code == 200 and r.json()["ok"] is False
+    assert "聊知识" in r.json()["reason"]
+    r2 = client.post("/api/conversation/sediment", json={
+        "conversation_id": mgr.current().id, "items": [], "decisions": {}})
+    assert r2.status_code == 200 and r2.json()["ok"] is False
+    # 工作会话没有被关
+    assert mgr.current().closed_at is None
+
+
+def test_knowledge_debt_endpoint(app_with_mgr, mgr):
+    client = TestClient(app_with_mgr)
+    assert client.get("/api/conversation/knowledge_debt").json()["unsettled"] == 0
+    mgr.set_peer(knowledge_peer())
+    mgr.record_turn("丢一份资料", "读好了")         # 知识线开着且聊过 = 欠 1
+    assert client.get("/api/conversation/knowledge_debt").json()["unsettled"] == 1
+    mgr.close_conversation(mgr.current().id)
+    assert client.get("/api/conversation/knowledge_debt").json()["unsettled"] == 0

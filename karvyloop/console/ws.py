@@ -237,6 +237,13 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     except Exception:
         pass
 
+    # docs/66 §F:知识线 → 馆员人设进最前(其他线零侵入);与 routes.api_intent 同款接缝
+    try:
+        from karvyloop.cognition.knowledge_chat import knowledge_governance
+        governance = knowledge_governance(mgr.current_peer() if mgr is not None else None, governance)
+    except Exception:
+        pass
+
     # ch4 #1:群里 @ 角色 → 定向给它;@ 命中跳过路由 PROPOSE(你已点名)。
     from .routes import _resolve_mention, _persona_for_current_peer, scope_for_peer
     ws_root = runtime_kwargs.get("workspace_root", "/")

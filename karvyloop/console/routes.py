@@ -869,6 +869,13 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     except Exception:
         pass
 
+    # docs/66 §F:知识线 → 馆员人设进最前(其他线零侵入);召回块已在上文注入=馆员手边有知识库
+    try:
+        from karvyloop.cognition.knowledge_chat import knowledge_governance
+        governance = knowledge_governance(mgr.current_peer() if mgr is not None else None, governance)
+    except Exception:
+        pass
+
     # ch4 #1:群里 @ 角色 → 定向给它(它照自己人格/域回话);@ 命中则跳过路由 PROPOSE(你已点名)。
     ws_root = runtime_kwargs.get("workspace_root", "/")
     m_persona, m_speaker, m_scope = _resolve_mention(request.app, mgr, req.mention, ws_root,
