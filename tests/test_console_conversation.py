@@ -371,7 +371,7 @@ def test_sediment_endpoint_writes_confirmed_closes_and_counts(app_with_mgr, mgr)
     metas = {m.id: m for m in mgr.list_conversations()}
     assert metas[conv_id].closed_at is not None
     r2 = client.get("/api/conversations")
-    assert r2.json()["unsettled"] == 1                        # 只剩顺势新开的那段
+    assert r2.json()["unsettled"] == 0                        # 顺势新开的空会话不算欠账(没料)
 
 
 def test_sediment_wrong_conversation_409(app_with_mgr, mgr):

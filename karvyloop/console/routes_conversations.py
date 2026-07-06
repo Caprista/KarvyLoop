@@ -41,7 +41,9 @@ def api_conversations(request: Request) -> dict[str, Any]:
     return {
         "conversations": [_conv_meta_to_dict(m) for m in metas],
         "current_id": cur.id if cur is not None else None,
-        "unsettled": sum(1 for m in metas if getattr(m, "closed_at", None) is None),
+        # 欠账 = 开着**且聊过**的(空会话没有料,不算"没沉下心";刚顺势开的新会话不背锅)
+        "unsettled": sum(1 for m in metas
+                         if getattr(m, "closed_at", None) is None and m.turn_count > 0),
     }
 
 
@@ -159,7 +161,8 @@ async def api_conversation_sediment(req: SedimentRequest, request: Request) -> d
     metas = mgr.list_conversations()
     return {
         "ok": True, "written": res["written"], "closed_at": closed_at,
-        "unsettled": sum(1 for m in metas if getattr(m, "closed_at", None) is None),
+        "unsettled": sum(1 for m in metas
+                         if getattr(m, "closed_at", None) is None and m.turn_count > 0),
         "needs_recheck": tracker.needs_recheck(),
         "new_conversation_id": (mgr.current().id if mgr.current() is not None else None),
     }

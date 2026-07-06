@@ -472,8 +472,9 @@ class ConversationManager:
         return ts
 
     def open_count(self, peer: Optional[Address] = None) -> int:
-        """开着(未沉淀关闭)的会话数 = 没沉下心沉淀的欠账(docs/66 §E)。"""
-        return sum(1 for m in self.list_conversations(peer) if m.closed_at is None)
+        """开着**且聊过**的会话数 = 没沉下心沉淀的欠账(docs/66 §E;空会话没有料不算)。"""
+        return sum(1 for m in self.list_conversations(peer)
+                   if m.closed_at is None and m.turn_count > 0)
 
     def list_conversations(self, peer: Optional[Address] = None) -> list[ConversationMeta]:
         p = peer or self._peer
