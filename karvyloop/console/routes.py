@@ -1670,13 +1670,9 @@ async def maybe_auto_distill(app: Any, mgr: Any) -> Optional[dict]:
         res, decisions = await distill_turns_with_decisions(
             new_turns, gateway=gw, mem=mem, model_ref=rk.get("model_ref", ""), trace=_trace)
         if getattr(res, "extends", None):
-            try:   # 摄入调和 extends 半边:蒸馏产物与旧条同主题加信息 → 升合并建议卡(人拍板)
+            try:   # 摄入调和 extends 半边 → 升合并建议卡(REJECT 过滤已内建在升卡咽喉)
                 from karvyloop.console.proposals import raise_extends_cards
-                from karvyloop.console.routes_memory import _filter_rejected_extends
-                # P0⑤:REJECT 记忆同样作用于 auto_distill 路径(用户拒过的调和不再重复弹)
-                ext = _filter_rejected_extends(app, list(res.extends))
-                if ext:
-                    await raise_extends_cards(app, ext)
+                await raise_extends_cards(app, res.extends)
             except Exception as e:
                 logger.debug(f"[auto_distill] extends 升卡失败(不影响蒸馏): {e}")
         if decisions:

@@ -88,6 +88,45 @@ async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = T
     return sent
 
 
+def _filter_rejected_extends(app: Any, ext: list) -> list:
+    """REJECT 记忆(P0 修复⑤):用户拒过的同对 extends 合并建议,下次不再弹。
+
+    住在升卡咽喉(本函数只被 raise_extends_cards 调)——摄入路径(routes_memory
+    ._raise_extends)和 auto_distill 路径(routes.py)都过这里,一处过滤全路径生效。
+    "已拒"状态**不新造存储**——就住在 decision_log(H2A 拍板回看流水,entry 接线时
+    已落盘):REJECT 时 record_decision_signals 记下 proposal_id,而 extends 素材的
+    幂等键与 merge_knowledge 卡 proposal_id 同一派生(conflict.extends_idem_key,
+    测试锁不漂移),按键查一次即得。decision_log 未接/查询失败 → 不过滤(宁多弹
+    一张卡,勿静默丢建议)。留存边界:decision_log 只保最近 5000 条拍板,更老的
+    拒绝自然过期(拒不是永久封杀)。"""
+    if not ext:
+        return []
+    log = getattr(app.state, "decision_log", None)
+    if log is None:
+        return list(ext)
+    try:
+        rejected = {str(e.get("proposal_id") or "")
+                    for e in log.query(decision="REJECT", limit=5000)}
+        rejected.discard("")
+    except Exception as e:
+        logger.debug(f"[proposals] REJECT 记忆查询失败(不过滤): {e}")
+        return list(ext)
+    if not rejected:
+        return list(ext)
+    from karvyloop.cognition.conflict import extends_idem_key
+    kept: list = []
+    for rec in ext:
+        try:
+            key = str(rec.get("idem_key") or "") or extends_idem_key(
+                str(rec.get("old") or ""), str(rec.get("new") or ""))
+        except Exception:
+            key = ""
+        if key and key in rejected:
+            continue   # 你拒过这对合并 → 不再唠叨(素材痕迹仍在 Trace,可审计)
+        kept.append(rec)
+    return kept
+
+
 async def raise_extends_cards(app: Any, extends: list, *, now: Optional[float] = None) -> int:
     """摄入调和的 extends 半边升卡(#61 研判③):新沉淀的知识与库里旧条讲同一主题、
     **补充了新信息** → 升 merge_knowledge H2A 卡(ACCEPT 才 apply_belief_merge,复用
@@ -98,6 +137,8 @@ async def raise_extends_cards(app: Any, extends: list, *, now: Optional[float] =
     (LLM 没给/低置信 duplicate 降级)→ 确定性拼接兜底(两条原文都已在库,拼接不投毒)。
     proposal_id 按成员内容稳定哈希 → 同对幂等,不唠叨。返回升卡数;单条失败跳过不阻断。
     """
+    # REJECT 记忆(P0⑤):拒过的同对不再弹——过滤在升卡咽喉,所有调用路径统一生效
+    extends = _filter_rejected_extends(app, extends)
     if not extends:
         return 0
     import time as _time
