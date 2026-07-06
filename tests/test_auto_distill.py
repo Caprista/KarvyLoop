@@ -5,7 +5,7 @@
 
 AC:
 - AC1 format_turns:user/assistant 拼成材料;空轮跳过
-- AC2 should_distill:攒够 batch 才 True
+- AC2 should_distill:阈值走冷启动 warmup(1→2→4→稳态 batch);稳态与旧固定 batch 一致
 - AC3 distill_turns:复用 ingest_material,source=conversation,写进 mem
 - AC4 distill_turns:空材料 → written=0,不调模型
 - AC5 maybe_auto_distill:未攒够 → 不蒸;攒够 → 蒸新轮 + watermark 推进 + 不重复蒸
@@ -38,11 +38,46 @@ def test_format_turns_empty():
     assert AD.format_turns([_Turn("", "")]) == ""
 
 
-# ---- AC2 ----
-def test_should_distill():
-    assert AD.should_distill(4, 0, batch=4) is True
-    assert AD.should_distill(3, 0, batch=4) is False
+# ---- AC2(冷启动 warmup:1→2→4→稳态)----
+def test_warmup_batch_ladder():
+    # 阈值阶梯:watermark 0→1轮 / 1→2轮 / 2,3→4轮 / 4+→稳态 batch
+    assert AD.warmup_batch(0) == 1
+    assert AD.warmup_batch(1) == 2
+    assert AD.warmup_batch(2) == 4
+    assert AD.warmup_batch(3) == 4
+    assert AD.warmup_batch(4) == AD.DISTILL_BATCH
+    assert AD.warmup_batch(100) == AD.DISTILL_BATCH
+
+
+def test_warmup_batch_explicit_batch_semantics():
+    # batch 只定稳态阈值;warmup 阶梯与 batch 取 min 封顶 —— 只会更早蒸,绝不比稳态晚
+    assert AD.warmup_batch(0, batch=8) == 1
+    assert AD.warmup_batch(1, batch=8) == 2
+    assert AD.warmup_batch(3, batch=8) == 4
+    assert AD.warmup_batch(4, batch=8) == 8     # 稳态跟 batch 走(指数 1→2→4→8)
+    assert AD.warmup_batch(0, batch=2) == 1
+    assert AD.warmup_batch(2, batch=2) == 2     # 阶梯 4 > batch 2 → 封顶,不拖慢
+    assert AD.warmup_batch(5, batch=2) == 2
+
+
+def test_should_distill_warmup_sequence():
+    # 数列效果:第 1 轮蒸 → 第 3 轮蒸 → 第 7 轮蒸 → 以后每 4 轮(冷启动第一天就有记忆感)
+    assert AD.should_distill(1, 0) is True      # 新对话第 1 轮就蒸
+    assert AD.should_distill(2, 1) is False
+    assert AD.should_distill(3, 1) is True      # 第 3 轮
+    assert AD.should_distill(6, 3) is False
+    assert AD.should_distill(7, 3) is True      # 第 7 轮
+    assert AD.should_distill(10, 7) is False
+    assert AD.should_distill(11, 7) is True     # 之后回到稳态:每 4 轮
+
+
+def test_should_distill_steady_state_unchanged():
+    # 稳态(watermark ≥ 4)与旧固定 batch 行为完全一致
     assert AD.should_distill(8, 4, batch=4) is True   # 又攒够一批
+    assert AD.should_distill(7, 4, batch=4) is False
+    assert AD.should_distill(12, 8, batch=4) is True
+    # 旧版 should_distill(3, 0)=False 在 warmup 下改为 True —— 这正是冷启动修复本身
+    assert AD.should_distill(3, 0, batch=4) is True
 
 
 # ---- 桩 ----
@@ -119,22 +154,48 @@ async def test_maybe_auto_distill_batches_and_watermarks():
     # P1b:maybe_auto_distill 改走组合抽取(facts+decisions 一次调用)→ 桩按组合对象格式返
     gw = FakeGW('{"facts":[{"content":"事实","kind":"fact"}],"decisions":[]}')
     mem = FakeMem()
-    conv = _conv("c1", [_Turn(f"u{i}", f"a{i}") for i in range(3)])
+    conv = _conv("c1", [_Turn("u0", "a0")])
     app = _app(mem, gw)
     mgr = _mgr(conv)
 
-    # 3 轮 < batch(4) → 不蒸
+    # 冷启动 warmup:新对话第 1 轮就蒸(立刻有"记得你"信号)
+    res = await maybe_auto_distill(app, mgr)
+    assert res is not None and res["written"] == 1
+    assert app.state.distill_watermarks["c1"] == 1      # watermark 推进到 1
+
+    # 第 2 轮:warmup 阈值 2,只攒 1 轮 → 不蒸
+    conv.turns.append(_Turn("u1", "a1"))
+    assert await maybe_auto_distill(app, mgr) is None
+
+    # 第 3 轮 → 蒸;watermark 推进到 3
+    conv.turns.append(_Turn("u2", "a2"))
+    res = await maybe_auto_distill(app, mgr)
+    assert res is not None and res["written"] == 1
+    assert app.state.distill_watermarks["c1"] == 3
+
+    # 再调(还是 3 轮)→ 不重复蒸
+    assert await maybe_auto_distill(app, mgr) is None
+
+
+@pytest.mark.asyncio
+async def test_maybe_auto_distill_steady_state_unchanged():
+    # 稳态(watermark ≥ 4):与旧固定 batch 行为一致,攒够 4 轮才蒸
+    from karvyloop.console.routes import maybe_auto_distill
+    gw = FakeGW('{"facts":[{"content":"事实","kind":"fact"}],"decisions":[]}')
+    conv = _conv("c1", [_Turn(f"u{i}", f"a{i}") for i in range(7)])
+    app = _app(FakeMem(), gw)
+    app.state.distill_watermarks["c1"] = 4
+    mgr = _mgr(conv)
+
+    # 7 - 4 = 3 < 4 → 不蒸
     assert await maybe_auto_distill(app, mgr) is None
     assert gw.called == 0
 
-    # 加到 4 轮 → 蒸
-    conv.turns.append(_Turn("u3", "a3"))
+    # 加到 8 轮 → 又攒够一批
+    conv.turns.append(_Turn("u7", "a7"))
     res = await maybe_auto_distill(app, mgr)
-    assert res is not None and res["written"] == 1
-    assert app.state.distill_watermarks["c1"] == 4      # watermark 推进到 4
-
-    # 再调(还是 4 轮)→ 不重复蒸
-    assert await maybe_auto_distill(app, mgr) is None
+    assert res is not None
+    assert app.state.distill_watermarks["c1"] == 8
 
 
 @pytest.mark.asyncio

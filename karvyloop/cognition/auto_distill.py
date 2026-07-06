@@ -5,7 +5,8 @@
 (`ingest.ingest_material`,source="conversation"),只是触发口从"用户喂"变成"轮后批量"。
 
 **省 token(用得起)**:不是每轮调一次模型,而是**攒够 N 轮未蒸馏才蒸一次**(一次调用蒸
-一批),且只蒸 watermark 之后的新轮(不重复蒸)。
+一批),且只蒸 watermark 之后的新轮(不重复蒸)。N 走会话级冷启动 warmup(1→2→4→稳态,
+见 `warmup_batch`):新对话第 1 轮就有"记得你"信号,稳态节奏与固定 batch 一致。
 """
 from __future__ import annotations
 
@@ -67,9 +68,40 @@ def format_turns(turns: list) -> str:
     return "\n".join(parts)
 
 
+def warmup_batch(watermark: int, *, batch: int = DISTILL_BATCH) -> int:
+    """会话级冷启动 warmup:按 watermark 返回本次蒸馏阈值(1→2→4→稳态 batch)。
+
+    痛点:固定 batch 下新对话前 batch-1 轮永远不蒸——用户走完 onboarding 开新话题,
+    前几轮零"记得你"信号。warmup 让**第一天就有记忆感**:第 1 轮就蒸 → 第 3 轮 →
+    第 7 轮 → 之后回到稳态每 batch 轮(watermark 按会话存,新对话=0,天然生效)。
+
+    成本纪律(用得起):warmup 只在 watermark 小时(0/1 两档)比旧固定 batch **多蒸 2 次**,
+    稳态节奏不变——指数升阈,不是每轮都蒸。
+
+    batch 显式传非默认值时的语义:batch 只定**稳态**阈值;warmup 阶梯(1/2/4)与 batch 取
+    min 封顶——warmup 只会比稳态**更早**蒸,绝不更晚(batch=2 时阶梯 4 若不封顶反而拖慢,
+    违背 warmup 本意)。
+
+    注(docs 判定表):若未来触发机制改成**防抖**(轮后延迟蒸 + 新消息到达取消重排),
+    冷启动问题在源头消失,整个 warmup(本函数 + should_distill 的接线)应整体撤掉。
+    """
+    if watermark <= 0:
+        step = 1          # 新对话第 1 轮就蒸,立刻有记忆感
+    elif watermark <= 1:
+        step = 2          # 第 3 轮
+    elif watermark <= 3:
+        step = 4          # 第 7 轮
+    else:
+        return batch      # 稳态:与旧固定 batch 行为完全一致
+    return min(step, batch)
+
+
 def should_distill(n_turns: int, watermark: int, *, batch: int = DISTILL_BATCH) -> bool:
-    """攒够 batch 轮未蒸馏 → 该蒸了。"""
-    return (n_turns - watermark) >= batch
+    """攒够阈值轮未蒸馏 → 该蒸了。阈值走 `warmup_batch`(冷启动 1→2→4→稳态 batch)。
+
+    batch 形参保留兼容既有调用:它定稳态阈值,warmup 阶梯与它取 min(见 warmup_batch)。
+    """
+    return (n_turns - watermark) >= warmup_batch(watermark, batch=batch)
 
 
 async def distill_turns(
@@ -194,6 +226,6 @@ async def distill_turns_with_decisions(
 
 __all__ = [
     "DISTILL_BATCH", "DISTILL_COMBINED_SYSTEM", "format_turns", "should_distill",
-    "distill_turns", "parse_combined", "distill_turns_with_decisions",
+    "warmup_batch", "distill_turns", "parse_combined", "distill_turns_with_decisions",
     "strip_recall_echo",
 ]
