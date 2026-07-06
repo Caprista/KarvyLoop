@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -139,5 +141,100 @@ async def converge_and_propose(
     return parse_candidates(out)
 
 
+# 只认**绝对**日期(YYYY / YYYY-MM / YYYY-MM-DD)。相对/模糊("上个月"/"Vue 之前")一律不解析——
+# 拿 now 反推一个精确时间戳 = 造假精度 = 又造认知债(docs/66 §A 红线:绝不猜时间)。
+_ABS_DATE_RE = re.compile(r"^\s*(\d{4})(?:[-/](\d{1,2}))?(?:[-/](\d{1,2}))?\s*$")
+
+
+def _parse_when(hint: Optional[str]) -> Optional[float]:
+    """用户明说的**绝对**日期 → UTC 时间戳;相对/模糊 → None(留原话字符串,绝不猜 float)。"""
+    if not hint or not isinstance(hint, str):
+        return None
+    m = _ABS_DATE_RE.match(hint)
+    if not m:
+        return None
+    try:
+        import datetime as _dt
+        y, mo, d = int(m.group(1)), int(m.group(2) or 1), int(m.group(3) or 1)
+        return _dt.datetime(y, mo, d, tzinfo=_dt.timezone.utc).timestamp()
+    except (ValueError, OverflowError):
+        return None
+
+
+async def sediment_confirmed(
+    candidates: list, *, mem: Any, gateway: Any = None, model_ref: str = "",
+    agent_id: str = "user", now: Optional[float] = None, trace: Any = None,
+    learned_via: str = "",
+) -> dict:
+    """把用户**确认过**的分层认知候选沉进记忆库。只沉传进来的(= 你确认的),没确认的候选压根不到这。
+
+    - `provenance.source = "user_explicit"`(最高档、非 provisional:过了人的理解关 = 最高权威,
+      supersede 时掀不翻,强于 auto 蒸的一档);带 layer / why / learned_via(理解出处,可审计)。
+    - 时间格:`when_hint` 能解析成**绝对**日期 → `provenance.valid_from`(as_of 用);相对/模糊 →
+      留 `provenance.valid_from_hint` 原话字符串(顺序/为什么才是重点,时间可后补,绝不猜)。
+    - 写后跑 `run_supersede_pass`(新高权威条正确打失效矛盾旧条,失效不删)+ 语义标签(同 distill 接缝)。
+    - Trace 只记**确认沉淀**的。返回 {"written", "extends", "ids"}。
+    """
+    from karvyloop.schemas.cognition import Belief
+
+    if now is None:
+        now = time.time()
+    written: list = []
+    ids: list = []
+    for c in candidates:
+        content = (getattr(c, "content", "") or "").strip()
+        if not content:
+            continue
+        prov = {
+            "source": "user_explicit", "agent": agent_id, "ts": now, "trace_ref": "",
+            "kind": "belief", "layer": getattr(c, "layer", "") or "",
+            "why": getattr(c, "why", "") or "",
+        }
+        if learned_via:
+            prov["learned_via"] = learned_via
+        when_hint = getattr(c, "when_hint", None)
+        vf = _parse_when(when_hint)
+        if vf is not None:
+            prov["valid_from"] = vf
+        elif when_hint:
+            prov["valid_from_hint"] = when_hint
+        try:
+            b = Belief(content=content, provenance=prov, freshness_ts=now, scope="personal")
+            mem.write(b)
+            written.append(b)
+            ids.append(_cid(content))
+        except Exception:
+            continue
+    result = {"written": len(written), "extends": [], "ids": ids}
+    if written and gateway is not None:
+        try:
+            from karvyloop.cognition.conflict import run_supersede_pass
+            sup = await run_supersede_pass(written, mem=mem, gateway=gateway,
+                                           model_ref=model_ref, now=now, trace=trace)
+            result["extends"] = list(sup.get("extends") or [])
+        except Exception:
+            pass
+        cc = getattr(mem, "concept_cache", None)
+        if cc is not None:
+            try:
+                from karvyloop.cognition.concepts import tag_beliefs
+                from karvyloop.llm.token_ledger import token_source
+                with token_source("belief_tags"):
+                    await tag_beliefs(written, cache=cc, gateway=gateway, model_ref=model_ref, trace=trace)
+            except Exception:
+                pass
+    if trace is not None and written:
+        try:
+            from karvyloop.cognition.trace import TraceEntry
+            trace.append(TraceEntry(
+                task_id="cognition_sediment", kind="belief_sedimented",
+                payload={"n": len(written), "layers": [(b.provenance or {}).get("layer", "") for b in written],
+                         "learned_via": learned_via},
+                source="converge"))
+        except Exception:
+            pass
+    return result
+
+
 __all__ = ["LAYERS", "DEPTH_BY_LAYER", "CognitionCandidate", "parse_candidates",
-           "converge_and_propose", "CONVERGE_SYSTEM"]
+           "converge_and_propose", "sediment_confirmed", "CONVERGE_SYSTEM"]
