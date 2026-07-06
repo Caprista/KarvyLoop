@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -21,10 +22,22 @@ _SYS = (
     "- intent: 到点要做的事(去掉时间词,保留干什么)。\n"
     "- title: 极短标题(≤10 字)。\n"
     "- target_role: 若指明要**某个角色**去做,填那个角色名;没指明填空串。\n"
-    f"参考相对时间用『当前时间』。**只输出 JSON,无其它**:\n"
+    "参考相对时间用『当前时间』——它带显式时区 offset;推算「每天下午3点」「明早」「下周一」等相对时间"
+    "**一律按该时区**,生成的 cron 也按此时区语义(cron 由本机按本地时区执行)。**只输出 JSON,无其它**:\n"
     '{"cron":"0 8 * * *","intent":"汇总昨天进展","title":"每日进展","target_role":""}\n'
     "解析不出明确的时间规律 → 输出 {\"cron\":\"\"}(不要瞎编)。"
 )
+
+
+def local_now_str() -> str:
+    """本机当前时间 → ISO8601 显式 offset + 星期 + 时区标注,如 `2026-07-06T15:30:00+08:00 Sunday (本机时区,UTC+08:00)`。
+
+    业界做法:给 LLM 参考的"当前时间"必须声明时区,否则"每天下午3点"/"明早"这类相对时间有错解风险。
+    只显式化、不换算——语义仍是服务器本地时区(cron 由本机执行),croniter 执行侧不动。
+    """
+    now = datetime.now().astimezone()   # 标准库拿 offset-aware 本地时间,不引第三方
+    z = now.strftime("%z")              # 如 +0800
+    return f"{now.isoformat(timespec='seconds')} {now.strftime('%A')} (本机时区,UTC{z[:3]}:{z[3:]})"
 
 
 def _extract_json(text: str) -> dict:
@@ -81,4 +94,4 @@ def make_schedule_parser(gateway: Any, model_ref: str = "") -> Optional[Callable
     return parse
 
 
-__all__ = ["make_schedule_parser"]
+__all__ = ["local_now_str", "make_schedule_parser"]

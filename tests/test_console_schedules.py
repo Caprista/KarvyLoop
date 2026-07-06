@@ -57,3 +57,19 @@ def test_run_now_no_llm_marks_error():
 def test_parse_no_llm_degrades():
     c = _client()
     assert c.post("/api/schedule/parse", json={"description": "每天8点汇总"}).json() == {"ok": False, "reason": "no_llm"}
+
+
+def test_parse_passes_tz_aware_now():
+    # /api/schedule/parse 传给解析器的"当前时间"必须带显式时区 offset(相对时间按此推算)
+    import re
+    c = _client()
+    seen = {}
+
+    def fake_parser(desc, now_str=""):
+        seen["now"] = now_str
+        return {"cron": "0 8 * * *", "intent": "汇总", "title": "汇总", "target_role": ""}
+
+    c.app.state._schedule_parser_cached = fake_parser
+    r = c.post("/api/schedule/parse", json={"description": "每天8点汇总"}).json()
+    assert r["ok"] is True and r["cron"] == "0 8 * * *"
+    assert re.search(r"[+-]\d{2}:\d{2}", seen["now"]) and "UTC" in seen["now"]

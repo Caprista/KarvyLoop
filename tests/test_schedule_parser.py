@@ -1,14 +1,15 @@
-"""test_schedule_parser — NL→定时任务:有效解析 / 非法 cron 拒 / 无意图拒 / 异常→None / 无 gateway→None。"""
+"""test_schedule_parser — NL→定时任务:有效解析 / 非法 cron 拒 / 无意图拒 / 异常→None / 无 gateway→None / 当前时间带时区。"""
 from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from karvyloop.karvy.schedule_parser import make_schedule_parser  # noqa: E402
+from karvyloop.karvy.schedule_parser import _SYS, local_now_str, make_schedule_parser  # noqa: E402
 
 TextDelta = type("TextDelta", (), {"__init__": lambda self, text: setattr(self, "text", text)})
 
@@ -47,3 +48,15 @@ def test_empty_cron_means_not_understood():
 
 def test_llm_failure_none():
     assert make_schedule_parser(_GW("", boom=True), "m")("每天8点", "") is None
+
+
+def test_local_now_str_has_explicit_offset():
+    # "当前时间"必须是 ISO8601 + 显式时区 offset + 星期,否则"明早/下午3点"这类相对时间有错解风险
+    s = local_now_str()
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2} \w+ ", s)
+    assert re.search(r"UTC[+-]\d{2}:\d{2}", s) and "本机时区" in s
+
+
+def test_sys_prompt_declares_timezone_discipline():
+    # 系统提示里必须声明:相对时间按『当前时间』的时区推算,cron 按本机时区语义
+    assert "时区" in _SYS and "offset" in _SYS and "本机" in _SYS

@@ -94,8 +94,8 @@ def api_schedule_parse(req: ScheduleParseRequest, request: Request) -> dict[str,
     parser = _schedule_parser(request.app)
     if parser is None:
         return {"ok": False, "reason": "no_llm"}
-    import time as _t
-    now_str = _t.strftime("%Y-%m-%d %H:%M %A", _t.localtime())
+    from karvyloop.karvy.schedule_parser import local_now_str
+    now_str = local_now_str()   # ISO8601 带显式时区 offset("每天下午3点"/"明早"按此时区推算)
     parsed = parser(req.description, now_str)
     if parsed is None:
         return {"ok": False, "reason": "not_understood"}   # 没听懂明确时间 → 让用户换种说法
