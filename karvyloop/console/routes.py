@@ -1077,6 +1077,11 @@ async def maybe_route_to_role(app, mgr, intent: str):
     from karvyloop.karvy.capability import dispatch_for_peer, is_karvy_peer
 
     peer = mgr.current_peer() if mgr is not None else None
+    # docs/66 §F:知识线 = 馆员自己接(专职消化知识),不路由不提圆桌 —— 真机实拍:
+    # "帮我消化一个说法"被截胡成"拉俩角色开圆桌讨论",馆员根本没答。知识线豁免整个路由层。
+    from karvyloop.cognition.knowledge_chat import is_knowledge_peer
+    if is_knowledge_peer(peer):
+        return None
     domain_id = peer.domain_id if peer is not None else "l0"  # 默认私聊小卡
     if not is_karvy_peer(domain_id):
         return None  # 私聊业务 role → 该 role 自己执行(照常 drive)

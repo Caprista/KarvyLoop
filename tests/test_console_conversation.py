@@ -412,3 +412,13 @@ def test_knowledge_debt_endpoint(app_with_mgr, mgr):
     assert client.get("/api/conversation/knowledge_debt").json()["unsettled"] == 1
     mgr.close_conversation(mgr.current().id)
     assert client.get("/api/conversation/knowledge_debt").json()["unsettled"] == 0
+
+
+def test_knowledge_line_never_routes(app_with_mgr, mgr):
+    """知识线豁免路由层(docs/66 §F):馆员自己接。真机实拍病根:"帮我消化一个说法"
+    被路由层截胡成"拉俩角色开圆桌"提案,馆员根本没答。最强触发词也不许路由。"""
+    import asyncio as _a
+    from karvyloop.console.routes import maybe_route_to_role
+    mgr.set_peer(knowledge_peer())
+    out = _a.run(maybe_route_to_role(app_with_mgr, mgr, "让几个角色开圆桌讨论这个说法"))
+    assert out is None
