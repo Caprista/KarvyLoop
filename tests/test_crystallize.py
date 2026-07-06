@@ -675,3 +675,144 @@ def test_recall_no_inc_on_miss(tmp_path: Path):
     assert hit is None
     # store 仍空,无任何 stats
     assert list(store.all()) == []
+
+
+# ============ 夯实:结晶文件名/路径规范化(第二道防线) ============
+# name 可能来自 LLM 产出/导入/用户输入 —— 含分隔符/`..`/非法字符/超长时也必须:
+# 落在技能根之内、目录名合法、CJK 保留、幂等(同名恒同路径)。越界一律兜底重定位,
+# 绝不 raise 炸结晶主流程(结晶是增益不是命脉;宁可名字丑,不写到库外)。
+
+_DANGEROUS_FS_CHARS = '\\/:*?"<>|'
+
+
+def _ready_sig(clk: FrozenClock, intent: str = "weird name crystallize"):
+    """构造一个已过两关(READY)的 sig(镜像 AC5 的最小 setup)。"""
+    store = InMemoryUsageStore()
+    verify = VerifyStore()
+    runs = [
+        make_run(intent=intent, input_={"month": f"2026-{m:02d}"},
+                 success=True, tool_calls=[{"name": "read_file"}],
+                 trace_ref=f"t{m}", ts=clk.t + m * 100)
+        for m in range(1, 5)
+    ]
+    observe(runs, store, clock=clk)
+    sig = compute_signature(runs[0])
+    verify.mark_verified(sig, "t1", note="trace-based", clock=clk)
+    return store, verify, sig
+
+
+def test_safe_skill_filename_normal_names_pass_through():
+    """第一道防线产出的正常名(kebab / skill_<hash> / 中文)恒等通过 —— 两道防线咬合不冲突。"""
+    from karvyloop.crystallize.crystallize import _safe_skill_filename
+
+    assert _safe_skill_filename("monthly-report") == "monthly-report"
+    assert _safe_skill_filename("skill_1a2b3c4d") == "skill_1a2b3c4d"
+    assert _safe_skill_filename("整理发票流程") == "整理发票流程"
+
+
+def test_safe_skill_filename_deterministic_fallback():
+    """空/剥光/Windows 保留设备名 → 确定性兜底名(同输入恒同输出,不破幂等)。"""
+    from karvyloop.crystallize.crystallize import _safe_skill_filename
+
+    # 空串 → 兜底;两次调用结果一致(确定性)
+    a, b = _safe_skill_filename(""), _safe_skill_filename("")
+    assert a and a == b
+    # 全被剥光(纯穿越/纯点)→ 兜底,不产出 "" / "." / ".."
+    for raw in ("..", "...", "///", "  ", "-._"):
+        got = _safe_skill_filename(raw)
+        assert got not in ("", ".", "..")
+        assert not any(c in got for c in _DANGEROUS_FS_CHARS)
+    # Windows 保留设备名做目录名会写失败/写去设备 → 兜底
+    assert _safe_skill_filename("con") not in ("con", "CON")
+    # 显式 fallback(结晶路径挂 sig 前 8 位)生效
+    assert _safe_skill_filename("", fallback="skill_deadbeef") == "skill_deadbeef"
+
+
+@pytest.mark.parametrize("raw", [
+    "../evil",           # 上跳穿越
+    "a/b\\c",            # 两种路径分隔符混用(Windows/POSIX 都要处理)
+    "con|foo?",          # Windows 危险字符
+    "🦫🦫🦫",            # 纯 emoji(合法 Unicode 文件名,不抹)
+    "",                  # 空串
+    "x" * 200,           # 超长
+    "整理发票流程",       # 正常中文(必须原样保留,见下面的专项断言)
+])
+def test_crystallize_weird_names_stay_inside_skills_root(tmp_path: Path, raw: str):
+    """怪名结晶:全部落在技能根**直下一层**,目录名合法,写入名与查找名同源。"""
+    from karvyloop.registry.skills import parse_frontmatter
+
+    clk = FrozenClock(1_700_000_000.0)
+    store, verify, sig = _ready_sig(clk)
+    skills_dir = tmp_path / "skills"
+    skill = crystallize(
+        sig, name=raw, description="weird name case", body="## steps",
+        when_to_use="weird name crystallize",
+        arguments=None, store=store, verify=verify,
+        skills_dir=skills_dir, scope="user", now=clk.t + 400,
+    )
+    p = Path(skill.manifest["path"]).resolve()
+    root = skills_dir.resolve()
+    # 落点:恰好 <root>/<skill>/SKILL.md 一层(*/SKILL.md 扫描发现得了,重启不失踪)
+    assert p.name == "SKILL.md"
+    assert p.parent.parent == root
+    dirname = p.parent.name
+    # 目录名合法:无危险字符 / 无穿越残留 / 不超长 / 非空
+    assert dirname
+    assert not any(c in dirname for c in _DANGEROUS_FS_CHARS)
+    assert ".." not in dirname
+    assert len(dirname) <= 64
+    # 同源:落盘目录名 = 内存态 Skill.name = frontmatter name(重启 rebuild 用 frontmatter)
+    assert skill.name == dirname
+    fm, _body = parse_frontmatter(p)
+    assert fm.name == dirname
+    # 穿越名绝没写到根外(tmp_path 下只有 skills/ 一棵树)
+    assert not (tmp_path / "evil").exists()
+    # 中文保留专项:正常中文名原样通过(不被抹成兜底串)
+    if raw == "整理发票流程":
+        assert dirname == raw
+    # 纯 emoji 是合法文件名 → 原样保留(只替危险字符哲学)
+    if raw == "🦫🦫🦫":
+        assert dirname == raw
+    # 空名 → 兜底名挂 sig 前 8 位(与 sig 幂等键对齐)
+    if raw == "":
+        assert dirname == f"skill_{sig[:8]}"
+
+
+def test_crystallize_weird_name_idempotent_same_path(tmp_path: Path):
+    """幂等:同一 sig 同一怪名结晶两次 → 同一路径,技能根下只有一个技能目录。"""
+    clk = FrozenClock(1_700_000_000.0)
+    store, verify, sig = _ready_sig(clk)
+    skills_dir = tmp_path / "skills"
+    kw = dict(name="a/b\\c", description="idem", body="## steps",
+              when_to_use="weird name crystallize", arguments=None,
+              store=store, verify=verify, skills_dir=skills_dir,
+              scope="user", now=clk.t + 400)
+    s1 = crystallize(sig, **kw)
+    s2 = crystallize(sig, **kw)
+    assert s1.manifest["path"] == s2.manifest["path"]
+    assert s1.name == s2.name == "a-b-c"
+    assert len(list(skills_dir.glob("*/SKILL.md"))) == 1
+
+
+def test_write_skill_md_containment_relocates_outside_root(tmp_path: Path):
+    """路径包含校验:resolve 后不在技能根直下(逃逸/嵌套/根本身)→ 兜底重定位,不 raise。"""
+    root = tmp_path / "skills"
+    root.mkdir()
+    text = build_skill_md(
+        name="evil", description="escape case", body="z",
+        signature="0000000000000000",
+        verify_proof={"passed_at": 0, "verifier": "manual", "note": ""},
+        trace_refs=["r1"],
+    )
+    # 上跳逃逸 → 拉回根内(根外一个字节不落)
+    p = write_skill_md(root / ".." / "evil", text, skills_root=root)
+    assert p.resolve().is_relative_to(root.resolve())
+    assert p.resolve().parent.parent == root.resolve()
+    assert not (tmp_path / "evil").exists()
+    # 嵌套两层(*/SKILL.md 扫不到 = 静默失踪)→ 拉回直下一层
+    p2 = write_skill_md(root / "a" / "b", text, skills_root=root)
+    assert p2.resolve().parent.parent == root.resolve()
+    # 不传 skills_root = 行为同旧(手工/测试直调不受影响)
+    p3 = write_skill_md(tmp_path / "legacy", text)
+    assert p3 == tmp_path / "legacy" / "SKILL.md"
+    assert p3.exists()

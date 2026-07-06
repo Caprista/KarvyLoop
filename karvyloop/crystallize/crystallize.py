@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import math
 import re
 import time
@@ -25,6 +27,8 @@ from karvyloop.schemas import Skill, UsageStats
 from .signature import compute_signature
 from .store import UsageStore
 from .verify import VerifyStore
+
+logger = logging.getLogger(__name__)
 
 
 # ---- 阈值(§4 旋钮非真理)----
@@ -348,13 +352,66 @@ def read_crystallized_ts(skill_md_text: str) -> Optional[float]:
         return None
 
 
-def write_skill_md(skill_dir: Path, skill_md_text: str) -> Path:
+# ---- 文件名/路径规范化(第二道防线)----
+# 第一道防线是 readable_skill_name 的 kebab 化 / `skill_<hash>` 兜底;但 crystallize()
+# 的 name 是调用方显式传入的(LLM 产出/导入/用户输入都可能流进来),不能假设干净。
+# 哲学同 cognition/conversation._safe:只替**文件系统危险字符**,保留 CJK 等 Unicode
+# (中文技能名不抹);路径分隔符两种都处理(Windows `\` + POSIX `/`)。
+_UNSAFE_FILENAME_RE = re.compile(r'[\\/:*?"<>|\x00-\x1f\s]+')
+# Windows 保留设备名:做目录名会写失败/写去设备,一律归入兜底名
+_WIN_RESERVED_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{i}" for i in range(1, 10)}
+    | {f"lpt{i}" for i in range(1, 10)}
+)
+_MAX_SKILL_FILENAME = 64
+
+
+def _safe_skill_filename(name: str, fallback: str = "") -> str:
+    """把任意技能名规范成安全的**单层**目录名(纯函数,第二道防线)。
+
+    - 只替危险字符(路径分隔/通配/控制/空白 → `-`),**保留 CJK / emoji 等 Unicode**;
+    - 首尾削 `.`/`-`/`_`/空格(防 `..` 穿越残留、隐藏目录、Windows 尾点尾空格陷阱);
+    - 剥光后没剩实义字符(空串/纯点/纯连字符)或撞 Windows 保留设备名 → 确定性兜底名
+      (`fallback` 没给就用原文 hash 前 8 位,同名恒同结果,不破幂等);
+    - 超长截断到 64 字符(截完再削一次尾巴)。
+
+    第一道防线产出的正常名(kebab / `skill_<hash>` / 纯中文)在这里**恒等通过**。
+    """
+    raw = str(name or "")
+    if not fallback:
+        fallback = "skill_" + hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:8]
+    s = _UNSAFE_FILENAME_RE.sub("-", raw.strip()).strip("-._ ")
+    if not s or set(s) <= {".", "-", "_"}:
+        return fallback
+    if s.lower() in _WIN_RESERVED_NAMES:
+        return fallback
+    return s[:_MAX_SKILL_FILENAME].rstrip("-._ ") or fallback
+
+
+def write_skill_md(skill_dir: Path, skill_md_text: str, *,
+                   skills_root: Optional[Path] = None) -> Path:
     """写到 `<skill_dir>/SKILL.md`。不存在则创建目录。
 
     `skill_dir` 约定是 `<skills_root>/<skill_name>/`(与 registry.load_skills_dir
     布局一致);传 skills_root 时不会自动加 skill_name 子目录,需 caller 拼好。
+
+    `skills_root`(可选,第二道防线的路径包含校验):给了就要求 resolve 后 skill_dir
+    是技能根的**直接子目录**(越界 = 逃逸;嵌套 = `*/SKILL.md` 扫描发现不了,重启后
+    技能静默失踪)。违反 → 用确定性兜底名重定位到根内,**不 raise 炸结晶主流程**
+    (结晶是增益不是命脉;宁可名字丑,不写到库外 —— 同"宁空勿毒"哲学)。
+    不传 = 行为同旧(手工/测试直调不受影响)。
     """
     skill_dir = Path(skill_dir)
+    if skills_root is not None:
+        root = Path(skills_root).resolve()
+        target = skill_dir.resolve()
+        if target.parent != root:
+            relocated = _safe_skill_filename(skill_dir.name)
+            skill_dir = root / relocated
+            logger.warning(
+                "[crystallize] 技能目录越界/不在技能根直下,已兜底重定位:%s → %s",
+                target, skill_dir)
     skill_dir.mkdir(parents=True, exist_ok=True)
     p = skill_dir / "SKILL.md"
     p.write_text(skill_md_text, encoding="utf-8")
@@ -468,6 +525,13 @@ def crystallize(
     # duck-type 防御:老的/第三方 VerifyStore 没这方法 → None(frontmatter 不写,行为同旧)。
     _has_ind = getattr(verify, "has_independent", None)
     verified_flag: Optional[bool] = bool(_has_ind(sig)) if callable(_has_ind) else None
+    # 第二道防线(文件名/路径规范化):name 可能来自 LLM 产出/导入/用户输入,不能假设
+    # 干净(含分隔符/`..`/非法字符/超长会产出怪目录甚至逃逸技能根)。规范化后的名字就是
+    # **唯一的名字**:frontmatter / 内存态 Skill / SkillIndex / 落盘目录四处同源,写入名
+    # 恒等于后续 recall/list 用的名。第一道防线(readable_skill_name 的 kebab /
+    # `skill_<hash>` 兜底)产出的正常名在这里恒等通过,0 影响;兜底名挂 sig 前 8 位,
+    # 与 sig 幂等键对齐(同 sig 恒同名,不重复结晶)。
+    name = _safe_skill_filename(name, fallback=f"skill_{sig[:8]}")
     # P1.5 缺口③:结晶落盘时刻(wall clock,同 Skill.created_at 口径)——frontmatter 与
     # 内存态用**同一个**戳,不各 time.time() 各的。
     created = time.time()
@@ -485,7 +549,7 @@ def crystallize(
         verified=verified_flag,
         created_ts=created,
     )
-    path = write_skill_md(skills_dir / name, skill_md)
+    path = write_skill_md(skills_dir / name, skill_md, skills_root=skills_dir)
     stats = store.get(sig) or UsageStats()
     # SKILL.md frontmatter 写 "user"/"domain";Skill.scope 是 Literal["personal","domain"]。
     # M1 保守:把 "user" 译作 "personal"(域外的都是 personal),保 schema 一致。
