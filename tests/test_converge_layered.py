@@ -17,6 +17,9 @@ from karvyloop.cognition.converge import (
     converge_and_propose,
     parse_candidates,
     sediment_confirmed,
+    build_sediment_card,
+    apply_confirmation,
+    SedimentTracker,
 )
 
 
@@ -213,3 +216,89 @@ def test_sediment_empty_list_noop():
     mem = _FakeMem()
     res = asyncio.run(sediment_confirmed([], mem=mem, gateway=None, now=1000.0))
     assert res["written"] == 0 and mem.written == []
+
+
+# ---------------------------------------------------------------- ② 确认卡 + 防盲拍
+def _five_candidates():
+    return [
+        CognitionCandidate(content="每个决策都藏着隐含假设", layer="emergent", why="聊才涌现"),
+        CognitionCandidate(content="从 React 换到了 Vue", layer="experience"),
+        CognitionCandidate(content="不做≠不好", layer="corrective"),
+        CognitionCandidate(content="因为团队协作更顺", layer="reasoning"),
+        CognitionCandidate(content="别为半年后模型会有的功能提前建", layer="principle"),
+    ]
+
+
+def test_build_card_sorted_by_depth_and_flags_deep():
+    card = build_sediment_card(_five_candidates(), conversation_ref="conv#7")
+    assert card["kind"] == "sediment" and card["conversation_ref"] == "conv#7"
+    assert card["n"] == 5 and card["max_depth"] == 5
+    depths = [it["depth"] for it in card["items"]]
+    assert depths == sorted(depths) == [1, 2, 3, 4, 5]        # 浅→深(经历在前,涌现殿后)
+    # depth≥4(校正/涌现)= 模型替你立的观点 → needs_attention
+    assert [it["needs_attention"] for it in card["items"]] == [False, False, False, True, True]
+
+
+def test_apply_confirmation_accept_edit_drop_and_default_drop():
+    cands = _five_candidates()
+    by_layer = {c.layer: c for c in cands}
+    decisions = {
+        by_layer["experience"].id: {"action": "accept"},
+        by_layer["reasoning"].id: {"action": "edit", "content": "换 Vue 是因为团队都熟"},
+        by_layer["principle"].id: {"action": "drop"},
+        # corrective / emergent 不在 decisions 里 → 未确认 = 不沉
+    }
+    accepted, engaged = apply_confirmation(cands, decisions)
+    assert engaged is True                                     # 有 edit/drop = 真判断过
+    contents = {c.content for c in accepted}
+    assert contents == {"从 React 换到了 Vue", "换 Vue 是因为团队都熟"}
+    edited = next(c for c in accepted if c.layer == "reasoning")
+    assert edited.id == CognitionCandidate(content="换 Vue 是因为团队都熟", layer="reasoning").id  # id 重算
+
+
+def test_apply_confirmation_blind_accept_all_not_engaged():
+    cands = _five_candidates()
+    decisions = {c.id: {"action": "accept"} for c in cands}
+    accepted, engaged = apply_confirmation(cands, decisions)
+    assert len(accepted) == 5 and engaged is False             # 全收零改零删 = 盲拍
+
+
+def test_apply_confirmation_edit_to_empty_is_drop():
+    cands = [_five_candidates()[1]]
+    accepted, engaged = apply_confirmation(cands, {cands[0].id: {"action": "edit", "content": "  "}})
+    assert accepted == [] and engaged is True
+
+
+def test_sediment_tracker_deep_blind_counts_double():
+    t = SedimentTracker()                                      # threshold=3
+    t.record(accepted_any=True, engaged=False, max_depth=5)    # 盲拍含涌现 → +2
+    assert not t.needs_recheck()
+    t.record(accepted_any=True, engaged=False, max_depth=1)    # 盲拍浅层 → +1 → 3
+    assert t.needs_recheck()
+    t.record(accepted_any=True, engaged=True, max_depth=5)     # 真判断过 → 归零
+    assert t.score == 0 and not t.needs_recheck()
+
+
+def test_full_chain_card_to_sediment():
+    """整链串测:候选 → 卡 → 用户逐条确认 → 只沉确认的(user_explicit)。"""
+    mem, trace = _FakeMem(), _FakeTrace()
+    cands = _five_candidates()
+    card = build_sediment_card(cands)
+    assert card["n"] == 5
+    # 用户:收经历+涌现(涌现改了措辞),删原则,其余没动(=不沉)
+    by_layer = {c.layer: c for c in cands}
+    decisions = {
+        by_layer["experience"].id: {"action": "accept"},
+        by_layer["emergent"].id: {"action": "edit", "content": "跨域套用认知前,先刨出它的隐含假设"},
+        by_layer["principle"].id: {"action": "drop"},
+    }
+    accepted, engaged = apply_confirmation(cands, decisions)
+    assert engaged is True and len(accepted) == 2
+    res = asyncio.run(sediment_confirmed(accepted, mem=mem, gateway=None, now=1000.0,
+                                         trace=trace, learned_via="conv#7"))
+    assert res["written"] == 2
+    assert all(b.provenance["source"] == "user_explicit" for b in mem.written)
+    assert {b.provenance["layer"] for b in mem.written} == {"experience", "emergent"}
+    edited = next(b for b in mem.written if b.provenance["layer"] == "emergent")
+    assert edited.content == "跨域套用认知前,先刨出它的隐含假设"   # 沉的是你改后的话
+    assert trace.entries[0].payload["n"] == 2                      # Trace 只记确认沉淀的

@@ -236,5 +236,84 @@ async def sediment_confirmed(
     return result
 
 
+# ---------------------------------------------------------------------------
+# ② 沉淀确认卡:把分层候选摆成一张 H2A 卡 → 用户逐条 yes/改/删 → 只把确认的喂给 sediment_confirmed。
+# 确认动作 = 理解关(docs/66):你没法对没读懂的东西诚实说"沉";越深的层越不能盲拍。
+# ---------------------------------------------------------------------------
+
+def build_sediment_card(candidates: list, *, conversation_ref: str = "") -> dict:
+    """把分层候选摆成沉淀确认卡(UI 渲染用,kind="sediment")。
+
+    按深度递增排(经历在前、涌现在后);涌现/校正层(depth≥4)标 `needs_attention`——
+    那是模型替你刨的、不是你说的,UI 该视觉上要求你真读过再拍。
+    """
+    items = sorted((c.to_dict() for c in candidates), key=lambda d: d.get("depth", 1))
+    for it in items:
+        it["needs_attention"] = it.get("depth", 1) >= 4
+    return {
+        "kind": "sediment",
+        "conversation_ref": conversation_ref,
+        "items": items,
+        "n": len(items),
+        "max_depth": max((it.get("depth", 1) for it in items), default=0),
+    }
+
+
+def apply_confirmation(
+    candidates: list, decisions: dict,
+) -> tuple[list, bool]:
+    """按用户逐条决定过滤候选 → (要沉的列表, engaged)。
+
+    decisions:{candidate_id: {"action": "accept"|"edit"|"drop", "content": 改后文本(edit 时)}}。
+    - **不在 decisions 里的候选 = 未确认 = 不沉**(只沉你确认的,缺省即 drop);
+    - edit:改后的话才是你背书的 → 替换 content、id 重算(空改后文本 = drop);
+    - engaged = 有任何 edit/drop(你真判断过,非 rubber-stamp)——镜像 DecisionCard.engaged()。
+    """
+    accepted: list[CognitionCandidate] = []
+    engaged = False
+    for c in candidates:
+        d = decisions.get(getattr(c, "id", ""))
+        if not isinstance(d, dict):
+            continue                                   # 未确认 → 不沉
+        action = d.get("action")
+        if action == "drop":
+            engaged = True
+            continue
+        if action == "edit":
+            engaged = True
+            new_content = (d.get("content") or "").strip()
+            if not new_content:
+                continue                               # 改成空 = drop
+            accepted.append(CognitionCandidate(
+                content=new_content, layer=c.layer, why=c.why,
+                when_hint=c.when_hint, id=_cid(new_content)))
+            continue
+        if action == "accept":
+            accepted.append(c)
+    return accepted, engaged
+
+
+@dataclass
+class SedimentTracker:
+    """反投降闸(沉淀版):侦测"你在无脑沉"再拦一次。
+
+    盲拍 = 全收且零改零删。**越深越严**:含涌现/校正层(depth≥4)的盲拍计 2 分——
+    那些是模型替你立的观点,盲拍它们 = 最毒的认知债(docs/66:深度↔确认关绑死)。
+    阈值 3(比决策卡的 5 严:沉淀写进"你是谁",错认比错执行贵)。
+    """
+    threshold: int = 3
+    score: int = 0
+
+    def record(self, *, accepted_any: bool, engaged: bool, max_depth: int = 1) -> None:
+        if accepted_any and not engaged:
+            self.score += 2 if max_depth >= 4 else 1
+        else:
+            self.score = 0                             # 改/删过、或全删 → 你还在判断
+
+    def needs_recheck(self) -> bool:
+        return self.score >= self.threshold
+
+
 __all__ = ["LAYERS", "DEPTH_BY_LAYER", "CognitionCandidate", "parse_candidates",
-           "converge_and_propose", "sediment_confirmed", "CONVERGE_SYSTEM"]
+           "converge_and_propose", "sediment_confirmed", "CONVERGE_SYSTEM",
+           "build_sediment_card", "apply_confirmation", "SedimentTracker"]
