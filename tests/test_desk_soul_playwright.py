@@ -314,10 +314,17 @@ def test_desk_first_open_default_layout(console_url):
         clock_txt = page.inner_text("#desk-clock")
         assert ":" in clock_txt, f"大时间应是 H:MM: {clock_txt!r}"
 
-        # ④ 待处理任务项轻量列出(极简条目,非完整卡)
-        assert page.is_visible("#desk-pending"), "待处理任务轻量条应在"
+        # ④ 待处理任务项轻量列出(极简条目,非完整卡)。
+        # 聊天窗开着 = 你在聚焦对话 → 待办速览**让位**(chat z220 曾盖住它下半,Hardy 实拍"覆盖");
+        # 聊天最小化进 dock → 桌面转待命面板,待办速览才回来。两态都验。
+        assert not page.is_visible("#desk-pending"), "聊天窗开着时,待办速览应让位(不被压半截)"
+        page.click("#chat-modal-close")   # 桌面下 ✕ = 最小化进 dock
+        page.wait_for_timeout(200)
+        assert page.is_visible("#desk-pending"), "聊天最小化后,待处理任务轻量条应回来"
         rows = page.evaluate("document.querySelectorAll('#desk-pending .desk-pending-row').length")
         assert rows >= 1, "有待拍板卡时,待办轻量条应至少列一条(极简条目)"
+        page.click("#chat-open")          # 恢复聊天窗,后续断言在默认态上继续
+        page.wait_for_timeout(200)
 
         # 看板 dock 📋 图标 + 角标(有没有新料);dock/🌗/吉祥物在位
         assert page.evaluate("document.getElementById('desk-board-btn') !== null"), "dock 应有 📋 看板图标"
@@ -348,25 +355,36 @@ def test_desk_first_open_default_layout(console_url):
         chat = rects["chat"]
         assert chat["top"] >= clock["bottom"], \
             f"bug1: 精简聊天窗顶必须落在时钟底之下(不夹时钟底部): chat.top={chat['top']} clock.bottom={clock['bottom']}"
-        #   bug5 = 折叠标签卡两两矩形无重叠(collapsed 定位算错会互相叠、字串一起)。
-        note_rects = page.evaluate("""() => [...document.querySelectorAll('.cockpit-grid .cockpit-col.col-collapsed')]
-            .map(c => ({k:[...c.classList].find(x=>x.indexOf('col-')===0), r:c.getBoundingClientRect().toJSON()}))
-            .sort((a,b) => a.r.top - b.r.top)""")
-        assert len(note_rects) >= 2, "默认应有多张收起标签卡"
-        for i in range(len(note_rects) - 1):
-            a, b = note_rects[i]["r"], note_rects[i + 1]["r"]
-            assert b["top"] >= a["bottom"] - 1, \
-                f"bug5: 折叠卡 {note_rects[i]['k']} 与 {note_rects[i+1]['k']} 重叠了(top={b['top']} <= bottom={a['bottom']})"
+        #   看板 4→1(Hardy 2026-07-06,替代旧 bug5"折叠卡对齐"):折起 = 一张缩略卡、4 象限全藏
+        #   (不存在"对齐 4 张绝对定位卡"就不存在重叠);点开 = 一整块 2×2 网格,格子间天然无重叠。
+        assert page.is_visible("#desk-board-fold"), "折起态应有看板缩略卡(点开=一整块看板)"
+        vis_cols = page.evaluate(
+            "[...document.querySelectorAll('.cockpit-col')].filter(c => c.offsetParent !== null).length")
+        assert vis_cols == 0, f"折起态 4 象限应全藏(看板是一个整体): 可见 {vis_cols}"
 
-        # 截图①:默认空旷态(给人工看主次分明/不拥挤 + 时钟完整 + 折叠卡整齐)
+        # 截图①:默认空旷态(给人工看主次分明/不拥挤 + 时钟完整)
         page.screenshot(path=os.path.join(_SHOTS_DIR, "01-default-empty.png"))
 
-        # 点 📋 摊开看板 → 四标签全展开(召唤才出),截个板态确认功能没删
-        page.click("#desk-board-btn")
+        # 点缩略卡摊开看板 → 一整块 2×2:4 象限全可见、两两无重叠、底清 dock;点遮罩空白关回
+        page.click("#desk-board-fold")
         page.wait_for_function("document.body.classList.contains('desk-board-open')", timeout=3000)
-        assert not page.evaluate("document.querySelector('.col-decide').classList.contains('col-collapsed')"), \
-            "点 📋 应摊开看板(便签全展开看详情)"
-        page.click("#desk-board-btn")   # 关回默认收起
+        board = page.evaluate("""() => {
+            const cols = [...document.querySelectorAll('.cockpit-col')].filter(c => c.offsetParent !== null);
+            const rects = cols.map(c => c.getBoundingClientRect().toJSON());
+            let overlaps = 0;
+            for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+                const a = rects[i], b = rects[j];
+                if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) overlaps++;
+            }
+            const grid = document.querySelector('.cockpit-grid').getBoundingClientRect();
+            const dock = document.getElementById('desk-dock').getBoundingClientRect();
+            return {n: cols.length, overlaps, gridBottom: grid.bottom, dockTop: dock.top};
+        }""")
+        assert board["n"] == 4, f"摊开 = 一整块看板,4 象限全可见: {board}"
+        assert board["overlaps"] == 0, f"整块看板格子间不许重叠: {board}"
+        assert board["gridBottom"] <= board["dockTop"], f"看板底不许钻 dock: {board}"
+        page.screenshot(path=os.path.join(_SHOTS_DIR, "01b-board-open.png"))
+        page.mouse.click(60, 450)   # 点遮罩空白 = 关(看板外)
         page.wait_for_function("!document.body.classList.contains('desk-board-open')", timeout=3000)
 
         browser.close()

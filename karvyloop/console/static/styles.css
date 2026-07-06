@@ -2419,3 +2419,61 @@ body.demo-modal-expanded .demo-timeline, body.demo-modal-full .demo-timeline {
   display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
 }
 body.demo-modal-full .demo-hero-grid { grid-template-columns: repeat(6, 1fr); }
+
+/* ============ docs/66:沉淀确认卡(收敛→逐条 收/改/不要→只沉确认的) ============ */
+.sediment-card {
+  margin: 10px 4px;
+  padding: 12px 14px;
+  background: var(--accent-light, #f6ead9);
+  border: 1px solid var(--accent-line, #d9bf9d);
+  border-radius: 12px;
+}
+.sediment-head { font-weight: 700; font-size: var(--fs-14, 14px); margin-bottom: 2px; }
+.sediment-note { font-size: var(--fs-12, 12px); color: var(--text-dim, #8a7a66); margin-bottom: 8px; }
+.sediment-row {
+  display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+  padding: 7px 8px; margin: 4px 0;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+.sediment-row.is-keep { border-color: var(--teal-line, #9ec9b8); background: var(--teal-soft, #e6f2ec); }
+.sediment-row.is-edit { border-color: var(--accent-line, #d9bf9d); background: #fdf6e8; }
+.sediment-row.is-drop { opacity: 0.45; }
+.sediment-row.is-drop .sediment-content { text-decoration: line-through; }
+.sediment-chip {
+  flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 9px;
+  background: #efe2cd; color: #6b5136; border: 1px solid #dcc6a4;
+}
+/* 层级越深底越深:校正/涌现(模型替你立的观点)视觉上更重 */
+.sediment-row.depth-4 .sediment-chip { background: #e8d7f2; color: #5d3f77; border-color: #cbaede; }
+.sediment-row.depth-5 .sediment-chip { background: #dfe3f7; color: #3c4a86; border-color: #b6c0e8; }
+.sediment-content { flex: 1 1 220px; min-width: 0; font-size: var(--fs-13, 13px); line-height: 1.5; }
+.sediment-content[contenteditable="true"] {
+  outline: 2px solid var(--accent-line, #d9bf9d); border-radius: 6px; background: #fff; padding: 2px 6px;
+}
+.sediment-acts { flex: none; display: inline-flex; gap: 4px; }
+.sediment-act {
+  border: 1px solid var(--border, #ddd0be); background: #fff; border-radius: 7px;
+  font-size: 12px; padding: 3px 9px; cursor: pointer;
+}
+.sediment-act.keep:hover { background: var(--teal-soft, #e6f2ec); }
+.sediment-act.drop:hover { background: #f7e3e6; }
+.sediment-warn {
+  flex-basis: 100%; font-size: var(--fs-12, 12px); color: var(--rose, #b8577b); margin-top: 2px;
+}
+.sediment-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.sediment-submit {
+  border: none; border-radius: 9px; padding: 7px 14px; cursor: pointer; font-weight: 700;
+  background: var(--accent-strong, #8a5a2b); color: #fff;
+}
+.sediment-cancel {
+  border: 1px solid var(--border, #ddd0be); border-radius: 9px; padding: 7px 12px;
+  cursor: pointer; background: transparent; color: var(--text-dim, #8a7a66);
+}
+/* 开着的会话数 = 没沉淀的欠账(≥2 才亮,和⚗️挨着) */
+.conv-unsettled {
+  align-self: center; font-size: 11px; font-weight: 700; padding: 2px 8px;
+  border-radius: 9px; background: var(--rose-soft, #f7e3e6); color: var(--rose, #b8577b);
+  border: 1px solid #ecc7d0; white-space: nowrap;
+}

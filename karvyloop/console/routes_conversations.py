@@ -25,20 +25,23 @@ def _conv_meta_to_dict(m) -> dict[str, Any]:
         "last_active_at": m.last_active_at, "turn_count": m.turn_count,
         "domain_id": m.peer.domain_id, "peer_role": m.peer.role,
         "peer_agent_id": m.peer.agent_id,
+        "closed_at": getattr(m, "closed_at", None),   # 沉淀关闭;None = 开着(欠账)
     }
 
 
 @router.get("/conversations")
 def api_conversations(request: Request) -> dict[str, Any]:
-    """历史对话列表(0.1.0 刚需,按 last_active 倒序;K4 只读)。"""
+    """历史对话列表(0.1.0 刚需,按 last_active 倒序;K4 只读)。
+    `unsettled` = 开着(未沉淀关闭)的会话数 —— 你还没沉下心沉淀的欠账(docs/66 §E)。"""
     mgr = getattr(request.app.state, "conversation_manager", None)
     if mgr is None:
-        return {"conversations": [], "current_id": None}
+        return {"conversations": [], "current_id": None, "unsettled": 0}
     metas = mgr.list_conversations()
     cur = mgr.current()
     return {
         "conversations": [_conv_meta_to_dict(m) for m in metas],
         "current_id": cur.id if cur is not None else None,
+        "unsettled": sum(1 for m in metas if getattr(m, "closed_at", None) is None),
     }
 
 
@@ -69,6 +72,7 @@ def api_conversation_resume(req: ResumeRequest, request: Request) -> dict[str, A
         raise HTTPException(status_code=404, detail="conversation not found")
     return {
         "id": conv.id, "title": conv.title, "turn_count": conv.turn_count,
+        "closed_at": conv.closed_at,
         "turns": [
             {"user_intent": t.user_intent, "agent_response": t.agent_response,
              "brain": t.brain, "task_id": t.task_id, "data": t.data}
@@ -76,3 +80,91 @@ def api_conversation_resume(req: ResumeRequest, request: Request) -> dict[str, A
         ],
         "roundtable_pending": _roundtable_pending(request.app, conv.id),
     }
+
+
+# ---- docs/66:收敛 → 分层确认 → 只沉确认的 → 会话关闭(=欠账清一笔)----
+
+@router.post("/conversation/converge")
+async def api_conversation_converge(request: Request) -> dict[str, Any]:
+    """收敛当前会话:对话 → 分层认知候选(经历/推理/原则/校正/涌现)→ 沉淀确认卡。
+    **不写库**——只产候选;你逐条确认后走 /conversation/sediment 才沉(理解关)。"""
+    mgr = getattr(request.app.state, "conversation_manager", None)
+    conv = mgr.current() if mgr is not None else None
+    if conv is None:
+        return {"ok": False, "reason": "无当前会话"}
+    if not conv.turns:
+        return {"ok": False, "reason": "这段对话还没聊呢"}
+    rk = getattr(request.app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    if gw is None:
+        return {"ok": False, "reason": "无 gateway,无法收敛(--no-llm?)"}
+    from karvyloop.cognition.converge import build_sediment_card, converge_and_propose
+    cands = await converge_and_propose(conv.turns, gateway=gw, model_ref=rk.get("model_ref", ""),
+                                       trace=_conv_trace(request.app))
+    card = build_sediment_card(cands, conversation_ref=conv.id)
+    return {"ok": True, "card": card}
+
+
+class SedimentRequest(BaseModel):
+    conversation_id: str = Field(..., min_length=1, max_length=64)
+    # 卡上的候选(收敛响应原样带回;edit 过的 content 在 decisions 里)
+    items: list[dict] = Field(default_factory=list, max_length=64)
+    # {candidate_id: {"action": "accept"|"edit"|"drop", "content": 改后文本}}
+    decisions: dict[str, dict] = Field(default_factory=dict)
+
+
+@router.post("/conversation/sediment")
+async def api_conversation_sediment(req: SedimentRequest, request: Request) -> dict[str, Any]:
+    """沉淀你确认的候选(user_explicit)→ **关闭会话**(欠账清一笔)。
+    不在 decisions 里的候选 = 未确认 = 不沉;盲拍(全收零改零删)进反投降闸,越深计分越重。"""
+    mgr = getattr(request.app.state, "conversation_manager", None)
+    conv = mgr.current() if mgr is not None else None
+    if conv is None or conv.id != req.conversation_id:
+        raise HTTPException(status_code=409, detail="不是当前会话(先 resume 再沉淀)")
+    mem = getattr(request.app.state, "memory", None)
+    if mem is None:
+        return {"ok": False, "reason": "memory 未接(--no-llm?)"}
+    rk = getattr(request.app.state, "runtime_kwargs", None) or {}
+    from karvyloop.cognition.converge import (
+        LAYERS, CognitionCandidate, SedimentTracker, apply_confirmation, sediment_confirmed,
+    )
+    # 重建候选(客户端带回;layer 白名单校验,坏项丢弃=宁空勿毒)
+    cands = []
+    for it in req.items:
+        if not isinstance(it, dict):
+            continue
+        content = (it.get("content") or "").strip() if isinstance(it.get("content"), str) else ""
+        layer = it.get("layer")
+        if not content or layer not in LAYERS:
+            continue
+        wh = it.get("when_hint")
+        cands.append(CognitionCandidate(
+            content=content, layer=layer, why=(it.get("why") or "")[:300],
+            when_hint=wh if isinstance(wh, str) and wh.strip() else None))
+    accepted, engaged = apply_confirmation(cands, req.decisions)
+    res = {"written": 0, "extends": [], "ids": []}
+    if accepted:
+        res = await sediment_confirmed(
+            accepted, mem=mem, gateway=rk.get("gateway"), model_ref=rk.get("model_ref", ""),
+            trace=_conv_trace(request.app), learned_via=f"conversation:{conv.id}")
+    # 反投降闸(越深盲拍计分越重);服务级单例,重启清零可接受(闸是行为侦测不是账本)
+    tracker = getattr(request.app.state, "sediment_tracker", None)
+    if tracker is None:
+        tracker = SedimentTracker()
+        request.app.state.sediment_tracker = tracker
+    max_depth = max((c.depth for c in accepted), default=1)
+    tracker.record(accepted_any=bool(accepted), engaged=engaged, max_depth=max_depth)
+    # 沉淀了才关(docs/66 §E);一条没沉(全删/全没确认)也算"处理过了"→ 同样关,欠账清
+    closed_at = mgr.close_conversation(conv.id, reason="sedimented" if res["written"] else "settled_empty")
+    metas = mgr.list_conversations()
+    return {
+        "ok": True, "written": res["written"], "closed_at": closed_at,
+        "unsettled": sum(1 for m in metas if getattr(m, "closed_at", None) is None),
+        "needs_recheck": tracker.needs_recheck(),
+        "new_conversation_id": (mgr.current().id if mgr.current() is not None else None),
+    }
+
+
+def _conv_trace(app: Any):
+    """Trace 底座句柄(沉淀审计落这);--no-llm/无 main_loop → None(照跑)。"""
+    return getattr(getattr(app.state, "main_loop", None), "trace", None)

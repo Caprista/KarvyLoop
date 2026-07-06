@@ -56,7 +56,7 @@ def test_conversations_no_manager_graceful():
     client = TestClient(app)
     r = client.get("/api/conversations")
     assert r.status_code == 200
-    assert r.json() == {"conversations": [], "current_id": None}
+    assert r.json() == {"conversations": [], "current_id": None, "unsettled": 0}
 
 
 # ---- AC2: new ----
@@ -249,3 +249,135 @@ def test_static_has_conversation_controls():
     assert "resumeConversation" in js
     assert "/api/conversation/new" in js
     assert "/api/conversations" in js
+
+
+# ---- docs/66 §E:会话=临时存放区(沉淀关闭 / 开数=欠账)+ 收敛/沉淀端点 ----
+
+import json as _json  # noqa: E402
+
+from karvyloop.cognition.conversation import karvy_world_peer  # noqa: E402
+
+
+class TextDelta:  # 名字必须叫 TextDelta(代码按 type().__name__ 收)
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _SedimentFakeGateway:
+    """收敛端点用:吐一张两层候选(经历+涌现)的严格 JSON。"""
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def resolve_model(self, scope):  # noqa: ANN001
+        return "fake"
+
+    async def complete(self, messages, tools, ref, system=None):  # noqa: ANN001
+        self.calls += 1
+        out = _json.dumps([
+            {"content": "从 React 换到了 Vue", "layer": "experience", "why": "", "when": None},
+            {"content": "每个决策都藏着隐含假设", "layer": "emergent", "why": "聊才涌现", "when": None},
+        ], ensure_ascii=False)
+        yield TextDelta(out)
+
+
+class _FakeMem:
+    def __init__(self) -> None:
+        self.written = []
+        self.concept_cache = None
+
+    def write(self, b, *, pinned: bool = False) -> bool:  # noqa: ANN001
+        self.written.append(b)
+        return True
+
+
+def test_store_close_tombstone_idempotent_and_meta(tmp_path):
+    store = ConversationStore(tmp_path / "conv")
+    peer = karvy_world_peer()
+    conv = store.new(peer, "t")
+    mgr2 = ConversationManager(store)
+    mgr2.start()
+    ts1 = store.close(conv)
+    ts2 = store.close(conv)                     # 幂等:第二次不再追加
+    assert ts1 == ts2 and conv.closed_at == ts1
+    # 墓碑持久化:重载读回 closed_at,且不算轮
+    loaded = store.load(peer, conv.id)
+    assert loaded.closed_at == ts1 and loaded.turn_count == 0
+    meta = [m for m in store.list_conversations(peer) if m.id == conv.id][0]
+    assert meta.closed_at == ts1 and meta.turn_count == 0
+
+
+def test_manager_close_current_opens_new_and_counts(mgr):
+    mgr.start()
+    first = mgr.current()
+    mgr.record_turn("聊了一句", "回了一句")
+    assert mgr.open_count() >= 1
+    ts = mgr.close_conversation(first.id)
+    assert ts is not None
+    cur = mgr.current()
+    assert cur is not None and cur.id != first.id        # 关当前 → 顺势开新的
+    metas = {m.id: m for m in mgr.list_conversations()}
+    assert metas[first.id].closed_at == ts
+    assert metas[cur.id].closed_at is None
+
+
+def test_converge_endpoint_returns_card(app_with_mgr, mgr):
+    gw = _SedimentFakeGateway()
+    app_with_mgr.state.runtime_kwargs = {"gateway": gw, "model_ref": ""}
+    mgr.record_turn("我从 React 换到了 Vue", "为什么切换?")
+    client = TestClient(app_with_mgr)
+    r = client.post("/api/conversation/converge")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and gw.calls == 1
+    card = body["card"]
+    assert card["kind"] == "sediment" and card["n"] == 2
+    assert card["conversation_ref"] == mgr.current().id
+    assert card["items"][-1]["layer"] == "emergent" and card["items"][-1]["needs_attention"] is True
+
+
+def test_converge_empty_conversation_refuses(app_with_mgr):
+    app_with_mgr.state.runtime_kwargs = {"gateway": _SedimentFakeGateway(), "model_ref": ""}
+    client = TestClient(app_with_mgr)
+    r = client.post("/api/conversation/converge")
+    assert r.status_code == 200 and r.json()["ok"] is False   # 没聊过 → 拒,不烧 LLM
+
+
+def test_sediment_endpoint_writes_confirmed_closes_and_counts(app_with_mgr, mgr):
+    mem = _FakeMem()
+    app_with_mgr.state.memory = mem
+    app_with_mgr.state.runtime_kwargs = {"gateway": None, "model_ref": ""}
+    mgr.record_turn("我从 React 换到了 Vue", "为什么切换?")
+    conv_id = mgr.current().id
+    client = TestClient(app_with_mgr)
+    from karvyloop.cognition.converge import CognitionCandidate
+    items = [
+        CognitionCandidate(content="从 React 换到了 Vue", layer="experience").to_dict(),
+        CognitionCandidate(content="每个决策都藏着隐含假设", layer="emergent").to_dict(),
+    ]
+    decisions = {items[0]["id"]: {"action": "accept"},
+                 items[1]["id"]: {"action": "edit", "content": "跨域套用认知前先刨隐含假设"}}
+    r = client.post("/api/conversation/sediment", json={
+        "conversation_id": conv_id, "items": items, "decisions": decisions})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["written"] == 2
+    assert body["closed_at"] is not None
+    assert body["new_conversation_id"] and body["new_conversation_id"] != conv_id
+    # 只沉确认的、user_explicit、带理解出处;edit 沉改后的话
+    assert all(b.provenance["source"] == "user_explicit" for b in mem.written)
+    assert {b.content for b in mem.written} == {"从 React 换到了 Vue", "跨域套用认知前先刨隐含假设"}
+    assert all(b.provenance["learned_via"] == f"conversation:{conv_id}" for b in mem.written)
+    # 关了的不算欠账
+    metas = {m.id: m for m in mgr.list_conversations()}
+    assert metas[conv_id].closed_at is not None
+    r2 = client.get("/api/conversations")
+    assert r2.json()["unsettled"] == 1                        # 只剩顺势新开的那段
+
+
+def test_sediment_wrong_conversation_409(app_with_mgr, mgr):
+    app_with_mgr.state.memory = _FakeMem()
+    mgr.record_turn("x", "y")
+    client = TestClient(app_with_mgr)
+    r = client.post("/api/conversation/sediment", json={
+        "conversation_id": "not-current", "items": [], "decisions": {}})
+    assert r.status_code == 409

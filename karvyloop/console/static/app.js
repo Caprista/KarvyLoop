@@ -1366,12 +1366,140 @@
       for (const c of data.conversations || []) {
         const opt = el("option", { value: c.id });
         const label = (c.title && c.title.trim()) ? c.title : t("conv.untitled");
-        opt.textContent = `${label} · ${t("conv.turns", { n: c.turn_count })}${c.id === data.current_id ? t("conv.current") : ""}`;
+        // docs/66 §E:沉淀关闭的标 ✓(历史可翻但不算欠账)
+        const closed = c.closed_at ? t("conv.closed_suffix") : "";
+        opt.textContent = `${label} · ${t("conv.turns", { n: c.turn_count })}${closed}${c.id === data.current_id ? t("conv.current") : ""}`;
         sel.appendChild(opt);
+      }
+      // 开着的会话数 = 没沉淀的欠账;只欠当前这 1 段(或 0)不打扰,≥2 才亮
+      const badge = document.getElementById("conv-unsettled");
+      if (badge) {
+        const n = data.unsettled || 0;
+        badge.classList.toggle("hidden", n < 2);
+        if (n >= 2) badge.textContent = t("conv.unsettled", { n });
       }
     } catch (e) {
       console.warn("[conv] list failed", e);
     }
+  }
+
+  // ============ docs/66:收敛 → 分层确认卡 → 只沉确认的 → 会话关闭 ============
+
+  async function convergeConversation() {
+    const btn = document.getElementById("conv-converge-btn");
+    if (btn) btn.disabled = true;
+    try {
+      const r = await fetch("/api/conversation/converge", { method: "POST" });
+      const data = await r.json();
+      if (!r.ok || !data.ok) {
+        pushChatLine("system", t("sediment.failed", { reason: (data && data.reason) || r.status }));
+        return;
+      }
+      if (!data.card || !data.card.n) {
+        pushChatLine("system", t("sediment.none"));
+        return;
+      }
+      renderSedimentCard(data.card);
+    } catch (e) {
+      pushChatLine("system", t("sediment.failed", { reason: String(e) }));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // 沉淀确认卡:逐条 收/改/不要(没动的 = 未确认 = 不沉)。深层(校正/涌现)带 ⚠ 提示。
+  function renderSedimentCard(card) {
+    const log = document.getElementById("chat-log");
+    if (!log) return;
+    const box = el("div", { class: "sediment-card" });
+    box.appendChild(el("div", { class: "sediment-head", text: t("sediment.card_title") }));
+    box.appendChild(el("div", { class: "sediment-note", text: t("sediment.card_note") }));
+    const states = {};   // id → {action, content}
+    for (const it of card.items || []) {
+      const row = el("div", { class: "sediment-row depth-" + (it.depth || 1) });
+      const chip = el("span", { class: "sediment-chip", text: t("layer." + it.layer) });
+      const content = el("span", { class: "sediment-content", text: it.content });
+      const acts = el("span", { class: "sediment-acts" });
+      const bKeep = el("button", { type: "button", class: "sediment-act keep", text: t("sediment.keep") });
+      const bEdit = el("button", { type: "button", class: "sediment-act edit", text: t("sediment.edit") });
+      const bDrop = el("button", { type: "button", class: "sediment-act drop", text: t("sediment.drop") });
+      const setState = (cls) => {
+        row.classList.remove("is-keep", "is-edit", "is-drop");
+        if (cls) row.classList.add("is-" + cls);
+        updateSubmit();
+      };
+      bKeep.addEventListener("click", () => {
+        const editing = content.getAttribute("contenteditable") === "true";
+        const txt = (content.textContent || "").trim();
+        if (editing && txt && txt !== it.content) {
+          states[it.id] = { action: "edit", content: txt };   // 改过再收 = 沉你改后的话
+          setState("edit");
+        } else {
+          states[it.id] = { action: "accept" };
+          setState("keep");
+        }
+        content.setAttribute("contenteditable", "false");
+      });
+      bEdit.addEventListener("click", () => {
+        content.setAttribute("contenteditable", "true");
+        content.focus();   // 改完还得按「收」——改而不收不算确认
+      });
+      bDrop.addEventListener("click", () => {
+        states[it.id] = { action: "drop" };
+        content.setAttribute("contenteditable", "false");
+        setState("drop");
+      });
+      acts.appendChild(bKeep); acts.appendChild(bEdit); acts.appendChild(bDrop);
+      row.appendChild(chip); row.appendChild(content); row.appendChild(acts);
+      if (it.needs_attention) {
+        row.appendChild(el("div", { class: "sediment-warn", text: t("sediment.attention") }));
+      }
+      box.appendChild(row);
+    }
+    const foot = el("div", { class: "sediment-foot" });
+    const submit = el("button", { type: "button", class: "sediment-submit" });
+    const cancel = el("button", { type: "button", class: "sediment-cancel", text: t("sediment.cancel") });
+    function updateSubmit() {
+      const n = Object.values(states).filter((s) => s.action !== "drop").length;
+      submit.textContent = n > 0 ? t("sediment.submit", { n }) : t("sediment.submit_zero");
+    }
+    updateSubmit();
+    cancel.addEventListener("click", () => box.remove());   // 接着聊:卡撤走,不沉、不关
+    submit.addEventListener("click", async () => {
+      submit.disabled = true;
+      try {
+        const r = await fetch("/api/conversation/sediment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            conversation_id: card.conversation_ref,
+            items: card.items,
+            decisions: states,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok || !data.ok) {
+          pushChatLine("system", t("sediment.failed", { reason: (data && data.reason) || r.status }));
+          submit.disabled = false;
+          return;
+        }
+        box.remove();
+        // 会话已关、新会话已开:清屏 + 回执(镜像 newConversation 行为)
+        const log2 = document.getElementById("chat-log");
+        if (log2) log2.innerHTML = "";
+        pushChatLine("system", data.written > 0 ? t("sediment.done", { n: data.written }) : t("sediment.done_zero"));
+        if (data.needs_recheck) pushChatLine("system", t("sediment.recheck"));
+        refreshConversations();
+      } catch (e) {
+        pushChatLine("system", t("sediment.failed", { reason: String(e) }));
+        submit.disabled = false;
+      }
+    });
+    foot.appendChild(cancel); foot.appendChild(submit);
+    box.appendChild(foot);
+    const follow = isNearBottom(log);
+    log.appendChild(box);
+    if (follow) log.scrollTop = log.scrollHeight;
   }
 
   async function newConversation() {
@@ -3693,6 +3821,9 @@
     // 9.1d:绑对话控件(➕新对话 / 🕘历史)
     const newBtn = document.getElementById("conv-new-btn");
     if (newBtn) newBtn.addEventListener("click", newConversation);
+    // docs/66:⚗️ 收敛(总结→逐条确认→只沉确认的→关会话)
+    const convergeBtn = document.getElementById("conv-converge-btn");
+    if (convergeBtn) convergeBtn.addEventListener("click", convergeConversation);
     const histSel = document.getElementById("conv-history");
     if (histSel) histSel.addEventListener("change", (e) => {
       const v = e.target.value; e.target.selectedIndex = 0;   // 选完复位成 🕘 图标,不显长标题

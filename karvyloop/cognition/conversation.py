@@ -154,12 +154,17 @@ class Conversation:
 
     无 `status`:"当前活跃哪段"是运行时概念(Manager 持有,不持久化)。
     `last_active_at` 由最后一轮 ts 派生(续最近排序,**不**做超时判定)。
+
+    `closed_at`(docs/66 §E,会话=临时存放区):**沉淀过的会话才关闭**——这不是"活跃态"
+    (运行时),是持久生命周期事实;开着的会话数 = 你还没沉下心沉淀的欠账。追加式
+    `_closed` 墓碑行落盘(不改写 meta,合原子追加范式);关了仍可 resume 查看(审计)。
     """
     id: str
     created_at: float
     peer: Address                          # 归属:跟谁聊 + 在哪个场(CV-12)
     title: str = ""
     turns: list[Turn] = field(default_factory=list)
+    closed_at: Optional[float] = None      # 沉淀关闭时刻;None = 开着(欠账)
 
     @property
     def last_active_at(self) -> float:
@@ -190,6 +195,7 @@ class ConversationMeta:
     last_active_at: float
     turn_count: int
     peer: Address
+    closed_at: Optional[float] = None      # 沉淀关闭;None = 开着(未沉淀欠账)
 
 
 # ---- 存储(JSONL per-conversation,按场分区)----
@@ -251,6 +257,16 @@ class ConversationStore:
         conv.turns.append(turn)
         return turn
 
+    def close(self, conv: Conversation, *, reason: str = "sedimented") -> float:
+        """关闭会话(docs/66 §E:沉淀了才关)。追加 `_closed` 墓碑行,不改写既有内容;幂等。"""
+        if conv.closed_at is not None:
+            return conv.closed_at
+        ts = self._clock()
+        marker = json.dumps({"_closed": True, "ts": ts, "reason": reason}, ensure_ascii=False) + "\n"
+        _atomic_append(self._path(conv.peer, conv.id), marker)
+        conv.closed_at = ts
+        return ts
+
     # ---- 读取 / 恢复 ----
 
     def load(self, peer: Address, conv_id: str) -> Optional[Conversation]:
@@ -265,6 +281,7 @@ class ConversationStore:
         title = ""
         peer = karvy_world_peer()
         turns: list[Turn] = []
+        closed_at: Optional[float] = None
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -280,9 +297,13 @@ class ConversationStore:
                     if isinstance(rec.get("peer"), dict):
                         peer = _peer_from_record(rec["peer"])
                     continue
+                if rec.get("_closed"):
+                    closed_at = float(rec.get("ts", 0.0)) or None
+                    continue
                 turns.append(Turn.from_record(rec))
         return Conversation(
-            id=path.stem, created_at=created_at, peer=peer, title=title, turns=turns
+            id=path.stem, created_at=created_at, peer=peer, title=title, turns=turns,
+            closed_at=closed_at,
         )
 
     def list_conversations(self, peer: Address) -> list[ConversationMeta]:
@@ -324,6 +345,7 @@ class ConversationStore:
         peer = karvy_world_peer()
         last_ts = 0.0
         turn_count = 0
+        closed_at: Optional[float] = None
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -340,6 +362,9 @@ class ConversationStore:
                         if isinstance(rec.get("peer"), dict):
                             peer = _peer_from_record(rec["peer"])
                         continue
+                    if rec.get("_closed"):
+                        closed_at = float(rec.get("ts", 0.0)) or None
+                        continue          # 墓碑不算轮
                     turn_count += 1
                     last_ts = float(rec.get("ts", last_ts))
         except OSError:
@@ -347,7 +372,7 @@ class ConversationStore:
         return ConversationMeta(
             id=path.stem, created_at=created_at, title=title,
             last_active_at=last_ts if last_ts else created_at,
-            turn_count=turn_count, peer=peer,
+            turn_count=turn_count, peer=peer, closed_at=closed_at,
         )
 
 
@@ -429,6 +454,26 @@ class ConversationManager:
             self._current = loaded
             self._peer = loaded.peer
         return loaded
+
+    def close_conversation(self, conv_id: str = "", *, reason: str = "sedimented") -> Optional[float]:
+        """关闭会话(docs/66 §E:沉淀了才关)。缺省关当前;关的是当前 → 顺势开新的
+        (聊天永远有地方落脚,不悬在已关会话上)。返回 closed_at;找不到 → None。"""
+        peer = self._peer or karvy_world_peer()
+        target: Optional[Conversation] = None
+        if not conv_id or (self._current is not None and self._current.id == conv_id):
+            target = self._current
+        else:
+            target = self._store.load(peer, conv_id)
+        if target is None:
+            return None
+        ts = self._store.close(target, reason=reason)
+        if self._current is not None and self._current.id == target.id:
+            self.new_conversation()
+        return ts
+
+    def open_count(self, peer: Optional[Address] = None) -> int:
+        """开着(未沉淀关闭)的会话数 = 没沉下心沉淀的欠账(docs/66 §E)。"""
+        return sum(1 for m in self.list_conversations(peer) if m.closed_at is None)
 
     def list_conversations(self, peer: Optional[Address] = None) -> list[ConversationMeta]:
         p = peer or self._peer
