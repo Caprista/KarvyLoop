@@ -25,7 +25,6 @@ API_ONLY = {
     "/api/atoms/consolidate/apply",    # 原子语义合并·兑现(经 H2A);同上
     "/api/decisions/audit",     # 决策审计流水查询(dev-report #6);程序化/审计面按需查,非 UI 按钮
     "/api/skill_lifecycle",     # 技能事件时间线(契约面先行;前端时间线视图由并行工人在接,接上后本行可删)
-    "/api/memory/recall",       # 时点召回(as_of,docs/69 Q4):底座+API 先就绪;NL 意图入口("当时…")是 drive 侧后续接线,接上后本行可删
     # #54 逃生门 workflow 续/丢/查(pending_resume/resume/discard)已接前端 app.js 顶部横幅
     # (fetchPendingResume + 续跑/丢弃按钮,docs/56 ②)→ 不再是 API_ONLY,已从白名单移除。
 }

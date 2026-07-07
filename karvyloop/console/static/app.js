@@ -2225,7 +2225,7 @@
       pushChatLine("system", "⚠ " + payload.error);
     } else if ((payload.events && payload.events.length) || payload.text) {
       appendAgentTurn(log, payload);
-      _appendRecallChip(log, payload.recall_used);   // Q1 召回解释:垫了哪几条记忆(空/缺=不渲染)
+      _appendRecallChip(log, payload.recall_used, payload.recall_as_of);   // Q1 召回解释:垫了哪几条记忆(空/缺=不渲染);docs/69 Q4:带时点则标"按 X 时点的记忆"
       if (follow) log.scrollTop = log.scrollHeight;
     }
     if (payload.crystallized && payload.skill_name) {
@@ -2279,7 +2279,7 @@
     if (!parts.length) parts.push(t("recall.why_related"));
     return parts.join(" · ");
   }
-  function _appendRecallChip(log, used) {
+  function _appendRecallChip(log, used, asOf) {
     if (!used || !used.length) return;
     const list = el("div", { class: "recall-list hidden" });
     for (const r of used) {
@@ -2290,9 +2290,13 @@
           el("span", { class: "recall-why", text: _recallWhy(r) }),
           ts ? el("span", { class: "recall-ts", text: t("recall.since", { date: ts }) }) : null)));
     }
+    // docs/69 Q4:这轮是按某个过去时点召回的("你当时/上个月怎么理解的")→ chip 头显式标出,
+    // 让人知道垫进去的是**那时**的旧认知(不是当下已更新的事实)。缺 = 当下召回,原文案。
+    const asOfLabel = (asOf && isFinite(asOf))
+      ? " · " + t("recall.as_of", { date: new Date(asOf * 1000).toLocaleDateString() }) : "";
     const chip = el("button", {
-      class: "recall-chip", type: "button",
-      text: "🧠 " + t("recall.used_n", { n: used.length }),
+      class: "recall-chip" + (asOfLabel ? " recall-chip-asof" : ""), type: "button",
+      text: "🧠 " + t("recall.used_n", { n: used.length }) + asOfLabel,
       onclick: () => {
         list.classList.toggle("hidden");
         // 展开时把列表滚进视野(chip 常在聊天底部,不滚用户看不见展开了什么)

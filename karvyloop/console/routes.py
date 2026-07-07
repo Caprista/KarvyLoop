@@ -794,6 +794,17 @@ def _recall_domain(mgr) -> str:
     return "" if d == KARVY_WORLD_DOMAIN else (d or "")
 
 
+def _resolve_recall_as_of(intent: str) -> Optional[float]:
+    """docs/69 Q4:问句是"你当时/上个月怎么理解的"这类过去认知问句 → 解析出那个时点 T(epoch 秒)。
+    确定性正则识别(零 LLM,热路径零成本);不是过去认知问句 / 解析不出时刻 → None(照当下召回,
+    绝不猜时间)。ws 与 routes 两条 drive 入口共用 cognition.past_recall.resolve_as_of。"""
+    try:
+        from karvyloop.cognition.past_recall import resolve_as_of
+        return resolve_as_of(intent or "")
+    except Exception:
+        return None   # 识别是增益不是命脉:任何异常退回当下召回,不挡 drive
+
+
 @router.post("/intent")
 async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     """提交 intent → 调 MainLoop.drive(K4 写 ml.drive 副作用,不算 K 违规:用户主动提交)。"""
@@ -850,10 +861,14 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     # §2.6:在某业务域里 drive → 召回共享层 + 本域私有层(域专属认知不跨域漏)。
     mem = getattr(request.app.state, "memory", None)
     _recall_used: list = []   # Q1 召回解释:这轮垫了哪几条记忆(空列表=没垫),挂进响应 payload
+    # docs/69 Q4:问句是"你**当时/上个月**怎么理解的"这类**过去认知**问句 → 按那个时点召回
+    # (确定性正则,零 LLM;宁漏勿误,解析不出时刻=None 照当下召回)。
+    _recall_as_of = _resolve_recall_as_of(req.intent)
     if mem is not None:
         try:
             block = mem.recall_block(req.intent, scope="personal", limit=8,
                                      domain=_recall_domain(mgr),
+                                     as_of=_recall_as_of,
                                      explain_sink=_recall_used)
             if block:
                 governance = (block + "\n\n" + governance).strip()
@@ -1031,6 +1046,8 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     payload = drive_outcome_to_dict(outcome)
     payload["speaker"] = _turn_speaker  # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
     payload["recall_used"] = _recall_used  # Q1 召回解释:垫了哪几条记忆(空=没垫)
+    if _recall_as_of is not None:
+        payload["recall_as_of"] = _recall_as_of  # docs/69 Q4:这轮按此时点召回(chip 标"按 X 时点的记忆")
     return payload
 
 

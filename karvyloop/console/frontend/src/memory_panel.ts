@@ -784,6 +784,47 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
   wrap.appendChild(main);
 }
 
+// 时点召回(docs/69 Q4 收尾:接 /api/memory/recall 的 as_of 到用户可见面)——「知识库」页里一小块
+// 可选查询:选个日期 + 输个搜索词 → 看"那天你的这块记忆算数吗"(考古层是"被谁取代",这里是"某时点
+// 完整召回")。日期空 = 不触发(现状不变);HTML date(本地零点)→ epoch 秒喂后端谓词 valid_from≤T。
+function _renderAsOfRecall(body: HTMLElement): void {
+  const box = el("div", { class: "mem-asof" });
+  box.appendChild(el("div", { class: "mem-asof-hint", text: t("mem.asof_hint") }));
+  const q = el("input", { class: "mem-asof-q", type: "text", placeholder: t("mem.asof_q_ph") }) as HTMLInputElement;
+  const date = el("input", { class: "mem-asof-date", type: "date" }) as HTMLInputElement;
+  const out = el("div", { class: "mem-asof-out hidden" });
+  const run = async (): Promise<void> => {
+    const query = q.value.trim();
+    const day = date.value.trim();   // "YYYY-MM-DD";空 = 不按时点(现状不变)
+    if (!day) { out.classList.add("hidden"); out.innerHTML = ""; return; }
+    if (!query) { out.classList.remove("hidden"); out.innerHTML = ""; out.appendChild(el("div", { class: "mgmt-hint", text: t("mem.asof_need_q") })); return; }
+    // 当天本地零点 → epoch 秒(new Date("YYYY-MM-DD") 会当 UTC 解析 → 用分量构造走本地时区,不偏一天)
+    const [yy, mm, dd] = day.split("-").map(Number);
+    const asOf = Math.floor(new Date(yy, (mm || 1) - 1, dd || 1).getTime() / 1000);
+    if (!isFinite(asOf)) { return; }
+    out.classList.remove("hidden");
+    out.innerHTML = ""; out.appendChild(el("div", { class: "mgmt-hint", text: t("mem.asof_loading") }));
+    const url = "/api/memory/recall?q=" + encodeURIComponent(query) + "&as_of=" + asOf;
+    const res = await _getJSON(url);
+    out.innerHTML = "";
+    if (!res || !res.ok) {
+      out.appendChild(el("div", { class: "mgmt-empty", text: (res && res.reason) || t("mem.asof_failed") }));
+      return;
+    }
+    const block = (res.block || "").trim();
+    out.appendChild(el("div", { class: "mem-asof-stamp", text: t("mem.asof_stamp", { d: day }) }));
+    if (!block) { out.appendChild(el("div", { class: "mgmt-empty", text: t("mem.asof_none") })); return; }
+    const bd = el("div", { class: "mem-asof-block" }); _md(bd, block); out.appendChild(bd);
+  };
+  const go = el("button", { class: "mgmt-inline-link mem-asof-go", text: t("mem.asof_btn"), onclick: () => void run() });
+  // 清空日期即回到现状:date 一变就重算(空→收起,有值→需按钮或回车触发查询,不空打后端)
+  date.addEventListener("change", () => { if (!date.value.trim()) { out.classList.add("hidden"); out.innerHTML = ""; } });
+  q.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") void run(); });
+  box.appendChild(el("div", { class: "mem-asof-row" }, q, date, go));
+  box.appendChild(out);
+  body.appendChild(box);
+}
+
 // 双标签(Hardy:"知识库和知识沉淀做在 2 个标签页,免得聊天视图不纯粹")
 let _memTab: "sediment" | "library" = "sediment";
 
@@ -813,6 +854,9 @@ async function renderMemoryPanel(): Promise<void> {
   const graphBox = el("div", { class: "mem-graph-box" });
   body.appendChild(graphBox);
   renderMemoryGraph(graphBox);
+  // 时点召回(docs/69 Q4:"上个月你以为我在哪家公司?"):可选按时点查——填了日期 + 搜索词 →
+  // 拉 /api/memory/recall?as_of=<那天 epoch 秒>,渲染该时点算数的记忆块;清空日期 = 现状不变。
+  _renderAsOfRecall(body);
   // 已知(列表)
   const data = await _getJSON("/api/memory");
   const beliefs = (data && data.beliefs) || [];

@@ -216,11 +216,15 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     # 让"关于你"的长期记忆真的喂进模型 —— 否则摄入/蒸馏写进的库没人读。
     mem = getattr(app.state, "memory", None)
     _recall_used: list = []   # Q1 召回解释:这轮垫了哪几条记忆(空列表=没垫),挂进 drive_done
+    # docs/69 Q4:过去认知问句("你当时/上个月怎么理解的")→ 按那个时点召回(确定性正则,零 LLM)。
+    from .routes import _resolve_recall_as_of
+    _recall_as_of = _resolve_recall_as_of(intent)
     if mem is not None:
         try:
             from .routes import _recall_domain
             block = mem.recall_block(intent, scope="personal", limit=8,
                                      domain=_recall_domain(mgr),   # §2.6 域隔离
+                                     as_of=_recall_as_of,
                                      explain_sink=_recall_used)
             if block:
                 governance = (block + "\n\n" + governance).strip()
@@ -392,6 +396,8 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     _payload = drive_outcome_to_dict(outcome)
     _payload["speaker"] = _turn_speaker   # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
     _payload["recall_used"] = _recall_used   # Q1 召回解释:垫了哪几条记忆(空=没垫)
+    if _recall_as_of is not None:
+        _payload["recall_as_of"] = _recall_as_of   # docs/69 Q4:按此时点召回(chip 标"按 X 时点的记忆")
     await websocket.send_json({"type": "drive_done", "payload": _payload})
 
 

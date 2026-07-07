@@ -962,6 +962,65 @@ var KarvyMemoryPanelBundle = (function(exports) {
     wrap.appendChild(side);
     wrap.appendChild(main);
   }
+  function _renderAsOfRecall(body) {
+    const box = el("div", { class: "mem-asof" });
+    box.appendChild(el("div", { class: "mem-asof-hint", text: t("mem.asof_hint") }));
+    const q = el("input", { class: "mem-asof-q", type: "text", placeholder: t("mem.asof_q_ph") });
+    const date = el("input", { class: "mem-asof-date", type: "date" });
+    const out = el("div", { class: "mem-asof-out hidden" });
+    const run = async () => {
+      const query = q.value.trim();
+      const day = date.value.trim();
+      if (!day) {
+        out.classList.add("hidden");
+        out.innerHTML = "";
+        return;
+      }
+      if (!query) {
+        out.classList.remove("hidden");
+        out.innerHTML = "";
+        out.appendChild(el("div", { class: "mgmt-hint", text: t("mem.asof_need_q") }));
+        return;
+      }
+      const [yy, mm, dd] = day.split("-").map(Number);
+      const asOf = Math.floor(new Date(yy, (mm || 1) - 1, dd || 1).getTime() / 1e3);
+      if (!isFinite(asOf)) {
+        return;
+      }
+      out.classList.remove("hidden");
+      out.innerHTML = "";
+      out.appendChild(el("div", { class: "mgmt-hint", text: t("mem.asof_loading") }));
+      const url = "/api/memory/recall?q=" + encodeURIComponent(query) + "&as_of=" + asOf;
+      const res = await _getJSON(url);
+      out.innerHTML = "";
+      if (!res || !res.ok) {
+        out.appendChild(el("div", { class: "mgmt-empty", text: res && res.reason || t("mem.asof_failed") }));
+        return;
+      }
+      const block = (res.block || "").trim();
+      out.appendChild(el("div", { class: "mem-asof-stamp", text: t("mem.asof_stamp", { d: day }) }));
+      if (!block) {
+        out.appendChild(el("div", { class: "mgmt-empty", text: t("mem.asof_none") }));
+        return;
+      }
+      const bd = el("div", { class: "mem-asof-block" });
+      _md(bd, block);
+      out.appendChild(bd);
+    };
+    const go = el("button", { class: "mgmt-inline-link mem-asof-go", text: t("mem.asof_btn"), onclick: () => void run() });
+    date.addEventListener("change", () => {
+      if (!date.value.trim()) {
+        out.classList.add("hidden");
+        out.innerHTML = "";
+      }
+    });
+    q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") void run();
+    });
+    box.appendChild(el("div", { class: "mem-asof-row" }, q, date, go));
+    box.appendChild(out);
+    body.appendChild(box);
+  }
   let _memTab = "sediment";
   async function renderMemoryPanel() {
     const body = mgmtBody();
@@ -992,6 +1051,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
     const graphBox = el("div", { class: "mem-graph-box" });
     body.appendChild(graphBox);
     renderMemoryGraph(graphBox);
+    _renderAsOfRecall(body);
     const data = await _getJSON("/api/memory");
     const beliefs = data && data.beliefs || [];
     body.appendChild(el(
