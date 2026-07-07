@@ -1795,6 +1795,16 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
         handlers = getattr(request.app.state, "proposal_handlers", None) or {}
         res = registry.decide(req.proposal_id, req.decision, handlers=handlers,
                               edits=(req.edits or None))
+        # 委派兑现(route_to_role / run_task 等)会同步 drive → 被委派 role 可能碰壁工作区外
+        # 路径(note_denied 攒「想要」)。与顶层 drive 收尾同待遇:这一轮就把「想要」升成 H2A
+        # 授权卡,否则委派活的授权卡永远不出(缺口)。sync 端点在 FastAPI 线程池(无运行
+        # loop)→ asyncio.run 安全;失败不阻断决策回执。
+        import asyncio
+        from karvyloop.console.proposals import raise_fs_access_cards
+        try:
+            asyncio.run(raise_fs_access_cards(request.app))
+        except Exception:
+            logger.debug("[h2a_decide] 委派收尾升 fs_access 卡失败(不阻断)", exc_info=True)
         return res.to_dict() if res is not None else None
 
     if req.decision == H2A_DEFER:

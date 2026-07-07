@@ -515,6 +515,13 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
                 lambda: registry.decide(req.proposal_id, req.decision, handlers=handlers,
                                         edits=(req.edits or None))
             )
+            # 委派兑现同步 drive 后:被委派 role 碰壁工作区外路径攒的「想要」→ 这一轮升 H2A
+            # 授权卡(与顶层 drive 收尾同待遇;REST 端点同调)。已在事件循环里 → 直接 await。
+            try:
+                from karvyloop.console.proposals import raise_fs_access_cards
+                await raise_fs_access_cards(app)
+            except Exception:
+                logger.debug("[ws] 委派收尾升 fs_access 卡失败(不阻断)", exc_info=True)
             return res.to_dict() if res is not None else None
 
         if req.decision == H2A_DEFER:
