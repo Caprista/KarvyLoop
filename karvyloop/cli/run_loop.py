@@ -55,7 +55,11 @@ def _read_skills_dir_from_config(config_path: Optional[Path]) -> Optional[Path]:
 
 def _read_thresholds_from_config(config_path: Optional[Path]):
     """从 config.yaml `crystallize.{min_usage_count, min_success_rate, usage_debounce_sec,
-    promote_score, generalized_distinct}` 读结晶旋钮。缺字段 → 用默认值。"""
+    promote_score, generalized_distinct, cluster_overlap_threshold, satisfaction_floor,
+    satisfaction_min_samples}` 读结晶旋钮。缺字段 → 用默认值。
+
+    覆盖 CrystallizeThresholds **全部**字段(内部审计半接线修):满意度关(docs/44 断⑭)
+    的地板/样本门原来没从 config 读 → 用户改 `crystallize.satisfaction_floor` 静默无效。"""
     from karvyloop.crystallize.crystallize import CrystallizeThresholds, DEFAULT_THRESHOLDS
     if config_path is None or not config_path.exists():
         return DEFAULT_THRESHOLDS
@@ -73,6 +77,8 @@ def _read_thresholds_from_config(config_path: Optional[Path]):
             promote_score=float(cry.get("promote_score", d.promote_score)),
             generalized_distinct=int(cry.get("generalized_distinct", d.generalized_distinct)),
             cluster_overlap_threshold=float(cry.get("cluster_overlap_threshold", d.cluster_overlap_threshold)),
+            satisfaction_floor=float(cry.get("satisfaction_floor", d.satisfaction_floor)),
+            satisfaction_min_samples=int(cry.get("satisfaction_min_samples", d.satisfaction_min_samples)),
         )
     except (TypeError, ValueError):
         return DEFAULT_THRESHOLDS  # 配置值非法 → 退默认,不崩

@@ -102,6 +102,70 @@ def test_maybe_promote_honors_min_usage_count():
     assert d_high.kind.value == "not_yet"   # usage 3 < 5 → 还不够
 
 
+# ---- AC7: 满意度旋钮(satisfaction_floor / satisfaction_min_samples)也走 config ----
+# 内部审计(docs/68 半接线):CrystallizeThresholds 有这俩字段、maybe_promote 也消费,
+# 但 _read_thresholds_from_config 原来不读 → 用户改 config.yaml 的满意度地板无效。
+def test_read_satisfaction_knobs_from_config(tmp_path: Path):
+    from karvyloop.cli.run_loop import _read_thresholds_from_config
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "crystallize:\n"
+        "  satisfaction_floor: 0.9\n"
+        "  satisfaction_min_samples: 2\n",
+        encoding="utf-8",
+    )
+    t = _read_thresholds_from_config(cfg)
+    assert t.satisfaction_floor == 0.9
+    assert t.satisfaction_min_samples == 2
+    # 没填的用默认
+    assert t.min_usage_count == DEFAULT_THRESHOLDS.min_usage_count
+    assert t.promote_score == DEFAULT_THRESHOLDS.promote_score
+
+
+class _StubSatisfaction:
+    """duck-typed SatisfactionStore 桩:固定近期均分 0.5(= 纯"未核验成功"历史)。"""
+
+    def samples(self, sig):
+        return [object(), object(), object()]   # 3 份样本,过 min_samples 门
+
+    def mean_overall_recent(self, sig):
+        return 0.5
+
+
+def test_maybe_promote_honors_configured_satisfaction_floor(tmp_path: Path):
+    """构造自定义配置 → 走 maybe_promote → 断言满意度地板真被尊重(半接线验收)。"""
+    from karvyloop.cli.run_loop import _read_thresholds_from_config
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "crystallize:\n"
+        "  min_usage_count: 3\n"
+        "  promote_score: 0.0\n"
+        "  min_success_rate: 0.0\n"
+        "  satisfaction_floor: 0.9\n"
+        "  satisfaction_min_samples: 2\n",
+        encoding="utf-8",
+    )
+    t = _read_thresholds_from_config(cfg)
+
+    store = InMemoryUsageStore()
+    verify = VerifyStore()
+    sig = "sig-sat"
+    store.put(sig, UsageStats(usage_count=3, success_count=3, last_used_at=1000.0))
+    verify.mark_verified(sig, "t", note="x", clock=lambda: 1000.0)
+    sat = _StubSatisfaction()
+
+    # 默认地板 0.45:0.5 不算差评 → 晋升(对照组,证明只有地板在变)
+    loose = CrystallizeThresholds(min_usage_count=3, promote_score=0.0, min_success_rate=0.0)
+    d_default = maybe_promote(sig, store, verify, now=1000.0, thresholds=loose,
+                              satisfaction=sat)
+    assert d_default.kind.value == "ready"
+
+    # config 地板 0.9:0.5 < 0.9 → 被满意度关拦下(config 真生效)
+    d_cfg = maybe_promote(sig, store, verify, now=1000.0, thresholds=t, satisfaction=sat)
+    assert d_cfg.kind.value == "not_yet"
+    assert "satisfaction" in d_cfg.reason
+
+
 # ---- AC5: build_main_loop wiring ----
 def test_build_main_loop_wires_thresholds(tmp_path: Path):
     from karvyloop.cli.run_loop import build_main_loop, close_main_loop_stores

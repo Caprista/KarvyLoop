@@ -241,6 +241,20 @@ class TestPusher:
         # DEFER 未满老化阈值 → 不计入(与 email digest 同一口径:channels/common)
         assert pusher.push_if_due(now=T0 + 60) == {"sent": False, "reason": "no_pending"}
 
+    def test_deferred_card_reenters_push_after_aging_with_tag(self):
+        """DEFER 满老化阈值后重新浮出推送,带「⏳挂了N天」语义(DEFER≠消失,与 email 同口径)。"""
+        from karvyloop.karvy.proposal_registry import AGING_THRESHOLD_S
+        registry = PendingProposalRegistry()
+        registry.register(make_proposal(pid="p-defer"), now=T0)
+        registry.decide("p-defer", "DEFER", now=T0)
+        pusher = WebhookPusher(make_config(), registry, transport=CaptureTransport(),
+                               console_link=lambda: "")
+        assert pusher.build_note(T0 + 3600).count == 0            # 暂缓中,不打扰
+        note = pusher.build_note(T0 + AGING_THRESHOLD_S + 3600)   # 满老化阈值回来
+        assert note.count == 1
+        # 挂龄从 created_ts 算(49h → 2 天),正文带老化标注
+        assert i18n.t("channels.webhook.aging", days=2) in note.text
+
     def test_send_failure_is_swallowed_and_retryable(self, caplog):
         registry = PendingProposalRegistry()
         registry.register(make_proposal(), now=T0)
