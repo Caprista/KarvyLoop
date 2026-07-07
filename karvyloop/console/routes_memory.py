@@ -105,15 +105,49 @@ def _extract_url(material: str) -> str:
 
 
 async def _fetch_url(url: str, *, timeout: float = 12.0, max_chars: int = 16000) -> str:
-    """抓链接正文(极简 HTML→text)。本地优先 + 用户主动分享的链接;失败返空。"""
+    """抓链接正文(极简 HTML→text)。本地优先 + 用户主动分享的链接;失败返空。
+
+    **SSRF 地板(安全审计逮到的旁路缝):URL 来自用户粘贴的"材料",不能被当跳板打云元数据
+    (169.254.169.254)或内网。** 与 web 工具的正规抓取(coding/tools/web._http_get)同纪律:
+    抓前 + 每次重定向后都过 urlguard.check_url,关掉 httpx 自动跟随、手动逐跳(不给
+    "重定向到内网"留缝)。此前这条 feed 路径直接 follow_redirects=True 裸抓,绕过了全仓其余
+    地方都在守的 SSRF 闸——本地优先产品尤其:安全是地基,一处旁路即全线失守。"""
     import re
+    from urllib.parse import urljoin
+
+    from karvyloop.coding.tools.urlguard import SsrfBlocked, check_url
     try:
         import httpx
-        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout,
+    except Exception:
+        return ""
+    try:
+        check_url(url)   # 首个 URL 先过 SSRF 闸
+    except SsrfBlocked as e:
+        logger.warning(f"[distill] SSRF 拦截,拒抓 {url}: {e}")
+        return ""
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout,   # 自己跟,才能逐跳校验
                                      headers={"User-Agent": "Mozilla/5.0 KarvyLoop"}) as c:
-            r = await c.get(url)
-            r.raise_for_status()
-            txt = r.text
+            cur = url
+            txt = ""
+            for _hop in range(6):   # 上限 5 次重定向(同 web._http_get)
+                r = await c.get(cur)
+                if r.is_redirect and r.headers.get("location"):
+                    nxt = str(r.next_request.url) if r.next_request else \
+                        urljoin(cur, r.headers["location"])
+                    try:
+                        check_url(nxt)   # 重定向目标同样过闸(挡 redirect→内网)
+                    except SsrfBlocked as e:
+                        logger.warning(f"[distill] SSRF 拦截(重定向),拒抓 {nxt}: {e}")
+                        return ""
+                    cur = nxt
+                    continue
+                r.raise_for_status()
+                txt = r.text
+                break
+            else:
+                logger.warning(f"[distill] 重定向次数过多,放弃 {url}")
+                return ""
         txt = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", txt)
         txt = re.sub(r"(?is)<[^>]+>", " ", txt)
         txt = re.sub(r"&[a-z]+;", " ", txt)
