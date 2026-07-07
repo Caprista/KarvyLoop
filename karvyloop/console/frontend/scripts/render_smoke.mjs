@@ -13,6 +13,17 @@ globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 // navigator 是 node 全局只读 getter(且渲染路径不用,仅复制按钮点击时用)→ 不设
 
+// 真库 highlight.js 由 index.html 的 <script> 提供 window.hljs;冒烟里注入一个记录桩,
+// 既避免拖 121KB 库进测试,又能断言渲染层**真调**了 highlightElement(只加 hljs class,
+// 桩绝不注入脚本 → 和真库一样安全)。挂在 IIFE 之前,渲染时 _hljs() 就取得到。
+const _hljsCalls = [];
+dom.window.hljs = {
+  highlightElement: (elArg) => {
+    _hljsCalls.push((elArg.tagName || "") + "." + (elArg.className || ""));
+    elArg.classList.add("hljs");
+  },
+};
+
 const here = dirname(fileURLToPath(import.meta.url));
 const code = readFileSync(resolve(here, "../../static/render.js"), "utf8");
 (0, eval)(code); // 运行 IIFE → 设 window.KarvyRender
@@ -43,4 +54,24 @@ R.renderEvents(c2, [{ type: "text", text: "just chat" }]);
 assert.ok(!c2.querySelector(".process-fold"), "纯对话不该有过程折叠");
 assert.ok(c2.querySelector(".chat-md"), "纯对话应直接渲染 markdown");
 
-console.log("✓ render smoke OK — markdown + DOMPurify 消毒 + 事件分派 行为正确");
+// 4) 代码块语法高亮:围栏代码 → <pre><code>,渲染层在**消毒后**真调 highlightElement;
+//    并把代码块包进带复制按钮的 code-wrap;代码里的 <script> 仍被 DOMPurify 剥掉(XSS 不出)。
+const c3 = dom.window.document.createElement("div");
+R.appendMarkdown(c3, "```python\nprint('hi')\n<script>alert(1)</script>\n```");
+assert.ok(c3.querySelector("pre code"), "围栏代码应渲染成 <pre><code>");
+assert.ok(_hljsCalls.some((s) => s.startsWith("CODE")), "代码块应真调 hljs.highlightElement");
+assert.ok(c3.querySelector("pre code.hljs"), "高亮后代码块应带 hljs class");
+assert.ok(c3.querySelector(".code-wrap") && c3.querySelector(".copy-btn"), "代码块应包进带复制按钮的 code-wrap");
+assert.ok(!c3.innerHTML.toLowerCase().includes("<script"), "代码块内 <script> 仍须被 DOMPurify 剥掉");
+
+// 5) thinking(推理块)→ 默认折叠的 <details.thinking-card>(与正文视觉分离);
+//    thinking 文本走同一消毒管线,<script> 不出。
+const c4 = dom.window.document.createElement("div");
+R.renderEvent(c4, { type: "thinking", text: "let me reason <script>alert(2)</script>" });
+const det = c4.querySelector("details.thinking-card");
+assert.ok(det, "thinking 事件应渲染成 details.thinking-card");
+assert.ok(det.querySelector("summary"), "thinking 卡应有 summary(可点开)");
+assert.ok(!det.hasAttribute("open"), "thinking 卡默认应折叠(无 open 属性)");
+assert.ok(!c4.innerHTML.toLowerCase().includes("<script"), "thinking 文本内 <script> 仍须被剥掉");
+
+console.log("✓ render smoke OK — markdown + DOMPurify 消毒 + 事件分派 + 代码高亮 + thinking 折叠 行为正确");
