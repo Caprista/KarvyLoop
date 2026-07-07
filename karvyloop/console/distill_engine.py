@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 
+from karvyloop.llm.token_ledger import token_source
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,10 +57,11 @@ async def _distill_analyze(gw, model_ref, content, user_ctx="") -> str:
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
-        async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
-                                    system=SystemPrompt(static=[_DISTILL_FRAMEWORK])):
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        with token_source("knowledge_distill"):   # 知识馆员分析:此前无标 → 记 unknown(P0-9 覆盖缺口)
+            async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
+                                        system=SystemPrompt(static=[_DISTILL_FRAMEWORK])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
     except Exception as e:
         logger.warning(f"[distill] 分析失败: {e}")
     return out.strip() or "(分析失败,稍后重试)"
@@ -77,10 +80,11 @@ async def _distill_chat_reply(gw, model_ref, session, message) -> str:
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
-        async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
-                                    system=SystemPrompt(static=[sysp])):
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        with token_source("knowledge_distill"):   # 知识馆员交流:同上(P0-9)
+            async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
+                                        system=SystemPrompt(static=[sysp])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
     except Exception as e:
         logger.warning(f"[distill] 交流失败: {e}")
     return out.strip() or "(没接上,再说一次?)"

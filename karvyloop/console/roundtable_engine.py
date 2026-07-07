@@ -238,10 +238,11 @@ async def _host_moderate_call(gw, model_ref, topic, transcript, *, final):
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
-        async for ev in gw.complete([{"role": "user", "content": f"主题:{topic}\n\n讨论:\n{convo}"}],
-                                    [], ref, system=SystemPrompt(static=[sysp])):
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        with _token_src("roundtable"):   # 主持人调用(P0-9:此前无标;成员发言另走 forge 标不动)
+            async for ev in gw.complete([{"role": "user", "content": f"主题:{topic}\n\n讨论:\n{convo}"}],
+                                        [], ref, system=SystemPrompt(static=[sysp])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
     except Exception:
         out = ""
     if final:
@@ -261,10 +262,11 @@ async def _roundtable_clarify_opening(gw, model_ref, topic, member_names) -> str
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
-        async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
-                                    system=SystemPrompt(static=[sysp])):
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        with _token_src("roundtable"):   # P0-9
+            async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
+                                        system=SystemPrompt(static=[sysp])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
     except Exception as e:
         logger.warning(f"[roundtable] 对齐开场失败: {e}")
     return out.strip() or (f"我们先对齐一下「{topic}」:你最想分析的核心是什么?期望的产出/目标是?"
@@ -281,10 +283,11 @@ async def _roundtable_goal_summary(gw, model_ref, topic, align_text) -> str:
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
-        async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
-                                    system=SystemPrompt(static=[sysp])):
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        with _token_src("roundtable"):   # P0-9
+            async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
+                                        system=SystemPrompt(static=[sysp])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
     except Exception as e:
         logger.warning(f"[roundtable] 目标收敛失败: {e}")
     return out.strip() or topic
@@ -321,10 +324,11 @@ async def _roundtable_clarify_turn(gw, model_ref, topic, align_history, user_msg
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
-        async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
-                                    system=SystemPrompt(static=[sysp])):
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        with _token_src("roundtable"):   # P0-9
+            async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
+                                        system=SystemPrompt(static=[sysp])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
     except Exception as e:
         logger.warning(f"[roundtable] 对齐轮失败: {e}")
     text = out.strip()

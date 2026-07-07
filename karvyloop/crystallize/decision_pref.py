@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from karvyloop.llm.token_ledger import token_source
 from karvyloop.schemas.cognition import Belief
 
 # Belief.provenance.source 标记(召回时据此筛出决策偏好,与普通事实/偏好区分)
@@ -261,12 +262,13 @@ async def compile_decisions(samples: list[DecisionSample], *, gateway: Any,
     from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板(批量决策多时防爆)
     out = ""
-    async for ev in gateway.complete(
-        [{"role": "user", "content": material}], [], ref,
-        system=SystemPrompt(static=[DECISION_PREF_SYSTEM]),
-    ):
-        if type(ev).__name__ == "TextDelta":
-            out += getattr(ev, "text", "")
+    with token_source("decision_pref"):   # 决策偏好抽取(楔子进料口):此前无标 → 记 unknown(P0-9)
+        async for ev in gateway.complete(
+            [{"role": "user", "content": material}], [], ref,
+            system=SystemPrompt(static=[DECISION_PREF_SYSTEM]),
+        ):
+            if type(ev).__name__ == "TextDelta":
+                out += getattr(ev, "text", "")
     return parse_decision_prefs(out)
 
 
@@ -480,12 +482,13 @@ async def reconcile_decisions(samples: list[DecisionSample], *, existing: list[s
     from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板
     out = ""
-    async for ev in gateway.complete(
-        [{"role": "user", "content": material}], [], ref,
-        system=SystemPrompt(static=[system]),
-    ):
-        if type(ev).__name__ == "TextDelta":
-            out += getattr(ev, "text", "")
+    with token_source("decision_pref"):   # 矛盾调和(同抽取,楔子进料口):P0-9
+        async for ev in gateway.complete(
+            [{"role": "user", "content": material}], [], ref,
+            system=SystemPrompt(static=[system]),
+        ):
+            if type(ev).__name__ == "TextDelta":
+                out += getattr(ev, "text", "")
     return parse_reconcile(out)
 
 
