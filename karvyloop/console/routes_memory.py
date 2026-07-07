@@ -437,7 +437,13 @@ async def maybe_auto_distill(app: Any, mgr: Any) -> Optional[dict]:
             try:
                 from karvyloop.console.decision_wire import crystallize_candidates
                 # 聊天来源 = 私聊小卡 → 全局(ctx 空);走双关门(显式 1 次/隐式跨批复现)。
-                await crystallize_candidates(app, decisions)
+                # 回执(Q3 真机压测逮到的缺口):你聊天里亲口说的偏好也要带 STATE 证据
+                # (何时/哪次会话),否则偏好面板"来自你的拍板"对聊天源永远是空——
+                # 与 onboarding_intake / H2A 卡路径同形,gist 不复述内容(批级共享,内容在卡上)。
+                import time as _t
+                ev = [{"ts": _t.time(), "decision": "STATE",
+                       "gist": f"对话中明确陈述(conv {conv.id[:8]})"}]
+                await crystallize_candidates(app, decisions, evidence=ev)
             except Exception as e:
                 logger.debug(f"[auto_distill] 决策偏好结晶失败(不影响蒸馏): {e}")
         return {"written": res.written}

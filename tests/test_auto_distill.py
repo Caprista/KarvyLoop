@@ -364,3 +364,27 @@ def test_schedule_no_running_loop_graceful():
     app = types.SimpleNamespace(state=types.SimpleNamespace(memory=None))
     schedule_auto_distill(app, _mgr(None))               # 不抛
     assert not hasattr(app.state, "_distill_tasks") or len(app.state._distill_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_maybe_auto_distill_passes_state_evidence(monkeypatch):
+    # Q3 真机压测逮到的缺口:聊天显式陈述结晶时必须带 STATE 回执(何时/哪次会话),
+    # 否则偏好面板"来自你的拍板"对聊天源永远空 —— 与 onboarding/H2A 卡路径同形。
+    from karvyloop.console import decision_wire
+    from karvyloop.console.routes import maybe_auto_distill
+    seen: dict = {}
+
+    async def _capture(app, candidates, **kw):
+        seen["candidates"] = candidates
+        seen["evidence"] = kw.get("evidence")
+        return (1, 0)
+
+    monkeypatch.setattr(decision_wire, "crystallize_candidates", _capture)
+    gw = FakeGW('{"facts":[],"decisions":[{"content":"对外邮件先过目","kind":"style","explicit":true}]}')
+    conv = _conv("cafe1234deadbeef", [_Turn("u0", "a0")])
+    res = await maybe_auto_distill(_app(FakeMem(), gw), _mgr(conv))
+    assert res is not None
+    ev = seen["evidence"]
+    assert ev and ev[0]["decision"] == "STATE"           # 你亲口说的 → STATE 回执
+    assert "cafe1234" in ev[0]["gist"]                   # 带会话短 id,可核回哪次对话
+    assert isinstance(ev[0]["ts"], float) and ev[0]["ts"] > 0
