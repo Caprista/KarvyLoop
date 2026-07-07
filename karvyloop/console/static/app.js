@@ -22,6 +22,7 @@
 
   let ws = null;
   let wsReconnectDelay = 1000;
+  let _wsEverConnected = false;   // 断线恢复:区分首连(启动已拉过历史)vs 重连(要补拉)
 
   function connectWS() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -30,6 +31,14 @@
     ws.onopen = () => {
       console.log("[ws] connected");
       wsReconnectDelay = 1000;
+      // 断线恢复:重连时补拉 chat_history —— 断线窗口里 drive 在服务端照跑完(worker 线程,
+      // 不系在这条 WS 上),完成的回合已落 chat_history(带结构化 events),但那条 drive_done
+      // 广播给的是**当时在线**的 socket,断开的这个错过了。renderChatHistory 从权威持久历史整段
+      // 重建(幂等),把断线期间跑完的回合补回来 —— 灭「怎么样了?」反模式的断线死角。
+      // 逐字草稿是纯装饰(终态以 chat_history/drive_done 为准),丢了无所谓,不需重放增量。
+      // 首连不重复拉(启动 init 已 pollChatHistory 一次);仅重连补。
+      if (_wsEverConnected) { pollChatHistory(); }
+      _wsEverConnected = true;
     };
     ws.onmessage = (ev) => {
       try {

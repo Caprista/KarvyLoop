@@ -14,8 +14,13 @@ import markdownit from "markdown-it";
 import DOMPurify from "dompurify";
 
 // ---- render-event 形状(原来是 duck-typed any;迁移顺手补类型,捕获字段拼写错)----
+// id / tool_use_id 是**稳定配对锚点**:后端 render_events.py 给每个 tool_call 带 `id`、
+// 每个 tool_result 带对应的 `tool_use_id`(源自模型的 tool_use_id,LLM 协议级稳定)。
+// 归组不靠数组顺序(刷新/分页/chat_history 重建后顺序可乱)——靠 id↔tool_use_id 显式匹配。
 interface RenderEvent {
   type: "text" | "thinking" | "tool_call" | "tool_result" | "terminal";
+  id?: string;            // tool_call 的稳定 id(配对锚点)
+  tool_use_id?: string;   // tool_result 指回它所属 tool_call 的 id
   text?: string;
   name?: string;
   input?: unknown;
@@ -93,6 +98,72 @@ function _el(tag: string, cls?: string): HTMLElement {
   const e = document.createElement(tag); if (cls) e.className = cls; return e;
 }
 
+// ---- 编辑类工具的 diff 视图(edit_file:tool_call.input 已带 old_string/new_string,
+//      前端本来就拿得到 → 不用执行器改就能渲增删行 diff;write_file 只有"改后"无"改前",
+//      渲不成真 diff,退化成写入摘要,不硬造)----
+
+// 最小 LCS 行 diff(通用文本算法,非"重造 markdown/消毒"那种深水区 → 自造不违"通用基建必借")。
+// 返回 {op,text} 行序列:op ∈ "="(未变)/"-"(删)/"+"(增)。O(n*m) 表,行数封顶防大文件卡 UI。
+type DiffLine = { op: "=" | "-" | "+"; text: string };
+const _DIFF_MAX_LINES = 400;   // 每侧行数上限;超了不算 LCS(退化成整块删+整块增),防 O(n*m) 撑爆
+function _lineDiff(before: string, after: string): DiffLine[] {
+  const a = (before || "").split("\n");
+  const b = (after || "").split("\n");
+  // 超大文件:不跑 LCS(会卡),直接整块替换(仍是可读 diff,只是不对齐)
+  if (a.length > _DIFF_MAX_LINES || b.length > _DIFF_MAX_LINES) {
+    return [...a.map((t): DiffLine => ({ op: "-", text: t })),
+            ...b.map((t): DiffLine => ({ op: "+", text: t }))];
+  }
+  const n = a.length, m = b.length;
+  // dp[i][j] = LCS(a[i:], b[j:]) 长度
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out: DiffLine[] = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { out.push({ op: "=", text: a[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ op: "-", text: a[i] }); i++; }
+    else { out.push({ op: "+", text: b[j] }); j++; }
+  }
+  while (i < n) { out.push({ op: "-", text: a[i] }); i++; }
+  while (j < m) { out.push({ op: "+", text: b[j] }); j++; }
+  return out;
+}
+
+// 从 tool_call.input 抽取可渲 diff 的编辑意图(before/after)。
+// edit_file:old_string→new_string 是真 before/after(局部替换,渲这段就够);
+// 其它工具(write_file 无"改前" / 非编辑工具)→ null(不渲 diff)。
+function _editDiffSignal(name: string, input: unknown): { before: string; after: string } | null {
+  if (name !== "edit_file" || !input || typeof input !== "object") return null;
+  const obj = input as Record<string, unknown>;
+  const before = obj.old_string, after = obj.new_string;
+  if (typeof before !== "string" || typeof after !== "string") return null;
+  if (before === after) return null;   // 无变化不渲 diff
+  return { before, after };
+}
+
+// 渲染 diff 行进容器:每行走 textContent(**绝不 innerHTML** → 文件内容里的 <script>/HTML 不执行,
+// XSS 天然不出),只靠 CSS class 着色(增绿删红)。等价于"消毒后再着色":textContent 即最强消毒。
+function _renderDiff(container: HTMLElement, before: string, after: string): void {
+  const lines = _lineDiff(before, after);
+  const block = _el("pre", "tool-diff");
+  for (const ln of lines) {
+    const row = _el("div", "diff-line diff-" + (ln.op === "=" ? "ctx" : ln.op === "-" ? "del" : "add"));
+    const gutter = _el("span", "diff-gutter");
+    gutter.textContent = ln.op === "=" ? " " : ln.op;   // +/-/(空)
+    const body = _el("span", "diff-text");
+    body.textContent = ln.text;                          // 纯文本 → XSS 不出
+    row.appendChild(gutter); row.appendChild(body);
+    block.appendChild(row);
+  }
+  container.appendChild(block);
+  _wrapWithCopy(block);   // 复制走的是 innerText(渲染后的可见文本),仍安全
+}
+
 // 复制按钮(代码/指令框右上角)。LAN(非 https/localhost)下 navigator.clipboard 可能不可用 →
 // execCommand 兜底,保证局域网真机也能复制。
 function _fallbackCopy(txt: string): void {
@@ -156,10 +227,16 @@ function renderEvent(container: HTMLElement, ev: RenderEvent): void {
     const sum = _el("summary", "tool-card-head");
     sum.textContent = toolIcon(ev.name || "") + " " + (ev.name || "tool") + "  " + _truncate(_inputSummary(ev.input), 80);
     card.appendChild(sum);
-    const body = _el("pre", "tool-card-body");
-    try { body.textContent = JSON.stringify(ev.input, null, 2); } catch { body.textContent = String(ev.input); }
-    card.appendChild(body);
-    _wrapWithCopy(body);   // 指令/输入框加复制按钮
+    // 编辑类工具(edit_file)→ 渲增删行 diff(比整块 JSON 输入更好读);其余 → JSON 输入。
+    const _sig = _editDiffSignal(ev.name || "", ev.input);
+    if (_sig) {
+      _renderDiff(card, _sig.before, _sig.after);
+    } else {
+      const body = _el("pre", "tool-card-body");
+      try { body.textContent = JSON.stringify(ev.input, null, 2); } catch { body.textContent = String(ev.input); }
+      card.appendChild(body);
+      _wrapWithCopy(body);   // 指令/输入框加复制按钮
+    }
     container.appendChild(card);
   } else if (ev.type === "tool_result") {
     const det = _el("details", "tool-result" + (ev.is_error ? " tool-result-error" : ""));
@@ -178,6 +255,41 @@ function renderEvent(container: HTMLElement, ev: RenderEvent): void {
     const st = _el("div", "terminal-status" + (ev.ok ? "" : " terminal-error"));
     st.textContent = (ev.ok ? "✓ " : "✗ ") + (ev.reason || "");
     container.appendChild(st);
+  }
+}
+
+// 过程区渲染:把每个 tool_call 与它的 tool_result 按**稳定锚点**(tool_call.id ↔ tool_result.tool_use_id)
+// 配对成一个 .tool-group 单元 —— 归组不靠数组顺序(chat_history 重建 / 分页 / 流式补齐后顺序可扰动),
+// 靠 id 显式匹配,call↔return 永远同组、可重建。缺 id 的(老数据 / 顺序保真足够的场景)退回按
+// **紧邻的下一条 tool_result** 配对(与旧顺序语义一致,0 回归);配不上的孤儿 result 独立渲染。
+function _renderProcessGrouped(inner: HTMLElement, processEvents: RenderEvent[]): void {
+  // 先建 id → tool_result 索引(带 id 的走稳定配对)
+  const resById: Record<string, RenderEvent> = {};
+  for (const e of processEvents) {
+    if (e.type === "tool_result" && e.tool_use_id) resById[e.tool_use_id] = e;
+  }
+  const consumed = new Set<RenderEvent>();   // 已被某 tool_call 组吸收的 result,不再独立渲染
+  for (let i = 0; i < processEvents.length; i++) {
+    const ev = processEvents[i];
+    if (ev.type === "tool_result" && consumed.has(ev)) continue;   // 已归组,跳过
+    if (ev.type === "tool_call") {
+      // 配对:优先稳定 id;缺 id 退回"紧邻下一条未消费 result"(旧顺序语义)
+      let res: RenderEvent | null = (ev.id && resById[ev.id]) || null;
+      if (!res) {
+        for (let j = i + 1; j < processEvents.length; j++) {
+          const cand = processEvents[j];
+          if (cand.type === "tool_call") break;   // 撞到下一个 call → 本 call 无紧邻 result
+          if (cand.type === "tool_result" && !cand.tool_use_id && !consumed.has(cand)) { res = cand; break; }
+        }
+      }
+      const group = _el("div", "tool-group");
+      if (ev.id) group.setAttribute("data-tool-id", ev.id);   // 稳定锚点落 DOM(可重建/可测)
+      renderEvent(group, ev);
+      if (res) { renderEvent(group, res); consumed.add(res); }
+      inner.appendChild(group);
+    } else {
+      renderEvent(inner, ev);   // text / thinking / terminal / 孤儿 result → 原样
+    }
   }
 }
 
@@ -205,7 +317,7 @@ function renderEvents(container: HTMLElement, events: RenderEvent[]): void {
     head.textContent = T ? T.t("render.process", { n: steps }) : ("过程(" + steps + " 步)");
     fold.appendChild(head);
     const inner = _el("div", "process-fold-body");
-    processEvents.forEach((ev) => renderEvent(inner, ev));
+    _renderProcessGrouped(inner, processEvents);   // 稳定锚点配对 call↔return
     fold.appendChild(inner);
     container.appendChild(fold);
   }

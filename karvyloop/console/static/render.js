@@ -6781,6 +6781,72 @@ var KarvyRenderBundle = (function(exports) {
     if (cls) e.className = cls;
     return e;
   }
+  const _DIFF_MAX_LINES = 400;
+  function _lineDiff(before, after) {
+    const a = (before || "").split("\n");
+    const b = (after || "").split("\n");
+    if (a.length > _DIFF_MAX_LINES || b.length > _DIFF_MAX_LINES) {
+      return [
+        ...a.map((t) => ({ op: "-", text: t })),
+        ...b.map((t) => ({ op: "+", text: t }))
+      ];
+    }
+    const n = a.length, m = b.length;
+    const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i2 = n - 1; i2 >= 0; i2--) {
+      for (let j2 = m - 1; j2 >= 0; j2--) {
+        dp[i2][j2] = a[i2] === b[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
+      }
+    }
+    const out = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) {
+        out.push({ op: "=", text: a[i] });
+        i++;
+        j++;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+        out.push({ op: "-", text: a[i] });
+        i++;
+      } else {
+        out.push({ op: "+", text: b[j] });
+        j++;
+      }
+    }
+    while (i < n) {
+      out.push({ op: "-", text: a[i] });
+      i++;
+    }
+    while (j < m) {
+      out.push({ op: "+", text: b[j] });
+      j++;
+    }
+    return out;
+  }
+  function _editDiffSignal(name, input) {
+    if (name !== "edit_file" || !input || typeof input !== "object") return null;
+    const obj = input;
+    const before = obj.old_string, after = obj.new_string;
+    if (typeof before !== "string" || typeof after !== "string") return null;
+    if (before === after) return null;
+    return { before, after };
+  }
+  function _renderDiff(container, before, after) {
+    const lines = _lineDiff(before, after);
+    const block2 = _el("pre", "tool-diff");
+    for (const ln of lines) {
+      const row = _el("div", "diff-line diff-" + (ln.op === "=" ? "ctx" : ln.op === "-" ? "del" : "add"));
+      const gutter = _el("span", "diff-gutter");
+      gutter.textContent = ln.op === "=" ? " " : ln.op;
+      const body = _el("span", "diff-text");
+      body.textContent = ln.text;
+      row.appendChild(gutter);
+      row.appendChild(body);
+      block2.appendChild(row);
+    }
+    container.appendChild(block2);
+    _wrapWithCopy(block2);
+  }
   function _fallbackCopy(txt) {
     try {
       const ta = document.createElement("textarea");
@@ -6855,14 +6921,19 @@ var KarvyRenderBundle = (function(exports) {
       const sum = _el("summary", "tool-card-head");
       sum.textContent = toolIcon(ev.name || "") + " " + (ev.name || "tool") + "  " + _truncate(_inputSummary(ev.input), 80);
       card.appendChild(sum);
-      const body = _el("pre", "tool-card-body");
-      try {
-        body.textContent = JSON.stringify(ev.input, null, 2);
-      } catch {
-        body.textContent = String(ev.input);
+      const _sig = _editDiffSignal(ev.name || "", ev.input);
+      if (_sig) {
+        _renderDiff(card, _sig.before, _sig.after);
+      } else {
+        const body = _el("pre", "tool-card-body");
+        try {
+          body.textContent = JSON.stringify(ev.input, null, 2);
+        } catch {
+          body.textContent = String(ev.input);
+        }
+        card.appendChild(body);
+        _wrapWithCopy(body);
       }
-      card.appendChild(body);
-      _wrapWithCopy(body);
       container.appendChild(card);
     } else if (ev.type === "tool_result") {
       const det = _el("details", "tool-result" + (ev.is_error ? " tool-result-error" : ""));
@@ -6881,6 +6952,40 @@ var KarvyRenderBundle = (function(exports) {
       const st = _el("div", "terminal-status" + (ev.ok ? "" : " terminal-error"));
       st.textContent = (ev.ok ? "✓ " : "✗ ") + (ev.reason || "");
       container.appendChild(st);
+    }
+  }
+  function _renderProcessGrouped(inner, processEvents) {
+    const resById = {};
+    for (const e of processEvents) {
+      if (e.type === "tool_result" && e.tool_use_id) resById[e.tool_use_id] = e;
+    }
+    const consumed = /* @__PURE__ */ new Set();
+    for (let i = 0; i < processEvents.length; i++) {
+      const ev = processEvents[i];
+      if (ev.type === "tool_result" && consumed.has(ev)) continue;
+      if (ev.type === "tool_call") {
+        let res = ev.id && resById[ev.id] || null;
+        if (!res) {
+          for (let j = i + 1; j < processEvents.length; j++) {
+            const cand = processEvents[j];
+            if (cand.type === "tool_call") break;
+            if (cand.type === "tool_result" && !cand.tool_use_id && !consumed.has(cand)) {
+              res = cand;
+              break;
+            }
+          }
+        }
+        const group = _el("div", "tool-group");
+        if (ev.id) group.setAttribute("data-tool-id", ev.id);
+        renderEvent(group, ev);
+        if (res) {
+          renderEvent(group, res);
+          consumed.add(res);
+        }
+        inner.appendChild(group);
+      } else {
+        renderEvent(inner, ev);
+      }
     }
   }
   function renderEvents(container, events) {
@@ -6911,7 +7016,7 @@ var KarvyRenderBundle = (function(exports) {
       head.textContent = T ? T.t("render.process", { n: steps }) : "过程(" + steps + " 步)";
       fold.appendChild(head);
       const inner = _el("div", "process-fold-body");
-      processEvents.forEach((ev) => renderEvent(inner, ev));
+      _renderProcessGrouped(inner, processEvents);
       fold.appendChild(inner);
       container.appendChild(fold);
     }

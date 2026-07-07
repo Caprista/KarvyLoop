@@ -74,4 +74,69 @@ assert.ok(det.querySelector("summary"), "thinking 卡应有 summary(可点开)")
 assert.ok(!det.hasAttribute("open"), "thinking 卡默认应折叠(无 open 属性)");
 assert.ok(!c4.innerHTML.toLowerCase().includes("<script"), "thinking 文本内 <script> 仍须被剥掉");
 
-console.log("✓ render smoke OK — markdown + DOMPurify 消毒 + 事件分派 + 代码高亮 + thinking 折叠 行为正确");
+// 6) 稳定锚点配对(工具轨迹 triggerMessageId):tool_call.id ↔ tool_result.tool_use_id 归组,
+//    **不靠数组顺序** —— 即便事件顺序被扰动(chat_history 重建 / 分页 / 流式补齐),配对仍正确。
+//    构造:两个 call,result 顺序**故意反过来**(r2 在 r1 前),验证仍按 id 各归各组。
+const c5 = dom.window.document.createElement("div");
+R.renderEvents(c5, [
+  { type: "tool_call", id: "call_A", name: "read_file", input: { path: "a.py" } },
+  { type: "tool_call", id: "call_B", name: "read_file", input: { path: "b.py" } },
+  { type: "tool_result", tool_use_id: "call_B", output: "B-content" },  // 顺序反了(B 先)
+  { type: "tool_result", tool_use_id: "call_A", output: "A-content" },
+  { type: "text", text: "done" },
+]);
+const groups = c5.querySelectorAll(".tool-group");
+assert.equal(groups.length, 2, "两个 tool_call 应各成一个 .tool-group");
+// 组 A(data-tool-id=call_A)里的 result 必须是 A-content,不能被顺序在前的 B 抢走
+const gA = c5.querySelector('.tool-group[data-tool-id="call_A"]');
+const gB = c5.querySelector('.tool-group[data-tool-id="call_B"]');
+assert.ok(gA && gB, "两组都应带稳定锚点 data-tool-id");
+assert.ok(gA.querySelector(".tool-result-body").textContent.includes("A-content"),
+  "call_A 组必须配到 A 的结果(按 id 配对,不被乱序骗)");
+assert.ok(gB.querySelector(".tool-result-body").textContent.includes("B-content"),
+  "call_B 组必须配到 B 的结果");
+
+// 6b) 缺 id 的老数据 → 退回"紧邻下一条 result"配对(0 回归,仍成组)
+const c5b = dom.window.document.createElement("div");
+R.renderEvents(c5b, [
+  { type: "tool_call", name: "read_file", input: { path: "x" } },
+  { type: "tool_result", output: "x-out" },
+  { type: "text", text: "ok" },
+]);
+const gLegacy = c5b.querySelector(".tool-group");
+assert.ok(gLegacy && gLegacy.querySelector(".tool-card") && gLegacy.querySelector(".tool-result"),
+  "无 id 老数据:tool_call + 紧邻 result 仍归同组(顺序兜底)");
+
+// 7) 编辑类工具 diff 视图:edit_file 的 tool_call(input.old_string/new_string)→ 增删行着色 diff;
+//    diff 走 textContent(纯文本)→ 文件内容里的 <script> 不执行(XSS 剥);增行绿、删行红。
+const c6 = dom.window.document.createElement("div");
+R.renderEvent(c6, {
+  type: "tool_call", id: "e1", name: "edit_file",
+  input: {
+    file_path: "app.py",
+    old_string: "line1\nOLD\n<script>alert(3)</script>\nline3",
+    new_string: "line1\nNEW\n<script>alert(3)</script>\nline3",
+  },
+});
+const diff = c6.querySelector(".tool-diff");
+assert.ok(diff, "edit_file 应渲染成 .tool-diff(而非整块 JSON 输入)");
+assert.ok(c6.querySelector(".diff-del"), "diff 应有删行(.diff-del)");
+assert.ok(c6.querySelector(".diff-add"), "diff 应有增行(.diff-add)");
+// 删行含 OLD,增行含 NEW;未变行(line1/line3/含 script 那行)= 上下文
+const delText = Array.from(c6.querySelectorAll(".diff-del .diff-text")).map((e) => e.textContent).join("|");
+const addText = Array.from(c6.querySelectorAll(".diff-add .diff-text")).map((e) => e.textContent).join("|");
+assert.ok(delText.includes("OLD") && !delText.includes("NEW"), "删行应是旧内容(OLD)");
+assert.ok(addText.includes("NEW") && !addText.includes("OLD"), "增行应是新内容(NEW)");
+assert.ok(!c6.innerHTML.toLowerCase().includes("<script"),
+  "diff 里文件内容的 <script> 必须不作为标签存在(textContent 天然剥 XSS)");
+// 含 <script> 的那行两侧相同 → 应是**上下文行**(diff-ctx),不该被当增删
+assert.ok(c6.querySelector(".diff-ctx"), "相同行应作为上下文行(.diff-ctx)");
+
+// 7b) write_file(只有'改后'、无'改前')→ 不渲 diff,退回 JSON 输入卡(不硬造 diff)
+const c6b = dom.window.document.createElement("div");
+R.renderEvent(c6b, { type: "tool_call", id: "w1", name: "write_file",
+  input: { file_path: "new.py", content: "hello" } });
+assert.ok(!c6b.querySelector(".tool-diff"), "write_file 无'改前'不该渲 diff");
+assert.ok(c6b.querySelector(".tool-card-body"), "write_file 应退回 JSON 输入卡");
+
+console.log("✓ render smoke OK — markdown + 消毒 + 事件分派 + 高亮 + thinking + 稳定锚点配对 + 编辑 diff 行为正确");

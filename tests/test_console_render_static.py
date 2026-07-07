@@ -62,6 +62,53 @@ def test_render_ts_uses_md_and_sanitize():
         assert t in ts, f"render.ts 未处理事件类型 {t}"
 
 
+# ---- 渲染层三件(dev-report):稳定锚点配对 / 编辑 diff / 断线恢复 ----
+
+def test_render_ts_pairs_tools_by_stable_anchor():
+    """工具轨迹稳定锚点:tool_call.id ↔ tool_result.tool_use_id 显式配对归组,
+    不靠数组顺序(chat_history 重建/分页/流式补齐后顺序可扰动)。"""
+    ts = (FRONTEND / "src" / "render.ts").read_text(encoding="utf-8")
+    # RenderEvent 形状带配对锚点字段
+    assert "tool_use_id" in ts and "id?" in ts, "render.ts 未在事件形状里带稳定锚点 id/tool_use_id"
+    # 有按 id 建索引的分组函数,且把锚点落进 DOM(data-tool-id)供重建/测试
+    assert "_renderProcessGrouped" in ts, "render.ts 缺按稳定锚点分组的过程渲染函数"
+    assert "data-tool-id" in ts, "配对锚点应落进 DOM(data-tool-id)以可重建"
+    assert "resById" in ts, "应按 tool_use_id 建 result 索引做稳定配对"
+
+
+def test_render_ts_edit_diff_from_tool_call_input():
+    """编辑类工具 diff:edit_file 的 tool_call.input(old_string/new_string,前端已有)→
+    渲增删行 diff;纯 textContent 着色(XSS 天然剥);write_file 无'改前'不硬造 diff。"""
+    ts = (FRONTEND / "src" / "render.ts").read_text(encoding="utf-8")
+    assert "_lineDiff" in ts and "_renderDiff" in ts, "render.ts 缺 diff 计算/渲染函数"
+    assert "_editDiffSignal" in ts, "render.ts 缺编辑信号抽取(edit_file old_string→new_string)"
+    assert "old_string" in ts and "new_string" in ts, "diff 信号应取自 edit_file 的 old/new_string"
+    # 着色类名前缀(add/del/ctx 由 op 分支拼 "diff-"+... → 断言前缀 + 三态)
+    assert "diff-" in ts, "diff 行缺着色类前缀 diff-"
+    assert '"add"' in ts and '"del"' in ts and '"ctx"' in ts, "diff 应有增/删/上下文三态"
+    # 安全:diff 行走 textContent(不 innerHTML),文件内容里的 HTML/script 不执行
+    assert "textContent" in ts, "diff 行必须走 textContent(XSS 剥)"
+
+
+def test_render_diff_css_present():
+    """diff 视图 + 稳定锚点分组的样式落在 styles.css。"""
+    css = _read("styles.css")
+    assert ".tool-group" in css, "缺 .tool-group(配对单元)样式"
+    assert ".tool-diff" in css and ".diff-add" in css and ".diff-del" in css, "缺 diff 着色样式"
+
+
+def test_app_js_refetches_chat_history_on_reconnect():
+    """断线恢复:WS 重连时补拉 chat_history —— 断线窗口里 drive 在服务端跑完、回合已落
+    持久历史(带 events),但那条 drive_done 广播给的是当时在线的 socket,断开的错过了。
+    renderChatHistory 从权威历史整段幂等重建 → 把断线期间跑完的回合补回来(灭断线死角)。
+    重连才补(首连启动已拉过);逐字草稿是装饰,丢了以终态为准,不需重放增量。"""
+    js = _read("app.js")
+    assert "_wsEverConnected" in js, "app.js 缺重连判别(首连 vs 重连)"
+    # onopen 重连分支里补拉 chat_history
+    assert "if (_wsEverConnected) { pollChatHistory(); }" in js, \
+        "app.js 未在 WS 重连(onopen)时补拉 chat_history 做断线恢复"
+
+
 # ---- AC5: app.js 接入 ----
 def test_app_js_uses_karvyrender():
     js = _read("app.js")

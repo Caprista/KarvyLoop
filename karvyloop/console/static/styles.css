@@ -1605,6 +1605,27 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .terminal-status { font-size: 11.5px; color: var(--green); margin: 3px 0; }
 .terminal-status.terminal-error { color: var(--danger); }
 
+/* tool 调用 + 结果按稳定锚点(tool_call.id ↔ tool_result.tool_use_id)配对成一组 */
+.tool-group { margin: 5px 0; }
+.tool-group > .tool-result { margin-top: 2px; margin-left: 10px; }   /* 结果缩进,视觉归属其上的调用 */
+
+/* 编辑类工具(edit_file)diff 视图:增删行着色(纯 textContent → XSS 天然不出,只 CSS 着色)*/
+.tool-diff {
+  margin: 0; padding: 6px 0; border-top: 1px solid var(--border);
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px;
+  white-space: pre; overflow-x: auto; max-height: 340px; overflow-y: auto;
+}
+.tool-diff .diff-line { display: flex; padding: 0 9px; }
+.tool-diff .diff-gutter {
+  flex: 0 0 1.4em; text-align: center; user-select: none; color: var(--text-dim); opacity: 0.75;
+}
+.tool-diff .diff-text { white-space: pre-wrap; word-break: break-word; }
+.tool-diff .diff-add { background: rgba(31,142,128,0.14); }              /* 增行 = 绿底 */
+.tool-diff .diff-add .diff-gutter { color: var(--green); }
+.tool-diff .diff-del { background: rgba(216,82,124,0.13); }             /* 删行 = 红底 */
+.tool-diff .diff-del .diff-gutter { color: var(--danger); }
+.tool-diff .diff-ctx { color: var(--text-dim); }                        /* 未变行(上下文)*/
+
 /* === 9.5 P2:任务看板 === */
 .task-card {
   background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
