@@ -2280,7 +2280,11 @@
     const chip = el("button", {
       class: "recall-chip", type: "button",
       text: "🧠 " + t("recall.used_n", { n: used.length }),
-      onclick: () => list.classList.toggle("hidden"),
+      onclick: () => {
+        list.classList.toggle("hidden");
+        // 展开时把列表滚进视野(chip 常在聊天底部,不滚用户看不见展开了什么)
+        if (!list.classList.contains("hidden")) list.scrollIntoView({ block: "nearest" });
+      },
     });
     log.appendChild(el("div", { class: "recall-used" }, chip, list));
   }
