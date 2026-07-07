@@ -1187,14 +1187,15 @@
 
   // 2e:按 conversation_id 打开(料里追问)。后端定位真 peer;运行线给产物标题,普通线走常规标题。
   // targetTaskId(可选):料→去聊天时传入 → 渲染完滚到并高亮那一轮(不只是开对话丢你在底部)。
+  // 返回 true/false(Q2 出处回链的调用方要知道"定位到没有"以便友好提示;老调用方忽略返回值,零回归)。
   async function openConvById(convId, targetTaskId) {
     openChatModal();
     try {
       const r = await fetch("/api/line/open_by_conv", { method: "POST",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversation_id: convId }) });
-      if (!r.ok) return;
+      if (!r.ok) return false;
       const data = await r.json();
-      if (!data.ok) return;
+      if (!data.ok) return false;
       _currentRunConv = data.is_run_line ? data.conversation_id : "";
       _currentPeer = { domain_id: data.domain_id, role: data.role, agent_id: data.agent_id || "",
                        is_group: !!data.is_group };
@@ -1216,8 +1217,20 @@
       refreshPeers();
       refreshConversations();
       if (targetTaskId) _locateTurnByTask(targetTaskId);
-    } catch (e) { console.warn("[openConvById] failed", e); }
+      return true;
+    } catch (e) { console.warn("[openConvById] failed", e); return false; }
   }
+
+  // Q2 记忆出处回链:知识库面板"对话沉淀"来源可点 → 面板发 karvy:open-conversation 事件,
+  // 这里统一收口跳转(复用 openConvById 按 id 定位真 peer,跨面板零耦合)。
+  // 定位不到(会话已删 / 老数据 id 失效)→ 聊天流里友好提示,不崩不骗。
+  window.addEventListener("karvy:open-conversation", async (e) => {
+    const convId = e && e.detail && e.detail.conversation_id;
+    if (!convId) return;
+    closeMgmtModal();
+    const ok = await openConvById(String(convId));
+    if (!ok) pushChatLine("system", t("conv.locate_failed"));
+  });
 
   async function refreshPeers() {
     try {
@@ -2199,6 +2212,7 @@
       pushChatLine("system", "⚠ " + payload.error);
     } else if ((payload.events && payload.events.length) || payload.text) {
       appendAgentTurn(log, payload);
+      _appendRecallChip(log, payload.recall_used);   // Q1 召回解释:垫了哪几条记忆(空/缺=不渲染)
       if (follow) log.scrollTop = log.scrollHeight;
     }
     if (payload.crystallized && payload.skill_name) {
@@ -2236,6 +2250,39 @@
       line.appendChild(document.createTextNode(tB(entry.text || "")));
     }
     log.appendChild(line);
+  }
+
+  // ==== Q1 召回解释:回答气泡下的低调 chip(默认收起)→ 点开列出每条记忆 + 想起理由 ====
+  // 理由行按后端真中间量拼:命中词面 / 语义标签交集 / 图谱扩散 N 跳;都没有 → 诚实兜底文案。
+  function _recallWhy(r) {
+    const parts = [];
+    if (r.surface_terms && r.surface_terms.length) {
+      parts.push(t("recall.why_terms", { terms: r.surface_terms.slice(0, 5).join("、") }));
+    }
+    if (r.concept_tags && r.concept_tags.length) {
+      parts.push(t("recall.why_tags", { tags: r.concept_tags.join("、") }));
+    }
+    if (r.via_spread) parts.push(t("recall.why_spread", { hops: r.hops || 1 }));
+    if (!parts.length) parts.push(t("recall.why_related"));
+    return parts.join(" · ");
+  }
+  function _appendRecallChip(log, used) {
+    if (!used || !used.length) return;
+    const list = el("div", { class: "recall-list hidden" });
+    for (const r of used) {
+      const ts = r.provenance_ts ? new Date(r.provenance_ts * 1000).toLocaleDateString() : "";
+      list.appendChild(el("div", { class: "recall-item" },
+        el("div", { class: "recall-preview", text: r.content_preview || "" }),
+        el("div", { class: "recall-meta" },
+          el("span", { class: "recall-why", text: _recallWhy(r) }),
+          ts ? el("span", { class: "recall-ts", text: t("recall.since", { date: ts }) }) : null)));
+    }
+    const chip = el("button", {
+      class: "recall-chip", type: "button",
+      text: "🧠 " + t("recall.used_n", { n: used.length }),
+      onclick: () => list.classList.toggle("hidden"),
+    });
+    log.appendChild(el("div", { class: "recall-used" }, chip, list));
   }
 
   // brick2:消息身份。当前回复方显示名(""=小卡,本地化);drive_done 时由 payload.speaker 更新。

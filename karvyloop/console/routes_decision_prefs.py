@@ -24,9 +24,39 @@ class DecisionPrefOpRequest(BaseModel):
     new_content: str = Field(default="", max_length=2000)     # edit 用
 
 
+_EVIDENCE_LIMIT = 5    # 每条偏好最多回最近 N 条证据(payload 别爆)
+_EVIDENCE_GIST_MAX = 120   # 单条摘要截断(写入点已截 60,这里兜底防别的写入者爆长)
+
+
+def _evidence_view(raw: list) -> list[dict[str, Any]]:
+    """provenance.evidence → 用户能懂的证据明细(最近 N 条,新的在前)。
+
+    真实写入形态(decision_wire.maybe_crystallize_decisions / onboarding_intake):
+    {"ts": <float>, "decision": "ACCEPT|REJECT|DEFER|EDIT|STATE", "gist": "<理由/上下文摘要>"}。
+    兼容旧数据:早期 evidence 只存时间戳(float)→ 保留 ts,decision/gist 诚实留空(不编);
+    其余垃圾形态跳过。这是楔子的可核面:偏好不是凭空的标准,能指回你哪几次拍板。
+    """
+    out: list[dict[str, Any]] = []
+    for e in reversed(list(raw or [])[-_EVIDENCE_LIMIT:]):
+        if isinstance(e, dict):
+            try:
+                ts = float(e.get("ts", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                ts = 0.0
+            out.append({"ts": ts, "decision": str(e.get("decision", "") or ""),
+                        "gist": str(e.get("gist", "") or "")[:_EVIDENCE_GIST_MAX]})
+        elif isinstance(e, (int, float)) and not isinstance(e, bool):
+            out.append({"ts": float(e), "decision": "", "gist": ""})
+    return out
+
+
 @router.get("/decision_prefs")
 def api_decision_prefs(request: Request) -> dict[str, Any]:
-    """列你的决策偏好(可见 = 你掌舵的前提)。docs/02 §11 P1 可编辑面。"""
+    """列你的决策偏好(可见 = 你掌舵的前提)。docs/02 §11 P1 可编辑面。
+
+    每条带 evidence 明细(最近 5 次拍板:何时/拍了什么/一句摘要)—— "这条从哪学来"可核,
+    不只 evidence_n 一个数字(Q3 决策偏好证据可见)。
+    """
     mem = getattr(request.app.state, "memory", None)
     if mem is None:
         return {"prefs": []}
@@ -37,10 +67,12 @@ def api_decision_prefs(request: Request) -> dict[str, Any]:
             if not is_decision_pref(b):
                 continue
             p = b.provenance
+            ev = p.get("evidence", [])
             prefs.append({
                 "content": b.content, "kind": p.get("kind", "taste"),
                 "strength": p.get("strength", 0.0), "status": p.get("status", "provisional"),
-                "applies": p.get("applies", {}), "evidence_n": len(p.get("evidence", [])),
+                "applies": p.get("applies", {}), "evidence_n": len(ev),
+                "evidence": _evidence_view(ev),
                 "freshness_ts": b.freshness_ts,
             })
     prefs.sort(key=lambda x: x["strength"], reverse=True)

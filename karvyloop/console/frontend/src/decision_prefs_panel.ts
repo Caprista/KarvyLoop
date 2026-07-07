@@ -54,6 +54,43 @@ function _tasteHitText(s: any): string {
   return txt;
 }
 
+// 证据(Q3 决策偏好证据可见):这条偏好从你哪几次拍板学来 —— 楔子的可核面,不是凭空的标准。
+// API 每条 evidence = {ts, decision, gist}(最近 5 条,新的在前;旧数据只有 ts,decision/gist 空)。
+const _EV_DECISION_KEY: Record<string, string> = {
+  ACCEPT: "dpref.ev_accept", REJECT: "dpref.ev_reject", DEFER: "dpref.ev_defer",
+  EDIT: "dpref.ev_edit", STATE: "dpref.ev_state",
+};
+
+function _evWhen(ts: number): string {
+  if (!ts || !isFinite(ts)) return "";
+  const d = new Date(ts * 1000);
+  return (d.getMonth() + 1) + "/" + d.getDate();   // 「6/28」这样的人话日期
+}
+
+function _evidenceLine(ev: any): string {
+  const when = _evWhen(Number(ev && ev.ts) || 0);
+  const dec = (ev && ev.decision) || "";
+  const what = dec
+    ? t(_EV_DECISION_KEY[dec] || "dpref.ev_decided", { d: dec })
+    : t("dpref.ev_no_detail");   // 旧数据只存了时间戳 → 诚实说没存明细,不编
+  const gist = (ev && ev.gist) || "";
+  return (when ? when + " · " : "") + what + (gist ? " — " + gist : "");
+}
+
+function _evidencePanel(p: any): HTMLElement {
+  const panel = el("div", { class: "dpref-evidence" });
+  const items = (p && p.evidence) || [];
+  if (!items.length) {
+    // 没有证据(学到它时还没开始存回执)→ 诚实文案,不摆空列表
+    panel.appendChild(el("div", { class: "mc-meta dpref-ev-empty", text: t("dpref.ev_empty") }));
+    return panel;
+  }
+  for (const ev of items) {
+    panel.appendChild(el("div", { class: "mc-meta dpref-ev-line", text: _evidenceLine(ev) }));
+  }
+  return panel;
+}
+
 async function renderDecisionPrefs(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
   const stats = await _getJSON("/api/decision_prefs/stats");
@@ -93,11 +130,18 @@ async function renderDecisionPrefs(): Promise<void> {
         await _postJSON("/api/decision_prefs/op", { op: "revoke", content: p.content });
         await renderDecisionPrefs();
       } }));
+    // 证据展开(Q3):默认收起;点开看"这条从你哪几次拍板学来"(数据已随 /api/decision_prefs 到手,零额外请求)
+    const evPanel = _evidencePanel(p);
+    evPanel.classList.add("hidden");
+    const evToggle = el("button", { class: "mgmt-inline-link dpref-ev-toggle",
+      text: t("dpref.ev_btn", { n: p.evidence_n || 0 }),
+      onclick: () => { evPanel.classList.toggle("hidden"); } });
     list.appendChild(el("div", { class: "mgmt-card dpref-card" },
       el("div", { class: "mc-main" },
         el("div", { class: "mc-name" }, el("span", { class: "dpref-kind", text: kindLbl }), " ", statusBadge),
         el("div", { class: "mc-meta dpref-content", text: p.content }),
-        el("div", { class: "mc-meta dpref-strength", text: t("dpref.strength", { pct: Math.round((p.strength || 0) * 100) }) })),
+        el("div", { class: "mc-meta dpref-strength", text: t("dpref.strength", { pct: Math.round((p.strength || 0) * 100) }) }),
+        evToggle, evPanel),
       actions));
   }
   body.appendChild(list);

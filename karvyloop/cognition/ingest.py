@@ -179,6 +179,7 @@ async def ingest_material(
     system: str = INGEST_SYSTEM,       # 抽取口径:默认关于用户;KNOWLEDGE_SYSTEM=通用知识
     provisional: bool = False,         # auto 蒸(无人审)标 True:低置信,不与人审沉淀同权
     trace: Any = None,                 # Trace 底座(可选):标签词表事件/自动合并审计落这里
+    conversation_id: str = "",         # Q2 出处回链:source=conversation 时产生它的 Conversation.id
 ) -> IngestResult:
     """摄入一段材料 → 编译成结构化 Belief → 写进长期记忆(provenance/freshness/去重在 write 里)。
 
@@ -208,6 +209,10 @@ async def ingest_material(
                 "trace_ref": trace_ref, "kind": f.get("kind", "fact"),
                 "title": (f.get("title") or "").strip(),   # 短标题:图谱节点/列表可读
                 "source_ref": (source_ref or "").strip()}  # 来源指纹:同资料重喂 supersede
+        if conversation_id:
+            # Q2 出处回链(只有对话蒸馏路径会传):记产生这批轮的会话 id → 面板"对话沉淀"可点回。
+            # 老数据/其它来源无此键 → 列表端点 .get 降级 "",面板回退现状文本(不崩不骗)。
+            prov["conversation_id"] = conversation_id.strip()
         if provisional:
             prov["provisional"] = True   # 质量门:auto 蒸的降权(provenance_rank 封顶蒸馏档)
         belief = Belief(content=content, provenance=prov, freshness_ts=now, scope=scope)

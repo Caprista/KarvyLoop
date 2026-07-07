@@ -75,6 +75,28 @@ def _tag_seed_scores(query: str, concepts: Optional[list], n: int) -> Optional[l
     return out
 
 
+def _matched_surface_terms(query: str, content: str, cap: int = 5) -> list:
+    """explain 用:query 的哪些词面项(拉丁整词 / CJK bigram)真出现在这条 content 里。
+
+    命中规则与种子打分 `idf_weighted_scores` **同一条**(同切分 + 同子串包含判定),
+    只对入选的 top_k 条算(≤8 条),不碰全库热路径。"""
+    from karvyloop.context.relevance import _cjk_bigrams, _latin_tokens
+    q = (query or "").lower()
+    c = (content or "").lower()
+    terms = _latin_tokens(q) | _cjk_bigrams(q)
+    return sorted(t for t in terms if t in c)[:max(0, cap)]
+
+
+def _matched_tags(tags, query_lower: str, query_tokens: set, memo: dict) -> list:
+    """explain 用:这条的哪些概念标签真命中了 query(命中规则与种子③共用 count_tag_hits)。"""
+    out = []
+    for t in tags or []:
+        tl = str(t).strip()
+        if tl and count_tag_hits([tl], query_lower, query_tokens, memo):
+            out.append(tl)
+    return out
+
+
 def _keys_for(beliefs: list, concepts: Optional[list]):
     """每条 belief 的关联键:有 LLM 概念用概念(语义边),否则回退词面 token。返回 (keys, has_concept)。"""
     keys, has_c = [], []
@@ -92,13 +114,18 @@ def _keys_for(beliefs: list, concepts: Optional[list]):
 def spreading_activation_recall(beliefs: list, query: str, *,
                                 concepts: Optional[list] = None,
                                 top_k: int = 8, hops: int = _DEFAULT_HOPS,
-                                decay: float = _DEFAULT_DECAY):
+                                decay: float = _DEFAULT_DECAY,
+                                explain_sink: Optional[list] = None):
     """激活扩散召回:返回按激活分排序的 top_k 个 belief(种子=query 相关度,沿图最强路径扩散)。
 
     - `concepts`:与 beliefs 对齐的 list[list[str]](LLM 写入时抽的概念标签,读缓存零 LLM);
       既当**边**(共享概念=语义边)也进**种子**(标签×query 词面重叠,同义改写的救场层);
       缺/空 → 词面边 + 纯词面种子(老库优雅退化)。
     - 无任何命中(词面 + 标签种子全 0)→ 返回空(不投毒,见下)。
+    - `explain_sink`(Q1 召回解释,可选):给了就按返回顺序 append 每条入选的解释
+      {index, surface_terms, concept_tags, via_spread, hops, score} —— 只把已算出的
+      中间量带出来(种子分/激活分/标签命中),唯一新增记录是扩散跳数(int 赋值,
+      且只在要解释时跟踪);默认 None = 行为与热路径一字不变。
     """
     if not beliefs:
         return []
@@ -106,6 +133,7 @@ def spreading_activation_recall(beliefs: list, query: str, *,
     n = len(beliefs)
     # 种子①+②:词面重叠,IDF 降权高频词(同一切分来源 relevance,不与决策召回漂移)
     overlap = idf_weighted_scores(query, [getattr(b, "content", "") or "" for b in beliefs])
+    lex_seed = overlap   # 词面层单独留引用(explain 区分「词面命中」vs「标签命中」)
     # 种子③:LLM 语义标签重叠(预计算缓存;同义改写零词面交集时唯一能点火的层)
     tag_seed = _tag_seed_scores(query, concepts, n)
     if tag_seed is not None:
@@ -132,8 +160,10 @@ def spreading_activation_recall(beliefs: list, query: str, *,
     mx = max(overlap) or 1.0
     act = [overlap[i] / mx if overlap[i] > 0 else 0.0 for i in range(n)]   # 种子=归一化命中度(floor)
     frontier = [i for i in range(n) if act[i] > 0.0]
+    # 跳数记录(explain 独享):最强路径最后一次刷新 act[j] 时它在第几跳被够到。默认不跟踪。
+    hop_of = [0] * n if explain_sink is not None else None
 
-    for _ in range(max(0, hops)):
+    for _hop in range(max(0, hops)):
         if len(frontier) > _SEED_CAP:                      # 有界:前沿过大只留激活最高的(不静默)
             frontier = sorted(frontier, key=lambda i: act[i], reverse=True)[:_SEED_CAP]
         nxt: set = set()
@@ -154,13 +184,31 @@ def spreading_activation_recall(beliefs: list, query: str, *,
                 if src > act[j]:                           # 最强路径:取 max,不累加(防 hub-bias)
                     act[j] = src
                     nxt.add(j)
+                    if hop_of is not None:
+                        hop_of[j] = _hop + 1
         frontier = list(nxt)
         if not frontier:
             break
 
     order = sorted(range(n), key=lambda i: (act[i], getattr(beliefs[i], "freshness_ts", 0)),
                    reverse=True)
-    return [beliefs[i] for i in order if act[i] > 0.0][:max(0, top_k)]
+    picked = [i for i in order if act[i] > 0.0][:max(0, top_k)]
+    if explain_sink is not None:
+        qtok, ql, memo = _tokens(query), (query or "").lower(), {}
+        for i in picked:
+            via_spread = overlap[i] <= 0.0   # 种子分 0 = 全靠图谱扩散抬上来的
+            explain_sink.append({
+                "index": i,
+                "surface_terms": (_matched_surface_terms(query, getattr(beliefs[i], "content", "") or "")
+                                  if lex_seed[i] > 0 else []),
+                "concept_tags": (_matched_tags(concepts[i], ql, qtok, memo)
+                                 if (tag_seed is not None and tag_seed[i] > 0
+                                     and concepts and i < len(concepts)) else []),
+                "via_spread": via_spread,
+                "hops": (hop_of[i] if via_spread else 0),   # 种子恒 0(即使后被更强路径刷过)
+                "score": round(act[i], 4),
+            })
+    return [beliefs[i] for i in picked]
 
 
 __all__ = ["spreading_activation_recall"]

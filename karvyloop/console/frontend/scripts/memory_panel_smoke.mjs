@@ -44,7 +44,12 @@ dom.window.KarvyDom.getJSON = async (url) => {
     { title: "偏好直接", content: "我偏好直接、不啰嗦的沟通", kind: "preference", source: "ingest", source_ref: "" },
     { title: "loop A", content: "loop 是自运转的", kind: "knowledge", source: "fed",
       source_ref: "https://addyosmani.com/blog/loop-engineering/" },
-    { title: "loop B", content: "loop 无人参与", kind: "knowledge", source: "fed", source_ref: "text:abc123" }] };
+    { title: "loop B", content: "loop 无人参与", kind: "knowledge", source: "fed", source_ref: "text:abc123" },
+    // Q2 出处回链:对话蒸馏产物带 conversation_id → 来源可点回那次对话;老数据没有 → 回退纯文本
+    { title: "咖啡", content: "早上要黑咖啡", kind: "preference", source: "conversation",
+      source_ref: "", conversation_id: "cafe1234deadbeef" },
+    { title: "旧蒸馏", content: "老数据没会话定位", kind: "fact", source: "conversation",
+      source_ref: "", conversation_id: "" }] };
   return null;
 };
 dom.window.KarvyDom.postJSON = async (url, payload) => {
@@ -93,6 +98,22 @@ assert.ok([...libBody.querySelectorAll(".mc-del")].length >= 1, "每条知识应
 const srcLink = libBody.querySelector(".mc-src-link");
 assert.ok(srcLink && srcLink.getAttribute("href") === "https://addyosmani.com/blog/loop-engineering/",
   "带 source_ref 的知识应显示真实来源链接(不是 fed/ingest)");
+// Q2 出处回链:对话蒸馏条目(带 conversation_id)→ 来源仍是友好的"对话沉淀"文案但**可点**,
+// 点击发全局 karvy:open-conversation 事件(app.js 收口跳回那次对话);老数据无 id → 回退纯文本。
+let jumpDetail = null;
+dom.window.addEventListener("karvy:open-conversation", (e) => { jumpDetail = e.detail; });
+const convLinks = [...libBody.querySelectorAll("a.mc-src-conv")];
+assert.equal(convLinks.length, 1, `带 conversation_id 的对话沉淀条目应恰有 1 个可点来源(实际 ${convLinks.length})`);
+// 文案仍是友好的来源类别(走 _memSrc/i18n;本 smoke 的 i18n 桩返回键 → _memSrc 回退原值 "conversation"),
+// 关键是**不显示裸会话 id**(真环境显示 t("mem.src_conversation") 的"对话沉淀")
+assert.equal(convLinks[0].textContent, "conversation", "可点来源文案应走 _memSrc 友好类别,不是裸会话 id");
+assert.ok(!convLinks[0].textContent.includes("cafe1234"), "来源文案绝不显示裸会话 id");
+convLinks[0].dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+assert.ok(jumpDetail && jumpDetail.conversation_id === "cafe1234deadbeef",
+  "点击应发 karvy:open-conversation 事件并带会话 id(app.js 据此 openConvById 跳转)");
+// 老数据(source=conversation 但无 conversation_id)→ 优雅降级为纯文本来源(不崩不骗)
+const plainConvSrcs = [...libBody.querySelectorAll("span.mc-src")].filter((s) => s.textContent === "conversation");
+assert.equal(plainConvSrcs.length, 1, "无会话定位的老条目应回退为纯文本来源(不可点)");
 // 搜 "loop" → 只剩 loop 相关的两条
 const ksearch = body.querySelector(".paged-search");
 ksearch.value = "loop"; ksearch.dispatchEvent(new dom.window.Event("input"));

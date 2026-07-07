@@ -136,6 +136,51 @@ def test_no_memory_graceful():
                   json={"op": "delete", "content": "x"}).json()["ok"] is False
 
 
+def _client_with_evidence(evidence: list):
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    mem = MemoryManager()
+    mem.write(make_decision_pref_belief("先写测试", "constraint", strength=0.7,
+                                        evidence=evidence, now=1.0))
+    app.state.memory = mem
+    return TestClient(app)
+
+
+def test_evidence_detail_returned():
+    """Q3 证据可见:这条偏好从你哪几次拍板学来 —— 回明细(何时/拍了什么/一句摘要),不只个数。"""
+    ev = [{"ts": 100.0, "decision": "ACCEPT", "gist": "按你说的先加了测试"},
+          {"ts": 200.0, "decision": "EDIT", "gist": "你改了再批"}]
+    p = _client_with_evidence(ev).get("/api/decision_prefs").json()["prefs"][0]
+    assert p["evidence_n"] == 2
+    assert p["evidence"] == [
+        {"ts": 200.0, "decision": "EDIT", "gist": "你改了再批"},        # 新的在前
+        {"ts": 100.0, "decision": "ACCEPT", "gist": "按你说的先加了测试"},
+    ]
+
+
+def test_evidence_empty_graceful():
+    """无证据(老数据 evidence 空)→ evidence: [](优雅空,前端显诚实文案)。"""
+    p = _client_with_evidence([]).get("/api/decision_prefs").json()["prefs"][0]
+    assert p["evidence_n"] == 0 and p["evidence"] == []
+
+
+def test_evidence_legacy_float_ts():
+    """兼容旧数据:早期 evidence 只存时间戳(float)→ 保留 ts,decision/gist 诚实留空(不编)。"""
+    p = _client_with_evidence([123.0]).get("/api/decision_prefs").json()["prefs"][0]
+    assert p["evidence"] == [{"ts": 123.0, "decision": "", "gist": ""}]
+
+
+def test_evidence_capped_and_truncated():
+    """payload 别爆:只回最近 5 条(新的在前)+ gist 截断;垃圾形态(str)跳过不编。"""
+    ev: list = ["garbage"] + [
+        {"ts": float(i), "decision": "ACCEPT", "gist": f"第{i}次" + "长" * 300} for i in range(1, 8)
+    ]
+    p = _client_with_evidence(ev).get("/api/decision_prefs").json()["prefs"][0]
+    assert len(p["evidence"]) == 5
+    assert [e["ts"] for e in p["evidence"]] == [7.0, 6.0, 5.0, 4.0, 3.0]   # 最近 5,新的在前
+    assert all(len(e["gist"]) <= 120 for e in p["evidence"])
+    assert p["evidence"][0]["gist"].startswith("第7次")
+
+
 def test_stats_endpoint_prefs_and_outcomes():
     from karvyloop.console.decision_stats import DecisionStats
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)

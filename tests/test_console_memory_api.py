@@ -81,3 +81,28 @@ def test_list_no_memory_empty(app_with_memory):
     app_with_memory.state.memory = None
     client = TestClient(app_with_memory)
     assert client.get("/api/memory").json()["beliefs"] == []
+
+
+def test_list_carries_conversation_locator(app_with_memory):
+    # Q2 记忆出处回链:对话蒸馏产物 provenance 带 conversation_id → 列表端点必须带出去
+    # (面板据此把"对话沉淀"渲染成可点、跳回那次对话);老数据没这键 → 优雅降级 ""(不崩不骗)。
+    import time as _t
+
+    from karvyloop.schemas.cognition import Belief
+
+    mem = app_with_memory.state.memory
+    now = _t.time()
+    mem.write(Belief(content="早上要黑咖啡",
+                     provenance={"source": "conversation", "agent": "user", "ts": now,
+                                 "trace_ref": "", "kind": "preference",
+                                 "conversation_id": "cafe1234deadbeef"},
+                     freshness_ts=now, scope="personal"))
+    mem.write(Belief(content="旧蒸馏条目没定位",
+                     provenance={"source": "conversation", "agent": "user", "ts": now,
+                                 "trace_ref": "", "kind": "fact"},
+                     freshness_ts=now, scope="personal"))
+    client = TestClient(app_with_memory)
+    lst = client.get("/api/memory").json()["beliefs"]
+    by_content = {b["content"]: b for b in lst}
+    assert by_content["早上要黑咖啡"]["conversation_id"] == "cafe1234deadbeef"
+    assert by_content["旧蒸馏条目没定位"]["conversation_id"] == ""   # 老数据降级,不崩

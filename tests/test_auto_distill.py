@@ -124,6 +124,43 @@ async def test_distill_turns_empty_no_model_call():
     assert res.written == 0 and gw.called == 0          # 空材料不调模型
 
 
+# ---- Q2 记忆出处回链:蒸馏产物 provenance 必带会话定位(conversation_id)----
+# 病根:蒸馏写 belief 时只有 source=conversation,没带产生它的那次会话的 id →
+# 记忆面板"对话沉淀"条目点不回那次对话。定位键 = 现成的 Conversation.id(别发明新 id 体系)。
+
+
+@pytest.mark.asyncio
+async def test_distill_with_decisions_provenance_carries_conversation_id():
+    gw = FakeGW('{"facts":[{"content":"用户早上要黑咖啡","kind":"preference"}],"decisions":[]}')
+    mem = FakeMem()
+    res, _ = await AD.distill_turns_with_decisions(
+        [_Turn("早上来杯黑咖啡", "记住了")], gateway=gw, mem=mem, now=1.0,
+        conversation_id="cafe1234deadbeef")
+    assert res.written == 1
+    assert mem.written[0].provenance["conversation_id"] == "cafe1234deadbeef"
+
+
+@pytest.mark.asyncio
+async def test_distill_turns_provenance_carries_conversation_id():
+    # 旧路径(distill_turns → ingest_material,source=conversation)同样要带定位
+    gw = FakeGW('[{"content":"用户喜欢简洁","kind":"preference"}]')
+    mem = FakeMem()
+    res = await AD.distill_turns([_Turn("少废话", "好的")], gateway=gw, mem=mem, now=1.0,
+                                 conversation_id="cafe1234deadbeef")
+    assert res.written == 1
+    assert mem.written[0].provenance["conversation_id"] == "cafe1234deadbeef"
+
+
+@pytest.mark.asyncio
+async def test_distill_without_conversation_id_degrades_gracefully():
+    # 无会话上下文的调用方:不带 conversation_id → 不写键、不崩(面板回退现状文本)
+    gw = FakeGW('{"facts":[{"content":"事实","kind":"fact"}],"decisions":[]}')
+    mem = FakeMem()
+    res, _ = await AD.distill_turns_with_decisions([_Turn("u", "a")], gateway=gw, mem=mem, now=1.0)
+    assert res.written == 1
+    assert mem.written[0].provenance.get("conversation_id", "") == ""
+
+
 # ---- AC5 watermark + 批量 ----
 _L0 = "l0"  # KARVY_WORLD_DOMAIN(私聊)
 
@@ -175,6 +212,18 @@ async def test_maybe_auto_distill_batches_and_watermarks():
 
     # 再调(还是 3 轮)→ 不重复蒸
     assert await maybe_auto_distill(app, mgr) is None
+
+
+@pytest.mark.asyncio
+async def test_maybe_auto_distill_wires_conversation_id():
+    # Q2 出处回链:真实调用方(routes.maybe_auto_distill)手里就有 conv.id → 必须传进蒸馏 provenance
+    from karvyloop.console.routes import maybe_auto_distill
+    gw = FakeGW('{"facts":[{"content":"事实","kind":"fact"}],"decisions":[]}')
+    mem = FakeMem()
+    conv = _conv("c1", [_Turn("u0", "a0")])
+    res = await maybe_auto_distill(_app(mem, gw), _mgr(conv))
+    assert res is not None and res["written"] == 1
+    assert mem.written[0].provenance["conversation_id"] == "c1"
 
 
 @pytest.mark.asyncio

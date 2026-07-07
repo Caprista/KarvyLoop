@@ -215,15 +215,17 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     # loop step4b 地基:从个人知识库召回相关 Belief,注入上下文最前(token 纪律:封顶 8 条)。
     # 让"关于你"的长期记忆真的喂进模型 —— 否则摄入/蒸馏写进的库没人读。
     mem = getattr(app.state, "memory", None)
+    _recall_used: list = []   # Q1 召回解释:这轮垫了哪几条记忆(空列表=没垫),挂进 drive_done
     if mem is not None:
         try:
             from .routes import _recall_domain
             block = mem.recall_block(intent, scope="personal", limit=8,
-                                     domain=_recall_domain(mgr))   # §2.6 域隔离
+                                     domain=_recall_domain(mgr),   # §2.6 域隔离
+                                     explain_sink=_recall_used)
             if block:
                 governance = (block + "\n\n" + governance).strip()
         except Exception:
-            pass
+            _recall_used = []   # 召回失败没垫成 → 不留半截解释
 
     # §11 决策接口结晶:提案/drive 前注入"你的决策偏好"做预对齐(只偏置不执行,仍你拍板)。
     try:
@@ -319,7 +321,8 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     except Exception as e:
         await websocket.send_json({
             "type": "drive_done",
-            "payload": {"intent": intent, "error": str(e), "brain": "SLOW", "text": ""},
+            "payload": {"intent": intent, "error": str(e), "brain": "SLOW", "text": "",
+                        "recall_used": _recall_used},
         })
         return
 
@@ -388,6 +391,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
 
     _payload = drive_outcome_to_dict(outcome)
     _payload["speaker"] = _turn_speaker   # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
+    _payload["recall_used"] = _recall_used   # Q1 召回解释:垫了哪几条记忆(空=没垫)
     await websocket.send_json({"type": "drive_done", "payload": _payload})
 
 

@@ -20,19 +20,36 @@ var KarvyMemoryPanelBundle = (function(exports) {
     const m = t("mem.src_" + (s || "ingest"));
     return m.indexOf("mem.src_") === 0 ? s || "" : m;
   }
-  function _origin(source, sourceRef) {
+  function _origin(source, sourceRef, conversationId) {
     const ref = (sourceRef || "").trim();
     if (/^https?:\/\//.test(ref)) {
       let short = ref.replace(/^https?:\/\//, "").replace(/\/+$/, "");
       if (short.length > 46) short = short.slice(0, 44) + "…";
-      return { text: short, href: ref };
+      return { text: short, href: ref, conv: "" };
     }
-    if (ref.indexOf("text:") === 0) return { text: t("mem.src_pasted"), href: "" };
-    return { text: _memSrc(source), href: "" };
+    if (ref.indexOf("text:") === 0) return { text: t("mem.src_pasted"), href: "", conv: "" };
+    const conv = source === "conversation" ? (conversationId || "").trim() : "";
+    return { text: _memSrc(source), href: "", conv };
   }
-  function _originNode(source, sourceRef) {
-    const o = _origin(source, sourceRef);
-    return o.href ? el("a", { class: "mc-src-link", href: o.href, target: "_blank", text: o.text, title: o.href }) : el("span", { class: "mc-src", text: o.text });
+  function _originNode(source, sourceRef, conversationId) {
+    const o = _origin(source, sourceRef, conversationId);
+    if (o.href) return el("a", { class: "mc-src-link", href: o.href, target: "_blank", text: o.text, title: o.href });
+    if (o.conv) {
+      return el("a", {
+        class: "mc-src-link mc-src-conv",
+        href: "#",
+        text: o.text,
+        title: t("mem.src_conv_title"),
+        onclick: (e) => {
+          e.preventDefault();
+          window.dispatchEvent(new window.CustomEvent(
+            "karvy:open-conversation",
+            { detail: { conversation_id: o.conv } }
+          ));
+        }
+      });
+    }
+    return el("span", { class: "mc-src", text: o.text });
   }
   const _NS = "http://www.w3.org/2000/svg";
   const _nodeLabel = (n) => (n.title || "").trim() || (n.content || "").slice(0, 12);
@@ -999,7 +1016,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
                 { class: "mc-meta" },
                 el("span", { class: "mc-tag", text: _memKind(b.kind) }),
                 " · ",
-                _originNode(b.source, b.source_ref)
+                _originNode(b.source, b.source_ref, b.conversation_id)
               )
             ),
             el("button", {

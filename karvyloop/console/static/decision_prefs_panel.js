@@ -33,6 +33,37 @@ var KarvyDecisionPrefsBundle = (function(exports) {
     }
     return txt;
   }
+  const _EV_DECISION_KEY = {
+    ACCEPT: "dpref.ev_accept",
+    REJECT: "dpref.ev_reject",
+    DEFER: "dpref.ev_defer",
+    EDIT: "dpref.ev_edit",
+    STATE: "dpref.ev_state"
+  };
+  function _evWhen(ts) {
+    if (!ts || !isFinite(ts)) return "";
+    const d = new Date(ts * 1e3);
+    return d.getMonth() + 1 + "/" + d.getDate();
+  }
+  function _evidenceLine(ev) {
+    const when = _evWhen(Number(ev && ev.ts) || 0);
+    const dec = ev && ev.decision || "";
+    const what = dec ? t(_EV_DECISION_KEY[dec] || "dpref.ev_decided", { d: dec }) : t("dpref.ev_no_detail");
+    const gist = ev && ev.gist || "";
+    return (when ? when + " · " : "") + what + (gist ? " — " + gist : "");
+  }
+  function _evidencePanel(p) {
+    const panel = el("div", { class: "dpref-evidence" });
+    const items = p && p.evidence || [];
+    if (!items.length) {
+      panel.appendChild(el("div", { class: "mc-meta dpref-ev-empty", text: t("dpref.ev_empty") }));
+      return panel;
+    }
+    for (const ev of items) {
+      panel.appendChild(el("div", { class: "mc-meta dpref-ev-line", text: _evidenceLine(ev) }));
+    }
+    return panel;
+  }
   async function renderDecisionPrefs() {
     const body = mgmtBody();
     if (!body) return;
@@ -89,6 +120,15 @@ var KarvyDecisionPrefsBundle = (function(exports) {
           await renderDecisionPrefs();
         }
       }));
+      const evPanel = _evidencePanel(p);
+      evPanel.classList.add("hidden");
+      const evToggle = el("button", {
+        class: "mgmt-inline-link dpref-ev-toggle",
+        text: t("dpref.ev_btn", { n: p.evidence_n || 0 }),
+        onclick: () => {
+          evPanel.classList.toggle("hidden");
+        }
+      });
       list.appendChild(el(
         "div",
         { class: "mgmt-card dpref-card" },
@@ -97,7 +137,9 @@ var KarvyDecisionPrefsBundle = (function(exports) {
           { class: "mc-main" },
           el("div", { class: "mc-name" }, el("span", { class: "dpref-kind", text: kindLbl }), " ", statusBadge),
           el("div", { class: "mc-meta dpref-content", text: p.content }),
-          el("div", { class: "mc-meta dpref-strength", text: t("dpref.strength", { pct: Math.round((p.strength || 0) * 100) }) })
+          el("div", { class: "mc-meta dpref-strength", text: t("dpref.strength", { pct: Math.round((p.strength || 0) * 100) }) }),
+          evToggle,
+          evPanel
         ),
         actions
       ));

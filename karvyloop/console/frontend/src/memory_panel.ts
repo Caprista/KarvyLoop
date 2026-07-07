@@ -44,21 +44,33 @@ function _memSrc(s: string): string {
 }
 // 真实来源(Hardy:别给用户看 fed/ingest 这种内部代号):优先 source_ref —— URL→可点链接、
 // 粘贴文本→"粘贴文本";没有 ref 才回退到友好的来源类别(你分享的资料/对话沉淀/手动录入)。
-function _origin(source: string, sourceRef: string): { text: string; href: string } {
+// Q2 出处回链:对话蒸馏的条目带 conversation_id → 文案仍是友好的"对话沉淀",但可点 —— 点回
+// 产生它的那次对话(跳转统一在 app.js:面板只发全局事件,老数据无 id → 回退纯文本,不崩不骗)。
+function _origin(source: string, sourceRef: string, conversationId?: string): { text: string; href: string; conv: string } {
   const ref = (sourceRef || "").trim();
   if (/^https?:\/\//.test(ref)) {
     let short = ref.replace(/^https?:\/\//, "").replace(/\/+$/, "");
     if (short.length > 46) short = short.slice(0, 44) + "…";
-    return { text: short, href: ref };
+    return { text: short, href: ref, conv: "" };
   }
-  if (ref.indexOf("text:") === 0) return { text: t("mem.src_pasted"), href: "" };
-  return { text: _memSrc(source), href: "" };
+  if (ref.indexOf("text:") === 0) return { text: t("mem.src_pasted"), href: "", conv: "" };
+  const conv = source === "conversation" ? (conversationId || "").trim() : "";
+  return { text: _memSrc(source), href: "", conv };
 }
-function _originNode(source: string, sourceRef: string): HTMLElement {
-  const o = _origin(source, sourceRef);
-  return o.href
-    ? el("a", { class: "mc-src-link", href: o.href, target: "_blank", text: o.text, title: o.href })
-    : el("span", { class: "mc-src", text: o.text });
+function _originNode(source: string, sourceRef: string, conversationId?: string): HTMLElement {
+  const o = _origin(source, sourceRef, conversationId);
+  if (o.href) return el("a", { class: "mc-src-link", href: o.href, target: "_blank", text: o.text, title: o.href });
+  if (o.conv) {
+    // 复用 app.js 的会话跳转(openConvById 按 id 定位真 peer):发 karvy:open-conversation 事件,
+    // app.js 收口(关面板 → 跳会话;定位不到旧会话 → 聊天流里友好提示)。
+    return el("a", { class: "mc-src-link mc-src-conv", href: "#", text: o.text, title: t("mem.src_conv_title"),
+      onclick: (e: Event) => {
+        e.preventDefault();
+        window.dispatchEvent(new (window as unknown as { CustomEvent: typeof CustomEvent }).CustomEvent(
+          "karvy:open-conversation", { detail: { conversation_id: o.conv } }));
+      } });
+  }
+  return el("span", { class: "mc-src", text: o.text });
 }
 
 // ch4 pillar 3:认知图谱**网状视图**(mesh),仿 Obsidian graph view。Hardy:别排成一个圆、别堆成一坨、
@@ -808,7 +820,7 @@ async function renderMemoryPanel(): Promise<void> {
             title ? el("div", { class: "mc-meta", text: b.content }) : null,
             el("div", { class: "mc-meta" },
               el("span", { class: "mc-tag", text: _memKind(b.kind) }),
-              " · ", _originNode(b.source, b.source_ref))),
+              " · ", _originNode(b.source, b.source_ref, b.conversation_id))),
           el("button", { class: "mc-del", text: t("mgmt.delete"),
             onclick: async () => {
               if (!window.confirm(t("mem.del_confirm", { c: (title || b.content).slice(0, 40) }))) return;

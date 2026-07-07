@@ -848,14 +848,17 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     # loop step4b 地基:个人知识库召回注入(同 ws._handle_intent_ws,封顶 8 条)
     # §2.6:在某业务域里 drive → 召回共享层 + 本域私有层(域专属认知不跨域漏)。
     mem = getattr(request.app.state, "memory", None)
+    _recall_used: list = []   # Q1 召回解释:这轮垫了哪几条记忆(空列表=没垫),挂进响应 payload
     if mem is not None:
         try:
             block = mem.recall_block(req.intent, scope="personal", limit=8,
-                                     domain=_recall_domain(mgr))
+                                     domain=_recall_domain(mgr),
+                                     explain_sink=_recall_used)
             if block:
                 governance = (block + "\n\n" + governance).strip()
         except Exception:
-            pass
+            _recall_used = []   # 召回失败没垫成 → 不留半截解释
+
 
     # §11 决策接口结晶:提案/drive 前注入"你的决策偏好"做预对齐(只偏置不执行,仍你拍板)。
     try:
@@ -951,7 +954,8 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         logger.exception(f"api_intent drive 异常: {e}")
         if task_reg is not None and task_id is not None:
             task_reg.finish(task_id, error=str(e))
-        return {"intent": req.intent, "error": str(e), "brain": "SLOW", "text": ""}
+        return {"intent": req.intent, "error": str(e), "brain": "SLOW", "text": "",
+                "recall_used": _recall_used}
 
     if task_reg is not None and task_id is not None:
         task_reg.finish(task_id, result=(outcome.text or ""), error=(outcome.error or ""))
@@ -1025,6 +1029,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
 
     payload = drive_outcome_to_dict(outcome)
     payload["speaker"] = _turn_speaker  # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
+    payload["recall_used"] = _recall_used  # Q1 召回解释:垫了哪几条记忆(空=没垫)
     return payload
 
 
@@ -1618,115 +1623,11 @@ async def api_memory_graph(request: Request) -> dict[str, Any]:
     return concept_graph(beliefs, concepts)
 
 
-async def maybe_auto_distill(app: Any, mgr: Any) -> Optional[dict]:
-    """轮后自动蒸馏(loop step4b):攒够 N 轮未蒸馏 → 把新轮编译成 Belief 写进长期库。
-
-    复用 4b-1 编译器(经 auto_distill.distill_turns)。fire-and-forget 调,**异步晚跑**,故须防:
-    - **并发重复蒸**(每轮都 schedule 一个 task):per-conv in-flight 闸 + watermark 在 await 前
-      **乐观推进**(单调,`max`)→ 第二个 task 看到已推进/在飞 → 跳过。
-    - **TOCTOU**:slice 端点 `end` 只读一次,watermark 推进到 end(不回读 len)。
-    - **失败 hammer**:推进后**不回退**(失败该批跳过 + 记日志),否则坏 gateway 每轮重试烧钱。
-    - **隐私/隔离**:只蒸**私聊(l0)**进 personal;业务域对话不混进个人库(personal/domain
-      路径隔离硬规则)。
-    无 memory/gateway/对话 → 跳过。返回 {"written":N};无动作返 None。
-    """
-    try:
-        mem = getattr(app.state, "memory", None)
-        if mem is None or mgr is None:
-            return None
-        rk = getattr(app.state, "runtime_kwargs", None) or {}
-        gw = rk.get("gateway")
-        if gw is None:
-            return None
-        conv = mgr.current() if hasattr(mgr, "current") else None
-        if conv is None or not getattr(conv, "turns", None):
-            return None
-        # 只蒸私聊(l0)→ personal;业务域对话不混进个人库
-        from karvyloop.cognition.conversation import KARVY_WORLD_DOMAIN
-        peer = getattr(conv, "peer", None)
-        if peer is not None and getattr(peer, "domain_id", KARVY_WORLD_DOMAIN) != KARVY_WORLD_DOMAIN:
-            return None
-        from karvyloop.cognition.auto_distill import should_distill, distill_turns_with_decisions
-        marks = getattr(app.state, "distill_watermarks", None)
-        if marks is None:
-            marks = app.state.distill_watermarks = {}
-        inflight = getattr(app.state, "_distill_inflight", None)
-        if inflight is None:
-            inflight = app.state._distill_inflight = set()
-        n = len(conv.turns)
-        wm = marks.get(conv.id, 0)
-        if not should_distill(n, wm) or conv.id in inflight:
-            return None
-        end = n                                  # slice 端点只读一次(防 TOCTOU)
-        new_turns = list(conv.turns[wm:end])
-        inflight.add(conv.id)
-        marks[conv.id] = max(wm, end)            # await 前乐观推进(单调;防并发重复蒸)
-    except Exception as e:
-        logger.warning(f"[auto_distill] 准备阶段异常(跳过本轮): {e}")  # 不静默吞,留诊断信号
-        return None
-    try:
-        # §11 P1b:同一次 LLM 调用 piggyback —— 抽 facts(写记忆)+ decisions(显式陈述源)。
-        _trace = getattr(getattr(app.state, "main_loop", None), "trace", None)
-        res, decisions = await distill_turns_with_decisions(
-            new_turns, gateway=gw, mem=mem, model_ref=rk.get("model_ref", ""), trace=_trace)
-        if getattr(res, "extends", None):
-            try:   # 摄入调和 extends 半边 → 升合并建议卡(REJECT 过滤已内建在升卡咽喉)
-                from karvyloop.console.proposals import raise_extends_cards
-                await raise_extends_cards(app, res.extends)
-            except Exception as e:
-                logger.debug(f"[auto_distill] extends 升卡失败(不影响蒸馏): {e}")
-        if decisions:
-            try:
-                from karvyloop.console.decision_wire import crystallize_candidates
-                # 聊天来源 = 私聊小卡 → 全局(ctx 空);走双关门(显式 1 次/隐式跨批复现)。
-                await crystallize_candidates(app, decisions)
-            except Exception as e:
-                logger.debug(f"[auto_distill] 决策偏好结晶失败(不影响蒸馏): {e}")
-        return {"written": res.written}
-    except Exception as e:
-        # 已推进 watermark,不回退 → 失败只跳过该批,不每轮重试 hammer LLM
-        logger.warning(f"[auto_distill] 蒸馏失败(该批跳过): {e}")
-        # §0.7 fail-loud:后台蒸馏失败不再只 log 静默死,主动 push 给 UI(灭死角)
-        try:
-            from karvyloop.console.task_events import schedule_system_error
-            schedule_system_error(app, "auto_distill", str(e))
-        except Exception:
-            pass
-        return None
-    finally:
-        inflight.discard(conv.id)
-
-
-def schedule_auto_distill(app: Any, mgr: Any) -> None:
-    """fire-and-forget 调度轮后自动蒸馏(不阻塞对话响应)。保 task 引用防被 GC。"""
-    import asyncio
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return  # 无事件循环(同步上下文)→ 跳过
-    tasks = getattr(app.state, "_distill_tasks", None)
-    if tasks is None:
-        tasks = app.state._distill_tasks = set()
-    task = loop.create_task(maybe_auto_distill(app, mgr))
-    tasks.add(task)
-
-    def _on_done(t: Any) -> None:
-        tasks.discard(t)
-        # §0.7 fail-loud:防 maybe_auto_distill 之外逃逸的异常静默死(防御性兜底)
-        try:
-            exc = t.exception()
-        except Exception:
-            return  # cancelled / 取结果失败 → 不处理
-        if exc is not None:
-            logger.error(f"[auto_distill] 后台任务逃逸异常: {exc}")
-            try:
-                from karvyloop.console.task_events import schedule_system_error
-                schedule_system_error(app, "auto_distill", str(exc))
-            except Exception:
-                pass
-
-    task.add_done_callback(_on_done)
-
+# ---- 轮后自动蒸馏已下沉到 routes_memory.py(god-module 拆分:蒸馏维护属 memory 域)----
+from .routes_memory import (  # noqa: E402
+    maybe_auto_distill,
+    schedule_auto_distill,
+)
 
 # ---- /api/atoms* + /api/atom/* 已下沉到 routes_atoms.py(P2-② 纯搬移)----
 from .routes_atoms import (  # noqa: E402

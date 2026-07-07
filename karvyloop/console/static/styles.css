@@ -1970,6 +1970,21 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .ambient-name { font-weight: 600; color: var(--text-1); white-space: nowrap; }
 .ambient-summary { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* —— Q1 召回解释:回答气泡下的低调 chip(默认收起)→ 点开列出垫的记忆 + 想起理由 —— */
+.recall-used { align-self: flex-start; margin: 2px 0 6px 4px; max-width: 78%; }
+.recall-chip {
+  border: none; background: transparent; padding: 2px 6px; border-radius: 10px;
+  font-size: 11px; color: var(--text-3); cursor: pointer;
+}
+.recall-chip:hover { background: var(--sky-soft, var(--surface-2)); color: var(--text-2); }
+.recall-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.recall-item {
+  padding: 4px 8px; border-radius: 8px; font-size: 11px; line-height: 1.5;
+  background: var(--surface-2, #faf7f0); border: 1px solid var(--border);
+}
+.recall-preview { color: var(--text-2); word-break: break-word; }
+.recall-meta { display: flex; gap: 8px; flex-wrap: wrap; color: var(--text-3); margin-top: 2px; }
+
 /* —— revise_skill 卡:old/new steps 上下对照(简单 del/ins)—— */
 .revise-card { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--surface-2, #faf7f0); }
 .revise-title { font-size: var(--fs-13); font-weight: 700; margin-bottom: 6px; }

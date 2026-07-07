@@ -362,7 +362,8 @@ class MemoryManager:
 
     def recall_block(self, query: str, *, scope: str = "personal", limit: int = 8,
                      domain: str = "", include_invalid: bool = False,
-                     as_of: Optional[float] = None) -> str:
+                     as_of: Optional[float] = None,
+                     explain_sink: Optional[list] = None) -> str:
         """**同步**召回(只读 index)→ 围栏块,供 drive 前注入上下文(token 纪律:封顶 limit 条)。
 
         简化打分:query 词与 belief.content 的字符重叠命中加分,平手按 freshness 新的优先。
@@ -380,6 +381,11 @@ class MemoryManager:
         过滤:`valid_from ≤ T`(缺省退 provenance.ts)且(未失效 或 `invalid_at > T`)。
         回答"我三月对 X 的看法"——当时还没学到/已被推翻的不出现;整个能力就这一个谓词,
         不建时点查询语言(个人尺度够用即止)。None(默认)= 今天的行为,一字不变。
+
+        **`explain_sink` 召回解释(Q1 可见化)**:给了 → 按入选顺序 append 每条命中的解释
+        {content_preview(80 字截断,不塞全文), provenance_ts, source, belief_key,
+        surface_terms, concept_tags, via_spread, hops, score} —— 供 drive 路径把"这次回答
+        垫了哪几条记忆、每条为什么被想起"回给前端。None(默认)= 行为一字不变。
         """
         # 去重 by id(b):index.all 因双 key 可能返回同一对象两次(同 _persist 的坑)
         beliefs, _seen = [], set()
@@ -422,8 +428,31 @@ class MemoryManager:
             except Exception:
                 concepts = None   # 标签层是增益不是命脉:读缓存失败退回纯词面,不挂召回
 
+        spread_sink: Optional[list] = [] if explain_sink is not None else None
         ranked = spreading_activation_recall(beliefs, query, concepts=concepts,
-                                             top_k=max(0, limit))
+                                             top_k=max(0, limit),
+                                             explain_sink=spread_sink)
+        # Q1 召回解释:spread 的算法级解释(词面/标签/扩散)+ 本层补溯源与定位字段。
+        # belief_key:index 以 content 为唯一 key(provenance["id"] 全仓无 producer 写),
+        # 但 payload 不塞全文 → 用 provenance.id(若有)否则 content 短 hash 做稳定标识。
+        if explain_sink is not None and spread_sink:
+            import hashlib
+            for e, b in zip(spread_sink, ranked):
+                prov = b.provenance or {}
+                content = b.content or ""
+                key = prov.get("id") or (
+                    "sha1:" + hashlib.sha1(content.encode("utf-8")).hexdigest()[:16])
+                explain_sink.append({
+                    "content_preview": content[:80],
+                    "provenance_ts": belief_recency_ts(b),
+                    "source": str(prov.get("source", "") or ""),
+                    "belief_key": str(key),
+                    "surface_terms": list(e.get("surface_terms") or []),
+                    "concept_tags": list(e.get("concept_tags") or []),
+                    "via_spread": bool(e.get("via_spread", False)),
+                    "hops": int(e.get("hops", 0)),
+                    "score": e.get("score", 0.0),
+                })
         # 使用信号:命中即刷(fire-and-forget,内存置脏;落盘搭下次 write / flush_usage 的车,
         # 绝不在 drive 热路径写盘/算分 —— last_recalled_ts 不参与排序)。
         if ranked:

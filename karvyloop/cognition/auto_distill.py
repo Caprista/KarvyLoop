@@ -113,18 +113,22 @@ async def distill_turns(
     agent_id: str = "user",
     now: Optional[float] = None,
     trace: Any = None,
+    conversation_id: str = "",
 ) -> IngestResult:
     """把一批对话轮编译成"关于用户"的 Belief(source=conversation)。复用 4b-1 摄入编译器。
 
     质量门②:auto 蒸(无人审直接写库)一律标 `provisional`——provenance_rank 封顶蒸馏档,
-    supersede 时掀不翻人明说的;由 daily 复审/下次冲突判定处理,不与人审沉淀同权。"""
+    supersede 时掀不翻人明说的;由 daily 复审/下次冲突判定处理,不与人审沉淀同权。
+
+    `conversation_id`(Q2 出处回链):产生这批轮的 Conversation.id(现成定位键,全局唯一)——
+    进 provenance,记忆面板"对话沉淀"条目据此点回那次对话。空 = 调用方无会话上下文,不写键。"""
     material = format_turns(turns)
     if not material.strip():
         return IngestResult(written=0, raw="(无可蒸馏内容)")
     return await ingest_material(
         material, gateway=gateway, mem=mem, model_ref=model_ref,
         agent_id=agent_id, scope="personal", source="conversation", now=now,
-        provisional=True, trace=trace,
+        provisional=True, trace=trace, conversation_id=conversation_id,
     )
 
 
@@ -157,11 +161,15 @@ def parse_combined(text: str) -> tuple[list[dict], list[dict]]:
 async def distill_turns_with_decisions(
     turns: list, *, gateway: Any, mem: Any, model_ref: str = "",
     agent_id: str = "user", now: Optional[float] = None, trace: Any = None,
+    conversation_id: str = "",
 ) -> tuple[IngestResult, list[dict]]:
     """**一次** LLM 调用 piggyback:抽 facts(写进记忆)+ decisions(返回给调用方路由进决策结晶)。
 
     facts 写法与 ingest 一致(provenance/freshness/去重在 mem.write 里);decisions 不在此写,
     由 console 侧 `crystallize_candidates` 走双关门(避免 cognition 依赖 console)。
+
+    `conversation_id`(Q2 出处回链):产生这批轮的 Conversation.id → 进 provenance,
+    面板"对话沉淀"条目据此点回那次对话。空 = 无会话上下文,不写键(老数据同形,优雅降级)。
     """
     from karvyloop.gateway import ResolveScope
     from karvyloop.gateway.system import SystemPrompt
@@ -190,12 +198,13 @@ async def distill_turns_with_decisions(
         if not content:
             continue
         try:
-            b = Belief(
-                content=content,
-                provenance={"source": "conversation", "agent": agent_id, "ts": now,
-                            "trace_ref": "", "kind": f.get("kind", "fact"),
-                            "provisional": True},   # 质量门②:auto 蒸 = 低置信,不与人审同权
-                freshness_ts=now, scope="personal")
+            prov = {"source": "conversation", "agent": agent_id, "ts": now,
+                    "trace_ref": "", "kind": f.get("kind", "fact"),
+                    "provisional": True}   # 质量门②:auto 蒸 = 低置信,不与人审同权
+            if conversation_id:
+                prov["conversation_id"] = conversation_id   # Q2 出处回链:点回产生它的那次对话
+            b = Belief(content=content, provenance=prov,
+                       freshness_ts=now, scope="personal")
             mem.write(b)
             written.append(b)
         except Exception:
