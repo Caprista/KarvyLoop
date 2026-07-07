@@ -33,6 +33,7 @@ from karvyloop.crystallize.decision_pref import (  # noqa: E402
     qualifies,
     recall_decision_prefs,
     receipt_gists,
+    reconcile_decisions,
     reinforce,
     revoke_pref,
     should_revoke,
@@ -220,6 +221,86 @@ async def test_compile_decisions_parses_llm_output():
 async def test_compile_decisions_empty_samples():
     gw = _StubGateway("[]")
     assert await compile_decisions([], gateway=gw, model_ref="") == []
+
+
+# ---- 约束解码底层:schema 透传 + 不支持时优雅降级(决策画像投毒风险最高)----
+
+
+class _SchemaStubGateway:
+    """新网关桩:complete 接 response_schema kwarg → 记下来供断言"schema 被透传"。"""
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self.seen_schema = "unset"
+
+    def resolve_model(self, scope):
+        return "stub/model"
+
+    async def complete(self, messages, tools, ref, *, system=None, response_schema=None):
+        self.seen_schema = response_schema
+
+        class TextDelta:
+            def __init__(self, text):
+                self.text = text
+        yield TextDelta(self._text)
+
+
+def _samples():
+    return [DecisionSample(decision="REJECT", context="直接上线", reason="没测试", ts=1.0)]
+
+
+@pytest.mark.asyncio
+async def test_compile_decisions_threads_prefs_schema_when_supported():
+    """网关接 response_schema → compile_decisions 透传决策偏好数组 schema(约束解码底层);
+    schema 逐字段对齐 parse_decision_prefs(裸数组、item 只强求 content)。"""
+    gw = _SchemaStubGateway('[{"content":"碰生产先写测试","kind":"constraint","explicit":true}]')
+    out = await compile_decisions(_samples(), gateway=gw, model_ref="m")
+    # schema 被透传:裸数组、item.content=string、content 是唯一 required(其余可选)
+    assert isinstance(gw.seen_schema, dict) and gw.seen_schema.get("type") == "array"
+    item = gw.seen_schema["items"]
+    assert item["properties"]["content"]["type"] == "string"
+    assert item["required"] == ["content"]                      # 只强求 content(对齐解析器容忍度)
+    assert "kind" not in item.get("required", [])               # kind/explicit/scope 解析器可选 → 不 required
+    # 上层严校验仍产出合法结构(二层兜底不动)
+    assert len(out) == 1 and out[0]["kind"] == "constraint"
+
+
+@pytest.mark.asyncio
+async def test_compile_decisions_degrades_when_gateway_lacks_schema_kwarg():
+    """老网关/桩不认 response_schema kwarg → 捕 TypeError 剥掉重调,降级路径产出不变(不崩)。"""
+    gw = _StubGateway('[{"content":"碰生产先写测试","kind":"constraint","explicit":true}]')
+    out = await compile_decisions(_samples(), gateway=gw, model_ref="m")
+    assert len(out) == 1 and out[0]["content"] == "碰生产先写测试"   # 退回无约束路径仍产出
+
+
+@pytest.mark.asyncio
+async def test_reconcile_threads_object_schema_when_existing():
+    """existing 非空 → 走协调器,schema 必须是对象 {"new","contradicts"}(对齐实际 prompt 形状)。"""
+    gw = _SchemaStubGateway('{"new":[{"content":"a","kind":"taste"}],"contradicts":[2]}')
+    new, con = await reconcile_decisions(_samples(), existing=["旧偏好1", "旧偏好2"],
+                                         gateway=gw, model_ref="m")
+    assert isinstance(gw.seen_schema, dict) and gw.seen_schema.get("type") == "object"
+    props = gw.seen_schema["properties"]
+    assert props["new"]["type"] == "array"                      # new = 偏好数组
+    assert props["new"]["items"]["required"] == ["content"]     # 内层 item 仍只强求 content
+    assert props["contradicts"]["items"]["type"] == "integer"   # contradicts = 整数编号数组
+    assert len(new) == 1 and con == [2]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_threads_array_schema_when_no_existing():
+    """existing 空 → 退化成纯抽取(裸数组 prompt)→ schema 必须是数组(不是对象),配套 prompt。"""
+    gw = _SchemaStubGateway('[{"content":"a","kind":"taste"}]')
+    new, con = await reconcile_decisions(_samples(), existing=[], gateway=gw, model_ref="m")
+    assert isinstance(gw.seen_schema, dict) and gw.seen_schema.get("type") == "array"
+    assert len(new) == 1 and con == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_degrades_when_gateway_lacks_schema_kwarg():
+    """老网关不认 kwarg → 降级重调,产出与现状一致。"""
+    gw = _StubGateway('{"new":[{"content":"a","kind":"taste"}],"contradicts":[3]}')
+    new, con = await reconcile_decisions(_samples(), existing=["旧"], gateway=gw, model_ref="m")
+    assert len(new) == 1 and con == [3]
 
 
 # ---- P1:强化 / 翻转 / 撤销(不固化你) ----

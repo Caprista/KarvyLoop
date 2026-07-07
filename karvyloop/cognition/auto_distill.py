@@ -14,9 +14,26 @@ import re
 import time
 from typing import Any, Optional
 
-from karvyloop.cognition.ingest import IngestResult, ingest_material, parse_facts
+from karvyloop.cognition.ingest import _FACTS_SCHEMA, IngestResult, ingest_material, parse_facts
+from karvyloop.crystallize.decision_pref import _PREF_ITEM_SCHEMA
 
 DISTILL_BATCH = 4  # 每积累 N 轮未蒸馏 → 蒸一次(批量省 token)
+
+# ---- 约束解码底层 schema(组合抽取:facts + decisions 一次调用)----
+# distill_turns_with_decisions 的产物直写记忆(facts)+ 路由进决策结晶(decisions),两条都是最高
+# 投毒风险车道 → 给支持的 provider 走原生结构化输出(保证吐合法 JSON 对象),不支持的网关侧退回
+# 无约束、上层 parse_combined 宁空勿毒二层兜底。schema 逐字段对齐 parse_combined:它读对象
+# {"facts":[...],"decisions":[...]},facts 走 parse_facts(item 复用 ingest 的 _FACTS_SCHEMA:
+# 只强求 content,title/kind 可选),decisions 走 parse_decision_prefs(item 复用决策偏好 schema:
+# 只强求 content,kind/explicit/scope 可选)。子 item schema 直接复用两处唯一定义,防形状漂移。
+_COMBINED_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "facts": _FACTS_SCHEMA,                            # 数组;item = ingest 的 facts 形状
+        "decisions": {"type": "array", "items": _PREF_ITEM_SCHEMA},  # 数组;item = 决策偏好形状
+    },
+    "required": ["facts", "decisions"],   # 组合器 system 明列两键(没有就给空数组,键仍在)
+}
 
 # 质量门①(防自反馈投毒):蒸馏材料里剔除 <memory-context> 围栏召回块及其提示行——
 # 轮文本若带着"已召回的旧记忆",蒸馏会把旧记忆**再抽成新条**写回库(复述循环:
@@ -185,10 +202,16 @@ async def distill_turns_with_decisions(
     except Exception:
         ref = model_ref
     out = ""
-    async for ev in gateway.complete(
-        [{"role": "user", "content": material}], [], ref,
-        system=SystemPrompt(static=[DISTILL_COMBINED_SYSTEM]),
-    ):
+    # 约束解码底层:带组合 schema(facts+decisions 对象)→ 支持的 provider 保证吐合法 JSON 对象;
+    # 不支持的网关侧退回无约束。上层 parse_combined 宁空勿毒不动,作二层兜底。老网关/测试桩不认
+    # response_schema kwarg → 捕 TypeError 剥掉重调(与网关内部降级同纪律),请求照发不崩。
+    msgs = [{"role": "user", "content": material}]
+    sp = SystemPrompt(static=[DISTILL_COMBINED_SYSTEM])
+    try:
+        stream = gateway.complete(msgs, [], ref, system=sp, response_schema=_COMBINED_SCHEMA)
+    except TypeError:
+        stream = gateway.complete(msgs, [], ref, system=sp)
+    async for ev in stream:
         if type(ev).__name__ == "TextDelta":
             out += getattr(ev, "text", "")
     facts, decisions = parse_combined(out)

@@ -104,6 +104,17 @@ class FakeMem:
         self.written.append(belief)
 
 
+class SchemaGW:
+    """新网关桩:complete 接 response_schema kwarg → 记下来供断言组合 schema 被透传。"""
+    def __init__(self, reply):
+        self.reply = reply
+        self.seen_schema = "unset"
+
+    async def complete(self, messages, tools, model_ref, *, system=None, response_schema=None):
+        self.seen_schema = response_schema
+        yield TextDelta(self.reply)
+
+
 # ---- AC3/AC4 ----
 @pytest.mark.asyncio
 async def test_distill_turns_writes_conversation_beliefs():
@@ -159,6 +170,39 @@ async def test_distill_without_conversation_id_degrades_gracefully():
     res, _ = await AD.distill_turns_with_decisions([_Turn("u", "a")], gateway=gw, mem=mem, now=1.0)
     assert res.written == 1
     assert mem.written[0].provenance.get("conversation_id", "") == ""
+
+
+# ---- 约束解码底层:组合抽取(facts+decisions)schema 透传 + 降级(最高投毒风险车道)----
+
+
+@pytest.mark.asyncio
+async def test_distill_with_decisions_threads_combined_schema():
+    """网关接 response_schema → 组合抽取透传 {"facts","decisions"} 对象 schema;逐字段对齐
+    parse_combined(对象;facts item 只强求 content、decisions item 只强求 content)。"""
+    gw = SchemaGW('{"facts":[{"content":"用户早上要黑咖啡","kind":"preference"}],'
+                  '"decisions":[{"content":"对外邮件先过目","kind":"taste","explicit":true}]}')
+    res, decisions = await AD.distill_turns_with_decisions(
+        [_Turn("早上黑咖啡,邮件先给我看", "记住了")], gateway=gw, mem=FakeMem(), now=1.0)
+    sc = gw.seen_schema
+    assert isinstance(sc, dict) and sc.get("type") == "object"
+    props = sc["properties"]
+    assert props["facts"]["type"] == "array"
+    assert props["facts"]["items"]["required"] == ["content"]       # facts item:只强求 content
+    assert props["decisions"]["type"] == "array"
+    assert props["decisions"]["items"]["required"] == ["content"]   # decisions item:只强求 content
+    # 上层严校验仍产出:facts 写库、decisions 返回给调用方
+    assert res.written == 1 and len(decisions) == 1
+
+
+@pytest.mark.asyncio
+async def test_distill_with_decisions_degrades_when_no_schema_kwarg():
+    """老网关(FakeGW,不认 response_schema kwarg)→ 捕 TypeError 剥掉重调,产出与现状一致。"""
+    gw = FakeGW('{"facts":[{"content":"事实","kind":"fact"}],'
+                '"decisions":[{"content":"先写测试","kind":"constraint","explicit":true}]}')
+    res, decisions = await AD.distill_turns_with_decisions(
+        [_Turn("u", "a")], gateway=gw, mem=FakeMem(), now=1.0)
+    assert res.written == 1 and len(decisions) == 1     # 降级路径 facts+decisions 都不变
+    assert gw.called == 1
 
 
 # ---- AC5 watermark + 批量 ----

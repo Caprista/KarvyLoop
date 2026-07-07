@@ -57,6 +57,43 @@ WEAKEN_STEP = 0.3        # 相反决策 → strength - 此值
 STRENGTH_FLOOR = 0.25    # provisional 偏好 strength 跌破此值 → 撤销(归档);confirmed 仅降影响不删
 
 
+# ---- 约束解码底层 schema(决策画像投毒风险最高 → 底层保 provider 吐合法 JSON) ----
+# 决策结晶产物直接进决策画像(歪掉所有未来提案),比知识库更该有底层保证。给支持的 provider
+# 走原生结构化输出通道(保证吐合法 JSON,不是"求模型听话");不支持的网关侧自动退回无约束,
+# 上层 parse_decision_prefs / parse_reconcile 的宁空勿毒作二层兜底(双层校验)。schema **逐字段
+# 对齐解析器容忍度**:parse_decision_prefs 只强求 content(缺则丢),kind/explicit/scope 都可选缺省
+# → 只把 content 标 required,其余不标(解析器容忍的字段绝不标 required,否则约束比解析器还严)。
+# 一条决策偏好对象的 schema(compile / reconcile.new / combined.decisions 共用)
+_PREF_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "content": {"type": "string"},
+        "kind": {"type": "string"},
+        "explicit": {"type": "boolean"},
+        "scope": {"type": "string"},
+    },
+    "required": ["content"],   # content 是解析器唯一强求的;其余可选(对齐 parse_decision_prefs)
+}
+
+# compile_decisions:DECISION_PREF_SYSTEM 输出**裸数组**(每条一个偏好对象)。
+_DECISION_PREFS_SCHEMA = {
+    "type": "array",
+    "items": _PREF_ITEM_SCHEMA,
+}
+
+# reconcile_decisions(existing 非空,走 DECISION_RECONCILE_SYSTEM):输出**对象**
+# {"new":[偏好...], "contradicts":[编号...]}。existing 空时退化成纯抽取(裸数组,复用上面)。
+# 两分支的 schema 各自对齐**实际用的 prompt 形状**(parse_reconcile 两形态都容忍)。
+_RECONCILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "new": {"type": "array", "items": _PREF_ITEM_SCHEMA},
+        "contradicts": {"type": "array", "items": {"type": "integer"}},
+    },
+    "required": ["new", "contradicts"],   # 协调器 system 明列这两键(没矛盾也给 contradicts=[])
+}
+
+
 # 决策编译器 system:从拍板样本抽"你怎么决策"的可泛化偏好(三类),严格 JSON。
 DECISION_PREF_SYSTEM = (
     "你是 KarvyLoop 的决策编译器。下面是用户在决策 loop 里的拍板样本"
@@ -262,11 +299,18 @@ async def compile_decisions(samples: list[DecisionSample], *, gateway: Any,
     from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板(批量决策多时防爆)
     out = ""
+    # 约束解码底层:带决策偏好 schema → 支持的 provider 保证吐合法 JSON 数组;不支持的网关侧自动
+    # 退回无约束(warning 一次)。上层 parse_decision_prefs 宁空勿毒不动,作二层兜底。老网关/测试桩
+    # 的 complete 签名不认 response_schema kwarg → 捕 TypeError 剥掉重调(与网关内部降级同纪律)。
+    msgs = [{"role": "user", "content": material}]
+    sp = SystemPrompt(static=[DECISION_PREF_SYSTEM])
     with token_source("decision_pref"):   # 决策偏好抽取(楔子进料口):此前无标 → 记 unknown(P0-9)
-        async for ev in gateway.complete(
-            [{"role": "user", "content": material}], [], ref,
-            system=SystemPrompt(static=[DECISION_PREF_SYSTEM]),
-        ):
+        try:
+            stream = gateway.complete(msgs, [], ref, system=sp,
+                                      response_schema=_DECISION_PREFS_SCHEMA)
+        except TypeError:
+            stream = gateway.complete(msgs, [], ref, system=sp)
+        async for ev in stream:
             if type(ev).__name__ == "TextDelta":
                 out += getattr(ev, "text", "")
     return parse_decision_prefs(out)
@@ -482,11 +526,19 @@ async def reconcile_decisions(samples: list[DecisionSample], *, existing: list[s
     from karvyloop.context.budget import LLM_MATERIAL_TOKENS, clip_to_tokens
     material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板
     out = ""
+    # 约束解码底层:schema 必须对齐**实际用的 prompt 形状** —— existing 非空走协调器(对象
+    # {"new","contradicts"}),existing 空退化成纯抽取(裸数组)。parse_reconcile 两形态都容忍,但
+    # 约束解码只能锁一种,故按 existing 选与 system 配套的那份。不支持 provider 网关侧退回无约束;
+    # 老网关/桩不认 kwarg → 捕 TypeError 剥掉重调(优雅降级)。
+    schema = _RECONCILE_SCHEMA if existing else _DECISION_PREFS_SCHEMA
+    msgs = [{"role": "user", "content": material}]
+    sp = SystemPrompt(static=[system])
     with token_source("decision_pref"):   # 矛盾调和(同抽取,楔子进料口):P0-9
-        async for ev in gateway.complete(
-            [{"role": "user", "content": material}], [], ref,
-            system=SystemPrompt(static=[system]),
-        ):
+        try:
+            stream = gateway.complete(msgs, [], ref, system=sp, response_schema=schema)
+        except TypeError:
+            stream = gateway.complete(msgs, [], ref, system=sp)
+        async for ev in stream:
             if type(ev).__name__ == "TextDelta":
                 out += getattr(ev, "text", "")
     return parse_reconcile(out)
