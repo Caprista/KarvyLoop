@@ -64,6 +64,23 @@ class IngestResult:
 _BULLET_RE = re.compile(r"^([-*•]|\d+[.、)])\s+(.*)$")
 _MAX_FACT_LEN = 300
 
+# 约束解码底层(试点):facts 数组的 JSON schema。给支持的 provider 走原生结构化输出通道,
+# 保证吐出的就是合法 JSON 数组(不是"求模型听话");不支持的自动退回无约束,上层 parse_facts
+# 的宁空勿毒作二层兜底(双层校验)。schema 尽量宽松(只锁结构,不锁 kind 枚举)——编译器
+# system 已管 kind 取值口径,schema 只需保证 provider 不吐 prose/半截 JSON。
+_FACTS_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "content": {"type": "string"},
+            "kind": {"type": "string"},
+        },
+        "required": ["content"],
+    },
+}
+
 
 def _facts_from_list(data: list) -> list[dict]:
     facts: list[dict] = []
@@ -154,11 +171,18 @@ async def compile_material(material: str, *, gateway: Any, model_ref: str = "",
         ref = model_ref  # 解析不了就用原值(测试桩 gateway 无 resolve_model 也能跑)
     # 第一问/docs/40 §1:喂 LLM 的材料过 context engineering 基建天花板(宽松,只防病态爆炸)。
     material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)
+    # 约束解码底层(试点):带 facts 的 json_schema → 支持的 provider 保证吐合法 JSON 数组;
+    # 不支持的 provider 网关侧自动退回无约束(warning 一次)。上层 parse_facts 的宁空勿毒不动,
+    # 作二层兜底(双层校验)。老网关/测试桩的 complete 签名不认 response_schema kwarg →
+    # 捕 TypeError 剥掉重调(优雅降级,与网关内部降级同纪律),请求照发不崩。
+    msgs = [{"role": "user", "content": material}]
+    sp = SystemPrompt(static=[system])
+    try:
+        stream = gateway.complete(msgs, [], ref, system=sp, response_schema=_FACTS_SCHEMA)
+    except TypeError:
+        stream = gateway.complete(msgs, [], ref, system=sp)
     out = ""
-    async for ev in gateway.complete(
-        [{"role": "user", "content": material}], [], ref,
-        system=SystemPrompt(static=[system]),
-    ):
+    async for ev in stream:
         if type(ev).__name__ == "TextDelta":
             out += getattr(ev, "text", "")
     return parse_facts(out)

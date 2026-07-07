@@ -70,6 +70,16 @@ class GatewayClient:
         self.reg = reg
         self.cost = CostMeter()
         self._adapters = adapters if adapters is not None else default_adapters()
+        self._structured_warned: set[str] = set()   # 约束解码不支持 → 每模型只 warning 一次(不刷屏)
+
+    def _warn_structured_unsupported(self, model_id: str) -> None:
+        """provider 不支持约束解码 → 记一次 warning(退回无约束,上层严校验兜底)。每模型只喊一次:
+        高频调用点(如摄入)不该每次刷 warning,首次告知一次足够(降级是预期行为不是错误)。"""
+        if model_id in self._structured_warned:
+            return
+        self._structured_warned.add(model_id)
+        logger.warning("模型 %s 不支持约束解码/结构化输出,本次退回无约束(上层严校验兜底);"
+                       "如端点其实支持,请在其 compat.structured_output=true 显式声明。", model_id)
 
     def _adapter(self, api: str) -> ProviderAdapter:
         a = self._adapters.get(api)
@@ -82,12 +92,19 @@ class GatewayClient:
 
     async def complete(self, messages: list[dict], tools: list[dict],
                        model_ref: str, *, system: Optional[SystemPrompt] = None,
-                       reasoning: Optional[str] = None
+                       reasoning: Optional[str] = None,
+                       response_schema: Optional[dict] = None
                        ) -> AsyncIterator[Event]:
         """reasoning(碎碎念⑩,推理强度):fast|balanced|deep;None = 继承全局
         (config `agents.defaults.reasoning`,没配 = 不注入,零回归)。传 "" = 本次显式关。
         档位怎么落参见 gateway/reasoning.py(配置驱动 + api 方言内置映射;
-        不支持的模型/方言优雅忽略 + debug 日志,绝不发坏请求)。"""
+        不支持的模型/方言优雅忽略 + debug 日志,绝不发坏请求)。
+
+        response_schema(约束解码 / 结构化输出的底层):给了 JSON schema → 支持的 provider
+        走原生结构化通道(anthropic 强制 tool-use / openai response_format),保证输出 schema-合法;
+        **不支持的 provider**(compat.structured_output=false 或非结构化方言)→ 记一次 warning +
+        退回无约束(上层严校验兜底),**绝不发坏请求**(gateway/structured.py 能力探测)。
+        None = 不启用(零回归)。caller 传的 schema 原样透传给支持的 adapter,不被偷改。"""
         m = self.reg.get(model_ref)
         prov = self.reg.provider_of(model_ref)
         adapter = self._adapter(m.api)
@@ -122,20 +139,32 @@ class GatewayClient:
         # 两个,adapter 不认再逐个剥(先剥 cache 保 extra_body,再剥 extra_body),第三方旧 adapter
         # 只支持 extra_body 不支持 cache 时,推理档位不被误伤(缓存断点忽略,不影响正确性)。
         cache = bool(getattr(self.reg, "prompt_cache", True))
+        # 约束解码能力探测(唯一咽喉,配置驱动 + 优雅降级):caller 给了 schema 但 provider 不支持
+        # (compat.structured_output=false 或非结构化方言)→ warning 一次 + 退回无约束
+        # (schema 不透传,上层严校验兜底),绝不发坏请求。支持 → 原样透传给 adapter(caller 尊重)。
+        eff_schema = response_schema
+        if response_schema is not None:
+            from .structured import supports_structured
+            if not supports_structured(m):
+                self._warn_structured_unsupported(m.id)
+                eff_schema = None
         base_kwargs: dict = {"system": system}
         if extra_body:
             base_kwargs["extra_body"] = extra_body
+        if eff_schema is not None:
+            base_kwargs["response_schema"] = eff_schema
         try:
             stream = adapter.complete(messages, tools, m, prov, cache=cache, **base_kwargs)
         except TypeError:
-            # adapter 不认 cache kwarg → 剥掉 cache 重调(保留 extra_body,推理档位不被误伤)
+            # adapter 不认 cache kwarg → 剥掉 cache 重调(保留 extra_body/response_schema,不被误伤)
             logger.debug("adapter %s 不支持 cache kwarg,缓存断点忽略(cache=%s)",
                          type(adapter).__name__, cache)
             try:
                 stream = adapter.complete(messages, tools, m, prov, **base_kwargs)
             except TypeError:
-                # 连 extra_body 也不认(最老 adapter)→ 全剥,请求照发(推理档位一并忽略)
-                logger.debug("adapter %s 不支持 extra_body,推理档位 %r 忽略",
+                # 连 extra_body/response_schema 也不认(最老 adapter)→ 全剥,请求照发
+                # (推理档位 + 约束解码一并优雅忽略,上层严校验兜底)
+                logger.debug("adapter %s 不支持 extra_body/response_schema,推理档位 %r + 约束解码忽略",
                              type(adapter).__name__, level)
                 stream = adapter.complete(messages, tools, m, prov, system=system)
         async for ev in stream:

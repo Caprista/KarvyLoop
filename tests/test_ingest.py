@@ -91,6 +91,8 @@ class TextDelta:
 
 
 class FakeGW:
+    """老网关桩:complete 签名**不认** response_schema kwarg → 触发 ingest 侧优雅降级
+    (捕 TypeError 剥掉重调)。用来锁"不支持约束解码时试点仍产出"。"""
     def __init__(self, reply):
         self.reply = reply
         self.seen_msgs = None
@@ -101,6 +103,18 @@ class FakeGW:
         self.seen_msgs = messages
         self.seen_tools = tools
         self.seen_system = system
+        for ch in self.reply:
+            yield TextDelta(ch)
+
+
+class FakeGWSchema:
+    """新网关桩:complete 接 response_schema kwarg → 记下来供断言"schema 被透传"。"""
+    def __init__(self, reply):
+        self.reply = reply
+        self.seen_schema = "unset"
+
+    async def complete(self, messages, tools, model_ref, *, system=None, response_schema=None):
+        self.seen_schema = response_schema
         for ch in self.reply:
             yield TextDelta(ch)
 
@@ -186,3 +200,37 @@ async def test_compile_uses_restricted_call_with_system():
     assert gw.seen_tools == []                              # 无工具(纯抽取)
     assert any(I.INGEST_SYSTEM in s for s in gw.seen_system.static)  # 喂了编译器 system
     assert gw.seen_msgs[0]["content"] == "素材"             # 材料进 user 消息
+
+
+# ---- 约束解码底层试点:schema 透传 + 不支持时优雅降级 ----
+@pytest.mark.asyncio
+async def test_compile_threads_facts_schema_when_supported():
+    """网关接 response_schema → 试点把 facts 的 json_schema 透传下去(约束解码底层),
+    产出仍是合法结构(上层 parse_facts 二层兜底不动)。"""
+    gw = FakeGWSchema('[{"content":"用户在杭州","kind":"fact"}]')
+    facts = await I.compile_material("素材", gateway=gw, model_ref="m")
+    # schema 被透传(非 None、是 facts 数组 schema)
+    assert isinstance(gw.seen_schema, dict) and gw.seen_schema.get("type") == "array"
+    assert gw.seen_schema["items"]["properties"]["content"]["type"] == "string"
+    # 上层严校验仍产出合法结构
+    assert [f["content"] for f in facts] == ["用户在杭州"]
+
+
+@pytest.mark.asyncio
+async def test_compile_degrades_when_gateway_lacks_schema_kwarg():
+    """老网关/桩不认 response_schema kwarg → ingest 捕 TypeError 剥掉重调,试点仍产出(不崩)。"""
+    gw = FakeGW('[{"content":"用户在上海","kind":"fact"}]')   # 无 response_schema kwarg
+    facts = await I.compile_material("素材", gateway=gw, model_ref="m")
+    assert [f["content"] for f in facts] == ["用户在上海"]     # 退回无约束路径仍产出
+
+
+@pytest.mark.asyncio
+async def test_ingest_material_still_works_with_schema_gateway():
+    """端到端:带 schema 网关走完整 ingest_material,facts 写进真 MemoryManager。"""
+    from karvyloop.cognition.memory import MemoryManager
+    gw = FakeGWSchema('[{"content":"用户喜欢简洁","kind":"preference"}]')
+    mem = MemoryManager()
+    res = await I.ingest_material("材料", gateway=gw, mem=mem, agent_id="hardy", now=7.0)
+    assert res.written == 1
+    b = mem.index.all("personal")[0]
+    assert b.content == "用户喜欢简洁" and b.provenance["kind"] == "preference"

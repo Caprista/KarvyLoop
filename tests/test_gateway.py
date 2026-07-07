@@ -239,3 +239,132 @@ async def test_ac9_graceful_degrade_when_adapter_rejects_cache_kwarg():
     evs = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus",
                                        system=SystemPrompt(static=["s"]))]
     assert any(isinstance(e, Usage) for e in evs) and any(isinstance(e, Done) for e in evs)
+
+
+# ---- AC10：约束解码 / 结构化输出(response_schema)——底层能力 + 优雅降级 ----
+_FACTS_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {"content": {"type": "string"}, "kind": {"type": "string"}},
+        "required": ["content"],
+    },
+}
+
+
+def test_ac10_default_none_zero_regression():
+    """不传 response_schema → 请求体一字不变(零回归):adapter 收到 response_schema=None。"""
+    from karvyloop.gateway.providers.anthropic import AnthropicAdapter
+    from karvyloop.schemas import ModelDefinition, ProviderConfig
+    m = ModelDefinition(id="p/a", name="a", api="anthropic-messages",
+                        context_window=1000, max_tokens=100)
+    prov = ProviderConfig(name="p", base_url="x")
+    b_no = AnthropicAdapter().build_request([{"role": "user", "content": "x"}], [], m, prov, None)
+    assert "tool_choice" not in b_no and "tools" not in b_no
+
+
+@pytest.mark.asyncio
+async def test_ac10_schema_threaded_to_adapter():
+    """给了 schema → gateway 把它透传到 adapter.complete(caller-injected 尊重,不被偷改)。"""
+    reg = ModelRegistry.from_config(_cfg())
+    mock = MockAdapter("anthropic-messages")
+    g = GatewayClient(reg, adapters={"anthropic-messages": mock})
+    _ = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus",
+                                     response_schema=_FACTS_SCHEMA)]
+    assert mock.last_request["response_schema"] == _FACTS_SCHEMA
+
+
+def test_ac10_anthropic_builds_forced_tool():
+    """anthropic adapter:schema → 强制 tool-use(tools 带输出工具 + tool_choice 锁定它)。"""
+    from karvyloop.gateway.providers.anthropic import AnthropicAdapter
+    from karvyloop.schemas import ModelDefinition, ProviderConfig
+    m = ModelDefinition(id="p/a", name="a", api="anthropic-messages",
+                        context_window=1000, max_tokens=100)
+    prov = ProviderConfig(name="p", base_url="x")
+    body = AnthropicAdapter().build_request([{"role": "user", "content": "x"}], [], m, prov,
+                                            None, response_schema=_FACTS_SCHEMA)
+    assert body["tool_choice"]["type"] == "tool"
+    tool_names = [t["name"] for t in body["tools"]]
+    assert body["tool_choice"]["name"] in tool_names
+    # 输出工具的 input_schema 就是调用方传的 schema(原样,不被改)
+    out_tool = next(t for t in body["tools"] if t["name"] == body["tool_choice"]["name"])
+    assert out_tool["input_schema"] == _FACTS_SCHEMA
+
+
+def test_ac10_openai_builds_response_format():
+    """openai adapter:schema → response_format=json_schema strict(归一:全 required + 禁额外键)。"""
+    from karvyloop.gateway.providers.openai_completions import OpenAICompletionsAdapter
+    from karvyloop.schemas import ModelDefinition, ProviderConfig
+    m = ModelDefinition(id="p/o", name="o", api="openai-completions",
+                        context_window=1000, max_tokens=100)
+    prov = ProviderConfig(name="p", base_url="https://x/v1")
+    body = OpenAICompletionsAdapter().build_request([{"role": "user", "content": "x"}], [], m, prov,
+                                                    None, response_schema=_FACTS_SCHEMA)
+    rf = body["response_format"]
+    assert rf["type"] == "json_schema" and rf["json_schema"]["strict"] is True
+    item = rf["json_schema"]["schema"]["items"]
+    # 严格模式:object 补 additionalProperties:false + required 覆盖全部键
+    assert item["additionalProperties"] is False
+    assert set(item["required"]) == {"content", "kind"}
+    # 调用方原 dict 未被就地改(尊重 caller-injected;归一只在副本上)
+    assert "additionalProperties" not in _FACTS_SCHEMA["items"]
+
+
+@pytest.mark.asyncio
+async def test_ac10_unsupported_provider_degrades_no_crash():
+    """provider 不支持约束解码(compat.structured_output=false)→ warning 一次 + 退回无约束,
+    请求照发不崩(上层严校验兜底)。adapter 不该收到结构化参数。"""
+    cfg = _cfg()
+    cfg["models"]["providers"]["anthropic"]["models"][0]["compat"] = {"structured_output": False}
+    reg = ModelRegistry.from_config(cfg)
+    mock = MockAdapter("anthropic-messages")
+    g = GatewayClient(reg, adapters={"anthropic-messages": mock})
+    evs = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus",
+                                       response_schema=_FACTS_SCHEMA)]
+    # 退回无约束:schema 不透传给 adapter(能力探测挡在前面)
+    assert mock.last_request["response_schema"] is None
+    # 请求照常产出事件(不崩)
+    assert any(isinstance(e, Usage) for e in evs) and any(isinstance(e, Done) for e in evs)
+
+
+@pytest.mark.asyncio
+async def test_ac10_old_adapter_without_kwarg_degrades():
+    """最老 adapter(complete 签名连 response_schema 都不认)→ gateway 剥掉重调,请求照发不崩。"""
+    class _OldAdapter:
+        api = "anthropic-messages"
+        async def complete(self, messages, tools, model, provider, *, system=None):
+            yield Usage(input_tokens=5, output_tokens=2)
+            yield Done("end_turn")
+        async def embed(self, *a, **k):
+            return []
+    reg = ModelRegistry.from_config(_cfg())
+    g = GatewayClient(reg, adapters={"anthropic-messages": _OldAdapter()})
+    evs = [e async for e in g.complete([{"role": "user", "content": "x"}], [], "anthropic/claude-opus",
+                                       response_schema=_FACTS_SCHEMA)]
+    assert any(isinstance(e, Usage) for e in evs) and any(isinstance(e, Done) for e in evs)
+
+
+def test_ac10_capability_detection():
+    """能力探测:结构化方言默认支持;非结构化方言默认不支持;compat 显式覆盖优先。"""
+    from karvyloop.gateway.structured import supports_structured
+    from karvyloop.schemas import ModelDefinition
+    base = dict(name="m", context_window=1000, max_tokens=100)
+    assert supports_structured(ModelDefinition(id="p/a", api="anthropic-messages", **base))
+    assert supports_structured(ModelDefinition(id="p/o", api="openai-completions", **base))
+    # 非结构化方言(如本地 ollama)默认不支持 → 触发降级
+    assert not supports_structured(ModelDefinition(id="p/l", api="ollama", **base))
+    # compat 显式覆盖:声明支持的怪端点 / 声明不支持的结构化方言
+    assert supports_structured(ModelDefinition(id="p/l2", api="ollama",
+                                               compat={"structured_output": True}, **base))
+    assert not supports_structured(ModelDefinition(id="p/a2", api="anthropic-messages",
+                                                   compat={"structured_output": False}, **base))
+
+
+def test_ac10_warn_once_per_model():
+    """不支持约束解码 → 每模型只 warning 一次(高频调用点不刷屏)。"""
+    reg = ModelRegistry.from_config(_cfg())
+    g = GatewayClient(reg, adapters={})
+    assert "m/x" not in g._structured_warned
+    g._warn_structured_unsupported("m/x")
+    g._warn_structured_unsupported("m/x")   # 第二次静默
+    assert g._structured_warned == {"m/x"}

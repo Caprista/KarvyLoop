@@ -132,7 +132,8 @@ class OpenAICompletionsAdapter:
 
     def build_request(self, messages, tools, model: ModelDefinition,
                       provider: ProviderConfig, system: Optional[SystemPrompt],
-                      extra_body: Optional[dict] = None) -> dict:
+                      extra_body: Optional[dict] = None,
+                      response_schema: Optional[dict] = None) -> dict:
         body: dict = {
             "model": model.id.split("/", 1)[-1],
             "messages": messages_to_openai(messages, system),
@@ -141,6 +142,12 @@ class OpenAICompletionsAdapter:
             body["max_tokens"] = model.max_tokens
         if tools:
             body["tools"] = tools_to_openai(tools)
+        if response_schema is not None:
+            # 约束解码(业界做法):response_format=json_schema strict 模式 →
+            # provider 保证输出是 schema-合法 JSON。schema 归一(补 additionalProperties:false
+            # + 全 required)在 openai_response_format 内做,不改调用方原 dict。schema=None → 不碰(零回归)。
+            from ..structured import openai_response_format
+            body["response_format"] = openai_response_format(response_schema)
         if extra_body:
             # 推理强度等按配置注入的顶层参数(gateway/reasoning.py 产;如 reasoning_effort)
             body.update(extra_body)
@@ -148,12 +155,14 @@ class OpenAICompletionsAdapter:
 
     async def complete(self, messages, tools, model, provider, *, system=None,
                        extra_body: Optional[dict] = None,
-                       cache: bool = True) -> AsyncIterator[Event]:
+                       cache: bool = True,
+                       response_schema: Optional[dict] = None) -> AsyncIterator[Event]:
         import httpx  # 延迟导入(测试走 mock 不需要)
 
         # cache:OpenAI 系是**自动缓存**(命中不需请求侧标记 cache_control)—— 参数只为与
         # anthropic adapter 签名对齐,此处不影响请求体。命中读在 _normalize 的 usage 里。
-        body = self.build_request(messages, tools, model, provider, system, extra_body)
+        body = self.build_request(messages, tools, model, provider, system, extra_body,
+                                  response_schema)
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}   # 流末带 usage
         key = provider.api_key or ""

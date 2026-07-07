@@ -49,19 +49,31 @@ class AnthropicAdapter:
 
     def build_request(self, messages, tools, model: ModelDefinition,
                       provider: ProviderConfig, system: Optional[SystemPrompt],
-                      extra_body: Optional[dict] = None, cache: bool = True) -> dict:
+                      extra_body: Optional[dict] = None, cache: bool = True,
+                      response_schema: Optional[dict] = None) -> dict:
         body: dict = {
             "model": model.id.split("/", 1)[-1],
             "max_tokens": model.max_tokens,
             "messages": messages,
         }
-        if tools:
+        # 约束解码(业界做法):用一个"输出工具"承载 schema,tool_choice 锁定它 →
+        # 模型必须按 input_schema 产出参数 = schema-合法输出。与调用方原有 tools 并存
+        # (输出工具追加进 tools 尾)。schema=None → 完全不碰(零回归)。
+        out_tool = None
+        if response_schema is not None:
+            from ..structured import anthropic_structured_tool
+            out_tool, tool_choice = anthropic_structured_tool(response_schema)
+            body["tool_choice"] = tool_choice
+        eff_tools = list(tools) if tools else []
+        if out_tool is not None:
+            eff_tools.append(out_tool)
+        if eff_tools:
             # prompt cache(HR-9):tools schema 是每次 drive 基本不变的稳定前缀(数 KB),
             # 给**最后一个** tool 打 ephemeral 断点 → 整个 tools 数组被缓存,重复调用命中 cache_read。
             # 只在开关开 + tools 总量 ≥ 最小可缓存长度时打(太小写缓存不划算)。断点只落 tools 尾,
             # 会话历史/用户当轮消息绝不打(那是变的,打了每轮触发 cache_write 白付)。Anthropic 最多
             # 4 个断点,此处 system 尾 + tools 尾各一个,余量充足。
-            body["tools"] = _tools_with_cache_breakpoint(tools) if cache else tools
+            body["tools"] = _tools_with_cache_breakpoint(eff_tools) if cache else eff_tools
         if system is not None:
             body["system"] = system.to_blocks(cache=cache)   # HR-9：静态前缀带 cache_control
         if extra_body:
@@ -71,11 +83,13 @@ class AnthropicAdapter:
         return body
 
     async def complete(self, messages, tools, model, provider, *, system=None,
-                       extra_body: Optional[dict] = None, cache: bool = True
+                       extra_body: Optional[dict] = None, cache: bool = True,
+                       response_schema: Optional[dict] = None
                        ) -> AsyncIterator[Event]:
         import httpx  # 延迟导入
 
-        body = self.build_request(messages, tools, model, provider, system, extra_body, cache)
+        body = self.build_request(messages, tools, model, provider, system, extra_body, cache,
+                                  response_schema)
         body["stream"] = True
         # auth_header 决定鉴权方式:
         #   - x-api-key(默认):原生 Anthropic 习惯
