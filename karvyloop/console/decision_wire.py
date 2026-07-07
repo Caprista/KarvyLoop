@@ -72,6 +72,7 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
     logger.warning(带 proposal_id + 哪一段),且**不连坐**后面的段(决策流仍绝不被打断)。
     """
     import time as _time
+    from karvyloop.crystallize import taste_eval as _taste_eval
     # 段1:读回提案(summary/kind/payload —— 后面各段的原料;失败降级为用 id 当 context)
     ctx = ""
     kind = ""
@@ -81,21 +82,31 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
         reg = getattr(app.state, "proposal_registry", None)
         if reg is not None:
             p = reg.get(proposal_id)
+            if p is None:
+                # 去重键 = proposal_id(P0-7):registry 在场而卡不在 → 这板已拍过
+                # (双击/重放/多渠道并发)或 id 未知。三路信号一律不再记 —— 否则
+                # stats/decision_log/样本被双计,且确认卡的元循环闸(靠 kind 查回)
+                # 会被重放绕过。决策流不受影响(envelope 照发,registry.decide 自返 None);
+                # registry 未接线的宿主保持既有降级记录(context=id)不变。
+                logger.info(f"[decision_wire] proposal_id={proposal_id} 不在待决表"
+                            f"(已拍过或未知)→ 不重复记信号")
+                return
             ctx = getattr(p, "summary", "") or ""
             kind = getattr(p, "kind", "") or ""
             orig_payload = dict(getattr(p, "payload", {}) or {})
-            if p is not None:
-                # 域以**卡自己的 payload 为权威**(与 silence._proposal_domain 同口径):
-                # 传输层的 to_address_domain_id 是 pydantic 占位默认("dom-1"),前端常不填
-                # → 直接用会把全部流水记进假域,静音分桶两侧永远对不上(对抗验收缺陷①)。
-                _cd = str(orig_payload.get("domain_id")
-                          or orig_payload.get("group_domain_id") or "").strip()
-                eff_domain = "" if _cd in ("", "l0") else _cd
+            # 域以**卡自己的 payload 为权威**(与 silence._proposal_domain 同口径):
+            # 传输层的 to_address_domain_id 是 pydantic 占位默认("dom-1"),前端常不填
+            # → 直接用会把全部流水记进假域,静音分桶两侧永远对不上(对抗验收缺陷①)。
+            _cd = str(orig_payload.get("domain_id")
+                      or orig_payload.get("group_domain_id") or "").strip()
+            eff_domain = "" if _cd in ("", "l0") else _cd
     except Exception as e:
         logger.warning(f"[decision_wire] 读回提案失败(proposal_id={proposal_id},"
                        f"样本 context 降级为 id): {e}")
-    if kind == "confirm_decision_pref":
-        return   # 确认"决策偏好"本身不是工作决策(否则确认偏好又生样本)
+    if kind in _taste_eval.SKIP_KINDS:
+        # 元循环闸与押注侧共用同一份 SKIP_KINDS(单一来源,防两处独立 check 漂移):
+        # 确认"决策偏好"本身不是工作决策(否则确认偏好又生样本、又被口味对账开奖)。
+        return
     # 段2:折「改了再批」对照进 reason(最富偏好信号;失败退回原 reason)
     eff_reason = reason
     try:
@@ -341,23 +352,24 @@ async def _propose_confirmations(app: Any, beliefs: list, now: float) -> None:
 
 
 def schedule_decision_crystallize(app: Any) -> None:
-    """fire-and-forget 调度决策结晶(不阻塞决策响应)。失败 fail-loud(§0.7)不静默死。"""
+    """fire-and-forget 调度决策结晶(不阻塞决策响应)。失败 fail-loud(§0.7)不静默死。
+
+    线程语义(P0-6):WS/异步路径在事件循环线程里 → 直接 create_task;REST
+    `/api/h2a_decide` 是 sync def 走线程池,线程里**没有 running loop** —— 此前这里
+    直接 return,REST 拍板的样本只进缓冲、结晶永远等不到调度(两条学习回路不一致)。
+    现在回退用启动时记下的主循环(app.state.main_event_loop,lifespan 记)
+    run_coroutine_threadsafe 桥回;两个口都没有 → warning 有声(样本仍在缓冲,
+    下一次环内拍板会带出这批)。"""
     import asyncio
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
     tasks = getattr(app.state, "_decision_tasks", None)
     if tasks is None:
         tasks = app.state._decision_tasks = set()
-    task = loop.create_task(maybe_crystallize_decisions(app))
-    tasks.add(task)
 
     def _on_done(t: Any) -> None:
         tasks.discard(t)
         try:
             exc = t.exception()
-        except Exception:
+        except BaseException:   # cancelled 等:没有结果可报
             return
         if exc is not None:
             logger.error(f"[decision_pref] 结晶后台任务异常: {exc}")
@@ -367,6 +379,20 @@ def schedule_decision_crystallize(app: Any) -> None:
             except Exception:
                 pass
 
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = getattr(app.state, "main_event_loop", None)
+        if loop is None or loop.is_closed():
+            logger.warning("[decision_pref] 无事件循环可调度结晶(样本留在缓冲,"
+                           "等下一次环内拍板带出)")
+            return
+        fut = asyncio.run_coroutine_threadsafe(maybe_crystallize_decisions(app), loop)
+        tasks.add(fut)
+        fut.add_done_callback(_on_done)
+        return
+    task = loop.create_task(maybe_crystallize_decisions(app))
+    tasks.add(task)
     task.add_done_callback(_on_done)
 
 

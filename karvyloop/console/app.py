@@ -189,6 +189,9 @@ def build_console_app(
 
         # 启动:init ws_clients
         app.state.ws_clients = set()
+        # 主事件循环句柄:给线程池里跑的 sync 路径(REST /api/h2a_decide 等)把
+        # fire-and-forget 协程桥回环上用(run_coroutine_threadsafe;decision_wire P0-6)。
+        app.state.main_event_loop = asyncio.get_running_loop()
         logger.info(
             f"[karvyloop console] 启动 workbench={bool(workbench)} "
             f"main_loop={main_loop is not None} "
