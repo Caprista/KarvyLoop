@@ -1395,20 +1395,33 @@
   // 你点开启才打开知识库面板(H2A:问,不自动);馆员/收敛/沉淀/欠账全在面板里,主聊天零耦合。
   let _kHintShown = false;
   function _maybeKnowledgeHint(text) {
-    if (_kHintShown) return;
-    if (!/(聊|学|讲)[点些一]{0,2}(个)?(新)?(知识|认知)|新知识|开启知识(库)?(收集)?模式/.test(text || "")) return;
+    if (_kHintShown) return false;
+    if (!/(聊|学|讲)[点些一]{0,2}(个)?(新)?(知识|认知)|新知识|开启知识(库)?(收集)?模式/.test(text || "")) return false;
     _kHintShown = true;   // 一次会话只提一次,不追着问
     const log = document.getElementById("chat-log");
-    if (!log) return;
+    if (!log) return false;
     const box = el("div", { class: "chat-notice knowledge-hint" });
     box.appendChild(el("span", { text: t("knowledge.hint") + " " }));
     const yes = el("button", { type: "button", class: "khint-btn khint-yes", text: t("knowledge.hint_open") });
-    yes.addEventListener("click", () => { box.remove(); if (window.KarvyMemoryPanel) window.KarvyMemoryPanel.open(); });
+    yes.addEventListener("click", () => {
+      box.remove();
+      _ceClear();   // 这句话跟着去知识库,主聊天不再发它
+      if (window.KarvyMemoryPanel) window.KarvyMemoryPanel.open();
+      // 面板异步渲染 → 轮几拍把原话预填进「聊知识」输入框(带话入场,按发送即开聊)
+      let tries = 0;
+      const carry = () => {
+        const cin = document.querySelector(".kchat-in");
+        if (cin) { cin.value = text; cin.focus(); return; }
+        if (++tries < 20) setTimeout(carry, 150);
+      };
+      carry();
+    });
     const no = el("button", { type: "button", class: "khint-btn", text: t("knowledge.hint_skip") });
-    no.addEventListener("click", () => box.remove());
+    no.addEventListener("click", () => { box.remove(); _submitChat(); });   // 原话走正常聊天(闸已标,不再拦)
     box.appendChild(yes); box.appendChild(no);
     log.appendChild(box);
     log.scrollTop = log.scrollHeight;
+    return true;   // 闸门:调用方停住,等你选
   }
 
   async function newConversation() {
@@ -2914,6 +2927,9 @@
     const _imgs = _attachmentsImages();
     const _txtInline = _attachmentsTextInline();
     if (!text && !_attachments.length) return;   // 纯空不发;有附件(哪怕没文字)也能发
+    // docs/66 §F 闸门(Hardy 2026-07-07 体验反馈):识别出"聊知识"意图就**先停住等你选**——
+    // [打开]带这句话进知识库聊天,[不用]才走正常 drive。此前提示条与正常回答并行 = 两个脑子抢答。
+    if (_maybeKnowledgeHint(text)) return;       // 消息留在输入框:不派发、不渲染、附件不动
     const _qText = text || t("attach.implicit_q");
     const _manifest = await _buildAttachManifest();   // 异步:图降缩略图
     _clearAttachments();
@@ -2923,7 +2939,6 @@
     // 乐观渲染:**真**显示发了什么(缩略图/文档块),不再只写"(带了 N 个附件)"
     if (_manifest.length) _pushUserWithAttachments(_qText, _manifest);
     else pushChatLine("user", text);
-    _maybeKnowledgeHint(text);   // docs/66 §F:说到聊新知识 → 问要不要打开知识库聊知识(你点开启才开面板)
     showBusy();
     // ch4 圆桌对话式对齐(Hardy:少按钮)—— 待对齐圆桌里,你的话走 /align;小卡聊清了自己开始。
     if (_pendingRoundtable) {
