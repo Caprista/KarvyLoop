@@ -38,6 +38,21 @@ function _memKind(k: string): string {
   const m = t("mem.kind_" + (k || "fact"));
   return m.indexOf("mem.kind_") === 0 ? (k || "") : m;  // 未知 kind → 原值
 }
+// 人话日期(「6/28」):epoch 秒 → 月/日;缺/坏 → ""(不显示,不骗)。用于使用信号 + 失效时刻。
+function _when(ts: number): string {
+  if (!ts || !isFinite(ts)) return "";
+  const d = new Date(ts * 1000);
+  return (d.getMonth() + 1) + "/" + d.getDate();
+}
+// Q6 读写审计薄版:一条记忆的使用信号("被召回 N 次·最近 X" / 从没用过)。Trace 没记 belief 级
+// 召回事件 → 退用 recall_count/last_recalled_ts(后端既有字段),0 次时诚实说"还没被用过"。
+function _usageNode(b: any): HTMLElement {
+  const n = Number(b && b.recall_count) || 0;
+  if (n <= 0) return el("span", { class: "mc-usage mc-usage-idle", text: t("mem.usage_never") });
+  const when = _when(Number(b && b.last_recalled_ts) || 0);
+  const txt = when ? t("mem.usage_recalled_at", { n, t: when }) : t("mem.usage_recalled", { n });
+  return el("span", { class: "mc-usage", text: txt, title: t("mem.usage_title") });
+}
 function _memSrc(s: string): string {
   const m = t("mem.src_" + (s || "ingest"));
   return m.indexOf("mem.src_") === 0 ? (s || "") : m;
@@ -820,7 +835,8 @@ async function renderMemoryPanel(): Promise<void> {
             title ? el("div", { class: "mc-meta", text: b.content }) : null,
             el("div", { class: "mc-meta" },
               el("span", { class: "mc-tag", text: _memKind(b.kind) }),
-              " · ", _originNode(b.source, b.source_ref, b.conversation_id))),
+              " · ", _originNode(b.source, b.source_ref, b.conversation_id),
+              " · ", _usageNode(b))),   // Q6 读写审计薄版:被召回几次·最近何时
           el("button", { class: "mc-del", text: t("mgmt.delete"),
             onclick: async () => {
               if (!window.confirm(t("mem.del_confirm", { c: (title || b.content).slice(0, 40) }))) return;
@@ -830,6 +846,55 @@ async function renderMemoryPanel(): Promise<void> {
       },
     }));
   }
+  // Q5 记忆考古层:失效不删 —— 折叠区,按需拉取 include_invalid 的失效条,渲染"✗ 已失效(被『…』取代)"。
+  await _renderHistoryLayer(body);
+}
+
+// 记忆考古层(Q5:"你曾经怎么看我?"):默认折叠,点开才拉取失效条(不污染"当前知道的",也不白拉)。
+// invalid_at + invalid_reason + superseded_by(后端从 reason 解析出的取代者内容)全现成。
+async function _renderHistoryLayer(body: HTMLElement): Promise<void> {
+  const wrap = el("div", { class: "mem-history" });
+  let open = false, loaded = false;
+  const list = el("div", { class: "mem-history-list hidden" });
+  const toggle = el("button", { class: "mgmt-inline-link mem-history-toggle", text: t("mem.history_toggle") });
+  const render = (invalids: any[]): void => {
+    list.innerHTML = "";
+    if (!invalids.length) { list.appendChild(el("div", { class: "mgmt-empty", text: t("mem.history_empty") })); return; }
+    for (const b of invalids) {
+      const title = (b.title || "").trim();
+      const by = (b.superseded_by || "").trim();
+      const when = _when(Number(b.invalid_at) || 0);
+      // "✗ 已失效 — 被『取代者』取代 · 失效于 X"。取代者内容进**独立 span**(不只靠 i18n 插值,
+      // 面板/测试都能拿到真值);解析不出取代者(人工归档/老格式)→ 纯"已失效",不猜。
+      const stamp = when ? " " + t("mem.invalid_at", { t: when }) : "";
+      const mark = el("div", { class: "mem-history-mark" }, t("mem.invalid_retired"));
+      if (by) {
+        mark.appendChild(el("span", { text: " " + t("mem.invalid_replaced_by") + " " }));
+        mark.appendChild(el("span", { class: "mem-history-by", text: "「" + by + "」" }));
+      }
+      if (stamp) mark.appendChild(el("span", { class: "mem-history-when", text: stamp }));
+      list.appendChild(el("div", { class: "mgmt-card mem-history-card" },
+        el("div", { class: "mc-main" },
+          el("div", { class: "mc-name mem-history-name", text: title || b.content }),
+          title ? el("div", { class: "mc-meta", text: b.content }) : null,
+          mark)));
+    }
+  };
+  toggle.addEventListener("click", async () => {
+    open = !open;
+    list.classList.toggle("hidden", !open);
+    toggle.textContent = t(open ? "mem.history_hide" : "mem.history_toggle");
+    if (open && !loaded) {
+      loaded = true;
+      list.appendChild(el("div", { class: "mgmt-hint", text: t("mem.history_loading") }));
+      const data = await _getJSON("/api/memory?include_invalid=1");
+      const invalids = ((data && data.beliefs) || []).filter((b: any) => b.invalid_at != null);
+      render(invalids);
+    }
+  });
+  wrap.appendChild(toggle);
+  wrap.appendChild(list);
+  body.appendChild(wrap);
 }
 
 async function open(): Promise<void> {

@@ -16,6 +16,18 @@ var KarvyMemoryPanelBundle = (function(exports) {
     const m = t("mem.kind_" + (k || "fact"));
     return m.indexOf("mem.kind_") === 0 ? k || "" : m;
   }
+  function _when(ts) {
+    if (!ts || !isFinite(ts)) return "";
+    const d = new Date(ts * 1e3);
+    return d.getMonth() + 1 + "/" + d.getDate();
+  }
+  function _usageNode(b) {
+    const n = Number(b && b.recall_count) || 0;
+    if (n <= 0) return el("span", { class: "mc-usage mc-usage-idle", text: t("mem.usage_never") });
+    const when = _when(Number(b && b.last_recalled_ts) || 0);
+    const txt = when ? t("mem.usage_recalled_at", { n, t: when }) : t("mem.usage_recalled", { n });
+    return el("span", { class: "mc-usage", text: txt, title: t("mem.usage_title") });
+  }
   function _memSrc(s) {
     const m = t("mem.src_" + (s || "ingest"));
     return m.indexOf("mem.src_") === 0 ? s || "" : m;
@@ -1016,9 +1028,12 @@ var KarvyMemoryPanelBundle = (function(exports) {
                 { class: "mc-meta" },
                 el("span", { class: "mc-tag", text: _memKind(b.kind) }),
                 " · ",
-                _originNode(b.source, b.source_ref, b.conversation_id)
+                _originNode(b.source, b.source_ref, b.conversation_id),
+                " · ",
+                _usageNode(b)
               )
             ),
+            // Q6 读写审计薄版:被召回几次·最近何时
             el("button", {
               class: "mc-del",
               text: t("mgmt.delete"),
@@ -1032,6 +1047,58 @@ var KarvyMemoryPanelBundle = (function(exports) {
         }
       }));
     }
+    await _renderHistoryLayer(body);
+  }
+  async function _renderHistoryLayer(body) {
+    const wrap = el("div", { class: "mem-history" });
+    let open2 = false, loaded = false;
+    const list = el("div", { class: "mem-history-list hidden" });
+    const toggle = el("button", { class: "mgmt-inline-link mem-history-toggle", text: t("mem.history_toggle") });
+    const render = (invalids) => {
+      list.innerHTML = "";
+      if (!invalids.length) {
+        list.appendChild(el("div", { class: "mgmt-empty", text: t("mem.history_empty") }));
+        return;
+      }
+      for (const b of invalids) {
+        const title = (b.title || "").trim();
+        const by = (b.superseded_by || "").trim();
+        const when = _when(Number(b.invalid_at) || 0);
+        const stamp = when ? " " + t("mem.invalid_at", { t: when }) : "";
+        const mark = el("div", { class: "mem-history-mark" }, t("mem.invalid_retired"));
+        if (by) {
+          mark.appendChild(el("span", { text: " " + t("mem.invalid_replaced_by") + " " }));
+          mark.appendChild(el("span", { class: "mem-history-by", text: "「" + by + "」" }));
+        }
+        if (stamp) mark.appendChild(el("span", { class: "mem-history-when", text: stamp }));
+        list.appendChild(el(
+          "div",
+          { class: "mgmt-card mem-history-card" },
+          el(
+            "div",
+            { class: "mc-main" },
+            el("div", { class: "mc-name mem-history-name", text: title || b.content }),
+            title ? el("div", { class: "mc-meta", text: b.content }) : null,
+            mark
+          )
+        ));
+      }
+    };
+    toggle.addEventListener("click", async () => {
+      open2 = !open2;
+      list.classList.toggle("hidden", !open2);
+      toggle.textContent = t(open2 ? "mem.history_hide" : "mem.history_toggle");
+      if (open2 && !loaded) {
+        loaded = true;
+        list.appendChild(el("div", { class: "mgmt-hint", text: t("mem.history_loading") }));
+        const data = await _getJSON("/api/memory?include_invalid=1");
+        const invalids = (data && data.beliefs || []).filter((b) => b.invalid_at != null);
+        render(invalids);
+      }
+    });
+    wrap.appendChild(toggle);
+    wrap.appendChild(list);
+    body.appendChild(wrap);
   }
   async function open() {
     openMgmtModal(t("mgmt.memory_title"));

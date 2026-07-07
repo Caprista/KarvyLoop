@@ -271,23 +271,95 @@ async def api_memory_distill_decide(req: DistillDecideRequest, request: Request)
     return {"ok": True, "decision": "persist", "written": res.written, "superseded": superseded}
 
 
+def _superseded_by(reason: str) -> str:
+    """从 invalidate 的 reason 串里解析出**取代者内容**(考古层展示"被『…』取代")。
+
+    conflict.py 写的 reason 形如 `superseded(update) by newer belief [ingest]: <取代者内容>` /
+    `duplicate(auto-merged): same assertion as [ingest]: <胜者内容>` —— 取代者内容一律在最后一个
+    `]: ` 之后。解析不出(人工归档、老格式)→ 返 ""(降级纯"已失效",不猜、不骗)。
+    """
+    r = (reason or "").strip()
+    marker = "]: "
+    idx = r.rfind(marker)
+    if idx == -1:
+        return ""
+    tail = r[idx + len(marker):].strip()
+    # 世界时刻回填会在内容后追加 ` [world-time backfilled …]`,截掉这段审计注脚只留取代者内容
+    cut = tail.find(" [world-time backfilled")
+    if cut != -1:
+        tail = tail[:cut].strip()
+    return tail[:200]
+
+
 @router.get("/memory")
-def api_memory_list(request: Request) -> dict[str, Any]:
-    """列个人知识库当前 Belief(管理面 / 验证用)。决策偏好走自己的面,这里排除(免双显)。"""
+def api_memory_list(request: Request, include_invalid: int = 0) -> dict[str, Any]:
+    """列个人知识库 Belief(管理面 / 验证用)。决策偏好走自己的面,这里排除(免双显)。
+
+    默认只列**当前有效**条(失效条折叠进考古层,不污染"当前知道的")。
+    `include_invalid=1`(Q5 记忆考古层)→ 失效条也带出来,每条附:
+    - `invalid_at`(失效时刻,活条=None)
+    - `invalid_reason`(为什么失效,审计可读)
+    - `superseded_by`(取代者内容,从 reason 解析;解析不出=""降级)
+    使用信号(Q6 读写审计薄版):每条带 `recall_count` / `last_recalled_ts`
+    (Trace 没记 belief 级召回 → 退用 memory.py 既有这两个使用字段,不硬造)。
+    """
     mem = getattr(request.app.state, "memory", None)
     if mem is None:
         return {"beliefs": []}
     from karvyloop.crystallize.decision_pref import is_decision_pref
-    return {"beliefs": [
-        {"content": b.content, "title": b.provenance.get("title", ""),
-         "kind": b.provenance.get("kind", "?"),
-         "source": b.provenance.get("source", "?"),
-         "source_ref": b.provenance.get("source_ref", ""),   # 列表/详情卡显示真实来源(链接/文件)
-         # Q2 出处回链:对话蒸馏产物带产生它的会话 id → 面板"对话沉淀"可点回;老数据降级 ""
-         "conversation_id": b.provenance.get("conversation_id", ""),
-         "freshness_ts": b.freshness_ts}
-        for b in mem.index.all("personal") if not is_decision_pref(b)
-    ]}
+    out = []
+    for b in mem.index.all("personal"):
+        if is_decision_pref(b):
+            continue
+        inv = getattr(b, "invalid_at", None)
+        if inv is not None and not include_invalid:
+            continue   # 失效条:默认折叠,只在 include_invalid 时进考古层
+        row = {
+            "content": b.content, "title": b.provenance.get("title", ""),
+            "kind": b.provenance.get("kind", "?"),
+            "source": b.provenance.get("source", "?"),
+            "source_ref": b.provenance.get("source_ref", ""),   # 列表/详情卡显示真实来源(链接/文件)
+            # Q2 出处回链:对话蒸馏产物带产生它的会话 id → 面板"对话沉淀"可点回;老数据降级 ""
+            "conversation_id": b.provenance.get("conversation_id", ""),
+            "freshness_ts": b.freshness_ts,
+            # Q6 读写审计薄版:使用信号(被召回过几次 / 最近何时);从没用过 = 0(诚实,不硬造)
+            "recall_count": int(getattr(b, "recall_count", 0) or 0),
+            "last_recalled_ts": float(getattr(b, "last_recalled_ts", 0.0) or 0.0),
+        }
+        if inv is not None:
+            # Q5 记忆考古层:失效不删,带出失效时刻 + 原因 + 取代者内容(供面板"✗ 已失效(被『…』取代)")
+            row["invalid_at"] = float(inv)
+            row["invalid_reason"] = str(getattr(b, "invalid_reason", "") or "")
+            row["superseded_by"] = _superseded_by(row["invalid_reason"])
+        else:
+            row["invalid_at"] = None
+        out.append(row)
+    return {"beliefs": out}
+
+
+@router.get("/memory/recall")
+def api_memory_recall(request: Request, q: str = "", as_of: Optional[float] = None,
+                      limit: int = 8) -> dict[str, Any]:
+    """时点召回(Q4:"上个月你以为我在哪家公司?")—— recall_block(as_of=) 接出来。
+
+    `as_of` 给了 → 按"T 时刻它算数吗"过滤(valid_from≤T 且未失效或失效于 T 之后);
+    不给 → 当下召回(失效条不出现)。回执标注 `as_of` 供上层回答"按 X 时点的记忆"。
+    底座谓词全在(memory.recall_block),这里只是 API 入口;NL 意图识别(聊天里问"当时…")
+    是后续 drive 侧接线(见报告降级边界)。
+    """
+    mem = getattr(request.app.state, "memory", None)
+    if mem is None:
+        return {"ok": False, "reason": "memory 未接(--no-llm?)", "as_of": as_of, "block": ""}
+    query = (q or "").strip()
+    if not query:
+        return {"ok": False, "reason": "缺 q(要召回什么)", "as_of": as_of, "block": ""}
+    try:
+        lim = max(1, min(int(limit or 8), 50))
+        block = mem.recall_block(query, scope="personal", limit=lim, as_of=as_of)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[memory/recall] 召回失败: {e}")
+        return {"ok": False, "reason": f"召回失败: {e}", "as_of": as_of, "block": ""}
+    return {"ok": True, "as_of": as_of, "block": block or ""}
 
 
 @router.get("/memory/recent")

@@ -10,7 +10,13 @@ const dom = new JSDOM(`<!doctype html><body>
 </body>`);
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
-dom.window.KarvyI18n = { t: (k) => k };
+// i18n 桩:返回键名(parity 由 i18n_smoke 单独守),但**做 {var} 插值** —— 否则带插值的文案
+// (如考古层"被『{by}』取代")断言不到取代者内容。真 i18n 也是 {var} 模板替换,行为对齐。
+dom.window.KarvyI18n = { t: (k, vars) => {
+  let s = k;
+  if (vars) for (const key of Object.keys(vars)) s = s.split("{" + key + "}").join(String(vars[key]));
+  return s;
+} };
 
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (f) => (0, eval)(readFileSync(resolve(here, "../../static/" + f), "utf8"));
@@ -40,16 +46,26 @@ dom.window.KarvyDom.getJSON = async (url) => {
       { id: 2, title: "H2A 守人", content: "人是决策者+承担者", kind: "knowledge", degree: 1 }],
     edges: [{ source: 0, target: 1, via: ["loop"], semantic: true }, { source: 0, target: 2, via: ["agent"] }],
   };
+  // Q5 记忆考古层:include_invalid=1 → 失效条也带出来(带 invalid_at/invalid_reason/superseded_by)
+  if (url === "/api/memory?include_invalid=1") return { beliefs: pendingMode ? [] : [
+    { title: "偏好直接", content: "我偏好直接、不啰嗦的沟通", kind: "preference", source: "ingest",
+      source_ref: "", recall_count: 3, last_recalled_ts: 1751000000, invalid_at: null },
+    { title: "旧公司", content: "我在旧公司", kind: "fact", source: "ingest", source_ref: "",
+      recall_count: 0, last_recalled_ts: 0, invalid_at: 1751000500,
+      invalid_reason: "superseded(update) by newer belief [ingest]: 我在 A 公司", superseded_by: "我在 A 公司" }] };
   if (url === "/api/memory") return { beliefs: pendingMode ? [] : [
-    { title: "偏好直接", content: "我偏好直接、不啰嗦的沟通", kind: "preference", source: "ingest", source_ref: "" },
+    // Q6 读写审计薄版:每条带 recall_count/last_recalled_ts(被召回过 vs 从没用过)
+    { title: "偏好直接", content: "我偏好直接、不啰嗦的沟通", kind: "preference", source: "ingest",
+      source_ref: "", recall_count: 3, last_recalled_ts: 1751000000, invalid_at: null },
     { title: "loop A", content: "loop 是自运转的", kind: "knowledge", source: "fed",
-      source_ref: "https://addyosmani.com/blog/loop-engineering/" },
-    { title: "loop B", content: "loop 无人参与", kind: "knowledge", source: "fed", source_ref: "text:abc123" },
+      source_ref: "https://addyosmani.com/blog/loop-engineering/", recall_count: 0, last_recalled_ts: 0, invalid_at: null },
+    { title: "loop B", content: "loop 无人参与", kind: "knowledge", source: "fed", source_ref: "text:abc123",
+      recall_count: 0, last_recalled_ts: 0, invalid_at: null },
     // Q2 出处回链:对话蒸馏产物带 conversation_id → 来源可点回那次对话;老数据没有 → 回退纯文本
     { title: "咖啡", content: "早上要黑咖啡", kind: "preference", source: "conversation",
-      source_ref: "", conversation_id: "cafe1234deadbeef" },
+      source_ref: "", conversation_id: "cafe1234deadbeef", recall_count: 0, last_recalled_ts: 0, invalid_at: null },
     { title: "旧蒸馏", content: "老数据没会话定位", kind: "fact", source: "conversation",
-      source_ref: "", conversation_id: "" }] };
+      source_ref: "", conversation_id: "", recall_count: 0, last_recalled_ts: 0, invalid_at: null }] };
   return null;
 };
 dom.window.KarvyDom.postJSON = async (url, payload) => {
@@ -114,6 +130,24 @@ assert.ok(jumpDetail && jumpDetail.conversation_id === "cafe1234deadbeef",
 // 老数据(source=conversation 但无 conversation_id)→ 优雅降级为纯文本来源(不崩不骗)
 const plainConvSrcs = [...libBody.querySelectorAll("span.mc-src")].filter((s) => s.textContent === "conversation");
 assert.equal(plainConvSrcs.length, 1, "无会话定位的老条目应回退为纯文本来源(不可点)");
+// Q6 读写审计薄版:每条带使用信号 —— 被召回过的显示"被召回 N 次·最近 X"(mc-usage),
+// 从没用过的显示"还没被用过"(mc-usage-idle)。i18n 桩返回键 → 断言节点类而非文案。
+const usageActive = [...libBody.querySelectorAll(".mc-usage:not(.mc-usage-idle)")];
+const usageIdle = [...libBody.querySelectorAll(".mc-usage-idle")];
+assert.ok(usageActive.length >= 1, "被召回过的知识应显示使用信号(mc-usage)");
+assert.ok(usageIdle.length >= 1, "从没被召回的知识应显示'还没被用过'(mc-usage-idle)");
+// Q5 记忆考古层:折叠 toggle 在;点开 → 拉 include_invalid=1 → 渲染失效条(带取代者标记 mem-history-mark)
+const histToggle = libBody.querySelector(".mem-history-toggle");
+assert.ok(histToggle, "知识库页应有'历史层'折叠入口");
+assert.ok(libBody.querySelector(".mem-history-list.hidden"), "历史层默认折叠(hidden)");
+histToggle.click();
+await new Promise((r) => setTimeout(r, 20));
+const histBody = dom.window.document.getElementById("mgmt-body");
+const histCards = [...histBody.querySelectorAll(".mem-history-card")];
+assert.equal(histCards.length, 1, `历史层应只列失效条(实际 ${histCards.length})`);
+const by = histCards[0].querySelector(".mem-history-by");
+assert.ok(by && by.textContent.includes("我在 A 公司"), "失效条应显示被谁取代('我在 A 公司')");
+assert.ok(!histBody.querySelector(".mem-history-list.hidden"), "点开后历史层应展开(去掉 hidden)");
 // 搜 "loop" → 只剩 loop 相关的两条
 const ksearch = body.querySelector(".paged-search");
 ksearch.value = "loop"; ksearch.dispatchEvent(new dom.window.Event("input"));

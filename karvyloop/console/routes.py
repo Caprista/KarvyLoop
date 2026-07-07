@@ -1360,6 +1360,7 @@ from .routes_memory import (  # noqa: E402
     api_memory_feed,
     api_memory_ingest,
     api_memory_list,
+    api_memory_recall,
     api_memory_recent,
 )
 
