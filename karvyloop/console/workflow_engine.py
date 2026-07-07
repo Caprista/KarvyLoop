@@ -102,12 +102,14 @@ async def _workflow_plan_llm(gw, model_ref, intent, roles) -> dict:
         "规则:别造环;引用的 step 必须存在;步骤别太碎,一个角色一步为主;不确定就用最简单的线性/并行,别硬塞分支。")
     usr = f"角色:\n{roster_txt}\n\n用户消息:{intent}"
     out = ""
+    from karvyloop.llm.token_ledger import token_source
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
-        async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
-                                    system=SystemPrompt(static=[sysp])):
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        with token_source("workflow_plan"):   # 群协作编排:此前无标 → 记 unknown(P0-9 长尾覆盖)
+            async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
+                                        system=SystemPrompt(static=[sysp])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
     except Exception as e:
         logger.warning(f"[workflow] 规划失败: {e}")
     try:

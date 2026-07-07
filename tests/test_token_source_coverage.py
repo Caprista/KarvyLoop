@@ -62,3 +62,97 @@ def test_roundtable_host_labels_source():
     asyncio.run(_host_moderate_call(gw, "", "定价", transcript, final=False))
     assert gw.seen == ["roundtable"]
     assert "unknown" not in gw.seen
+
+
+# ---- 长尾 6 处覆盖(docs/68 P0-9 搭车)----------------------------------------
+# 同一复现口径:去掉对应 `with token_source(...)` 包裹,断言立刻回落 "unknown"
+# (下方注释说明,不写进产品码)。
+
+
+def test_workflow_plan_labels_source():
+    # 群内协作 workflow 编排:@多人 → 小卡设计 DAG(此前无标 → unknown,看板看不到编排在烧)
+    from karvyloop.console.workflow_engine import _workflow_plan_llm
+    gw = _RecordingGateway()
+    roles = [{"role_id": "r1", "display": "分析师"}, {"role_id": "r2", "display": "写手"}]
+    asyncio.run(_workflow_plan_llm(gw, "", "做个市场分析再写稿", roles))
+    assert gw.seen == ["workflow_plan"]
+    assert "unknown" not in gw.seen
+
+
+def test_result_classify_labels_source():
+    # 结晶时判"结果可否缓存回放"+ 起可读短名:两个 make_* 闭包同源(result_classify)
+    from karvyloop.crystallize.result_classifier import make_result_classifier, make_skill_namer
+    gw = _RecordingGateway()
+    classify = make_result_classifier(gw, "")
+    classify("把 3 公里换算成米", "3000 米", [])          # 无联网工具 → 真走 LLM 判
+    namer = make_skill_namer(gw, "")
+    namer("把 CSV 转成 JSON")
+    assert gw.seen == ["result_classify", "result_classify"]
+    assert "unknown" not in gw.seen
+
+
+def test_atom_synthesis_labels_source():
+    # role 自造原子:合成 AtomSpec + role 综合裁留不留,两处同源(atom_synthesis)。
+    # synthesize 此前落上层 forge、judge 此前 unknown → 都拆出成独立一线。
+    from karvyloop.atoms.self_create import judge_atom_keep, synthesize_atom_spec
+    gw = _RecordingGateway()
+    asyncio.run(synthesize_atom_spec("把一段中文翻成英文", gateway=gw, model_ref=""))
+
+    class _Spec:
+        id = "translate_zh_en"
+        prompt = "把中文翻成英文"
+
+    asyncio.run(judge_atom_keep(
+        _Spec(), role_id="r1", role_identity="翻译角色",
+        human_approved=True, contributed=True, verified=True, gateway=gw, model_ref=""))
+    assert gw.seen == ["atom_synthesis", "atom_synthesis"]
+    assert "unknown" not in gw.seen
+
+
+def test_decision_card_violation_labels_source():
+    # 决策卡 Cut2 守线(建卡路径):此前无标 → unknown。注意静音路径已由上层 silence_cut2 覆盖,
+    # 所以标必须打在**建卡 caller**(_attach_violations)、不是 check_violations 内部(否则会把
+    # 静音路径的 silence_cut2 冲掉)。这里直接测建卡 caller 的包裹。
+    from karvyloop.console import decision_card_wire
+
+    class _State:
+        runtime_kwargs = {"gateway": _RecordingGateway()}
+
+    class _App:
+        state = _State()
+
+    app = _App()
+    aligned = [{"content": "对外邮件先过目", "receipt": [], "kind_label": "约束"}]
+    d: dict = {}
+    decision_card_wire._attach_violations(app, d, aligned, "要发对外邮件", "直接群发", {})
+    seen = app.state.runtime_kwargs["gateway"].seen
+    assert seen == ["decision_card"]
+    assert "unknown" not in seen
+
+
+def test_topic_name_labels_source():
+    # 工作流/圆桌主题名压缩(2b):主题太长 → LLM 压成短标签(此前无标 → unknown)
+    from karvyloop.console.routes import _refine_run_title
+    gw = _RecordingGateway()
+    long_intent = "我们下个季度要不要进军东南亚市场并且重构一下定价策略以及渠道" * 2
+    asyncio.run(_refine_run_title(gw, "", long_intent))
+    assert gw.seen == ["topic_name"]
+    assert "unknown" not in gw.seen
+
+
+def test_agent_import_labels_source():
+    # agent 导入拆解:调用方(routes_roles）已用 `with token_source("agent_import")` 包住,
+    # bootstrap_decompose 内部**不再重复打标**(避免覆盖上层已正确归属的标)。这里断言
+    # 在上层 token_source 生效时,内部 gateway.complete 记到的正是 agent_import。
+    from karvyloop.adapter.bootstrap import bootstrap_decompose
+    from karvyloop.adapter.source import ExternalManifest
+    from karvyloop.llm.token_ledger import token_source
+
+    gw = _RecordingGateway()
+    manifest = ExternalManifest(
+        source_id="claude", source_path="<test>", system_prompt="做点事", tools=())
+    with token_source("agent_import"):
+        asyncio.run(bootstrap_decompose(manifest, existing_atom_ids=[], gateway=gw, model_ref=""))
+    # 桩产出解析不出合法结果 → 内部重试 1 次(共 2 次 complete);两次都应归到上层 agent_import。
+    assert gw.seen == ["agent_import", "agent_import"]
+    assert "unknown" not in gw.seen

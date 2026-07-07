@@ -44,13 +44,16 @@ def make_result_classifier(gateway: Any, model_ref: str = "") -> Optional[Callab
         usr = f"任务:{(intent or '')[:300]}"
         out = ""
 
+        from karvyloop.llm.token_ledger import token_source
+
         async def _go():
             nonlocal out
             ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
-            async for ev in gateway.complete([{"role": "user", "content": usr}], [], ref,
-                                             system=SystemPrompt(static=[_SYS])):
-                if type(ev).__name__ == "TextDelta":
-                    out += getattr(ev, "text", "")
+            with token_source("result_classify"):   # 结晶时判可缓存性:此前无标 → unknown(P0-9 长尾)
+                async for ev in gateway.complete([{"role": "user", "content": usr}], [], ref,
+                                                 system=SystemPrompt(static=[_SYS])):
+                    if type(ev).__name__ == "TextDelta":
+                        out += getattr(ev, "text", "")
         try:
             asyncio.run(_go())
         except Exception as e:
@@ -86,13 +89,16 @@ def make_skill_namer(gateway: Any, model_ref: str = "") -> Optional[Callable[[st
         usr = f"任务:{(intent or '')[:300]}"
         out = ""
 
+        from karvyloop.llm.token_ledger import token_source
+
         async def _go():
             nonlocal out
             ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
-            async for ev in gateway.complete([{"role": "user", "content": usr}], [], ref,
-                                             system=SystemPrompt(static=[_NAME_SYS])):
-                if type(ev).__name__ == "TextDelta":
-                    out += getattr(ev, "text", "")
+            with token_source("result_classify"):   # 结晶时起可读短名:与判定器同源(P0-9 长尾)
+                async for ev in gateway.complete([{"role": "user", "content": usr}], [], ref,
+                                                 system=SystemPrompt(static=[_NAME_SYS])):
+                    if type(ev).__name__ == "TextDelta":
+                        out += getattr(ev, "text", "")
         try:
             asyncio.run(_go())
         except Exception as e:

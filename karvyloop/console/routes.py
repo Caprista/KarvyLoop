@@ -362,10 +362,11 @@ async def _refine_run_title(gw, model_ref, text: str, *, max_keep: int = 24) -> 
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
-        async for ev in gw.complete([{"role": "user", "content": s[:500]}], [], ref,
-                                    system=SystemPrompt(static=[sysp])):
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        with _token_src("topic_name"):   # 主题名压缩:此前无标 → 记 unknown(P0-9 长尾覆盖)
+            async for ev in gw.complete([{"role": "user", "content": s[:500]}], [], ref,
+                                        system=SystemPrompt(static=[sysp])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
     except Exception as e:
         logger.warning(f"[title] 主题精炼失败,兜底截断: {e}")
     out = (out or "").strip().strip("\"'《》「」 ")

@@ -111,7 +111,12 @@ def _attach_violations(app: Any, d: dict, aligned: list[dict], problem: str,
                              + [str(payload.get(k, "")) for k in ("requirement", "topic", "intent")]).strip()
     try:
         import asyncio
-        violations = asyncio.run(check_violations(app, proposal_text, [a["content"] for a in aligned]))
+
+        from karvyloop.llm.token_ledger import token_source
+        # 标打在**建卡 caller**、不是 check_violations 内部:check_violations 另有静音路径复用,
+        # 那条已由上层 silence_cut2 归属;若打在内部会把它冲掉。此处只归建卡路径(P0-9 长尾)。
+        with token_source("decision_card"):
+            violations = asyncio.run(check_violations(app, proposal_text, [a["content"] for a in aligned]))
     except Exception:
         violations = []
     if not violations:

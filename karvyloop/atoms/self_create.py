@@ -137,13 +137,16 @@ def _parse_spec(text: str) -> Optional[dict]:
 async def synthesize_atom_spec(desc: str, *, gateway: Any, model_ref: str = "") -> Optional[dict]:
     """LLM 把能力描述凝成 AtomSpec 草案(宁空勿毒)。失败/凝不出 → None。"""
     from karvyloop.gateway import ResolveScope, SystemPrompt
+    from karvyloop.llm.token_ledger import token_source
     msgs = [{"role": "user", "content": f"需要的能力:{desc}"}]
     try:
         text = ""
-        async for ev in gateway.complete(msgs, [], model_ref or gateway.resolve_model(ResolveScope()),
-                                          system=SystemPrompt(static=[_SYNTH_SYSTEM])):
-            if type(ev).__name__ == "TextDelta":
-                text += getattr(ev, "text", "")
+        # 自造合成:执行路径里 role 造原子的这一小段单拆成一线(否则并进上层 forge,看不清自造在烧)。
+        with token_source("atom_synthesis"):
+            async for ev in gateway.complete(msgs, [], model_ref or gateway.resolve_model(ResolveScope()),
+                                             system=SystemPrompt(static=[_SYNTH_SYSTEM])):
+                if type(ev).__name__ == "TextDelta":
+                    text += getattr(ev, "text", "")
     except Exception:
         return None
     return _parse_spec(text)
@@ -230,6 +233,7 @@ async def judge_atom_keep(
     返回 {keep: bool, reason: str}。**宁空勿毒**:解析失败 → 保守 keep=False(不污染公共库)。
     """
     from karvyloop.gateway import ResolveScope, SystemPrompt
+    from karvyloop.llm.token_ledger import token_source
     aid = getattr(atom_spec, "id", "") or ""
     purpose = (getattr(atom_spec, "prompt", "") or "")[:600]
     evidence = (
@@ -242,11 +246,13 @@ async def judge_atom_keep(
     sys = _JUDGE_SYSTEM.replace("{role}", role_id or "该角色")
     try:
         text = ""
-        async for ev in gateway.complete([{"role": "user", "content": evidence}], [],
-                                          model_ref or gateway.resolve_model(ResolveScope()),
-                                          system=SystemPrompt(static=[sys])):
-            if type(ev).__name__ == "TextDelta":
-                text += getattr(ev, "text", "")
+        # role 综合裁留不留:与合成同源(自造原子这条线的收尾判断,此前无标 → unknown,P0-9 长尾)。
+        with token_source("atom_synthesis"):
+            async for ev in gateway.complete([{"role": "user", "content": evidence}], [],
+                                             model_ref or gateway.resolve_model(ResolveScope()),
+                                             system=SystemPrompt(static=[sys])):
+                if type(ev).__name__ == "TextDelta":
+                    text += getattr(ev, "text", "")
     except Exception:
         return {"keep": False, "reason": "判断调用失败,保守不留"}
     raw = (text or "").strip()
