@@ -2477,6 +2477,9 @@ body.demo-modal-full .demo-hero-grid { grid-template-columns: repeat(6, 1fr); }
 .sediment-row.is-edit { border-color: var(--accent-line, #d9bf9d); background: #fdf6e8; }
 .sediment-row.is-drop { opacity: 0.45; }
 .sediment-row.is-drop .sediment-content { text-decoration: line-through; }
+/* 追问:标成"待聊",蓝一点,不像 drop 那样淡掉——它没被丢,是留着继续 */
+.sediment-row.is-ask { border-color: #a9c2e8; background: #eef3fb; }
+.sediment-row.is-ask .sediment-content { font-style: italic; }
 .sediment-chip {
   flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 9px;
   background: #efe2cd; color: #6b5136; border: 1px solid #dcc6a4;
@@ -2495,6 +2498,7 @@ body.demo-modal-full .demo-hero-grid { grid-template-columns: repeat(6, 1fr); }
 }
 .sediment-act.keep:hover { background: var(--teal-soft, #e6f2ec); }
 .sediment-act.drop:hover { background: #f7e3e6; }
+.sediment-act.ask:hover { background: #e6eefa; }
 .sediment-warn {
   flex-basis: 100%; font-size: var(--fs-12, 12px); color: var(--rose, #b8577b); margin-top: 2px;
 }

@@ -415,6 +415,32 @@ def test_knowledge_sediment_by_id_closes_only_that_session(app_with_mgr, mgr):
     assert mgr._store.load(knowledge_peer(), conv.id).closed_at is not None
 
 
+def test_knowledge_sediment_keep_open_for_followups(app_with_mgr, mgr):
+    """追问流(flow A):有条目标 ask + keep_open=True → settled 的沉,但会话**不关**、留着继续聊。"""
+    mem = _FakeMem()
+    app_with_mgr.state.memory = mem
+    app_with_mgr.state.runtime_kwargs = {"gateway": None, "model_ref": ""}
+    conv = _kconv(mgr, ("我从 React 换到了 Vue", "为什么切换?"))
+    client = TestClient(app_with_mgr)
+    from karvyloop.cognition.converge import CognitionCandidate
+    items = [
+        CognitionCandidate(content="从 React 换到了 Vue", layer="experience").to_dict(),
+        CognitionCandidate(content="换框架的判据要不要写成原则", layer="principle").to_dict(),
+    ]
+    decisions = {items[0]["id"]: {"action": "accept"},
+                 items[1]["id"]: {"action": "ask"}}   # 第 2 条:我想先聊清楚
+    r = client.post("/api/knowledge/sediment", json={
+        "conversation_id": conv.id, "items": items, "decisions": decisions, "keep_open": True})
+    body = r.json()
+    # settled 的沉了(只 1 条,ask 那条不沉)
+    assert body["ok"] is True and body["written"] == 1
+    assert {b.content for b in mem.written} == {"从 React 换到了 Vue"}
+    # 会话**没关**(closed_at None)→ 追问那条能继续聊;欠账仍算 1(还开着)
+    assert body["closed_at"] is None
+    assert mgr._store.load(knowledge_peer(), conv.id).closed_at is None
+    assert body["unsettled"] == 1
+
+
 def test_knowledge_sediment_missing_session_404(app_with_mgr):
     app_with_mgr.state.memory = _FakeMem()
     client = TestClient(app_with_mgr)

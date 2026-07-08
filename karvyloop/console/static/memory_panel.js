@@ -752,14 +752,15 @@ var KarvyMemoryPanelBundle = (function(exports) {
     const states = {};
     const submit = el("button", { type: "button", class: "sediment-submit" });
     const updateSubmit = () => {
-      const n = Object.values(states).filter((x) => x.action !== "drop").length;
-      submit.textContent = n > 0 ? t("sediment.submit", { n }) : t("sediment.submit_zero");
+      const n = Object.values(states).filter((x) => x.action === "accept" || x.action === "edit").length;
+      const a = Object.values(states).filter((x) => x.action === "ask").length;
+      submit.textContent = a > 0 ? t("sediment.submit_ask", { n, a }) : n > 0 ? t("sediment.submit", { n }) : t("sediment.submit_zero");
     };
     for (const it of card.items || []) {
       const row = el("div", { class: "sediment-row depth-" + (it.depth || 1) });
       const content = el("span", { class: "sediment-content", text: it.content });
       const setState = (cls) => {
-        row.classList.remove("is-keep", "is-edit", "is-drop");
+        row.classList.remove("is-keep", "is-edit", "is-drop", "is-ask");
         if (cls) row.classList.add("is-" + cls);
         updateSubmit();
       };
@@ -787,7 +788,13 @@ var KarvyMemoryPanelBundle = (function(exports) {
         content.setAttribute("contenteditable", "false");
         setState("drop");
       });
-      const acts = el("span", { class: "sediment-acts" }, bKeep, bEdit, bDrop);
+      const bAsk = el("button", { type: "button", class: "sediment-act ask", text: t("sediment.ask"), title: t("sediment.ask_title") });
+      bAsk.addEventListener("click", () => {
+        states[it.id] = { action: "ask" };
+        content.setAttribute("contenteditable", "false");
+        setState("ask");
+      });
+      const acts = el("span", { class: "sediment-acts" }, bKeep, bEdit, bDrop, bAsk);
       row.appendChild(el("span", { class: "sediment-chip", text: t("layer." + it.layer) }));
       row.appendChild(content);
       row.appendChild(acts);
@@ -798,17 +805,19 @@ var KarvyMemoryPanelBundle = (function(exports) {
     cancel.addEventListener("click", () => box.remove());
     submit.addEventListener("click", async () => {
       submit.disabled = true;
+      const asks = (card.items || []).filter((it) => states[it.id] && states[it.id].action === "ask");
       const res = await _postJSON("/api/knowledge/sediment", {
         conversation_id: card.conversation_ref,
         items: card.items,
-        decisions: states
+        decisions: states,
+        keep_open: asks.length > 0
       });
       if (!res.ok || !(res.data && res.data.ok)) {
         submit.disabled = false;
         return;
       }
       box.remove();
-      onDone();
+      onDone(asks);
     });
     updateSubmit();
     box.appendChild(el("div", { class: "sediment-foot" }, cancel, submit));
@@ -985,9 +994,17 @@ var KarvyMemoryPanelBundle = (function(exports) {
         _kSysNote(log, t("sediment.none"));
         return;
       }
-      _renderSedimentCard(log, card, () => {
-        _kSession = "";
-        void renderMemoryPanel();
+      _renderSedimentCard(log, card, (asks) => {
+        if (asks.length) {
+          _kLine(log, "karvy", t(
+            "kchat.followup_intro",
+            { list: asks.map((a) => "- " + a.content).join("\n") }
+          ));
+          void refreshSide();
+        } else {
+          _kSession = "";
+          void renderMemoryPanel();
+        }
       });
     });
     const bar = el("div", { class: "kchat-bar" }, cin, send, conv);

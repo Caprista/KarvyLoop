@@ -620,22 +620,25 @@ function _kSysNote(log: HTMLElement, text: string): void {
   log.scrollTop = log.scrollHeight;
 }
 
-// 沉淀确认卡(面板内渲染):逐条 收/改/不要;没动的 = 未确认 = 不沉;depth≥4 带 ⚠。
-function _renderSedimentCard(host: HTMLElement, card: any, onDone: () => void): void {
+// 沉淀确认卡(面板内渲染):逐条 收/改/不要/**追问**;没动的 = 未确认 = 不沉;depth≥4 带 ⚠。
+// 追问 = "这条我想先聊清楚再决定":提交时 settled(收/改)的立刻沉,追问的不沉、丢回聊天继续(会话不关)。
+function _renderSedimentCard(host: HTMLElement, card: any, onDone: (asks: any[]) => void): void {
   const box = el("div", { class: "sediment-card" });
   box.appendChild(el("div", { class: "sediment-head", text: t("sediment.card_title") }));
   box.appendChild(el("div", { class: "sediment-note", text: t("sediment.card_note") }));
   const states: Record<string, { action: string; content?: string }> = {};
   const submit = el("button", { type: "button", class: "sediment-submit" }) as HTMLButtonElement;
   const updateSubmit = () => {
-    const n = Object.values(states).filter((x) => x.action !== "drop").length;
-    submit.textContent = n > 0 ? t("sediment.submit", { n }) : t("sediment.submit_zero");
+    const n = Object.values(states).filter((x) => x.action === "accept" || x.action === "edit").length;
+    const a = Object.values(states).filter((x) => x.action === "ask").length;
+    submit.textContent = a > 0 ? t("sediment.submit_ask", { n, a })
+      : n > 0 ? t("sediment.submit", { n }) : t("sediment.submit_zero");
   };
   for (const it of card.items || []) {
     const row = el("div", { class: "sediment-row depth-" + (it.depth || 1) });
     const content = el("span", { class: "sediment-content", text: it.content });
     const setState = (cls: string) => {
-      row.classList.remove("is-keep", "is-edit", "is-drop");
+      row.classList.remove("is-keep", "is-edit", "is-drop", "is-ask");
       if (cls) row.classList.add("is-" + cls);
       updateSubmit();
     };
@@ -651,7 +654,9 @@ function _renderSedimentCard(host: HTMLElement, card: any, onDone: () => void): 
     bEdit.addEventListener("click", () => { content.setAttribute("contenteditable", "true"); (content as HTMLElement).focus(); });
     const bDrop = el("button", { type: "button", class: "sediment-act drop", text: t("sediment.drop") });
     bDrop.addEventListener("click", () => { states[it.id] = { action: "drop" }; content.setAttribute("contenteditable", "false"); setState("drop"); });
-    const acts = el("span", { class: "sediment-acts" }, bKeep, bEdit, bDrop);
+    const bAsk = el("button", { type: "button", class: "sediment-act ask", text: t("sediment.ask"), title: t("sediment.ask_title") });
+    bAsk.addEventListener("click", () => { states[it.id] = { action: "ask" }; content.setAttribute("contenteditable", "false"); setState("ask"); });
+    const acts = el("span", { class: "sediment-acts" }, bKeep, bEdit, bDrop, bAsk);
     row.appendChild(el("span", { class: "sediment-chip", text: t("layer." + it.layer) }));
     row.appendChild(content); row.appendChild(acts);
     if (it.needs_attention) row.appendChild(el("div", { class: "sediment-warn", text: t("sediment.attention") }));
@@ -661,11 +666,13 @@ function _renderSedimentCard(host: HTMLElement, card: any, onDone: () => void): 
   cancel.addEventListener("click", () => box.remove());
   submit.addEventListener("click", async () => {
     submit.disabled = true;
+    const asks = (card.items || []).filter((it: any) => states[it.id] && states[it.id].action === "ask");
     const res = await _postJSON("/api/knowledge/sediment", {
-      conversation_id: card.conversation_ref, items: card.items, decisions: states });
+      conversation_id: card.conversation_ref, items: card.items, decisions: states,
+      keep_open: asks.length > 0 });   // 有追问 → 后端不关会话,留着继续聊
     if (!res.ok || !(res.data && res.data.ok)) { submit.disabled = false; return; }
     box.remove();
-    onDone();
+    onDone(asks);
   });
   updateSubmit();
   box.appendChild(el("div", { class: "sediment-foot" }, cancel, submit));
@@ -805,9 +812,17 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
     }
     const card = res.data.card;
     if (!card || !card.n) { _kSysNote(log, t("sediment.none")); return; }
-    _renderSedimentCard(log, card, () => {
-      _kSession = "";                       // 沉了就关这段 → 回到"新开一段"态,列表里那行消失
-      void renderMemoryPanel();             // 整面板刷新(待处理列表+已知列表都更新)
+    _renderSedimentCard(log, card, (asks) => {
+      if (asks.length) {
+        // 追问:settled 的已沉、会话不关。把这几条丢回聊天当话头,馆员开场引导(nudge,不记 turn)——
+        // 你自由聊,馆员会在聊出可复用认知时主动点"想收就点收敛"(见 KNOWLEDGE_PERSONA 主动回收)。
+        _kLine(log, "karvy", t("kchat.followup_intro",
+          { list: asks.map((a: any) => "- " + a.content).join("\n") }));
+        void refreshSide();                 // 会话仍开着(keep_open)→ 左栏那行还在、仍高亮
+      } else {
+        _kSession = "";                     // 全处理完 → 关这段,回到"新开一段"态
+        void renderMemoryPanel();            // 整面板刷新(待处理列表+已知列表都更新)
+      }
     });
   });
   const bar = el("div", { class: "kchat-bar" }, cin, send, conv);

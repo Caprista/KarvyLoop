@@ -215,8 +215,10 @@ class SedimentRequest(BaseModel):
     conversation_id: str = Field(..., min_length=1, max_length=64)
     # 卡上的候选(收敛响应原样带回;edit 过的 content 在 decisions 里)
     items: list[dict] = Field(default_factory=list, max_length=64)
-    # {candidate_id: {"action": "accept"|"edit"|"drop", "content": 改后文本}}
+    # {candidate_id: {"action": "accept"|"edit"|"drop"|"ask", "content": 改后文本}}
     decisions: dict[str, dict] = Field(default_factory=dict)
+    # 有条目被标「追问」→ settled 的先沉,但**会话不关**,留着继续聊那几条(前端把它们丢回聊天)。
+    keep_open: bool = Field(default=False)
 
 
 @router.post("/knowledge/sediment")
@@ -261,9 +263,12 @@ async def api_knowledge_sediment(req: SedimentRequest, request: Request) -> dict
         request.app.state.sediment_tracker = tracker
     max_depth = max((c.depth for c in accepted), default=1)
     tracker.record(accepted_any=bool(accepted), engaged=engaged, max_depth=max_depth)
-    # 沉淀了才关(docs/66 §E);一条没沉(全删/全没确认)也算"处理过了"→ 同样关,欠账清
+    # 沉淀了才关(docs/66 §E);一条没沉(全删/全没确认)也算"处理过了"→ 同样关,欠账清。
+    # 但有「追问」条目(keep_open)时**不关**:settled 的已沉,追问那几条留着继续聊(会话仍在左栏)。
     store = _kstore(mgr)
-    closed_at = store.close(conv, reason="sedimented" if res["written"] else "settled_empty")
+    closed_at = None
+    if not req.keep_open:
+        closed_at = store.close(conv, reason="sedimented" if res["written"] else "settled_empty")
     n, _metas = _kdebt(mgr)
     return {
         "ok": True, "written": res["written"], "closed_at": closed_at,
