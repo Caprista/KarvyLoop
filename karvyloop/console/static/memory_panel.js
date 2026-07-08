@@ -737,6 +737,14 @@ var KarvyMemoryPanelBundle = (function(exports) {
     log.appendChild(line);
     log.scrollTop = log.scrollHeight;
   }
+  function _kSysNote(log, text) {
+    const old = log.querySelector(".kchat-sysnote");
+    if (old) old.remove();
+    const note = el("div", { class: "kchat-sysnote" });
+    _md(note, text || "");
+    log.appendChild(note);
+    log.scrollTop = log.scrollHeight;
+  }
   function _renderSedimentCard(host, card, onDone) {
     const box = el("div", { class: "sediment-card" });
     box.appendChild(el("div", { class: "sediment-head", text: t("sediment.card_title") }));
@@ -809,14 +817,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
   }
   async function _renderKnowledgeArea(wrap) {
     wrap.innerHTML = "";
-    const debt = await _getJSON("/api/knowledge/debt");
-    const sessions = debt && debt.sessions || [];
     const side = el("div", { class: "kchat-side" });
-    side.appendChild(el("div", {
-      class: "kchat-side-head",
-      text: t("kchat.side_head", { n: sessions.length }),
-      title: t("knowledge.entry_desc")
-    }));
     const mkRow = (label, active, cls, onclick, xId) => {
       const r = el("button", { class: "kchat-sess" + (active ? " active" : "") + cls });
       r.appendChild(el("span", { class: "kchat-sess-nm", text: label }));
@@ -836,22 +837,33 @@ var KarvyMemoryPanelBundle = (function(exports) {
       }
       side.appendChild(r);
     };
-    mkRow(t("kchat.new"), !_kSession, " kchat-sess-new", () => {
-      _kSession = "";
-      void _renderKnowledgeArea(wrap);
-    });
-    for (const s of sessions) {
-      mkRow(
-        "📥 " + (s.snippet || t("conv.untitled")),
-        s.id === _kSession,
-        "",
-        () => {
-          _kSession = s.id;
-          void _renderKnowledgeArea(wrap);
-        },
-        s.id
-      );
-    }
+    const refreshSide = async () => {
+      const debt = await _getJSON("/api/knowledge/debt");
+      const sessions = debt && debt.sessions || [];
+      side.innerHTML = "";
+      side.appendChild(el("div", {
+        class: "kchat-side-head",
+        text: t("kchat.side_head", { n: sessions.length }),
+        title: t("knowledge.entry_desc")
+      }));
+      mkRow(t("kchat.new"), !_kSession, " kchat-sess-new", () => {
+        _kSession = "";
+        void _renderKnowledgeArea(wrap);
+      });
+      for (const s of sessions) {
+        mkRow(
+          "📥 " + (s.snippet || t("conv.untitled")),
+          s.id === _kSession,
+          "",
+          () => {
+            _kSession = s.id;
+            void _renderKnowledgeArea(wrap);
+          },
+          s.id
+        );
+      }
+    };
+    await refreshSide();
     const main = el("div", { class: "kchat-main" });
     const log = el("div", { class: "kchat-log" });
     try {
@@ -898,6 +910,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
         _setMsg(msg, false, t("kchat.busy"));
         return;
       }
+      const wasNew = !_kSession;
       _busy = true;
       send.disabled = true;
       cin.value = "";
@@ -911,6 +924,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
         _kSession = res.data.session_id;
         _setMsg(msg, true, "");
         _kLine(log, "karvy", res.data.reply);
+        if (wasNew) void refreshSide();
       } else {
         _kLine(log, "karvy", "(" + t("kchat.failed", { reason: res.data && res.data.reason || String(res.status) }) + ")");
       }
@@ -947,7 +961,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
       }
       const card = res.data.card;
       if (!card || !card.n) {
-        _kLine(log, "karvy", t("sediment.none"));
+        _kSysNote(log, t("sediment.none"));
         return;
       }
       _renderSedimentCard(log, card, () => {

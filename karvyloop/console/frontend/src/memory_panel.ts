@@ -609,6 +609,17 @@ function _kLine(log: HTMLElement, who: "you" | "karvy", text: string): void {
   log.scrollTop = log.scrollHeight;
 }
 
+// 系统提示(不是发言):收敛"没可沉淀的"/状态类。**替换旧的、不堆叠**(Hardy:同句连出两遍很烦),
+// 居中淡出区别于气泡(Hardy:别用馆员口吻甩"接着聊"像嫌你话没营养)。
+function _kSysNote(log: HTMLElement, text: string): void {
+  const old = log.querySelector(".kchat-sysnote");
+  if (old) old.remove();
+  const note = el("div", { class: "kchat-sysnote" });
+  _md(note, text || "");
+  log.appendChild(note);
+  log.scrollTop = log.scrollHeight;
+}
+
 // 沉淀确认卡(面板内渲染):逐条 收/改/不要;没动的 = 未确认 = 不沉;depth≥4 带 ⚠。
 function _renderSedimentCard(host: HTMLElement, card: any, onDone: () => void): void {
   const box = el("div", { class: "sediment-card" });
@@ -666,11 +677,7 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
   wrap.innerHTML = "";
   // 整窗 IM 布局(Hardy:"给你一个完整的窗口做聊天"):左栏=会话切换(➕新开一段 + 每段一行),
   // 右侧=聊天记录占满(**唯一滚动区**)+ 底部输入条(输入|发|⚗️收敛)。没有内外双滚动条。
-  const debt = await _getJSON("/api/knowledge/debt");
-  const sessions = (debt && debt.sessions) || [];
   const side = el("div", { class: "kchat-side" });
-  side.appendChild(el("div", { class: "kchat-side-head", text: t("kchat.side_head", { n: sessions.length }),
-    title: t("knowledge.entry_desc") }));
   const mkRow = (label: string, active: boolean, cls: string, onclick: () => void, xId?: string) => {
     const r = el("button", { class: "kchat-sess" + (active ? " active" : "") + cls });
     r.appendChild(el("span", { class: "kchat-sess-nm", text: label }));
@@ -691,11 +698,21 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
     }
     side.appendChild(r);
   };
-  mkRow(t("kchat.new"), !_kSession, " kchat-sess-new", () => { _kSession = ""; void _renderKnowledgeArea(wrap); });
-  for (const s of sessions) {
-    mkRow("📥 " + (s.snippet || t("conv.untitled")), s.id === _kSession, "",
-          () => { _kSession = s.id; void _renderKnowledgeArea(wrap); }, s.id);
-  }
+  // 左栏 = 所有开着的知识会话(含你**当前正聊的这段**)。独立可刷:发第一句后立刻出行、
+  // 高亮当前段(Hardy:"我明明在聊,左边没新框、点新建就找不回来了"的病根 = 聊完不刷左栏)。
+  const refreshSide = async (): Promise<void> => {
+    const debt = await _getJSON("/api/knowledge/debt");
+    const sessions = (debt && debt.sessions) || [];
+    side.innerHTML = "";
+    side.appendChild(el("div", { class: "kchat-side-head", text: t("kchat.side_head", { n: sessions.length }),
+      title: t("knowledge.entry_desc") }));
+    mkRow(t("kchat.new"), !_kSession, " kchat-sess-new", () => { _kSession = ""; void _renderKnowledgeArea(wrap); });
+    for (const s of sessions) {
+      mkRow("📥 " + (s.snippet || t("conv.untitled")), s.id === _kSession, "",
+            () => { _kSession = s.id; void _renderKnowledgeArea(wrap); }, s.id);
+    }
+  };
+  await refreshSide();
   const main = el("div", { class: "kchat-main" });
   const log = el("div", { class: "kchat-log" });
   // 旧喂料流的**待审条目**(有才显示,浮在记录顶部随流滚动;喂料入口已由聊天替代——丢进来就是喂)
@@ -736,6 +753,7 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
     const m = cin.value.trim();
     if (!m) return;
     if (_busy) { _setMsg(msg, false, t("kchat.busy")); return; }   // 忙时不吞:明说等一下,保住输入
+    const wasNew = !_kSession;   // 这是新开一段的第一句 → 发成功后左栏要立刻长出这一行
     _busy = true; send.disabled = true;
     cin.value = "";
     _kLine(log, "you", m);
@@ -747,6 +765,7 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
       _kSession = res.data.session_id;
       _setMsg(msg, true, "");
       _kLine(log, "karvy", res.data.reply);
+      if (wasNew) void refreshSide();   // 新会话即刻上左栏并高亮(不再"待处理·0"、不再点新建就丢)
     } else {
       // 失败在流里说(像个人),不是角落小字
       _kLine(log, "karvy", "(" + t("kchat.failed", { reason: (res.data && res.data.reason) || String(res.status) }) + ")");
@@ -770,7 +789,7 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
       return;
     }
     const card = res.data.card;
-    if (!card || !card.n) { _kLine(log, "karvy", t("sediment.none")); return; }
+    if (!card || !card.n) { _kSysNote(log, t("sediment.none")); return; }
     _renderSedimentCard(log, card, () => {
       _kSession = "";                       // 沉了就关这段 → 回到"新开一段"态,列表里那行消失
       void renderMemoryPanel();             // 整面板刷新(待处理列表+已知列表都更新)

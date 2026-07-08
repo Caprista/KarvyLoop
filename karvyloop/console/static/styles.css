@@ -2603,9 +2603,38 @@ body.desk-view #mgmt-modal .modal:has(.modal-body.kchat-mode) { height: calc(100
 .kchat-sess.active { background: var(--accent-light, #f6ead9); border-color: var(--accent-line, #d9bf9d); font-weight: 700; }
 .kchat-sess-new { color: var(--accent-strong, #8a5a2b); font-weight: 700; }
 .kchat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.kchat-main .kchat-log { flex: 1; min-height: 0; max-height: none; overflow-y: auto; margin: 0 0 8px; }
+.kchat-main .kchat-log { flex: 1; min-height: 0; max-height: none; overflow-y: auto; margin: 0 0 8px; padding: 4px 2px; }
 .kchat-main .kchat-log:empty { display: block; }   /* 空聊天也占满(别塌成一条缝) */
 .kchat-pending { margin-bottom: 10px; }
+
+/* 沉淀聊天 = 真 IM 气泡(Hardy:"没有一来一回的感觉"):你右·馆员左,每轮成块、轮间留白分隔。
+   只在 .kchat-log 内覆写(不动别处紧凑的 distill 待审流:那里 .distill-bd 仍 inline)。 */
+.kchat-log .distill-line { display: flex; flex-direction: column; margin: 0 0 14px; max-width: 84%; }
+.kchat-log .distill-line.you { margin-left: auto; align-items: flex-end; }
+.kchat-log .distill-line.karvy { margin-right: auto; align-items: flex-start; }
+.kchat-log .distill-line .distill-who {
+  display: block; margin: 0 3px 3px; font-size: 10.5px; font-weight: 700;
+  color: var(--text-dim, #8a7a66); letter-spacing: .3px;
+}
+.kchat-log .distill-line .distill-bd {
+  display: block; padding: 8px 13px; border-radius: 13px; line-height: 1.62;
+  font-size: 13px; box-shadow: 0 1px 2px rgba(60, 45, 120, .06); word-break: break-word;
+}
+.kchat-log .distill-line .distill-bd .md { display: block; background: transparent; border: none; box-shadow: none; padding: 0; }
+.kchat-log .distill-line.you .distill-bd {
+  background: var(--accent-light, #f6ead9); border: 1px solid var(--accent-line, #d9bf9d);
+  border-bottom-right-radius: 4px;
+}
+.kchat-log .distill-line.karvy .distill-bd {
+  background: #fff; border: 1px solid var(--border, #ddd0be); border-bottom-left-radius: 4px;
+}
+/* 系统提示(收敛无可沉淀 / 状态)——不是发言气泡:居中、淡、虚线框,单条不堆叠 */
+.kchat-log .kchat-sysnote {
+  align-self: center; max-width: 92%; margin: 4px auto 14px; padding: 9px 15px;
+  text-align: center; font-size: 12px; line-height: 1.62; color: var(--text-dim, #8a7a66);
+  background: rgba(120, 110, 90, .05); border: 1px dashed var(--border, #ddd0be); border-radius: 11px;
+}
+.kchat-log .kchat-sysnote .md, .kchat-log .kchat-sysnote .md p { display: inline; background: transparent; border: none; padding: 0; margin: 0; }
 
 /* 左栏会话行:hover 出 ✕(点 ✕ 弹确认关闭 —— 未沉淀会丢) */
 .kchat-sess { display: flex; align-items: center; gap: 4px; }
