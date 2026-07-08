@@ -11,7 +11,8 @@
   error="missing_dependency" + 明确安装提示,绝不崩。
 - 宁空勿毒:坏图/解码异常 → 空文本 + 错误码,绝不把噪声灌进上下文。
 - 模型下载诚实:模型首次使用时才下(不塞 wheel);下载/加载失败 → error="ocr_failed" + hint。
-- OCR 出来的是**脏文本**(有错字/乱序)—— 交给 receipt_extract 的 LLM 校准 + 算术对账,不当真相。
+- OCR 出来的是**脏文本**(有错字/乱序)—— 不当真相:交给下游角色(如报销员)的 prose 方法用 LLM
+  校准(O↔0/l↔1/乱序)+ 算术对账(行项之和≟总额)。识别归识别、抽取归模型,不在这里塞 bespoke 抽取。
 """
 from __future__ import annotations
 

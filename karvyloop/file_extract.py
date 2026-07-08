@@ -25,18 +25,22 @@ INSTALL_HINT = 'pip install "karvyloop[files]"'
 #: 后缀 → 解析类别。CSV / 纯文本**不在此表**:它们本来就是文本,走原有 decode 路径。
 #: 音频三格式(mp3/wav/m4a)→ "audio":本地 ASR 转写(audio_transcribe.py,[asr] extra),
 #: 与文档解析走同一条产线(预览/截断/read_file/交办全免新接线)。
+#: 图片(jpg/png/…)→ "image":本地 OCR(ocr_recognize.py,[ocr] extra)——照 ASR 同一条产线,
+#: read_file/files 面板遇到票据图**自动出脏文本**,报销员等角色的 prose 方法再校准抽取(不另建工具)。
 _SUFFIX_KINDS = {".pdf": "pdf", ".docx": "docx", ".xlsx": "xlsx",
-                 ".mp3": "audio", ".wav": "audio", ".m4a": "audio"}
+                 ".mp3": "audio", ".wav": "audio", ".m4a": "audio",
+                 ".jpg": "image", ".jpeg": "image", ".png": "image",
+                 ".bmp": "image", ".gif": "image", ".webp": "image"}
 
 
 @dataclass
 class ExtractResult:
     """解析结果。``ok=False`` 时 ``text`` 恒为空串(宁空勿毒)。"""
     ok: bool
-    kind: str = ""          # pdf | docx | xlsx | audio
+    kind: str = ""          # pdf | docx | xlsx | audio | image
     text: str = ""
     truncated: bool = False
-    error: str = ""         # "" | "missing_dependency" | "bad_file" | "asr_failed"
+    error: str = ""         # "" | "missing_dependency" | "bad_file" | "asr_failed" | "ocr_failed" | "ocr_empty"
     hint: str = ""          # 人可读补充(缺哪个包 / 坏在哪),绝不含文件内容
 
 
@@ -52,12 +56,18 @@ def extract_text(data: bytes, kind: str, *, max_chars: int = MAX_EXTRACT_CHARS) 
     伪造扩展名防线:先验 magic(PDF 头 / zip 容器 PK 头),不符直接 ``bad_file`` ——
     解析库还没碰到字节就被拒,坏文件伪装不进上下文。
     """
-    if kind not in ("pdf", "docx", "xlsx", "audio"):
+    if kind not in ("pdf", "docx", "xlsx", "audio", "image"):
         return ExtractResult(False, kind, error="bad_file", hint=f"未知格式: {kind}")
     if kind == "audio":
         # 音频分支整体委托(magic 防线在 audio_transcribe 内,容器判定与后缀解耦)
         from karvyloop.audio_transcribe import transcribe
         return transcribe(data, max_chars=max_chars)
+    if kind == "image":
+        # 图片分支整体委托 OCR(magic 防线在 ocr_recognize 内;出脏文本交下游 LLM 校准)
+        from karvyloop.ocr_recognize import recognize_image
+        r = recognize_image(data, max_chars=max_chars)
+        r.kind = "image"
+        return r
     if not _magic_ok(data, kind):
         return ExtractResult(False, kind, error="bad_file",
                              hint="文件头与扩展名不符(伪造扩展名或已损坏)")

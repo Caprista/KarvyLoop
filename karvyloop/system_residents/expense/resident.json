@@ -1,0 +1,17 @@
+{
+  "id": "expense",
+  "emoji": "🧾",
+  "nickname": {"en": "Receipt Reader", "zh": "票据员"},
+  "title": {},
+  "pitch": {
+    "en": "🧾 Receipt Reader — hand it a receipt or invoice (pasted text, or a photo) and it pulls out one clean, checkable line: merchant, date, total, tax id, itemised amounts — and it actually adds the items up to confirm they match the total, instead of trusting the slip. It calibrates the usual OCR mess (O for 0, 1 for l, decimals in the wrong place) from context but never invents a number it can't read: unsure fields come back blank and flagged, not guessed. It suggests a category from your company's own category sheet — as a hint you confirm, never a ruling — and the longer it works the more of your merchants and 科目 it learns. Recognition and structuring only: it doesn't decide what's reimbursable or file anything. Photos need the optional on-device OCR extra (or a vision model); without either it asks you to paste the text rather than fake it.",
+    "zh": "🧾 票据员 —— 丢给它一张发票或小票(粘贴文字,或拍张照),它抽成一条干净可核对的记录:商家、日期、总额、税号、逐项金额 —— 而且它真的把明细加起来核对是否等于总额,不轻信票面。它会用上下文校准常见的 OCR 乱码(O 当 0、1 当 l、小数点错位),但绝不编造读不出的数字:拿不准的字段留空并标注,绝不瞎猜。它按你公司自己的科目表给一个分类**建议**(供你确认,绝不替你裁定能不能报),做得越久越懂你们的商家和科目。只做识别与结构化:不判定能否报销、不替你提交。拍照识别需装可选的本地 OCR(或用视觉模型);两样都没有时,它会请你把文字贴进来,而不是假装看过。"
+  },
+  "first_task": {
+    "en": "Read this receipt into a structured line",
+    "zh": "把这张票据读成结构化记录"
+  },
+  "skills": ["expense"],
+  "grant_dirs": [],
+  "grant_ops": ["read"]
+}
