@@ -745,6 +745,34 @@ var KarvyMemoryPanelBundle = (function(exports) {
     log.appendChild(note);
     log.scrollTop = log.scrollHeight;
   }
+  function _renderInlineOffer(log, offer) {
+    if (!offer || !offer.content || !offer.id) return;
+    const box = el("div", { class: "kchat-offer" });
+    const keep = el("button", { type: "button", class: "kchat-offer-keep", text: t("kchat.offer_keep") });
+    keep.addEventListener("click", async () => {
+      keep.disabled = true;
+      const res = await _postJSON("/api/knowledge/sediment", {
+        conversation_id: _kSession,
+        items: [offer],
+        decisions: { [offer.id]: { action: "accept" } },
+        keep_open: true
+      });
+      if (res.ok && res.data && res.data.ok) {
+        box.classList.add("done");
+        box.innerHTML = "";
+        box.appendChild(el("span", { class: "kchat-offer-lead", text: t("kchat.offer_done") }));
+      } else {
+        keep.disabled = false;
+      }
+    });
+    const skip = el("button", { type: "button", class: "kchat-offer-skip", text: t("kchat.offer_skip") });
+    skip.addEventListener("click", () => box.remove());
+    box.appendChild(el("span", { class: "kchat-offer-lead", text: t("kchat.offer_lead") }));
+    box.appendChild(el("span", { class: "kchat-offer-body", text: offer.content }));
+    box.appendChild(el("span", { class: "kchat-offer-acts" }, keep, skip));
+    log.appendChild(box);
+    log.scrollTop = log.scrollHeight;
+  }
   function _renderSedimentCard(host, card, onDone) {
     const box = el("div", { class: "sediment-card" });
     box.appendChild(el("div", { class: "sediment-head", text: t("sediment.card_title") }));
@@ -946,6 +974,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
         _kSession = res.data.session_id;
         _setMsg(msg, true, "");
         _kLine(log, "karvy", res.data.reply);
+        if (res.data.offer) _renderInlineOffer(log, res.data.offer);
         if (wasNew) void refreshSide();
       } else {
         if (provRow) {
@@ -991,7 +1020,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
       }
       const card = res.data.card;
       if (!card || !card.n) {
-        _kSysNote(log, t("sediment.none"));
+        _kSysNote(log, log.querySelector(".kchat-offer:not(.done)") ? t("kchat.converge_has_offer") : t("sediment.none"));
         return;
       }
       _renderSedimentCard(log, card, (asks) => {

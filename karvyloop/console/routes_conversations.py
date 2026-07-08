@@ -181,9 +181,36 @@ async def api_knowledge_chat(req: KnowledgeChatRequest, request: Request) -> dic
     reply = out.strip()
     if not reply:
         return {"ok": False, "reason": "馆员没回上话(空回复)"}
+    # 主动回收:馆员在末尾用 ⟦可收:句 | 层⟧ 提**一条**可沉候选(见 KNOWLEDGE_PERSONA §5)。
+    # 这是"可沉候选"的**唯一产出者**(一个指称一个真源):解析出结构化 offer → 前端渲染成
+    # 「收下/再聊」按钮,收下=直接沉那一条(不绕道"收敛"另判一遍,杜绝同模块自相矛盾)。
+    # 宁空勿毒:格式不对 / 层非法 / 空内容 → offer=None(不硬凑);标记一律从落盘+回显里剥掉。
+    offer = _parse_sediment_offer(reply)
+    if offer is not None:
+        reply = offer.pop("_clean_reply") or reply
     from karvyloop.cognition.conversation import Turn
     store.append_turn(conv, Turn(user_intent=req.message, agent_response=reply, brain="slow"))
-    return {"ok": True, "session_id": conv.id, "reply": reply, "turn_count": conv.turn_count}
+    return {"ok": True, "session_id": conv.id, "reply": reply, "offer": offer,
+            "turn_count": conv.turn_count}
+
+
+def _parse_sediment_offer(reply: str) -> Optional[dict]:
+    """从馆员回复末尾抽 ⟦可收:句 | 层⟧ → 候选 dict(含 id/content/layer);无/坏 → None。
+    容错全/半角括号与分隔;剥掉标记后的干净正文塞进 _clean_reply(调用方替换回显)。"""
+    import re
+
+    from karvyloop.cognition.converge import LAYERS, CognitionCandidate
+    m = re.search(r"[⟦【]\s*可收\s*[:：]\s*(.+?)\s*[|｜]\s*([A-Za-z]+)\s*[⟧】]", reply or "", re.S)
+    if not m:
+        return None
+    content = (m.group(1) or "").strip()
+    layer = (m.group(2) or "").strip().lower()
+    if not content or layer not in LAYERS:
+        return None                       # 宁空勿毒:层非法/空内容不硬塞
+    clean = (reply[:m.start()] + reply[m.end():]).strip()
+    d = CognitionCandidate(content=content, layer=layer, why="聊中主动回收的可复用认知").to_dict()
+    d["_clean_reply"] = clean
+    return d
 
 
 class KnowledgeConvergeRequest(BaseModel):

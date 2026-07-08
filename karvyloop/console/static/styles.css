@@ -2639,6 +2639,27 @@ body.desk-view #mgmt-modal .modal:has(.modal-body.kchat-mode) { height: calc(100
   background: rgba(120, 110, 90, .05); border: 1px dashed var(--border, #ddd0be); border-radius: 11px;
 }
 .kchat-log .kchat-sysnote .md, .kchat-log .kchat-sysnote .md p { display: inline; background: transparent; border: none; padding: 0; margin: 0; }
+/* 主动回收 inline offer:馆员气泡下方一个「收下/再聊」小卡(可沉候选的唯一产出者) */
+.kchat-log .kchat-offer {
+  align-self: flex-start; max-width: 88%; margin: -6px 0 14px 2px; padding: 8px 12px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  background: #f3efe6; border: 1px solid var(--accent-line, #d9bf9d); border-left: 3px solid var(--accent-strong, #8a5a2b);
+  border-radius: 10px; font-size: 12.5px; line-height: 1.5;
+}
+.kchat-log .kchat-offer-lead { font-weight: 700; color: var(--accent-strong, #8a5a2b); white-space: nowrap; }
+.kchat-log .kchat-offer-body { flex: 1 1 200px; min-width: 0; color: var(--ink, #2a2150); }
+.kchat-log .kchat-offer-acts { flex: none; display: inline-flex; gap: 6px; }
+.kchat-log .kchat-offer-keep {
+  border: none; border-radius: 7px; padding: 4px 12px; cursor: pointer; font-size: 12px; font-weight: 700;
+  background: var(--accent-strong, #8a5a2b); color: #fff;
+}
+.kchat-log .kchat-offer-keep:disabled { opacity: 0.55; cursor: default; }
+.kchat-log .kchat-offer-skip {
+  border: 1px solid var(--border, #ddd0be); background: #fff; border-radius: 7px;
+  padding: 4px 12px; cursor: pointer; font-size: 12px; color: var(--text-dim, #8a7a66);
+}
+.kchat-log .kchat-offer.done { border-left-color: #1f6a55; background: #eef4f0; }
+.kchat-log .kchat-offer.done .kchat-offer-lead { color: #1f6a55; }
 
 /* 左栏会话行:hover 出 ✕(点 ✕ 弹确认关闭 —— 未沉淀会丢) */
 .kchat-sess { display: flex; align-items: center; gap: 4px; }

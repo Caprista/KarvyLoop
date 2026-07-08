@@ -441,6 +441,21 @@ def test_knowledge_sediment_keep_open_for_followups(app_with_mgr, mgr):
     assert body["unsettled"] == 1
 
 
+def test_parse_sediment_offer():
+    """主动回收标记解析(可沉候选唯一产出者):⟦可收:句 | 层⟧ → 候选;宁空勿毒。"""
+    from karvyloop.console.routes_conversations import _parse_sediment_offer as P
+    o = P("好,这条能存。\n⟦可收:X 决定藏着隐含假设 | principle⟧")
+    assert o and o["content"] == "X 决定藏着隐含假设" and o["layer"] == "principle"
+    assert o["_clean_reply"] == "好,这条能存。"       # 标记从回显里剥掉
+    assert o["id"]                                     # 有 id(=_cid(content))→ 前端做 decisions key 回环
+    # 全/半角括号与分隔都容错
+    assert P("【可收:我倾向从严 ｜ corrective】")["layer"] == "corrective"
+    # 宁空勿毒:层非法 / 空内容 / 无标记 → None(不硬凑一条毒进库)
+    assert P("x ⟦可收:随便写 | nonsense⟧") is None
+    assert P("⟦可收:  | principle⟧") is None
+    assert P("普通聊天,没有可收的") is None
+
+
 def test_knowledge_sediment_missing_session_404(app_with_mgr):
     app_with_mgr.state.memory = _FakeMem()
     client = TestClient(app_with_mgr)

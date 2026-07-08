@@ -620,6 +620,32 @@ function _kSysNote(log: HTMLElement, text: string): void {
   log.scrollTop = log.scrollHeight;
 }
 
+// 主动回收的 inline offer = 可沉候选的**唯一产出者**(一个指称一个真源):馆员聊出一条 →
+// 一个「收下 / 再聊」小卡。收下 = **直接沉那一条**(keep_open,不关会话),不绕道「收敛」另判一遍
+// —— 同一真相不判两次,同模块自相矛盾在结构上消失(不靠 persona 求模型自觉)。
+function _renderInlineOffer(log: HTMLElement, offer: any): void {
+  if (!offer || !offer.content || !offer.id) return;
+  const box = el("div", { class: "kchat-offer" });
+  const keep = el("button", { type: "button", class: "kchat-offer-keep", text: t("kchat.offer_keep") }) as HTMLButtonElement;
+  keep.addEventListener("click", async () => {
+    keep.disabled = true;
+    const res = await _postJSON("/api/knowledge/sediment", {
+      conversation_id: _kSession, items: [offer],
+      decisions: { [offer.id]: { action: "accept" } }, keep_open: true });   // 沉这一条,会话不关
+    if (res.ok && res.data && res.data.ok) {
+      box.classList.add("done"); box.innerHTML = "";
+      box.appendChild(el("span", { class: "kchat-offer-lead", text: t("kchat.offer_done") }));
+    } else { keep.disabled = false; }
+  });
+  const skip = el("button", { type: "button", class: "kchat-offer-skip", text: t("kchat.offer_skip") });
+  skip.addEventListener("click", () => box.remove());
+  box.appendChild(el("span", { class: "kchat-offer-lead", text: t("kchat.offer_lead") }));
+  box.appendChild(el("span", { class: "kchat-offer-body", text: offer.content }));
+  box.appendChild(el("span", { class: "kchat-offer-acts" }, keep, skip));
+  log.appendChild(box);
+  log.scrollTop = log.scrollHeight;
+}
+
 // 沉淀确认卡(面板内渲染):逐条 收/改/不要/**追问**;没动的 = 未确认 = 不沉;depth≥4 带 ⚠。
 // 追问 = "这条我想先聊清楚再决定":提交时 settled(收/改)的立刻沉,追问的不沉、丢回聊天继续(会话不关)。
 function _renderSedimentCard(host: HTMLElement, card: any, onDone: (asks: any[]) => void): void {
@@ -783,6 +809,7 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
       _kSession = res.data.session_id;
       _setMsg(msg, true, "");
       _kLine(log, "karvy", res.data.reply);
+      if (res.data.offer) _renderInlineOffer(log, res.data.offer);   // 主动回收:一键收下,不绕收敛
       if (wasNew) void refreshSide();   // 真会话行替换占位(refreshSide 重建左栏,占位自然冲掉)
     } else {
       // 失败在流里说(像个人),不是角落小字;并撤掉乐观占位、恢复"新开一段"高亮
@@ -811,7 +838,12 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
       return;
     }
     const card = res.data.card;
-    if (!card || !card.n) { _kSysNote(log, t("sediment.none")); return; }
+    if (!card || !card.n) {
+      // 确定性一致性闸(一个指称一个真源):有**活着的未处理 offer** 时,绝不弹"没什么可沉淀"——
+      // 那会和上面馆员刚提的 offer 自相矛盾。这是纯 DOM 检查、零 LLM,矛盾被 harness 焊死不靠模型。
+      _kSysNote(log, log.querySelector(".kchat-offer:not(.done)") ? t("kchat.converge_has_offer") : t("sediment.none"));
+      return;
+    }
     _renderSedimentCard(log, card, (asks) => {
       if (asks.length) {
         // 追问:settled 的已沉、会话不关。把这几条丢回聊天当话头,馆员开场引导(nudge,不记 turn)——
