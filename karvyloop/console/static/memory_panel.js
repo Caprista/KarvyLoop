@@ -962,6 +962,10 @@ var KarvyMemoryPanelBundle = (function(exports) {
         _setMsg(msg, false, t("kchat.busy"));
         return;
       }
+      if (log.querySelector(".sediment-card")) {
+        _setMsg(msg, false, t("kchat.card_pending"));
+        return;
+      }
       _busy = true;
       conv.disabled = true;
       send.disabled = true;

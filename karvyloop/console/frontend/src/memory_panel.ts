@@ -790,6 +790,9 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
   conv.addEventListener("click", async () => {
     if (!_kSession) { _setMsg(msg, false, t("kchat.nothing_yet")); return; }
     if (_busy) { _setMsg(msg, false, t("kchat.busy")); return; }
+    // 已有一张未处理的沉淀卡 → 别再收敛堆第二张(Hardy:"没选收改就能再点收敛又总结一堆")。
+    // 先让用户收/改/不要或"接着聊"撤掉这张,才允许下一次收敛(也省掉一次白烧的 LLM 调用)。
+    if (log.querySelector(".sediment-card")) { _setMsg(msg, false, t("kchat.card_pending")); return; }
     _busy = true; conv.disabled = true; send.disabled = true;
     const tl = typingLine();
     tl.querySelector(".distill-bd")!.textContent = t("kchat.converging");
