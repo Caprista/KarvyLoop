@@ -7,8 +7,9 @@
    不承诺自动定时(提醒由用户/Karvy 排,技能自己不起 timer)。
 3. human-owned 学习台账模板随包(间隔变长+错题不再复发 = 诚实成长指标,零假百分比)。
 
-注意:只有技能资产,**没有** system_residents/study-buddy(引荐不接,下程再开)——
-这里顺带锁住这一点,防止有人提前把角色塞进包里。
+docs/66 §H 补欠账:学伴已从"仅技能资产"升为**完整原住民**(system_residents/study-buddy,
+7 文件按范式老实建);本文件末尾改锁"原住民镜像齐全 + MEMORY 承载成长",证它是会长的 role
+而非静态 skill。
 """
 from __future__ import annotations
 
@@ -108,11 +109,29 @@ def test_skill_asset_honest_and_methodical():
     assert "does not set timers" in body, "必须白纸黑字写明技能自己不起定时"
 
 
-def test_no_resident_shipped_yet():
-    """docs/60 排程:学伴只先落技能资产;原住民镜像/引荐**下程**再开,不许提前塞包。"""
-    from karvyloop.karvy.residents import system_residents_dir
-    assert not (system_residents_dir() / "study-buddy").exists(), \
-        "study-buddy 原住民镜像不该在这个阶段出现(引荐未接)"
+def test_study_buddy_resident_shipped_and_wellformed():
+    """学伴已升为完整原住民(docs/66 §H 补欠账):镜像 7 文件齐、引用 study-buddy 技能、
+    MEMORY 承载成长(概念网/薄弱点)—— 这是它当 role 而非静态 skill 的理由。"""
+    from karvyloop.karvy.residents import load_resident, system_residents_dir
+    d = system_residents_dir() / "study-buddy"
+    assert d.exists(), "study-buddy 原住民镜像应已随包(欠账已补)"
+    for f in ("resident.json", "IDENTITY.md", "SOUL.md", "USER.md",
+              "COMMITMENT.md", "VERIFY.md", "MEMORY.md"):
+        assert (d / f).exists() and (d / f).read_text(encoding="utf-8").strip(), \
+            f"原住民镜像缺/空: {f}"
+    r = load_resident("study-buddy")
+    assert r and r["id"] == "study-buddy"
+    assert r["nickname"].get("en") and r["nickname"].get("zh"), "花名要中英双语"
+    assert r["pitch"].get("en") and r["pitch"].get("zh"), "pitch 要中英双语"
+    assert r["skills"] == ["study-buddy"], "必须引用 study-buddy 技能(方法在技能里)"
+    # 六灵魂文件都填了(按范式老实建,不留空槽当打样)
+    for slot in ("identity", "soul", "user", "commitment_own", "verify", "memory"):
+        assert len(r[slot]) > 80, f"灵魂槽太空,打样不合格: {slot}"
+    # 成长魂:MEMORY 明写会长的东西(概念网 + 薄弱点)——否则它就该是静态 skill 不是 role
+    assert "concept map" in r["memory"] and "weak spot" in r["memory"].lower(), \
+        "MEMORY 必须承载成长(概念网/薄弱点),这是它当 role 的理由"
+    # 只读学习材料,不写盘(与文件管家的读写不同;学伴只考不改)
+    assert r["grant_ops"] == ["read"], "学伴只读学习材料,不写盘"
 
 
 # ---- 3. human-owned 学习台账模板 ----

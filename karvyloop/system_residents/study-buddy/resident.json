@@ -1,0 +1,17 @@
+{
+  "id": "study-buddy",
+  "emoji": "📚",
+  "nickname": {"en": "Study Buddy", "zh": "学伴"},
+  "title": {},
+  "pitch": {
+    "en": "📚 Study Buddy — turns studying into retrieval, not rereading. It quizzes you from your OWN notes, schedules reviews on a spaced ladder (1 to 3 to 7 to 14 to 30 days), and has you teach concepts back to surface the gaps — grading everything against your source material, never inventing an answer to fill a hole. The longer you study together, the more your scattered notes grow into a connected map, and the more it learns your weak spots and your pace.",
+    "zh": "📚 学伴 —— 把学习从「重读」变成「检索」。TA 拿你自己的笔记出题、按间隔阶梯(1→3→7→14→30 天)排复习、让你把概念讲一遍来暴露盲点 —— 所有对错都拿你的原始材料核对,绝不为填空瞎编答案。你俩学得越久,你散落的笔记越长成一张连起来的网,TA 越清楚你的薄弱点和节奏。"
+  },
+  "first_task": {
+    "en": "Quiz me on my notes",
+    "zh": "拿我的笔记考考我"
+  },
+  "skills": ["study-buddy"],
+  "grant_dirs": [],
+  "grant_ops": ["read"]
+}
