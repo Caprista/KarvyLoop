@@ -104,6 +104,18 @@ def _extract_url(material: str) -> str:
     return m.group(0).rstrip(").,。)】>\"'") if m else ""
 
 
+# 抓取头:用户主动分享的链接,馆员替他去读。裸 UA("Mozilla/5.0 KarvyLoop")被大量站点当爬虫
+# 拒(真机实拍:baike.baidu 对它 403,换真浏览器头 + Accept-Language 立刻 200/105KB;addyosmani
+# 也从 3.8KB 拿到全页 42KB)。发真浏览器头是抓取器通例(curl/wget/readability 皆然),用户读自己
+# 贴的公开页,不构成滥用。SSRF 逐跳校验照旧(见下 follow_redirects=False + 每跳 check_url)。
+_BROWSER_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+
+
 async def _fetch_url(url: str, *, timeout: float = 12.0, max_chars: int = 16000) -> str:
     """抓链接正文(极简 HTML→text)。本地优先 + 用户主动分享的链接;失败返空。
 
@@ -127,7 +139,7 @@ async def _fetch_url(url: str, *, timeout: float = 12.0, max_chars: int = 16000)
         return ""
     try:
         async with httpx.AsyncClient(follow_redirects=False, timeout=timeout,   # 自己跟,才能逐跳校验
-                                     headers={"User-Agent": "Mozilla/5.0 KarvyLoop"}) as c:
+                                     headers=_BROWSER_HEADERS) as c:
             cur = url
             txt = ""
             for _hop in range(6):   # 上限 5 次重定向(同 web._http_get)
