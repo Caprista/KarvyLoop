@@ -1367,7 +1367,10 @@ body.desk-view #mgmt-modal.modal-overlay { z-index: 9700; }
   font-size: 16px; color: var(--text-dim); padding: 4px 8px; border-radius: 6px;
 }
 .modal-close:hover { background: var(--surface-2); color: var(--text); }
-.modal-body { padding: 16px 18px; overflow-y: auto; }
+/* flex:1 + min-height:0 是让 overflow-y:auto 真出滚动条的关键 —— 少了它,flex 子项不肯缩到
+   内容高度以下,内容顶穿 .modal(overflow:hidden)被裁掉、**没有滚动条**,超一页的面板(原子/角色
+   全范式编辑器)下半截够不着(Hardy 实拍;kchat-mode 早有这两行,普通管理面板漏了)。 */
+.modal-body { padding: 16px 18px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 
 .mgmt-section-title {
   font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
