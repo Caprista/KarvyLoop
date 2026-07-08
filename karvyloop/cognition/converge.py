@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from karvyloop.cognition.auto_distill import format_turns
+from karvyloop.paradigm.agent_spec import AgentSpec
 
 # 5 层认知(Hardy 2026-07-06 docs/66 §D):深度递增,确认关**越深越严**。
 LAYERS = ("experience", "reasoning", "principle", "corrective", "emergent")
@@ -42,6 +43,26 @@ CONVERGE_SYSTEM = (
     "认知』(如『要不要给沉默权设 Wilson 门』是问题、不是候选;『我倾向沉默权从严』才是)。"
     "拿不准某条是不是问题时,宁可不抽。\n"
     "严格输出 JSON 数组 [{\"content\",\"layer\",\"why\",\"when\"}...];不要输出 JSON 以外任何文字。"
+)
+
+# 收敛器的**范式工程内核**(知行合一:内部 agent 也用我们的范式 —— 见 paradigm/agent_spec.py)。
+# 上面的 CONVERGE_SYSTEM 是它 identity+principles 的散文实现,下面的 parse_candidates 是它 verify
+# (宁空勿毒)的代码实现;test_converge_layered 把这份 spec 和二者对账,不许漂移。
+# persona 层(USER 服务谁 / MEMORY 自己长)对这个无状态编译器不适用,故意缺席。
+CONVERGE_AGENT = AgentSpec(
+    id="converge",
+    identity="认知编译器:用户点「收敛」时,把一段对话总结成分层认知候选"
+             "(经历/推理/原则/校正/涌现),供用户逐条确认后再沉淀。",
+    principles=(
+        "颗粒度不预设:理解到几层抽几条,别硬凑、别切成流水账。",
+        "绝不猜时间:when 仅当对话里用户明说了真实时间才填原话,否则 null。",
+        "只抽确有依据、能泛化到将来的;一次性寒暄不抽;没有可沉淀的就给空数组。",
+        "每条是已确定的陈述句(用户可点头认领),不是开放问题/待办/未拿定的选择——拿不准宁可不抽。",
+    ),
+    contract="只产候选,绝不写库:converge_and_propose 返回候选交确认卡,落盘是 sediment_confirmed 的事。",
+    verify="严格输出 JSON 数组,每条 content+layer(∈LAYERS)+why+when;解析走 parse_candidates,"
+           "宁空勿毒——非严格 JSON / 非数组 / 未知 layer / 空内容一律跳过或返 [],绝不硬塞垃圾进候选。",
+    tools=(),   # 纯 LLM,无工具
 )
 
 

@@ -10,6 +10,8 @@ import json
 from types import SimpleNamespace
 
 from karvyloop.cognition.converge import (
+    CONVERGE_AGENT,
+    CONVERGE_SYSTEM,
     DEPTH_BY_LAYER,
     LAYERS,
     CognitionCandidate,
@@ -322,3 +324,28 @@ def test_parse_extracts_array_wrapped_in_prose():
     wrapped = "好的,我把这段对话收敛成以下认知候选:\n" + payload + "\n以上,请逐条确认。"
     cands = parse_candidates(wrapped)
     assert len(cands) == 1 and cands[0].content == "裹在散文里" and cands[0].layer == "emergent"
+
+
+# ---- 知行合一:收敛器用范式工程内核声明(AgentSpec),spec/散文prompt/解析器三者对账不漂移 ----
+
+def test_converge_agent_spec_matches_reality():
+    """内部 agent 也用范式(Hardy 2026-07-08):CONVERGE_AGENT 声明工程内核,而 CONVERGE_SYSTEM
+    (散文)与 parse_candidates(代码)是它的实现——本测试锁三者一致,防 spec 沦为不对账的注释。"""
+    from karvyloop.paradigm.agent_spec import AgentSpec
+    assert isinstance(CONVERGE_AGENT, AgentSpec) and CONVERGE_AGENT.id == "converge"
+
+    # 1) verify 对账:parse_candidates 真的宁空勿毒(spec.verify 声称的行为 = 代码行为)
+    assert parse_candidates("这不是 JSON") == []                       # 非 JSON → []
+    assert parse_candidates('{"content":"x","layer":"experience"}') == []   # 非数组 → []
+    assert parse_candidates('[{"content":"x","layer":"胡编层"}]') == []      # 未知 layer → 跳过
+    assert parse_candidates('[{"content":"  ","layer":"experience"}]') == []  # 空内容 → 跳过
+
+    # 2) principles 对账:spec 的每条原则都在散文 prompt 里有实现(不许 spec 写了 prompt 没有)
+    markers = ("颗粒度不预设", "绝不自己猜时间", "空数组", "绝不把开放式问题")
+    for m in markers:
+        assert m in CONVERGE_SYSTEM, f"CONVERGE_SYSTEM 缺 spec 声称的原则实现: {m}"
+
+    # 3) 分层诚实:工程内核五项齐(__post_init__ 已强制),persona 层(USER/MEMORY)故意不在 AgentSpec 上
+    assert CONVERGE_AGENT.tools == ()                                 # 纯 LLM,无工具
+    assert not hasattr(CONVERGE_AGENT, "user") and not hasattr(CONVERGE_AGENT, "memory"), \
+        "内部无状态 agent 不该有 persona 层(USER/MEMORY);范式=工程核(所有agent)+persona层(对外角色)"
