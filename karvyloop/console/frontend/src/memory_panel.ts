@@ -753,10 +753,21 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
     const m = cin.value.trim();
     if (!m) return;
     if (_busy) { _setMsg(msg, false, t("kchat.busy")); return; }   // 忙时不吞:明说等一下,保住输入
-    const wasNew = !_kSession;   // 这是新开一段的第一句 → 发成功后左栏要立刻长出这一行
+    const wasNew = !_kSession;   // 这是新开一段的第一句 → 发出去就该在左栏立刻出行
     _busy = true; send.disabled = true;
     cin.value = "";
     _kLine(log, "you", m);
+    // 乐观占位(Hardy:"发消息第一时刻没生成新会话记录"):不等馆员回话,发出去的**那一刻**
+    // 就在左栏挂一行、高亮当前段。成功→refreshSide 用真会话行替换;失败→撤掉,不留假行。
+    let provRow: HTMLElement | null = null;
+    if (wasNew) {
+      side.querySelector(".kchat-sess-new")?.classList.remove("active");
+      provRow = el("button", { class: "kchat-sess active kchat-sess-prov" },
+        el("span", { class: "kchat-sess-nm", text: "📥 " + m.slice(0, 30) }));
+      const newRow = side.querySelector(".kchat-sess-new");
+      if (newRow && newRow.nextSibling) side.insertBefore(provRow, newRow.nextSibling);
+      else side.appendChild(provRow);
+    }
     const tl = typingLine();
     const res = await _postJSON("/api/knowledge/chat", { session_id: _kSession, message: m });
     tl.remove();
@@ -765,9 +776,10 @@ async function _renderKnowledgeArea(wrap: HTMLElement): Promise<void> {
       _kSession = res.data.session_id;
       _setMsg(msg, true, "");
       _kLine(log, "karvy", res.data.reply);
-      if (wasNew) void refreshSide();   // 新会话即刻上左栏并高亮(不再"待处理·0"、不再点新建就丢)
+      if (wasNew) void refreshSide();   // 真会话行替换占位(refreshSide 重建左栏,占位自然冲掉)
     } else {
-      // 失败在流里说(像个人),不是角落小字
+      // 失败在流里说(像个人),不是角落小字;并撤掉乐观占位、恢复"新开一段"高亮
+      if (provRow) { provRow.remove(); side.querySelector(".kchat-sess-new")?.classList.add("active"); }
       _kLine(log, "karvy", "(" + t("kchat.failed", { reason: (res.data && res.data.reason) || String(res.status) }) + ")");
     }
   };

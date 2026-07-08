@@ -75,6 +75,26 @@ def test_urlguard_allows_public_literal_ip():
     check_url("https://1.1.1.1/")        # Cloudflare 公共 DNS,公网
 
 
+def test_urlguard_allows_fake_ip_proxy_range():
+    """代理 fake-ip 池(RFC 2544 benchmark 198.18.0.0/15)必须放行。
+
+    Clash/Surge/sing-box/V2Ray 在 fake-ip 模式下把**真实公网域名**映射到这段合成 IP,再由代理
+    内核转发到真址。一刀切按 is_private 挡掉 = 让"贴链接给馆员读"对全体 fake-ip 用户彻底失效
+    (Hardy 真机实拍:baike.baidu.com / addyosmani.com 全解析到 198.18.x.x → 全被误挡)。
+    这段公网不可路由、普通机器无内网服务监听于此,放行不换来任何真实 SSRF 防护损失。"""
+    for ip in ("http://198.18.0.0/", "http://198.18.1.110/", "http://198.19.255.255/"):
+        check_url(ip)   # 不抛 = 放行(fake-ip 合成地址)
+    # 回归护栏:carve-out 绝不能顺手放开真正的内网/元数据靶
+    import ipaddress
+
+    from karvyloop.coding.tools.urlguard import _ip_is_blocked
+    for bad in ("169.254.169.254", "127.0.0.1", "10.0.0.1", "192.168.1.1", "172.16.0.1", "0.0.0.0"):
+        assert _ip_is_blocked(ipaddress.ip_address(bad)) is True
+    # 边界外(198.17.x / 198.20.x)是普通公网,本就放行——确认 carve-out 没越界成"挡公网"
+    for edge in ("198.17.255.255", "198.20.0.0"):
+        assert _ip_is_blocked(ipaddress.ip_address(edge)) is False
+
+
 def test_urlguard_rejects_missing_host_and_empty():
     for bad in ("http:///path", "https://", "notaurl"):
         with pytest.raises(SsrfBlocked):

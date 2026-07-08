@@ -33,12 +33,23 @@ class SsrfBlocked(ValueError):
 
 _ALLOWED_SCHEMES = ("http", "https")
 
+# 代理 fake-ip 池(RFC 2544 benchmark 段 198.18.0.0/15):Clash/Surge/sing-box/V2Ray 在 fake-ip
+# 模式下把**真实公网域名**映射到这段合成 IP,再由代理内核拦截、转发到真实地址——中国用户几乎
+# 人手一个(Hardy 真机实拍:baike.baidu.com/addyosmani.com 全解析到 198.18.x.x)。
+# 威胁再分析:这段本身在公网**不可路由**,普通机器上无任何内网服务监听于此(连过去直接失败);
+# fake-ip 机器上它等价于"经代理访问那个公网域名",不比放行该域名本身更危险。一刀切按 is_private
+# 挡掉 = 让"贴链接给馆员读"对全体 fake-ip 用户彻底失效,却换不到任何真实 SSRF 防护。故显式放行。
+# (真正的 SSRF 靶——169.254 云元数据 / 127 环回 / 10·172.16·192.168 内网 / CGNAT 100.64——照挡不误。)
+_FAKE_IP_PROXY = ipaddress.ip_network("198.18.0.0/15")
+
 
 def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """这个 IP 落在不许出站的段里吗?(私有/环回/链路本地/保留/组播/未指定)"""
     # IPv6 映射的 IPv4(::ffff:127.0.0.1 之类)先剥回 v4 再判,防绕过。
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
+    if isinstance(ip, ipaddress.IPv4Address) and ip in _FAKE_IP_PROXY:
+        return False   # 代理 fake-ip 合成地址:放行(见上方威胁再分析),不当内网挡
     return (
         ip.is_private          # 10/8, 172.16/12, 192.168/16, fc00::/7 …
         or ip.is_loopback      # 127/8, ::1

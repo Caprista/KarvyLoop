@@ -904,6 +904,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
       return ln;
     };
     const doSend = async () => {
+      var _a, _b;
       const m = cin.value.trim();
       if (!m) return;
       if (_busy) {
@@ -915,6 +916,18 @@ var KarvyMemoryPanelBundle = (function(exports) {
       send.disabled = true;
       cin.value = "";
       _kLine(log, "you", m);
+      let provRow = null;
+      if (wasNew) {
+        (_a = side.querySelector(".kchat-sess-new")) == null ? void 0 : _a.classList.remove("active");
+        provRow = el(
+          "button",
+          { class: "kchat-sess active kchat-sess-prov" },
+          el("span", { class: "kchat-sess-nm", text: "📥 " + m.slice(0, 30) })
+        );
+        const newRow = side.querySelector(".kchat-sess-new");
+        if (newRow && newRow.nextSibling) side.insertBefore(provRow, newRow.nextSibling);
+        else side.appendChild(provRow);
+      }
       const tl = typingLine();
       const res = await _postJSON("/api/knowledge/chat", { session_id: _kSession, message: m });
       tl.remove();
@@ -926,6 +939,10 @@ var KarvyMemoryPanelBundle = (function(exports) {
         _kLine(log, "karvy", res.data.reply);
         if (wasNew) void refreshSide();
       } else {
+        if (provRow) {
+          provRow.remove();
+          (_b = side.querySelector(".kchat-sess-new")) == null ? void 0 : _b.classList.add("active");
+        }
         _kLine(log, "karvy", "(" + t("kchat.failed", { reason: res.data && res.data.reason || String(res.status) }) + ")");
       }
     };
