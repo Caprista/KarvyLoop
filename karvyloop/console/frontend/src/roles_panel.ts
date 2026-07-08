@@ -159,6 +159,9 @@ async function _openRoleEdit(v: any): Promise<void> {
   openMgmtModal(v.id);
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
   body.appendChild(el("div", { class: "mgmt-hint", text: t("role.paradigm_hint") }));
+  // 一眼看全:表单很长、首屏只露 ~3 层,用户会以为"只有 3 个字段"。顶部摆一行范式全景,
+  // 明说共 7 层、往下滚都能填 —— 消除"填不了更多"的错觉(discoverability)。
+  body.appendChild(el("div", { class: "paradigm-overview", text: t("role.paradigm_overview") }));
   const pmResp = await _getJSON("/api/role/paradigm?role_id=" + encodeURIComponent(v.id));
   const pm = (pmResp && pmResp.paradigm) || {};
   const atomsData = await _getJSON("/api/atoms");
@@ -179,6 +182,9 @@ async function _openRoleEdit(v: any): Promise<void> {
   for (const s of slots) {
     const orig = (pm[s.key] || "") as string;
     const ta = el("textarea", { class: "edit-area" }) as HTMLTextAreaElement; ta.value = orig;
+    // 空槽也要看得见:给占位符 + 淡样式,让只填了几层的 role 仍清晰露出全部 5 个可编辑框(别空白不可见)。
+    if (!orig.trim()) { ta.placeholder = t("role.slot_empty_ph"); ta.classList.add("edit-area-empty"); }
+    ta.addEventListener("input", () => ta.classList.toggle("edit-area-empty", !ta.value.trim()));
     areas[s.slot] = { ta, orig, slot: s.slot };
     form.appendChild(el("div", { class: "soul-slot" },
       el("label", {}, s.label, s.hint ? el("span", { class: "soul-hint", text: " — " + s.hint }) : null),

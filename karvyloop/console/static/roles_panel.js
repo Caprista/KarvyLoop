@@ -190,6 +190,7 @@ var KarvyRolesPanelBundle = (function(exports) {
     if (!body) return;
     body.innerHTML = "";
     body.appendChild(el("div", { class: "mgmt-hint", text: t("role.paradigm_hint") }));
+    body.appendChild(el("div", { class: "paradigm-overview", text: t("role.paradigm_overview") }));
     const pmResp = await _getJSON("/api/role/paradigm?role_id=" + encodeURIComponent(v.id));
     const pm = pmResp && pmResp.paradigm || {};
     const atomsData = await _getJSON("/api/atoms");
@@ -209,6 +210,11 @@ var KarvyRolesPanelBundle = (function(exports) {
       const orig = pm[s.key] || "";
       const ta = el("textarea", { class: "edit-area" });
       ta.value = orig;
+      if (!orig.trim()) {
+        ta.placeholder = t("role.slot_empty_ph");
+        ta.classList.add("edit-area-empty");
+      }
+      ta.addEventListener("input", () => ta.classList.toggle("edit-area-empty", !ta.value.trim()));
       areas[s.slot] = { ta, orig, slot: s.slot };
       form.appendChild(el(
         "div",

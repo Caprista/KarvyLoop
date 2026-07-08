@@ -1344,6 +1344,9 @@ html, body {
   padding: 24px;
 }
 .modal-overlay.hidden { display: none; }
+/* 桌面视图下小卡的环境冒泡(⚖ 决策泡 / 便签闪烁 / dock / 精灵)最高冲到 z 9600;
+   管理弹层必须压过它们,否则一开面板顶部就被冒泡盖住(Hardy 实拍:范式编辑器上方被压)。 */
+body.desk-view #mgmt-modal.modal-overlay { z-index: 9700; }
 .modal {
   background: var(--bg);
   border: 1px solid var(--border-strong);
@@ -1766,6 +1769,15 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .mgmt-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .mgmt-new-btn { background: var(--accent, #b9894e); color: #fff; border: none; border-radius: 8px; padding: 7px 15px; font-size: 13px; font-weight: 600; cursor: pointer; }
 /* 全范式 soul 编辑器 */
+/* 范式全景条:表单首屏只露 ~3 层,顶部这行明说共 7 层、往下都能填(消除"只有 3 个字段"错觉) */
+.paradigm-overview {
+  font-size: 12px; line-height: 1.5; color: var(--muted, #857a68);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 11px; margin: 4px 0 10px;
+}
+/* 空的可编辑槽:淡背景 + 占位符,让填了几层的 role 仍清晰露出全部 5 个可编辑框 */
+.edit-area.edit-area-empty { background: #faf6ee; border-style: dashed; }
+.edit-area.edit-area-empty::placeholder { color: var(--faint, #a89c87); font-style: italic; }
 .soul-slot { margin: 10px 0; }
 .soul-slot label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted, #857a68); margin-bottom: 4px; }
 .soul-slot .soul-hint { font-size: 11px; color: var(--faint, #a89c87); font-weight: 400; }
