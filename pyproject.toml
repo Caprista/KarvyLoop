@@ -45,6 +45,14 @@ files = [
 asr = [
     "faster-whisper>=1.1",
 ]
+# 图片/扫描票据 OCR(报销识别的前置 OCR 工具;ocr_recognize.py)。选型 PaddleOCR/PP-OCRv5
+# (Apache-2.0,CJK 最强,on-device 票据不出机器;2026-07 世界雷达裁,docs 待补)——首次用下模型,
+# 不塞 wheel。没装 → 诚实提示 `pip install "karvyloop[ocr]"`,图片走贴文字/视觉模型兜底,绝不崩。
+ocr = [
+    "paddleocr>=2.7",
+    "paddlepaddle>=2.6",
+    "pillow>=10.0",
+]
 # Windows Tier 3 沙箱(RestrictedToken 写隔离 + Job 资源上限)——**零额外依赖**:
 # 全用 stdlib ctypes 手绑 Win32,不引 pywin32(避免给非 Windows 用户加基础重量)。
 # 此 extra 故意留空,只作显式声明:装不装都一样,Windows 上探测到即启用 Tier 3,
