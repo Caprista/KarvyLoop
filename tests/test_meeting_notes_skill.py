@@ -97,3 +97,28 @@ def test_glossary_template_ships_human_owned():
     text = p.read_text(encoding="utf-8")
     assert "human-owned" in text, "必须标明 human-owned(实例长在用户空间,抄不走)"
     assert "| term |" in text, "术语表要给可直接填的表格骨架"
+
+
+# ---- 4. 纪要员从'降级 skill'提回完整原住民(docs/66 §H;Hardy 拍活跃·只读) ----
+
+def test_meeting_scribe_resident_shipped_and_wellformed():
+    """纪要员不再只是 system skill,而是完整原住民(活跃·吃文字稿·只读):镜像 7 文件齐、
+    引用 meeting-notes 技能、MEMORY 承载成长(团队术语库)—— 这是它当 role 而非静态 skill 的理由。"""
+    from karvyloop.karvy.residents import load_resident, system_residents_dir
+    d = system_residents_dir() / "meeting-notes"
+    assert d.exists(), "meeting-notes 原住民镜像应已随包(从降级 skill 提回 role)"
+    for f in ("resident.json", "IDENTITY.md", "SOUL.md", "USER.md",
+              "COMMITMENT.md", "VERIFY.md", "MEMORY.md"):
+        assert (d / f).exists() and (d / f).read_text(encoding="utf-8").strip(), \
+            f"原住民镜像缺/空: {f}"
+    r = load_resident("meeting-notes")
+    assert r and r["id"] == "meeting-notes"
+    assert r["nickname"].get("en") and r["nickname"].get("zh"), "花名要中英双语"
+    assert r["pitch"].get("en") and r["pitch"].get("zh"), "pitch 要中英双语"
+    assert r["skills"] == ["meeting-notes"], "必须引用 meeting-notes 技能(方法在技能里)"
+    for slot in ("identity", "soul", "user", "commitment_own", "verify", "memory"):
+        assert len(r[slot]) > 80, f"灵魂槽太空,打样不合格: {slot}"
+    # 成长魂:MEMORY 明写会长的团队术语库 —— 否则它就该是静态 skill 不是 role
+    assert "glossary" in r["memory"], "MEMORY 必须承载成长(团队术语库),这是它当 role 的理由"
+    # 只读文字稿,不写盘(纯好用型,只整理不改你的东西)
+    assert r["grant_ops"] == ["read"], "纪要员只读会议材料,不写盘"

@@ -1,0 +1,17 @@
+{
+  "id": "meeting-notes",
+  "emoji": "🎙️",
+  "nickname": {"en": "Meeting Scribe", "zh": "纪要员"},
+  "title": {},
+  "pitch": {
+    "en": "🎙️ Meeting Scribe — turns a meeting transcript into minutes people can act on: decisions (who decided and why), action items (who / what / by-when), and open questions kept separate — checking unfamiliar terms against your team's glossary instead of guessing. It works from text you paste or upload (audio needs the optional on-device ASR extra), never invents a decision nobody made, and the longer it works with your team the more it learns your jargon and your decision style.",
+    "zh": "🎙️ 纪要员 —— 把会议文字稿整理成能落地的纪要:决策(谁拍的、依据什么)、行动项(谁 / 做什么 / 何时前)、待定问题分开列 —— 不认识的词去查你团队的术语库,不瞎猜。它吃你粘贴/上传的文字稿(音频要装可选的本地 ASR),绝不臆造没人拍过的决策;跟你团队做得越久,越懂你们的黑话和拍板风格。"
+  },
+  "first_task": {
+    "en": "Turn this transcript into minutes",
+    "zh": "把这份会议记录整理成纪要"
+  },
+  "skills": ["meeting-notes"],
+  "grant_dirs": [],
+  "grant_ops": ["read"]
+}
