@@ -30,9 +30,80 @@ _IMAGE_MAGIC = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"BM", b"GIF87a", b"GIF89
 #: 进程内引擎缓存(首次识别加载一次,绝不 per-call 重载)。
 _OCR = None
 
+#: 低于此把握的识别段 → 标注 ⟦?score⟧ 交给 LLM 存疑(不再盲喂纯文本让它全信)。
+#: RapidOCR 清晰印刷体常 0.9+,糊/歪/反光段掉到 0.5-0.8 —— 正是要 LLM 别当准的那些。
+_CONF_THRESHOLD = 0.80
+
 
 def _magic_ok(data: bytes) -> bool:
     return any(data[:len(m)] == m for m in _IMAGE_MAGIC)
+
+
+def _layout_text(result, *, conf_threshold: float = _CONF_THRESHOLD) -> str:
+    """RapidOCR 结果 → 文本,但**不丢 box/score**(解决"LLM 盲信 OCR"的根因):
+
+    - **行重建**:按识别框的纵向位置分行、行内按横向排 —— 票据里"品名……价格"本在同一视觉行,
+      RapidOCR 却常拆成两段;重建后同一行拼一起,下游 LLM 能按行关联"项↔价",不靠猜。
+    - **逐段置信度标注**:把握 < 阈值的段包 ⟦?0.NN⟧,并在顶部加一句 legend 说明 —— LLM 据此
+      "该疑的疑"(优先怀疑、用上下文/算术校正、拿不准就 flag),信任度从"盲信"变"按把握信"。
+    纯函数(不碰引擎),可单测:喂合成 [box, text, score] 断言分行+低把握标注+legend。
+    拿不到几何(结构异常)→ 优雅退化为按原顺序纯文本,绝不崩。
+    """
+    segs: list[dict] = []
+    for entry in (result or []):
+        try:
+            box, text, score = entry[0], entry[1], float(entry[2])
+        except (IndexError, TypeError, ValueError):
+            try:                       # 退化:至少把文本捞出来(几何不可用)
+                t = str(entry[1]).strip()
+                if t:
+                    segs.append({"text": t, "score": 1.0, "yc": None, "xl": 0.0, "h": 0.0})
+            except Exception:
+                pass
+            continue
+        text = str(text).strip()
+        if not text:
+            continue
+        try:
+            ys = [float(p[1]) for p in box]
+            xs = [float(p[0]) for p in box]
+            segs.append({"text": text, "score": score,
+                         "yc": sum(ys) / len(ys), "xl": min(xs), "h": max(ys) - min(ys)})
+        except (TypeError, ValueError, IndexError):
+            segs.append({"text": text, "score": score, "yc": None, "xl": 0.0, "h": 0.0})
+    if not segs:
+        return ""
+
+    any_low = False
+
+    def _fmt(s: dict) -> str:
+        nonlocal any_low
+        if s["score"] < conf_threshold:
+            any_low = True
+            return f"{s['text']}⟦?{s['score']:.2f}⟧"
+        return s["text"]
+
+    have_geom = all(s["yc"] is not None for s in segs)
+    if have_geom:
+        heights = sorted(s["h"] for s in segs if s["h"] > 0)
+        H = heights[len(heights) // 2] if heights else 0.0
+        tol = max(H * 0.5, 6.0)                       # 同一视觉行的纵向容差
+        segs.sort(key=lambda s: s["yc"])
+        rows: list[list[dict]] = [[segs[0]]]
+        for s in segs[1:]:
+            if abs(s["yc"] - rows[-1][-1]["yc"]) <= tol:
+                rows[-1].append(s)
+            else:
+                rows.append([s])
+        lines = ["  ".join(_fmt(s) for s in sorted(row, key=lambda s: s["xl"])) for row in rows]
+    else:
+        lines = [_fmt(s) for s in segs]
+
+    text = "\n".join(lines).strip()
+    if any_low:
+        text = ("[OCR 置信度提示:带 ⟦?0.NN⟧ 的段 OCR 把握低(0–1,越低越可能读错)——请优先怀疑这些,"
+                "用上下文/算术校正,拿不准就 flag,别当准;没标的是 OCR 有把握的。]\n" + text)
+    return text
 
 
 def _load_ocr():
@@ -60,17 +131,10 @@ def recognize_image(data: bytes, *, max_chars: int = MAX_EXTRACT_CHARS) -> Extra
                              hint=f"OCR 引擎加载失败:{type(e).__name__}")
     try:
         # RapidOCR 直接吃图片字节(内部 cv2 解码);返回 (result, elapse),
-        # result = [[box, text, score], ...] 或 None(没识别出东西)。按行拼(脏、留给 LLM 校准)。
+        # result = [[box, text, score], ...] 或 None。**行重建 + 逐段置信度标注**(不再丢 box/score),
+        # 让下游 LLM 能按行关联"项↔价"、并对低把握段存疑(解"LLM 盲信 OCR"的根)。
         result, _elapse = ocr(data)
-        lines: list[str] = []
-        for entry in (result or []):
-            try:
-                txt = entry[1]
-                if txt and str(txt).strip():
-                    lines.append(str(txt).strip())
-            except (IndexError, TypeError):
-                continue
-        text = "\n".join(lines).strip()
+        text = _layout_text(result)
     except Exception as e:  # noqa: BLE001
         return ExtractResult(ok=False, text="", error="ocr_failed",
                              hint=f"OCR 识别失败:{type(e).__name__}")

@@ -59,8 +59,15 @@ and flag it — never a confident fabrication.**
    - a decimal point read in the wrong place — sanity-check against the other
      amounts and the total;
    - lines out of order — a receipt's layout is top-to-bottom, group by that.
-   If a character is genuinely unreadable, it stays unreadable: **calibrate the
-   obvious, flag the ambiguous, invent nothing.**
+   **Trust the OCR proportionally to what it tells you.** When the text is tagged
+   with confidence marks like `合计⟦?0.42⟧`, the OCR was only that sure of that
+   segment (0–1): **distrust the low ones first** — a `⟦?0.55⟧` number is a prime
+   suspect, fix it from context or resolve it against the arithmetic (see step 4),
+   and if you still can't pin it, leave `null` and flag it. Untagged text the OCR
+   was confident about — but a confident OCR read can still be wrong, so a value
+   that breaks the arithmetic is suspect even if untagged. If a character is
+   genuinely unreadable, it stays unreadable: **calibrate the obvious, flag the
+   ambiguous, invent nothing.**
 
 3. **Extract the fields.** merchant, date, currency, total, tax id (`null` if
    not an invoice), payee/抬头, and line items as **name / qty / amount**, plus a
