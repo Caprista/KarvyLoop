@@ -28,7 +28,7 @@ from typing import Any, Optional
 #: 可一键启用的可选件 → 底层 pip 包(**pyproject [project.optional-dependencies] 的镜像**;
 #: test 交叉核对防漂移)。纯配置型能力(webhook/email)不在此(没有可装的东西)。
 INSTALLABLE: dict[str, list[str]] = {
-    "ocr": ["paddleocr>=2.7", "paddlepaddle>=2.6", "pillow>=10.0"],
+    "ocr": ["rapidocr-onnxruntime>=1.2"],
     "asr": ["faster-whisper>=1.1"],
     "files": ["pypdf>=4.0", "python-docx>=1.1", "openpyxl>=3.1"],
     "relay": ["cryptography>=42"],

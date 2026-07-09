@@ -46,13 +46,13 @@ asr = [
     "faster-whisper>=1.1",
 ]
 # 图片/扫描票据 OCR:图片 → 脏文本,进 file_extract 同一条产线(read_file/files 面板自动 OCR,
-# 照 [asr] 那条,不另建工具)。报销员等角色的 prose 方法再拿 LLM 校准+抽取。选型 PaddleOCR/PP-OCRv5
-# (Apache-2.0,CJK 最强,on-device 票据不出机器;2026-07 世界雷达裁,docs 待补)——首次用下模型,
-# 不塞 wheel。没装 → 诚实提示 `pip install "karvyloop[ocr]"`,图片走贴文字/视觉模型兜底,绝不崩。
+# 照 [asr] 那条,不另建工具)。报销员等角色的 prose 方法再拿 LLM 校准+抽取。
+# 选型 **rapidocr-onnxruntime**(RapidOCR,Apache-2.0):跑 ONNX Runtime + 同款 PP-OCR 模型。
+# 2026-07-09 Hardy 纠偏后从 PaddleOCR 换来 —— paddlepaddle 常年追不上 Python(实测 3.14 无 wheel,
+# 一个逼你"别升/降 Python"的依赖=选型硬伤);RapidOCR 靠 onnxruntime 新 Python wheel 跟得快、更轻、
+# **模型随包不另下**。没装 → 诚实提示 `pip install "karvyloop[ocr]"`,图片走贴文字/视觉模型兜底,绝不崩。
 ocr = [
-    "paddleocr>=2.7",
-    "paddlepaddle>=2.6",
-    "pillow>=10.0",
+    "rapidocr-onnxruntime>=1.2",
 ]
 # Windows Tier 3 沙箱(RestrictedToken 写隔离 + Job 资源上限)——**零额外依赖**:
 # 全用 stdlib ctypes 手绑 Win32,不引 pywin32(避免给非 Windows 用户加基础重量)。

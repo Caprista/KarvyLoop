@@ -93,10 +93,10 @@ def list_unlocks(config_path: str = "", *,
                 "install": 'pip install "karvyloop[asr]"',
                 "detail": {}})
 
-    # ②c 图片/票据 OCR —— paddleocr 在 = 就绪(与附件解析同一条产线:read_file/files 面板遇图自动 OCR)。
-    #    OCR 引擎重(paddlepaddle 几百 MB)+ 模型首次用才下 —— 正因重才**默认关**、给一键启用,不塞基础包。
+    # ②c 图片/票据 OCR —— rapidocr_onnxruntime 在 = 就绪(与附件解析同一条产线:read_file/files 面板遇图自动 OCR)。
+    #    选型 RapidOCR(onnxruntime,跟得上新 Python;换掉追不上 Python 的 paddlepaddle)—— 默认关、给一键启用。
     out.append({"id": "ocr",
-                "status": STATUS_ON if dep("paddleocr") else STATUS_MISSING_DEP,
+                "status": STATUS_ON if dep("rapidocr_onnxruntime") else STATUS_MISSING_DEP,
                 "install": 'pip install "karvyloop[ocr]"',
                 "detail": {}})
 
