@@ -213,8 +213,179 @@ def make_recall_memory_tool(*, memory: Any):
     )
 
 
+# ---- 4. 建角色:create_role(物化一个 agent 目录进角色库)----
+
+def make_create_role_tool(*, role_registry: Any):
+    """把 RoleRegistry.create 包成"从对话里建一个角色"工具(WORKSPACE_WRITE)。
+
+    小卡跟用户聊清楚要一个什么角色(它是谁 identity、性格原则 soul、可选花名/职务/模型),
+    直接落一个合法 agent 目录进公共角色库(7 文件 + COMPOSITION.yaml,COMMITMENT 自动 seed 尽责契约)。
+    语义镜像 `POST /roles/create`(routes_roles):同一个 RoleRegistry.create,单一审计面。
+
+    诚实边界:role_id 非法(空/含空格路径符)或已存在 → RoleRegistry.create 抛,工具捕获转成
+    ok=False + reason(不炸、不盖旧角色)。原子先不挑(atom_ids=[]),角色随后可从原子库加/自造。
+    policy 表下限 WORKSPACE_WRITE(写角色注册表,做事中写)。
+    """
+    from karvyloop.capability import Mode
+    from karvyloop.registry.tool import build_tool
+
+    async def _call(inp: dict, token: Any, sandbox: Any) -> Any:
+        inp = inp or {}
+        role_id = str(inp.get("role_id") or "").strip()
+        if not role_id:
+            return {"ok": False, "reason": "需要 role_id(角色名,如「设计师」;只能含字母/数字/下划线/连字符)"}
+        if role_registry is None:
+            return {"ok": False, "reason": "role_registry 未接,建不了角色"}
+        identity = str(inp.get("identity") or "").strip()
+        soul = str(inp.get("soul") or "").strip()
+        nickname = str(inp.get("nickname") or "").strip()
+        title = str(inp.get("title") or "").strip()
+        model = str(inp.get("model") or "").strip()
+        try:
+            view = role_registry.create(
+                role_id, identity=identity, soul=soul,
+                nickname=nickname, title=title, model=model, atom_ids=[])
+        except Exception as e:  # noqa: BLE001 —— 工具永不穿透异常(含 DuplicateRoleError/非法名)
+            return {"ok": False, "reason": f"建角色失败:{type(e).__name__}: {e}"}
+        return {"ok": True, "id": view.id, "identity": view.identity,
+                "nickname": view.nickname, "title": view.title, "model": view.model,
+                "display": view.display_name()}
+
+    return build_tool(
+        name="create_role",
+        description=(
+            "从对话里给用户建一个新角色(落进他的角色库,之后能入职业务域、被 @ 协作)。"
+            "先跟用户聊清楚要个什么角色再建:role_id=角色名(如「设计师」,只能含字母/数字/下划线/连字符,"
+            "不能重名);identity=它是谁/负责什么(一句话人设);soul=性格原则/工作风格(可选);"
+            "可选 nickname=花名、title=职务、model=指定模型。**别擅自建,确认清楚了再调**。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "role_id": {"type": "string",
+                            "description": "角色名/唯一 id(字母/数字/下划线/连字符,支持中文,不能重名)"},
+                "identity": {"type": "string", "description": "它是谁、负责什么(一句话人设)"},
+                "soul": {"type": "string", "description": "性格原则/工作风格(可选)"},
+                "nickname": {"type": "string", "description": "花名(可选,进某域时的人名)"},
+                "title": {"type": "string", "description": "职务(可选,如「产品经理」)"},
+                "model": {"type": "string", "description": "指定模型(可选,不填=层叠默认)"},
+            },
+            "required": ["role_id", "identity"],
+        },
+        call=_call,
+        required_mode=Mode.WORKSPACE_WRITE,
+    )
+
+
+# ---- 5. 建业务域:create_domain(开一个业务域,可选子域)----
+
+def make_create_domain_tool(*, domain_registry: Any, domain_store: Any = None,
+                            created_by_user: str = "user"):
+    """把 BusinessDomainRegistry.create / create_child 包成"从对话里开个业务域"工具(WORKSPACE_WRITE)。
+
+    小卡跟用户聊清楚要开个什么业务域(名字、价值观 value.md、可选强护栏 forbid/oblige、可选父域),
+    直接落一个业务域进注册表(有 domain_store → 存盘,与 `POST /domain/create` 同持久语义)。
+    传了 parent_id → 走 create_child(继承父域 value.md + deontic,只能加不能删,D5)。
+
+    诚实边界:同名 active 域已存在 → 拒(防注册表被同名灌满);父域不存在/已归档 → registry 抛,
+    工具捕获转 ok=False + reason(不炸)。member_query 只含建域用户(角色以后再入职,同 REST 空角色语义)。
+    policy 表下限 WORKSPACE_WRITE(写业务域注册表,做事中写)。
+    """
+    from karvyloop.capability import Mode
+    from karvyloop.registry.tool import build_tool
+
+    async def _call(inp: dict, token: Any, sandbox: Any) -> Any:
+        inp = inp or {}
+        name = str(inp.get("name") or "").strip()
+        if not name:
+            return {"ok": False, "reason": "需要 name(业务域名字,如「我的理财所」)"}
+        if domain_registry is None:
+            return {"ok": False, "reason": "domain_registry 未接,开不了业务域"}
+        # 查重:已有同名 active 域 → 拒(镜像 REST 建域查重,防注册表被同名灌满)
+        try:
+            _nm = name.lower()
+            _dup = next((d for d in domain_registry.list_active()
+                         if (getattr(d, "name", "") or "").strip().lower() == _nm), None)
+            if _dup is not None:
+                return {"ok": False, "reason": f"已有同名业务域「{name}」(换个名字,或先归档旧的那个)"}
+        except Exception:
+            pass  # 查重失败不挡建域(降级)
+        # value.md:空=空灵魂(合法);非空补「# 价值观」头(镜像 REST 建域)
+        raw_value = str(inp.get("value_md") or "").strip()
+        if not raw_value:
+            value_md = ""
+        elif raw_value.startswith("# 价值观"):
+            value_md = raw_value
+        else:
+            value_md = f"# 价值观\n\n{raw_value}"
+        # 强护栏 deontic:forbid/oblige 列表(可选;确定性可拦的那部分由 deontic_gate 硬闸兜)
+        from karvyloop.domain.deontic import Deontic
+
+        def _as_list(v: Any) -> tuple[str, ...]:
+            if not v:
+                return ()
+            if isinstance(v, str):
+                v = [v]
+            return tuple(str(x).strip() for x in v if str(x).strip())
+        deontic = Deontic(forbid=_as_list(inp.get("forbid")), oblige=_as_list(inp.get("oblige")))
+        created_by = f"user:{created_by_user or 'user'}"
+        member_query = f"user:{created_by_user or 'user'}"
+        parent_id = str(inp.get("parent_id") or "").strip()
+        try:
+            if parent_id:
+                domain = domain_registry.create_child(
+                    parent_id=parent_id, name=name, created_by=created_by,
+                    deontic_override=deontic, member_query=member_query)
+            else:
+                domain = domain_registry.create(
+                    name=name, created_by=created_by, value_md_raw=value_md,
+                    deontic=deontic, member_query=member_query)
+        except Exception as e:  # noqa: BLE001 —— 工具永不穿透异常(父域不存在/已归档/value.md 非法)
+            return {"ok": False, "reason": f"开业务域失败:{type(e).__name__}: {e}"}
+        # 存盘(域是用户数据,默认持久;与 REST 同语义)。落盘失败如实回 warning,不假装存上了。
+        persisted = True
+        persist_warn = ""
+        if domain_store is not None:
+            try:
+                domain_store.save_all(domain_registry.list_all())
+            except Exception as e:  # noqa: BLE001
+                persisted = False
+                persist_warn = f"{type(e).__name__}: {e}"
+        out = {"ok": True, "id": domain.id, "name": domain.name,
+               "parent_id": domain.parent_id or "", "persisted": persisted}
+        if not persisted:
+            out["warning"] = f"业务域已建但没落盘(重启可能会丢):{persist_warn}"
+        return out
+
+    return build_tool(
+        name="create_domain",
+        description=(
+            "从对话里给用户开一个业务域(把一群角色组织起来做一摊事的场,如「理财所」「我的自媒体工作室」)。"
+            "先跟用户聊清楚再开:name=业务域名字(不能与现有域重名);value_md=这个域的价值观/做事原则(可选);"
+            "forbid=这个域里绝不能做的事(可选,列表,如「未经确认直接下单」);oblige=必须做到的事(可选);"
+            "parent_id=在某个已有域下开子域(可选,子域继承父域的价值观和护栏)。**别擅自开,确认清楚了再调**。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "业务域名字(不能重名),如「我的理财所」"},
+                "value_md": {"type": "string", "description": "价值观/做事原则(可选,自然语言)"},
+                "forbid": {"type": "array", "items": {"type": "string"},
+                           "description": "这个域里绝不能做的事(可选)"},
+                "oblige": {"type": "array", "items": {"type": "string"},
+                           "description": "这个域里必须做到的事(可选)"},
+                "parent_id": {"type": "string",
+                              "description": "父域 id(可选;传了=在它下面开子域,继承其价值观+护栏)"},
+            },
+            "required": ["name"],
+        },
+        call=_call,
+        required_mode=Mode.WORKSPACE_WRITE,
+    )
+
+
 __all__ = [
     "make_create_schedule_tool",
     "make_remember_fact_tool",
     "make_recall_memory_tool",
+    "make_create_role_tool",
+    "make_create_domain_tool",
 ]

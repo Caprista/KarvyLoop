@@ -63,6 +63,10 @@ DEFAULT_TOOL_REQUIREMENTS: dict[str, Mode] = {
     # 的 WORKSPACE_WRITE 语义(maker/forge 放行、只读 checker 仍拦;安全靠下游兜)。
     "create_schedule": Mode.WORKSPACE_WRITE,
     "remember_fact": Mode.WORKSPACE_WRITE,
+    # 小卡建角色/建业务域(karvy/tools.py):写角色/业务域注册表 → 同 create_atom 的 WORKSPACE_WRITE
+    # 语义(小卡人格 maker 放行、只读 checker 仍拦;查重/父域校验/持久化诚实兜)。
+    "create_role": Mode.WORKSPACE_WRITE,
+    "create_domain": Mode.WORKSPACE_WRITE,
     "git_commit": Mode.WORKSPACE_WRITE,
     "network": Mode.FULL,
     "process_spawn": Mode.FULL,

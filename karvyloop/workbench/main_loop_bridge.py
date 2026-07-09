@@ -115,6 +115,17 @@ async def drive_in_tui(
                 for _mk in (make_remember_fact_tool, make_recall_memory_tool):
                     _t = _mk(memory=memory)
                     _karvy_tools[_t.name] = _t
+            # 建角色/建业务域:小卡的编排职责(业务角色不建同僚/不开域)——同挂载模式,
+            # role_registry / domain_registry 存在才挂,capability 护栏照走(WORKSPACE_WRITE 下限)。
+            if role_registry is not None:
+                from karvyloop.karvy.tools import make_create_role_tool
+                _t = make_create_role_tool(role_registry=role_registry)
+                _karvy_tools[_t.name] = _t
+            if domain_registry is not None:
+                from karvyloop.karvy.tools import make_create_domain_tool
+                _t = make_create_domain_tool(
+                    domain_registry=domain_registry, domain_store=domain_store)
+                _karvy_tools[_t.name] = _t
         except Exception:
             logger.warning("[drive] 挂小卡随聊能力工具失败(降级=只这些工具缺席,不挡对话)",
                            exc_info=True)

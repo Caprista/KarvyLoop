@@ -18,6 +18,8 @@ BUILTIN_TOOL_NAMES: frozenset[str] = frozenset({
     "reconcile_receipt",
     # 小卡随聊能力工具(karvy/tools.py):按 persona.karvy_self 挂进小卡 drive 的工具集。
     "create_schedule", "remember_fact", "recall_memory",
+    # 小卡编排能力(karvy/tools.py):从对话里建角色 / 开业务域(role_registry / domain_registry 存在才挂)。
+    "create_role", "create_domain",
 })
 
 
