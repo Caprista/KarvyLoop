@@ -111,7 +111,103 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="relay address to print in the pairing info (e.g. wss://relay.example)")
     p_rpair.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
 
+    # 管理面(名词-动词,gh 风格):role / domain / memory / skill / schedule / token。
+    # 覆盖既有后端(RoleRegistry / BusinessDomainRegistry / MemoryManager / SkillIndex /
+    # SchedulerStore / TokenLedger),每条 read 支持 --json;create/mutate 走 --yes(H2A CLI 形态)。
+    _build_manage_parsers(sub)
+
     return p
+
+
+def _build_manage_parsers(sub) -> None:
+    """把管理面名词-动词子命令挂上（抽出来保持 _build_parser 清爽,同 build_console_parser 委托风格)。"""
+    from karvyloop.i18n import t
+
+    def _add_config(p):
+        p.add_argument("--config", type=str, default=None)
+        return p
+
+    def _add_json(p):
+        p.add_argument("--json", action="store_true", help=t("cli.help.json"))
+        return p
+
+    # role
+    p_role = sub.add_parser("role", help=t("cli.help.role"))
+    role_sub = p_role.add_subparsers(dest="subcmd", required=True)
+    _add_json(_add_config(role_sub.add_parser("list", help=t("cli.help.role.list"))))
+    p_role_show = _add_json(_add_config(role_sub.add_parser("show", help=t("cli.help.role.show"))))
+    p_role_show.add_argument("id", type=str, help=t("cli.help.role.id"))
+
+    # domain
+    p_domain = sub.add_parser("domain", help=t("cli.help.domain"))
+    domain_sub = p_domain.add_subparsers(dest="subcmd", required=True)
+    _add_json(_add_config(domain_sub.add_parser("list", help=t("cli.help.domain.list"))))
+    p_domain_show = _add_json(_add_config(domain_sub.add_parser("show", help=t("cli.help.domain.show"))))
+    p_domain_show.add_argument("id", type=str, help=t("cli.help.domain.id"))
+
+    # memory
+    p_memory = sub.add_parser("memory", help=t("cli.help.memory"))
+    memory_sub = p_memory.add_subparsers(dest="subcmd", required=True)
+    p_mem_recall = _add_json(_add_config(memory_sub.add_parser("recall", help=t("cli.help.memory.recall"))))
+    p_mem_recall.add_argument("query", type=str, help=t("cli.help.memory.recall.query"))
+    p_mem_recall.add_argument("--limit", type=int, default=8, help=t("cli.help.memory.limit"))
+    p_mem_recall.add_argument("--scope", type=str, default="personal", help=t("cli.help.memory.scope"))
+    p_mem_add = _add_json(_add_config(memory_sub.add_parser("add", help=t("cli.help.memory.add"))))
+    p_mem_add.add_argument("belief", type=str, help=t("cli.help.memory.add.belief"))
+    p_mem_add.add_argument("--scope", type=str, default="personal", help=t("cli.help.memory.scope"))
+    p_mem_add.add_argument("--yes", action="store_true", help=t("cli.help.yes"))
+
+    # skill
+    p_skill = sub.add_parser("skill", help=t("cli.help.skill"))
+    skill_sub = p_skill.add_subparsers(dest="subcmd", required=True)
+    _add_json(_add_config(skill_sub.add_parser("list", help=t("cli.help.skill.list"))))
+
+    # schedule
+    p_sched = sub.add_parser("schedule", help=t("cli.help.schedule"))
+    sched_sub = p_sched.add_subparsers(dest="subcmd", required=True)
+    _add_json(_add_config(sched_sub.add_parser("list", help=t("cli.help.schedule.list"))))
+
+    # token
+    p_token = sub.add_parser("token", help=t("cli.help.token"))
+    token_sub = p_token.add_subparsers(dest="subcmd", required=True)
+    p_token_report = _add_json(_add_config(token_sub.add_parser("report", help=t("cli.help.token.report"))))
+    p_token_report.add_argument("--by", type=str, default="source",
+                                choices=["source", "model", "day"], help=t("cli.help.token.by"))
+
+
+def _dispatch_manage(args) -> Optional[int]:
+    """管理面命令分发。命中返回 exit code,未命中(非管理命令)返回 None(让 main 继续)。"""
+    from . import manage as M
+    cmd = args.cmd
+    cfg = getattr(args, "config", None)
+    js = getattr(args, "json", False)
+    if cmd == "role":
+        if args.subcmd == "list":
+            return M.cmd_role_list(config_path=cfg, json_output=js)
+        if args.subcmd == "show":
+            return M.cmd_role_show(args.id, config_path=cfg, json_output=js)
+    if cmd == "domain":
+        if args.subcmd == "list":
+            return M.cmd_domain_list(config_path=cfg, json_output=js)
+        if args.subcmd == "show":
+            return M.cmd_domain_show(args.id, config_path=cfg, json_output=js)
+    if cmd == "memory":
+        if args.subcmd == "recall":
+            return M.cmd_memory_recall(args.query, config_path=cfg, json_output=js,
+                                       limit=args.limit, scope=args.scope)
+        if args.subcmd == "add":
+            return M.cmd_memory_add(args.belief, config_path=cfg, scope=args.scope,
+                                    yes=args.yes, json_output=js)
+    if cmd == "skill":
+        if args.subcmd == "list":
+            return M.cmd_skill_list(config_path=cfg, json_output=js)
+    if cmd == "schedule":
+        if args.subcmd == "list":
+            return M.cmd_schedule_list(config_path=cfg, json_output=js)
+    if cmd == "token":
+        if args.subcmd == "report":
+            return M.cmd_token_report(config_path=cfg, json_output=js, by=args.by)
+    return None
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -262,6 +358,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "relay-pair":
         from karvyloop.relay.pairing import cmd_relay_pair
         return cmd_relay_pair(relay_url=args.relay_url, state_dir=args.dir)
+
+    # 管理面(role/domain/memory/skill/schedule/token)—— 名词-动词,命中即返回。
+    if args.cmd in ("role", "domain", "memory", "skill", "schedule", "token"):
+        rc = _dispatch_manage(args)
+        if rc is not None:
+            return rc
 
     from karvyloop.i18n import t
     parser.error(t("cli.unknown_cmd", cmd=args.cmd))
