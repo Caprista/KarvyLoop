@@ -2305,6 +2305,10 @@ button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outl
 }
 .unlock-links a { color: var(--accent-deep); text-decoration: underline; }
 .unlock-links a:hover { color: var(--accent); }
+/* 一键启用:主动作按钮 + 进度/结果小字;手动命令降级为次选 */
+.unlock-enable { margin: 8px 0 2px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.unlock-enable-note { color: var(--text-dim); font-size: var(--fs-12); }
+.unlock-manual { opacity: .7; margin-top: 6px; font-size: var(--fs-12); }
 
 /* ---- 👀 演示实例面板(demo_panel.js):人设大标题 + 递减曲线高潮 + 每日时间线 ---- */
 .demo-switch { margin-bottom: 8px; display: flex; gap: 8px; }

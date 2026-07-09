@@ -303,6 +303,36 @@ def api_capability_unlocks(request: Request) -> dict[str, Any]:
     return {"unlocks": list_unlocks(cfgp)}
 
 
+class CapabilityEnableRequest(BaseModel):
+    id: str = Field(..., min_length=1, max_length=32)
+
+
+@router.post("/capability/enable")
+def api_capability_enable(req: CapabilityEnableRequest, request: Request) -> dict[str, Any]:
+    """一键启用某可选能力(Hardy 2026-07-09:app 替用户装,不用敲命令、不让人自己找门)。
+
+    后台 `pip install <底层包>` → 装完可选件懒加载即生效(**不重启** console)。安全同一键升级:
+    CSRF 头(X-Karvyloop-Upgrade)+ 本机/私网来源门 —— 装东西是控自己机器的事,挡公网/恶意跨源。
+    只装 INSTALLABLE 白名单里的固定包(id 之外无任何用户输入进 pip),无任意包注入面。
+    """
+    from karvyloop.console.capability_install import start_install
+    from karvyloop.console.routes_ops import _is_trusted_upgrade_origin
+    if (request.headers.get("x-karvyloop-upgrade") or "") != "1":
+        return {"ok": False, "reason": "缺启用标记(防 CSRF);请从控制台界面点启用"}
+    client = (request.client.host if request.client else "") or ""
+    if not _is_trusted_upgrade_origin(client):
+        return {"ok": False, "reason": f"启用只能从本机或同局域网触发(你的来源 {client} 不在可信网内)"}
+    return start_install(req.id)
+
+
+@router.get("/capability/enable_status")
+def api_capability_enable_status(request: Request, id: str = "") -> dict[str, Any]:
+    """轮询某能力的一键启用进度/结果(state ∈ running|done|failed;无 → 空)。只读,不触发安装。"""
+    from karvyloop.console.capability_install import read_status
+    st = read_status(id)
+    return st if st else {"state": "", "id": id}
+
+
 class FsGrantRequest(BaseModel):
     path: str = Field(..., min_length=1, max_length=1024)
     ops: list = Field(default_factory=lambda: ["read"])

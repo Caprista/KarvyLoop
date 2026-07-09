@@ -1309,6 +1309,7 @@ from .routes_domain import (  # noqa: E402
 # /task_cost_estimate,/domains 等)已下沉到 routes_capability.py(P2-② 纯搬移)----
 # 端点由 routes_capability.router 提供(app.py include_router);re-export 其符号保既有 import 可达。
 from .routes_capability import (  # noqa: E402
+    CapabilityEnableRequest,
     DomainTemplateRequest,
     FsGrantRequest,
     FsGrantRevokeRequest,
@@ -1324,6 +1325,8 @@ from .routes_capability import (  # noqa: E402
     _skill_net_granted,
     _skill_sources_store,
     _skill_status,
+    api_capability_enable,
+    api_capability_enable_status,
     api_capability_overview,
     api_coding_capability,
     api_coding_config,

@@ -62,6 +62,54 @@ function _cmdRow(cmd: string): HTMLElement {
     el("code", { class: "unlock-cmd", text: cmd }), " ", btn);
 }
 
+// 一键启用:app 替用户装(POST /capability/enable 带 CSRF 头 → 轮询 enable_status)。
+// 可选件都懒加载 → 装完**不用重启**,下次调用即生效。装崩/超时 fail-loud + 可重试 + 露出手动命令。
+function _enableBlock(u: any): HTMLElement {
+  const wrap = el("div", { class: "unlock-enable" });
+  const btn = el("button", { class: "dpref-confirm", text: t("unlock.enable_btn") }) as HTMLButtonElement;
+  const note = el("span", { class: "mc-meta unlock-enable-note" });
+  let tries = 0;
+  async function poll(): Promise<void> {
+    try {
+      const r = await fetch("/api/capability/enable_status?id=" + encodeURIComponent(u.id), { cache: "no-store" });
+      const st = await r.json();
+      if (st && st.state === "done") {
+        note.textContent = t("unlock.install_done") +
+          (st.extra_step ? " " + t("unlock.install_extra_step", { cmd: st.extra_step }) : "");
+        btn.remove();
+        return;
+      }
+      if (st && st.state === "failed") {
+        note.textContent = t("unlock.install_failed", { reason: String(st.tail || st.reason || "").slice(-160) });
+        btn.disabled = false; btn.textContent = t("unlock.enable_retry");
+        return;
+      }
+    } catch (e) { /* 重启窗口/瞬断 → 继续轮询 */ }
+    if (tries++ < 200) setTimeout(poll, 3000);          // 最多 ~10min
+    else note.textContent = t("unlock.install_slow");
+  }
+  btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = t("unlock.installing");
+    note.textContent = t("unlock.installing_note");
+    try {
+      const r = await fetch("/api/capability/enable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Karvyloop-Upgrade": "1" },
+        body: JSON.stringify({ id: u.id }),
+      });
+      const d = await r.json();
+      if (d && d.ok === false) {
+        note.textContent = t("unlock.install_failed", { reason: d.reason || "" });
+        btn.disabled = false; btn.textContent = t("unlock.enable_retry");
+        return;
+      }
+    } catch (e) { /* 可能已在装 → 直接轮询 */ }
+    tries = 0; poll();
+  };
+  wrap.appendChild(btn); wrap.appendChild(note);
+  return wrap;
+}
+
 function _card(title: string, status: string, ...rest: Child[]): HTMLElement {
   return el("div", { class: "mgmt-card" },
     el("div", { class: "mc-main" },
@@ -72,7 +120,8 @@ function _card(title: string, status: string, ...rest: Child[]): HTMLElement {
 function _mcpCard(u: any): HTMLElement {
   const bits: Child[] = [el("div", { class: "mc-meta", text: t("unlock.mcp.value") })];
   if (u.status === "missing_dep") {
-    bits.push(el("div", { class: "mc-meta", text: t("unlock.install_hint") }));
+    bits.push(_enableBlock(u));                                          // 一键启用(主动作)
+    bits.push(el("div", { class: "mc-meta unlock-manual", text: t("unlock.or_manual") }));
     bits.push(_cmdRow(u.install || ""));
   } else {
     if (u.status === "on") {
@@ -102,8 +151,9 @@ function _mcpCard(u: any): HTMLElement {
 function _depCard(icon: string, key: string, u: any, extraHowKey?: string): HTMLElement {
   const bits: Child[] = [el("div", { class: "mc-meta", text: t("unlock." + key + ".value") })];
   if (u.status === "missing_dep") {
-    bits.push(el("div", { class: "mc-meta", text: t("unlock.install_hint") }));
-    bits.push(_cmdRow(u.install || ""));
+    bits.push(_enableBlock(u));                                          // 一键启用(主动作)
+    bits.push(el("div", { class: "mc-meta unlock-manual", text: t("unlock.or_manual") }));
+    bits.push(_cmdRow(u.install || ""));                                 // 复制命令(备选)
   }
   if (extraHowKey) bits.push(el("div", { class: "mc-meta", text: t(extraHowKey) }));
   return _card(icon + " " + t("unlock." + key + ".name"), u.status, ...bits);
@@ -141,6 +191,8 @@ async function open(): Promise<void> {
   if (byId["files"]) list.appendChild(_depCard("📎", "files", byId["files"]));
   // how 行装没装都给:模型首次使用才下载(~480MB)这句诚实话,装完的人更需要看到
   if (byId["asr"]) list.appendChild(_depCard("🎙️", "asr", byId["asr"], "unlock.asr.how"));
+  // 🔤 票据/图片 OCR:报销识别的图片腿;紧挨附件/ASR 列(同一条 read_file 产线)
+  if (byId["ocr"]) list.appendChild(_depCard("🔤", "ocr", byId["ocr"], "unlock.ocr.how"));
   if (byId["webhook_channel"]) list.appendChild(_channelCard("📮", "webhook", byId["webhook_channel"], WEBHOOK_SNIPPET));
   if (byId["email_channel"]) list.appendChild(_channelCard("📧", "email", byId["email_channel"], EMAIL_SNIPPET));
   if (byId["relay"]) list.appendChild(_depCard("📡", "relay", byId["relay"], "unlock.relay.how"));

@@ -47,6 +47,57 @@ var KarvyUnlockPanelBundle = (function(exports) {
       btn
     );
   }
+  function _enableBlock(u) {
+    const wrap = el("div", { class: "unlock-enable" });
+    const btn = el("button", { class: "dpref-confirm", text: t("unlock.enable_btn") });
+    const note = el("span", { class: "mc-meta unlock-enable-note" });
+    let tries = 0;
+    async function poll() {
+      try {
+        const r = await fetch("/api/capability/enable_status?id=" + encodeURIComponent(u.id), { cache: "no-store" });
+        const st = await r.json();
+        if (st && st.state === "done") {
+          note.textContent = t("unlock.install_done") + (st.extra_step ? " " + t("unlock.install_extra_step", { cmd: st.extra_step }) : "");
+          btn.remove();
+          return;
+        }
+        if (st && st.state === "failed") {
+          note.textContent = t("unlock.install_failed", { reason: String(st.tail || st.reason || "").slice(-160) });
+          btn.disabled = false;
+          btn.textContent = t("unlock.enable_retry");
+          return;
+        }
+      } catch (e) {
+      }
+      if (tries++ < 200) setTimeout(poll, 3e3);
+      else note.textContent = t("unlock.install_slow");
+    }
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = t("unlock.installing");
+      note.textContent = t("unlock.installing_note");
+      try {
+        const r = await fetch("/api/capability/enable", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Karvyloop-Upgrade": "1" },
+          body: JSON.stringify({ id: u.id })
+        });
+        const d = await r.json();
+        if (d && d.ok === false) {
+          note.textContent = t("unlock.install_failed", { reason: d.reason || "" });
+          btn.disabled = false;
+          btn.textContent = t("unlock.enable_retry");
+          return;
+        }
+      } catch (e) {
+      }
+      tries = 0;
+      poll();
+    };
+    wrap.appendChild(btn);
+    wrap.appendChild(note);
+    return wrap;
+  }
   function _card(title, status, ...rest) {
     return el(
       "div",
@@ -62,7 +113,8 @@ var KarvyUnlockPanelBundle = (function(exports) {
   function _mcpCard(u) {
     const bits = [el("div", { class: "mc-meta", text: t("unlock.mcp.value") })];
     if (u.status === "missing_dep") {
-      bits.push(el("div", { class: "mc-meta", text: t("unlock.install_hint") }));
+      bits.push(_enableBlock(u));
+      bits.push(el("div", { class: "mc-meta unlock-manual", text: t("unlock.or_manual") }));
       bits.push(_cmdRow(u.install || ""));
     } else {
       if (u.status === "on") {
@@ -100,7 +152,8 @@ var KarvyUnlockPanelBundle = (function(exports) {
   function _depCard(icon, key, u, extraHowKey) {
     const bits = [el("div", { class: "mc-meta", text: t("unlock." + key + ".value") })];
     if (u.status === "missing_dep") {
-      bits.push(el("div", { class: "mc-meta", text: t("unlock.install_hint") }));
+      bits.push(_enableBlock(u));
+      bits.push(el("div", { class: "mc-meta unlock-manual", text: t("unlock.or_manual") }));
       bits.push(_cmdRow(u.install || ""));
     }
     if (extraHowKey) bits.push(el("div", { class: "mc-meta", text: t(extraHowKey) }));
@@ -138,6 +191,7 @@ var KarvyUnlockPanelBundle = (function(exports) {
     if (byId["mcp"]) list.appendChild(_mcpCard(byId["mcp"]));
     if (byId["files"]) list.appendChild(_depCard("📎", "files", byId["files"]));
     if (byId["asr"]) list.appendChild(_depCard("🎙️", "asr", byId["asr"], "unlock.asr.how"));
+    if (byId["ocr"]) list.appendChild(_depCard("🔤", "ocr", byId["ocr"], "unlock.ocr.how"));
     if (byId["webhook_channel"]) list.appendChild(_channelCard("📮", "webhook", byId["webhook_channel"], WEBHOOK_SNIPPET));
     if (byId["email_channel"]) list.appendChild(_channelCard("📧", "email", byId["email_channel"], EMAIL_SNIPPET));
     if (byId["relay"]) list.appendChild(_depCard("📡", "relay", byId["relay"], "unlock.relay.how"));

@@ -93,6 +93,13 @@ def list_unlocks(config_path: str = "", *,
                 "install": 'pip install "karvyloop[asr]"',
                 "detail": {}})
 
+    # ②c 图片/票据 OCR —— paddleocr 在 = 就绪(与附件解析同一条产线:read_file/files 面板遇图自动 OCR)。
+    #    OCR 引擎重(paddlepaddle 几百 MB)+ 模型首次用才下 —— 正因重才**默认关**、给一键启用,不塞基础包。
+    out.append({"id": "ocr",
+                "status": STATUS_ON if dep("paddleocr") else STATUS_MISSING_DEP,
+                "install": 'pip install "karvyloop[ocr]"',
+                "detail": {}})
+
     # ③ 推送渠道(webhook:ntfy/Bark/Slack)—— 纯配置,零额外依赖。
     #    复用 config_channels 解析器判定(enabled + url 合法才算通),绝不回显 url/headers。
     try:
