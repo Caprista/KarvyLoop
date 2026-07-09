@@ -101,6 +101,23 @@ def _load_token_ledger(root: Path):
     return TokenLedger(root / "tokens.db")
 
 
+def _build_gateway(root: Path, config_path: Optional[str]):
+    """从 config.yaml 起一个 GatewayClient（同 cli/run._bootstrap_runtime 精简版,只为 NL→cron）。
+
+    config 缺 / 加载失败 / 无可用模型 → None（caller 提示"没配模型")。只读 config、不落 token 账本、
+    不接沙箱 —— schedule add 只需一次小 LLM 调用把话解析成 cron，其它 runtime 组件都不需要。
+    """
+    cfg = Path(config_path) if config_path else (root / "config.yaml")
+    if not Path(cfg).exists():
+        return None
+    try:
+        from karvyloop.gateway import GatewayClient
+        from karvyloop.gateway.registry import ModelRegistry
+        return GatewayClient(ModelRegistry.load(cfg))
+    except Exception:
+        return None
+
+
 # ---- 输出小工具 ----
 
 def _emit_json(obj) -> int:
@@ -167,6 +184,61 @@ def cmd_role_show(role_id: str, *, config_path: Optional[str] = None, json_outpu
     return 0
 
 
+def cmd_role_create(role_id: str, *, config_path: Optional[str] = None,
+                    identity: str = "", soul: str = "", nickname: str = "",
+                    model: str = "", yes: bool = False, json_output: bool = False) -> int:
+    """新建角色（over RoleRegistry.create;物化 7 文件 + 系统默认协作契约,同 console 工厂）。"""
+    from karvyloop.i18n import t
+    rid = (role_id or "").strip()
+    if not rid:
+        sys.stderr.write(t("cli.manage.role_id_required") + "\n")
+        return 1
+    root = _instance_root(config_path)
+    if not _require_instance(root, config_path):
+        return 1
+    if not _confirm_or_yes(t("cli.manage.confirm_role_create", id=rid), yes):
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    reg = _load_role_registry(root)
+    try:
+        view = reg.create(rid, identity=identity or "", soul=soul or "",
+                          nickname=nickname or "", model=model or "")
+    except Exception as e:  # DuplicateRoleError / ValueError(非法 id)/ UnknownAtom/Skill
+        sys.stderr.write(t("cli.manage.role_create_failed", error=str(e)) + "\n")
+        if json_output:
+            _emit_json({"ok": False, "error": str(e), "id": rid})
+        return 1
+    if json_output:
+        return _emit_json({"ok": True, **view.to_dict()})
+    print(t("cli.manage.role_created", id=view.id))
+    return 0
+
+
+def cmd_role_rm(role_id: str, *, config_path: Optional[str] = None,
+                yes: bool = False, json_output: bool = False) -> int:
+    """删除角色（over RoleRegistry.remove;破坏性 → TTY 确认 / 非 TTY --yes）。"""
+    from karvyloop.i18n import t
+    rid = (role_id or "").strip()
+    root = _instance_root(config_path)
+    if not _require_instance(root, config_path):
+        return 1
+    reg = _load_role_registry(root)
+    if reg.get(rid) is None:
+        sys.stderr.write(t("cli.manage.role_not_found", id=rid) + "\n")
+        return 1
+    if not _confirm_or_yes(t("cli.manage.confirm_role_rm", id=rid), yes):
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    ok = reg.remove(rid)
+    if not ok:
+        sys.stderr.write(t("cli.manage.role_not_found", id=rid) + "\n")
+        return 1
+    if json_output:
+        return _emit_json({"ok": True, "removed": rid})
+    print(t("cli.manage.role_removed", id=rid))
+    return 0
+
+
 # ============ domain(over BusinessDomainRegistry.list_all / get）============
 
 def _domain_dict(d) -> dict:
@@ -213,6 +285,73 @@ def cmd_domain_show(domain_id: str, *, config_path: Optional[str] = None, json_o
     if d.parent_id:
         print(f"parent_id:    {d.parent_id}")
     print(f"value.md:     {d.value_md.text.strip() or '(空)'}")
+    return 0
+
+
+def _persist_domains(root: Path, reg) -> None:
+    """整存业务域（DomainStore.save_all，与 console 落盘同源）。"""
+    from karvyloop.domain.store import DomainStore
+    DomainStore(root / "domains.json").save_all(list(reg.list_all()))
+
+
+def cmd_domain_create(name: str, *, config_path: Optional[str] = None,
+                      parent: str = "", yes: bool = False, json_output: bool = False) -> int:
+    """新建业务域（over BusinessDomainRegistry.create;带 --parent 走 create_child,子域继承 value+deontic）。
+
+    created_by 固定 "user:cli"(须 user: 前缀,同 console 手建)。子域 deontic_override 传空 Deontic()
+    → 只继承父的(只加不删,D5)。落盘走 DomainStore.save_all。
+    """
+    from karvyloop.i18n import t
+    nm = (name or "").strip()
+    if not nm:
+        sys.stderr.write(t("cli.manage.domain_name_required") + "\n")
+        return 1
+    root = _instance_root(config_path)
+    if not _require_instance(root, config_path):
+        return 1
+    if not _confirm_or_yes(t("cli.manage.confirm_domain_create", name=nm), yes):
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    reg = _load_domain_registry(root)
+    parent_id = (parent or "").strip()
+    try:
+        if parent_id:
+            from karvyloop.domain.deontic import Deontic
+            d = reg.create_child(parent_id, nm, "user:cli", Deontic(), member_query="")
+        else:
+            d = reg.create(nm, "user:cli")
+    except Exception as e:  # parent not found / ArchivedDomainError / value.md 非法
+        sys.stderr.write(t("cli.manage.domain_create_failed", error=str(e)) + "\n")
+        if json_output:
+            _emit_json({"ok": False, "error": str(e), "name": nm})
+        return 1
+    _persist_domains(root, reg)
+    if json_output:
+        return _emit_json({"ok": True, **_domain_dict(d)})
+    print(t("cli.manage.domain_created", name=d.name, id=d.id))
+    return 0
+
+
+def cmd_domain_archive(domain_id: str, *, config_path: Optional[str] = None,
+                       yes: bool = False, json_output: bool = False) -> int:
+    """归档业务域（over BusinessDomainRegistry.archive;软删除 → 之后只读）。"""
+    from karvyloop.i18n import t
+    did = (domain_id or "").strip()
+    root = _instance_root(config_path)
+    if not _require_instance(root, config_path):
+        return 1
+    reg = _load_domain_registry(root)
+    if reg.get(did) is None:
+        sys.stderr.write(t("cli.manage.domain_not_found", id=did) + "\n")
+        return 1
+    if not _confirm_or_yes(t("cli.manage.confirm_domain_archive", id=did), yes):
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    reg.archive(did)
+    _persist_domains(root, reg)
+    if json_output:
+        return _emit_json({"ok": True, "archived": did, "lifecycle": "archived"})
+    print(t("cli.manage.domain_archived", id=did))
     return 0
 
 
@@ -303,6 +442,41 @@ def cmd_skill_list(*, config_path: Optional[str] = None, json_output: bool = Fal
     return 0
 
 
+def cmd_skill_import(source: str, *, config_path: Optional[str] = None,
+                     overwrite: bool = False, yes: bool = False, json_output: bool = False) -> int:
+    """导入第三方技能（over registry.skill_import.import_skill;Agent-Skills 开放标准）。
+
+    import_skill 自带地基级护栏(路径穿越/zip bomp/宁空勿毒)且**只写文件绝不执行**;第三方标 untrusted,
+    执行层据此在沙箱给最小能力。这里只是把那条既有导入路径搬上 CLI + 加 H2A 确认。
+    """
+    from karvyloop.i18n import t
+    src = (source or "").strip()
+    if not src:
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    root = _instance_root(config_path)
+    if not _require_instance(root, config_path):
+        return 1
+    if not _confirm_or_yes(t("cli.manage.confirm_skill_import", source=src), yes):
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    from karvyloop.registry.skill_import import import_skill
+    res = import_skill(src, skills_dir=root / "skills", overwrite=overwrite)
+    if not res.ok:
+        sys.stderr.write(t("cli.manage.skill_import_failed", error=res.reason) + "\n")
+        if json_output:
+            _emit_json({"ok": False, "error": res.reason, "source": src})
+        return 1
+    if json_output:
+        return _emit_json({
+            "ok": True, "name": res.name, "path": res.path, "files": res.files,
+            "untrusted": res.untrusted, "has_scripts": res.has_scripts, "origin": res.origin,
+        })
+    scripts = t("cli.manage.skill_scripts_note") if res.has_scripts else ""
+    print(t("cli.manage.skill_imported", name=res.name, files=res.files, scripts=scripts))
+    return 0
+
+
 # ============ schedule(over SchedulerStore.all）============
 
 def cmd_schedule_list(*, config_path: Optional[str] = None, json_output: bool = False) -> int:
@@ -320,6 +494,102 @@ def cmd_schedule_list(*, config_path: Optional[str] = None, json_output: bool = 
         flag = "on " if tk.enabled else "off"
         title = tk.title or tk.intent[:40]
         print(f"  {tk.id:<14} [{flag}] {tk.cron:<18} {title}")
+    return 0
+
+
+def cmd_schedule_add(text: str, *, config_path: Optional[str] = None,
+                     yes: bool = False, json_output: bool = False) -> int:
+    """NL→cron 加定时任务（over schedule_parser.make_schedule_parser + SchedulerStore.add）。
+
+    自然语言先经小 LLM 解析成 {cron,intent,title};解析不出明确时间 → 拒(不瞎编)。show 出解析结果后
+    TTY 确认 / 非 TTY --yes 才落库。委派目标不在 CLI 解析(那需活跑的域视图)—— 默认小卡自己起(空 target)。
+    """
+    from karvyloop.i18n import t
+    desc = (text or "").strip()
+    if not desc:
+        sys.stderr.write(t("cli.manage.schedule_text_required") + "\n")
+        return 1
+    root = _instance_root(config_path)
+    if not _require_instance(root, config_path):
+        return 1
+    gateway = _build_gateway(root, config_path)
+    if gateway is None:
+        sys.stderr.write(t("cli.manage.schedule_no_llm") + "\n")
+        return 1
+    from karvyloop.karvy.schedule_parser import make_schedule_parser, local_now_str
+    parser = make_schedule_parser(gateway)
+    if parser is None:
+        sys.stderr.write(t("cli.manage.schedule_no_llm") + "\n")
+        return 1
+    parsed = parser(desc, local_now_str())
+    if not parsed:
+        sys.stderr.write(t("cli.manage.schedule_not_understood") + "\n")
+        return 1
+    # 先给用户看解析结果(cron 是机器真相)——H2A 前的透明
+    if not json_output:
+        print(t("cli.manage.schedule_parsed", cron=parsed["cron"], intent=parsed["intent"]))
+    if not _confirm_or_yes(t("cli.manage.confirm_schedule_add"), yes):
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    tk = _load_scheduler(root).add(parsed["cron"], parsed["intent"], title=parsed.get("title", ""))
+    if tk is None:  # cron 已过 _valid_cron,理论上到不了;兜底
+        sys.stderr.write(t("cli.manage.schedule_not_understood") + "\n")
+        return 1
+    if json_output:
+        return _emit_json({"ok": True, **tk.to_dict()})
+    print(t("cli.manage.schedule_added", id=tk.id, cron=tk.cron, title=tk.title))
+    return 0
+
+
+def cmd_schedule_rm(task_id: str, *, config_path: Optional[str] = None,
+                    yes: bool = False, json_output: bool = False) -> int:
+    """删除定时任务（over SchedulerStore.remove;破坏性 → 确认/--yes）。"""
+    from karvyloop.i18n import t
+    tid = (task_id or "").strip()
+    root = _instance_root(config_path)
+    if not _require_instance(root, config_path):
+        return 1
+    store = _load_scheduler(root)
+    if store.get(tid) is None:
+        sys.stderr.write(t("cli.manage.schedule_not_found", id=tid) + "\n")
+        return 1
+    if not _confirm_or_yes(t("cli.manage.confirm_schedule_rm", id=tid), yes):
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    ok = store.remove(tid)
+    if not ok:
+        sys.stderr.write(t("cli.manage.schedule_not_found", id=tid) + "\n")
+        return 1
+    if json_output:
+        return _emit_json({"ok": True, "removed": tid})
+    print(t("cli.manage.schedule_removed", id=tid))
+    return 0
+
+
+def cmd_schedule_toggle(task_id: str, *, on: bool, config_path: Optional[str] = None,
+                        yes: bool = False, json_output: bool = False) -> int:
+    """启用/停用定时任务（over SchedulerStore.set_enabled）。--on/--off 由 caller 定 `on`。"""
+    from karvyloop.i18n import t
+    tid = (task_id or "").strip()
+    root = _instance_root(config_path)
+    if not _require_instance(root, config_path):
+        return 1
+    store = _load_scheduler(root)
+    if store.get(tid) is None:
+        sys.stderr.write(t("cli.manage.schedule_not_found", id=tid) + "\n")
+        return 1
+    if not _confirm_or_yes(t("cli.manage.schedule_toggled", id=tid,
+                             state=t("cli.manage.state_on" if on else "cli.manage.state_off")), yes):
+        sys.stderr.write(t("cli.manage.aborted") + "\n")
+        return 1
+    ok = store.set_enabled(tid, on)
+    if not ok:
+        sys.stderr.write(t("cli.manage.schedule_not_found", id=tid) + "\n")
+        return 1
+    state = t("cli.manage.state_on" if on else "cli.manage.state_off")
+    if json_output:
+        return _emit_json({"ok": True, "id": tid, "enabled": on})
+    print(t("cli.manage.schedule_toggled", id=tid, state=state))
     return 0
 
 
@@ -347,10 +617,10 @@ def cmd_token_report(*, config_path: Optional[str] = None, json_output: bool = F
 
 
 __all__ = [
-    "cmd_role_list", "cmd_role_show",
-    "cmd_domain_list", "cmd_domain_show",
+    "cmd_role_list", "cmd_role_show", "cmd_role_create", "cmd_role_rm",
+    "cmd_domain_list", "cmd_domain_show", "cmd_domain_create", "cmd_domain_archive",
     "cmd_memory_recall", "cmd_memory_add",
-    "cmd_skill_list",
-    "cmd_schedule_list",
+    "cmd_skill_list", "cmd_skill_import",
+    "cmd_schedule_list", "cmd_schedule_add", "cmd_schedule_rm", "cmd_schedule_toggle",
     "cmd_token_report",
 ]

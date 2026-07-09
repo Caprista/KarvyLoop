@@ -131,12 +131,26 @@ def _build_manage_parsers(sub) -> None:
         p.add_argument("--json", action="store_true", help=t("cli.help.json"))
         return p
 
+    def _add_yes(p):
+        p.add_argument("--yes", action="store_true", help=t("cli.help.yes"))
+        return p
+
     # role
     p_role = sub.add_parser("role", help=t("cli.help.role"))
     role_sub = p_role.add_subparsers(dest="subcmd", required=True)
     _add_json(_add_config(role_sub.add_parser("list", help=t("cli.help.role.list"))))
     p_role_show = _add_json(_add_config(role_sub.add_parser("show", help=t("cli.help.role.show"))))
     p_role_show.add_argument("id", type=str, help=t("cli.help.role.id"))
+    p_role_create = _add_yes(_add_json(_add_config(
+        role_sub.add_parser("create", help=t("cli.help.role.create")))))
+    p_role_create.add_argument("--id", type=str, required=True, help=t("cli.help.role.create.id"))
+    p_role_create.add_argument("--identity", type=str, default="", help=t("cli.help.role.create.identity"))
+    p_role_create.add_argument("--soul", type=str, default="", help=t("cli.help.role.create.soul"))
+    p_role_create.add_argument("--nickname", type=str, default="", help=t("cli.help.role.create.nickname"))
+    p_role_create.add_argument("--model", type=str, default="", help=t("cli.help.role.create.model"))
+    p_role_rm = _add_yes(_add_json(_add_config(
+        role_sub.add_parser("rm", help=t("cli.help.role.rm")))))
+    p_role_rm.add_argument("id", type=str, help=t("cli.help.role.id"))
 
     # domain
     p_domain = sub.add_parser("domain", help=t("cli.help.domain"))
@@ -144,6 +158,13 @@ def _build_manage_parsers(sub) -> None:
     _add_json(_add_config(domain_sub.add_parser("list", help=t("cli.help.domain.list"))))
     p_domain_show = _add_json(_add_config(domain_sub.add_parser("show", help=t("cli.help.domain.show"))))
     p_domain_show.add_argument("id", type=str, help=t("cli.help.domain.id"))
+    p_domain_create = _add_yes(_add_json(_add_config(
+        domain_sub.add_parser("create", help=t("cli.help.domain.create")))))
+    p_domain_create.add_argument("--name", type=str, required=True, help=t("cli.help.domain.create.name"))
+    p_domain_create.add_argument("--parent", type=str, default="", help=t("cli.help.domain.create.parent"))
+    p_domain_archive = _add_yes(_add_json(_add_config(
+        domain_sub.add_parser("archive", help=t("cli.help.domain.archive")))))
+    p_domain_archive.add_argument("id", type=str, help=t("cli.help.domain.id"))
 
     # memory
     p_memory = sub.add_parser("memory", help=t("cli.help.memory"))
@@ -161,11 +182,27 @@ def _build_manage_parsers(sub) -> None:
     p_skill = sub.add_parser("skill", help=t("cli.help.skill"))
     skill_sub = p_skill.add_subparsers(dest="subcmd", required=True)
     _add_json(_add_config(skill_sub.add_parser("list", help=t("cli.help.skill.list"))))
+    p_skill_import = _add_yes(_add_json(_add_config(
+        skill_sub.add_parser("import", help=t("cli.help.skill.import")))))
+    p_skill_import.add_argument("source", type=str, help=t("cli.help.skill.import.source"))
+    p_skill_import.add_argument("--overwrite", action="store_true", help=t("cli.help.skill.import.overwrite"))
 
     # schedule
     p_sched = sub.add_parser("schedule", help=t("cli.help.schedule"))
     sched_sub = p_sched.add_subparsers(dest="subcmd", required=True)
     _add_json(_add_config(sched_sub.add_parser("list", help=t("cli.help.schedule.list"))))
+    p_sched_add = _add_yes(_add_json(_add_config(
+        sched_sub.add_parser("add", help=t("cli.help.schedule.add")))))
+    p_sched_add.add_argument("text", type=str, help=t("cli.help.schedule.add.text"))
+    p_sched_rm = _add_yes(_add_json(_add_config(
+        sched_sub.add_parser("rm", help=t("cli.help.schedule.rm")))))
+    p_sched_rm.add_argument("id", type=str, help=t("cli.help.schedule.id"))
+    p_sched_toggle = _add_yes(_add_json(_add_config(
+        sched_sub.add_parser("toggle", help=t("cli.help.schedule.toggle")))))
+    p_sched_toggle.add_argument("id", type=str, help=t("cli.help.schedule.id"))
+    _toggle_grp = p_sched_toggle.add_mutually_exclusive_group(required=True)
+    _toggle_grp.add_argument("--on", dest="toggle_on", action="store_true", help=t("cli.help.schedule.on"))
+    _toggle_grp.add_argument("--off", dest="toggle_on", action="store_false", help=t("cli.help.schedule.off"))
 
     # token
     p_token = sub.add_parser("token", help=t("cli.help.token"))
@@ -181,16 +218,28 @@ def _dispatch_manage(args) -> Optional[int]:
     cmd = args.cmd
     cfg = getattr(args, "config", None)
     js = getattr(args, "json", False)
+    yes = getattr(args, "yes", False)
     if cmd == "role":
         if args.subcmd == "list":
             return M.cmd_role_list(config_path=cfg, json_output=js)
         if args.subcmd == "show":
             return M.cmd_role_show(args.id, config_path=cfg, json_output=js)
+        if args.subcmd == "create":
+            return M.cmd_role_create(args.id, config_path=cfg, identity=args.identity,
+                                     soul=args.soul, nickname=args.nickname, model=args.model,
+                                     yes=yes, json_output=js)
+        if args.subcmd == "rm":
+            return M.cmd_role_rm(args.id, config_path=cfg, yes=yes, json_output=js)
     if cmd == "domain":
         if args.subcmd == "list":
             return M.cmd_domain_list(config_path=cfg, json_output=js)
         if args.subcmd == "show":
             return M.cmd_domain_show(args.id, config_path=cfg, json_output=js)
+        if args.subcmd == "create":
+            return M.cmd_domain_create(args.name, config_path=cfg, parent=args.parent,
+                                       yes=yes, json_output=js)
+        if args.subcmd == "archive":
+            return M.cmd_domain_archive(args.id, config_path=cfg, yes=yes, json_output=js)
     if cmd == "memory":
         if args.subcmd == "recall":
             return M.cmd_memory_recall(args.query, config_path=cfg, json_output=js,
@@ -201,9 +250,19 @@ def _dispatch_manage(args) -> Optional[int]:
     if cmd == "skill":
         if args.subcmd == "list":
             return M.cmd_skill_list(config_path=cfg, json_output=js)
+        if args.subcmd == "import":
+            return M.cmd_skill_import(args.source, config_path=cfg, overwrite=args.overwrite,
+                                      yes=yes, json_output=js)
     if cmd == "schedule":
         if args.subcmd == "list":
             return M.cmd_schedule_list(config_path=cfg, json_output=js)
+        if args.subcmd == "add":
+            return M.cmd_schedule_add(args.text, config_path=cfg, yes=yes, json_output=js)
+        if args.subcmd == "rm":
+            return M.cmd_schedule_rm(args.id, config_path=cfg, yes=yes, json_output=js)
+        if args.subcmd == "toggle":
+            return M.cmd_schedule_toggle(args.id, on=args.toggle_on, config_path=cfg,
+                                         yes=yes, json_output=js)
     if cmd == "token":
         if args.subcmd == "report":
             return M.cmd_token_report(config_path=cfg, json_output=js, by=args.by)
