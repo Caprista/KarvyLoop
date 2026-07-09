@@ -819,6 +819,34 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         except Exception:
             pass
 
+    # 斜杠命令(/status /doctor /url /reboot /version /help):私聊小卡时**确定性拦截、零 LLM**
+    # (0 token、0 请求 —— 订阅计划按请求限流,ops 走快捷不吃配额)。放在 main_loop 检查之前,
+    # 没配模型也能用 /doctor /url 自救。业务域里不拦(那的 "/" 可能是正文)。
+    try:
+        from karvyloop.karvy.slash import dispatch_slash, is_slash
+        if is_slash(req.intent):
+            from karvyloop.karvy.capability import is_karvy_peer
+            _mgr = getattr(request.app.state, "conversation_manager", None)
+            _peer = _mgr.current_peer() if _mgr is not None else None
+            if _peer is None or is_karvy_peer(getattr(_peer, "domain_id", "l0")):
+                _sl = dispatch_slash(req.intent, request.app)
+                if _sl is not None:
+                    if workbench_app is not None:
+                        try:
+                            workbench_app.push_chat_log_line("agent", _sl["text"])
+                        except Exception:
+                            pass
+                    if _mgr is not None:
+                        try:
+                            _mgr.record_turn(req.intent, _sl["text"], brain="slash")
+                        except Exception:
+                            pass
+                    return {"intent": req.intent, "brain": "SLASH", "fast_brain_hit": True,
+                            "crystallized": False, "skill_name": "", "routed": False,
+                            "text": _sl["text"], "error": None, "slash": _sl.get("cmd", "")}
+    except Exception:
+        logger.warning("[api_intent] slash 处理失败,降级正常 drive", exc_info=True)
+
     if main_loop is None:
         # 修 silent-fail:返 200 + error dict,**不** 500
         return drive_outcome_to_dict(_stub_no_main_loop(req.intent))
