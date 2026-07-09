@@ -11,7 +11,35 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.7.9] — 2026-07-09
+
 ### Added
+- **🧾 Receipt Reader (票据员) — the fourth resident: receipt/invoice recognition → one checked
+  structured line.** Hand it a receipt or invoice — pasted text or a photo — and it returns a clean
+  structured record (merchant, date, currency, total, tax id, itemised amounts) with the items
+  **actually summed and checked against the stated total**, the usual OCR mess (O↔0, l↔1, misplaced
+  decimals) calibrated from context, and any unsure field left `null` rather than guessed.
+  Recognition and structuring **only**: it suggests a category as a *hint* from your human-owned
+  company category sheet (the growth soul, like the scribe's glossary), never rules on
+  reimbursability and never files anything. Image input rides the **same `file_extract` path as
+  audio**: photos are OCR'd on-device via the optional `[ocr]` extra (PaddleOCR), and without it
+  (and no vision model) it asks for the pasted text instead of faking it — no bespoke pipeline, no
+  special UI, it's just a resident you drop a receipt on. Real-model verified including the hard
+  case: given a receipt whose items don't add up, it flagged `sum_mismatch` with both numbers and
+  refused to fudge the figures to balance.
+- **📚 study-buddy and 🎙️ meeting-notes promoted from skills to full residents.** Both now ship as
+  complete 7-file paradigm images (identity / soul / user / commitment / verify / memory +
+  composition), read-only, each carrying a **growth soul** — study-buddy's concept map & weak
+  spots, the scribe's team glossary — the reason each is a role you can watch learn, not a static
+  skill. The empty house now offers four tenants (file-butler, study-buddy, meeting-notes,
+  expense).
+- **Internal agents use our own paradigm (知行合一).** A new `AgentSpec` declares an internal
+  agent's *engineering core* — identity, principles, contract, verify, tools — with the persona
+  layer deliberately omitted for stateless internals; `converge` is the first adopter. This
+  dogfoods the paradigm on our own code, for developers reading the source; it is **not** surfaced
+  in the user UI (that would clutter and create a see-but-can't-use asymmetry).
+- **Knowledge chat「追问」(converge flow A).** On the sediment card you can now **settle the rest
+  while keeping the questioned point open** for discussion, instead of an all-or-nothing accept.
 - **Onboarding intake: 4 questions whose answers immediately change behavior.** At the start of
   the first-10-minutes journey (after the key is configured, before the first demo chip), the
   journey bar asks 4 quick questions — conclusion-first vs process-first output, ask-me vs
@@ -202,6 +230,21 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   locked by smoke + browser tests.
 
 ### Fixed
+- **Knowledge chat: real back-and-forth, no self-contradiction, links actually fetch.** Chat now
+  renders as separated **turns** (question vs answer) instead of one wall of text; the same module
+  no longer offers to sediment X while another part says "nothing to sediment" — *one referent, one
+  source of truth*, enforced structurally rather than by prompt; and librarian fetches of a pasted
+  link now send **real browser headers** and allow the fake-ip proxy range (`198.18.0.0/15`) so
+  paste-a-link works behind Clash/Surge/V2Ray fake-ip mode (an earlier SSRF hardening had blocked
+  it). Starting a new knowledge session no longer loses the previous one.
+- **Management modals now scroll when content runs past one screen.** Atom and role edit modals
+  clipped anything below the fold with no scrollbar — `.modal-body` was missing `flex: 1` +
+  `min-height: 0`, so the flex child wouldn't shrink and the overflow never engaged.
+- **Capability-grant card now covers the delegated execution path**, the decision-card popup no
+  longer overlaps the role-edit modal, and the paradigm form is discoverable.
+- **Image receipts wired into `file_extract` without crashing when `[ocr]` is absent** — a missing
+  OCR extra degrades honestly (`missing_dependency`), and a fake/corrupt image is refused
+  (`bad_file`) rather than spilling bytes into context.
 - **Desktop view: five real layout bugs from the calm single-focus screenshots.** All caught
   visually (the previous Playwright tests asserted existence/z-index but never *saw* occlusion) and
   now locked with rect-level visual assertions + screenshots:
