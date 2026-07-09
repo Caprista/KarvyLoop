@@ -16,7 +16,13 @@ var KarvyAtomsPanelBundle = (function(exports) {
     body.appendChild(el(
       "div",
       { class: "mgmt-toolbar" },
-      el("button", { class: "mgmt-new-btn", text: t("mgmt.new") + " " + t("mgmt.atoms_title"), onclick: () => renderCreate() })
+      el("button", { class: "mgmt-new-btn", text: t("mgmt.new") + " " + t("mgmt.atoms_title"), onclick: () => renderCreate() }),
+      // 整理相似原子(H2A):镜像知识库「整理相似知识」—— 一次 LLM 出合并建议,逐簇你拍板(离热路径,点才跑)。
+      atoms.length >= 2 ? el("button", {
+        class: "mgmt-inline-link atom-consolidate-btn",
+        text: t("atom.consolidate_btn"),
+        onclick: () => _runConsolidate()
+      }) : null
     ));
     if (!atoms.length) {
       body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") }));
@@ -111,6 +117,72 @@ var KarvyAtomsPanelBundle = (function(exports) {
       ),
       msg
     ));
+  }
+  async function _runConsolidate() {
+    const body = mgmtBody();
+    if (!body) return;
+    body.innerHTML = "";
+    body.appendChild(el("div", { class: "mgmt-section-title", text: t("atom.consolidate_btn") }));
+    const backRow = el(
+      "div",
+      { class: "mgmt-row" },
+      el("button", { class: "mgmt-inline-link", text: t("role.back"), onclick: () => renderList() })
+    );
+    const status = el("div", { class: "mgmt-hint", text: t("atom.consolidating") });
+    body.appendChild(status);
+    body.appendChild(backRow);
+    const r = await _postJSON("/api/atoms/consolidate/suggest", {});
+    status.remove();
+    const clusters = r.ok && r.data && r.data.clusters || [];
+    if (!clusters.length) {
+      body.insertBefore(el("div", { class: "mgmt-empty", text: t("atom.consolidate_none") }), backRow);
+      return;
+    }
+    const list = el("div", { class: "mgmt-list" });
+    body.insertBefore(list, backRow);
+    for (const c of clusters) {
+      const card = el("div", { class: "mgmt-card consolidate-card" });
+      card.appendChild(el(
+        "div",
+        { class: "mc-main" },
+        el("div", { class: "mc-name", text: t("atom.consolidate_into", { n: (c.member_ids || []).length }) }),
+        el(
+          "div",
+          { class: "consolidate-target" },
+          c.canonical_id ? el("span", { class: "mc-tag", text: c.canonical_id }) : null,
+          el("span", { text: " " + (c.merged_purpose || "") })
+        )
+      ));
+      const mem = el("div", { class: "consolidate-members" });
+      (c.member_ids || []).forEach((m) => {
+        mem.appendChild(el("div", { class: "consolidate-member", text: "・ " + m }));
+      });
+      if (c.reason) mem.appendChild(el("div", { class: "mgmt-hint", text: c.reason }));
+      card.appendChild(mem);
+      const doBtn = el("button", {
+        class: "dpref-confirm",
+        text: t("atom.consolidate_do"),
+        onclick: async () => {
+          doBtn.disabled = true;
+          const ar = await _postJSON(
+            "/api/atoms/consolidate/apply",
+            {
+              canonical_id: c.canonical_id,
+              member_ids: c.member_ids,
+              merged_purpose: c.merged_purpose || "",
+              merged_tools: c.merged_tools || []
+            }
+          );
+          if (ar.ok && ar.data && ar.data.ok) card.replaceWith(el("div", {
+            class: "mgmt-hint",
+            text: t("atom.consolidate_done", { n: (ar.data.removed_atoms || []).length })
+          }));
+          else doBtn.disabled = false;
+        }
+      });
+      card.appendChild(el("div", { class: "dpref-actions" }, doBtn));
+      list.appendChild(card);
+    }
   }
   async function open() {
     openMgmtModal(t("mgmt.atoms_title"));

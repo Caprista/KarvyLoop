@@ -386,6 +386,27 @@ def test_role_atom_panels_create_list_split_and_search():
     assert 0 < html.find('src="/static/ui_widgets.js"') < a   # widgets 在 app.js/面板前加载
 
 
+def test_atom_consolidate_ui_wired():
+    """审计缺口:原子面板缺「整理相似原子」按钮(memory 侧同款早已接线,原子侧漏了)。
+    镜像 memory_panel 的 consolidate UX 到 atoms_panel:工具栏按钮 + suggest→渲染簇→拍板→apply,
+    payload/response 对齐 routes_atoms.py(canonical_id/member_ids/merged_purpose/merged_tools;removed_atoms)。"""
+    atoms_ts = (FRONTEND_SRC / "atoms_panel.ts").read_text(encoding="utf-8")
+    assert "atom-consolidate-btn" in atoms_ts               # 工具栏「整理相似原子」按钮
+    assert "function _runConsolidate(" in atoms_ts          # suggest→渲染→apply 流程
+    assert "/api/atoms/consolidate/suggest" in atoms_ts     # dry-run 建议
+    assert "/api/atoms/consolidate/apply" in atoms_ts       # 人拍板后兑现
+    assert "canonical_id: c.canonical_id" in atoms_ts       # apply payload 对齐 AtomMergeRequest
+    assert "member_ids: c.member_ids" in atoms_ts
+    assert "removed_atoms" in atoms_ts                      # apply 返回形态(合并了几个)
+    # 构建产物里也在(不是只改了源)
+    built = (STATIC_DIR / "atoms_panel.js").read_text(encoding="utf-8")
+    assert "/api/atoms/consolidate/suggest" in built and "/api/atoms/consolidate/apply" in built
+    i18n = (STATIC_DIR / "i18n.js").read_text(encoding="utf-8")
+    for k in ("atom.consolidate_btn", "atom.consolidating", "atom.consolidate_none",
+              "atom.consolidate_into", "atom.consolidate_do", "atom.consolidate_done"):
+        assert i18n.count(f'"{k}"') >= 2, f"{k} 不在 en+zh 双表(parity 断)"
+
+
 def test_skill_import_ui_wired():
     """Hardy:能直接用第三方 skill 库。Skill 面板有导入入口 + 第三方徽章。"""
     skills_ts = SKILLS_TS.read_text(encoding="utf-8")

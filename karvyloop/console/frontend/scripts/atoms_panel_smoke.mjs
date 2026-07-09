@@ -18,8 +18,20 @@ load("dom.js");
 load("modal.js");
 load("ui_widgets.js");
 dom.window.KarvyDom.getJSON = async (url) => {
-  if (url === "/api/atoms") return { atoms: [{ id: "web_search", kind: "task", prompt: "搜网", tools: ["run_command"] }] };
+  if (url === "/api/atoms") return { atoms: [
+    { id: "web_search", kind: "task", prompt: "搜网", tools: ["run_command"] },
+    { id: "web_lookup", kind: "task", prompt: "查网", tools: ["run_command"] },
+  ] };
   return null;
+};
+// 整理相似原子:suggest 出一簇合并建议 → apply 兑现(镜像知识库同款)
+dom.window.KarvyDom.postJSON = async (url) => {
+  if (url === "/api/atoms/consolidate/suggest") return { ok: true, status: 200, data: { ok: true, clusters: [
+    { canonical_id: "web_search", member_ids: ["web_search", "web_lookup"],
+      merged_purpose: "搜网", merged_tools: ["run_command"], reason: "同一件事" },
+  ] } };
+  if (url === "/api/atoms/consolidate/apply") return { ok: true, status: 200, data: { ok: true, removed_atoms: ["web_lookup"] } };
+  return { ok: true, status: 200, data: { ok: true } };
 };
 load("atoms_panel.js");
 
@@ -54,4 +66,21 @@ const idInput = eb.querySelector('input[type="text"]');
 assert.ok(idInput.readOnly && idInput.value === "web_search", "编辑页 id 应只读且带原值");
 assert.ok([...eb.querySelectorAll("textarea")].some((ta) => ta.value.includes("搜网")), "编辑页 prompt 应预填原值");
 
-console.log("✓ atoms panel smoke OK — 列表(＋新建/搜索/分页)+ 创建页 + 编辑页(id 只读·预填,可改)");
+// 整理相似原子:工具栏有按钮 → 点它出合并建议簇 → 点「合并」调 apply → 卡片变完成提示
+await A.open();
+await new Promise((r) => setTimeout(r, 0));
+const consBtn = dom.window.document.getElementById("mgmt-body").querySelector(".atom-consolidate-btn");
+assert.ok(consBtn, "工具栏应有「整理相似原子」按钮(≥2 原子时,镜像知识库同款)");
+consBtn.click();
+await new Promise((r) => setTimeout(r, 0));
+const cb = dom.window.document.getElementById("mgmt-body");
+const card = cb.querySelector(".consolidate-card");
+assert.ok(card, "suggest 应渲染合并建议簇卡片");
+assert.ok([...card.querySelectorAll(".consolidate-member")].some((m) => m.textContent.includes("web_lookup")), "簇应列出被并成员原子 id");
+const doBtn = card.querySelector(".dpref-confirm");
+assert.ok(doBtn, "簇卡应有「合并」按钮");
+doBtn.click();
+await new Promise((r) => setTimeout(r, 0));
+assert.ok(!cb.querySelector(".consolidate-card"), "点合并后簇卡应替换为完成提示");
+
+console.log("✓ atoms panel smoke OK — 列表(＋新建/搜索/分页)+ 创建页 + 编辑页(id 只读·预填,可改)+ 整理相似原子(suggest→合并)");
