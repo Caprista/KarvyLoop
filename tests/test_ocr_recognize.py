@@ -6,7 +6,14 @@
 """
 from __future__ import annotations
 
-from karvyloop.ocr_recognize import OCR_INSTALL_HINT, _layout_text, recognize_image
+import pytest
+
+from karvyloop.ocr_recognize import (
+    OCR_INSTALL_HINT,
+    _layout_text,
+    preprocess_for_ocr,
+    recognize_image,
+)
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
@@ -78,3 +85,104 @@ def test_missing_dep_is_honest_not_crash():
     assert r.error in ("missing_dependency", "ocr_failed", "ocr_empty", "bad_file")
     if r.error == "missing_dependency":
         assert "karvyloop[ocr]" in OCR_INSTALL_HINT and "karvyloop[ocr]" in r.hint
+
+
+# ---- ② OCR 前置预处理:救糊/歪/低对比票据(报销"腿三")----
+#
+# 纪律:cv2 缺失(没装 [ocr])或坏输入 → **原样返回入参**,绝不崩。这些"降级"断言在**任何机器上**都要过。
+# 真正的几何变换(上采样/纠偏)只有装了 cv2 才验得了 → 用 importorskip 语义门控,没装就跳过那几条。
+
+def _has_cv2():
+    try:
+        import cv2  # noqa: F401
+        import numpy  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# --- 降级路径:随处可跑,锁"宁空勿毒 + 绝不崩" ---
+
+def test_preprocess_empty_returns_input():
+    assert preprocess_for_ocr(b"") == b""
+
+
+def test_preprocess_none_does_not_crash():
+    """None 传进来(理论上类型不对)也不许炸 —— 出错就退回入参。"""
+    assert preprocess_for_ocr(None) is None
+
+
+def test_preprocess_garbage_returns_input_unchanged():
+    """非图片垃圾字节:cv2 缺失走跳过、装了则 imdecode 失败 —— 两条路都必须原样退回,绝不崩。"""
+    garbage = b"this is definitely not an image, not even close"
+    assert preprocess_for_ocr(garbage) == garbage
+
+
+def test_preprocess_truncated_png_returns_input():
+    """有 PNG magic 但体是垃圾(解不出图)→ 原样退回,交给下游诚实报错。"""
+    junk_png = _PNG_MAGIC + b"\x00" * 64
+    assert preprocess_for_ocr(junk_png) == junk_png
+
+
+def test_preprocess_never_raises_on_random_bytes():
+    """一堆随机/边界输入都不许抛异常(预处理绝不能成为新的崩溃源)。"""
+    for blob in (b"\x00", b"\xff" * 10, _PNG_MAGIC, b"\xff\xd8\xff" + b"\x11" * 30):
+        out = preprocess_for_ocr(blob)
+        assert isinstance(out, bytes)
+
+
+# --- 真变换路径:只在装了 cv2 时验(几何/格式确定性) ---
+
+def _encode_png(img):
+    import cv2
+    ok, buf = cv2.imencode(".png", img)
+    assert ok
+    return buf.tobytes()
+
+
+def _decode_shape(data: bytes):
+    import cv2
+    import numpy as np
+    arr = np.frombuffer(data, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+    assert img is not None
+    return img.shape[:2]  # (h, w)
+
+
+def test_preprocess_upscales_small_image():
+    """400×298 的糊票那一类:短边 < 1000 → 被上采样到短边 ≈ 1000(不超过 3×),字够大给识别器。"""
+    if not _has_cv2():
+        pytest.skip("cv2 未装([ocr] 未安装)——真上采样在装了 [ocr] 的机器/VM 上验")
+    import numpy as np
+    small = np.full((298, 400, 3), 255, dtype=np.uint8)      # 白底
+    small[140:160, 40:360] = 0                                # 画一道黑"文字"条,给纠偏/前景一点料
+    out = preprocess_for_ocr(_encode_png(small))
+    h, w = _decode_shape(out)
+    assert min(h, w) >= 900, f"小图应被上采样到短边≈1000,得到 {w}x{h}"
+    # 不该超过 3× 上限(298*3=894 短边;宽随比例)——挡过度插值/OOM。
+    assert min(h, w) <= 298 * 3 + 5, f"上采样不该超过 3×,得到 {w}x{h}"
+    assert out[: len(_PNG_MAGIC)] == _PNG_MAGIC, "重编码应为 PNG(下游 magic 仍认)"
+
+
+def test_preprocess_leaves_large_image_geometry_unchanged():
+    """已够大的图(短边 ≥ 1000)不上采样:几何尺寸原样(只做便宜的灰度/对比),不添插值噪声。"""
+    if not _has_cv2():
+        pytest.skip("cv2 未装([ocr] 未安装)——大图门控在装了 [ocr] 的机器/VM 上验")
+    import numpy as np
+    big = np.full((1200, 1600, 3), 255, dtype=np.uint8)
+    big[600:620, 200:1400] = 0
+    out = preprocess_for_ocr(_encode_png(big))
+    h, w = _decode_shape(out)
+    assert (h, w) == (1200, 1600), f"大图几何不该变,得到 {w}x{h}"
+
+
+def test_preprocess_output_is_decodable_image():
+    """输出必须仍是可解码图片(格式确定性)——预处理不能把下游能吃的图搞成 magic 都不认的东西。"""
+    if not _has_cv2():
+        pytest.skip("cv2 未装([ocr] 未安装)")
+    import numpy as np
+    img = np.full((500, 700, 3), 200, dtype=np.uint8)
+    img[240:260, 100:600] = 10
+    out = preprocess_for_ocr(_encode_png(img))
+    h, w = _decode_shape(out)                                 # 解得开即通过
+    assert h > 0 and w > 0
