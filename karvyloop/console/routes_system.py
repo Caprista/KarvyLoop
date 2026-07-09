@@ -135,6 +135,61 @@ async def api_proposals_pending(request: Request) -> dict[str, Any]:
     return {"proposals": out}
 
 
+@router.get("/residents")
+def api_residents(request: Request) -> dict[str, Any]:
+    """全部随包原住民 + 是否已入住(Hardy 2026-07-09:引荐卡一生只出一次 → 之后加的原住民
+    再没门可进、也没处浏览。这是**随时可浏览/请进来**的常驻门,补掉那个发现性黑洞)。"""
+    from karvyloop.i18n import get_locale
+    from karvyloop.karvy.residents import list_residents, resident_display_name
+    loc = get_locale()
+
+    def _pick(d: dict) -> str:  # 双语字段取当前 locale > en > 任意非空(与 residents._loc 同语义)
+        return str((d or {}).get(loc) or (d or {}).get("en")
+                   or next((v for v in (d or {}).values() if v), "")).strip()
+
+    st = request.app.state
+    role_reg = getattr(st, "role_registry", None)
+    out: list[dict[str, Any]] = []
+    for res in list_residents(getattr(st, "residents_dir", None)):
+        rid = res["id"]
+        out.append({
+            "id": rid,
+            "name": resident_display_name(res, loc),     # emoji + 花名
+            "pitch": _pick(res.get("pitch") or {}),
+            "first_task": _pick(res.get("first_task") or {}),
+            "instantiated": role_reg is not None and role_reg.get(rid) is not None,
+        })
+    return {"residents": out}
+
+
+class ResidentInviteRequest(BaseModel):
+    id: str = Field(..., min_length=1, max_length=64)
+
+
+@router.post("/residents/invite")
+def api_residents_invite(req: ResidentInviteRequest, request: Request) -> dict[str, Any]:
+    """把一个原住民请进来(实例化成角色)。在线注册表直接生效,**不用重启**;幂等(已入住复用)。
+
+    与空屋子引荐卡同一条 instantiate_resident(契约 seed + VERIFY/MEMORY 种子 + fs 白名单),
+    只是入口从"一生一次的卡"变成"随时可点的门"。
+    """
+    from karvyloop.karvy.residents import instantiate_resident, load_resident
+    st = request.app.state
+    role_reg = getattr(st, "role_registry", None)
+    if role_reg is None:
+        return {"ok": False, "reason": "角色注册表不可用"}
+    res = load_resident(req.id, getattr(st, "residents_dir", None))
+    if res is None:
+        return {"ok": False, "reason": f"原住民镜像不在(打包丢了?):{req.id}"}
+    try:
+        out = instantiate_resident(res, role_registry=role_reg,
+                                   fs_grants=getattr(st, "fs_grants", None),
+                                   home=getattr(st, "residents_home", None))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"入住失败:{type(e).__name__}: {e}"}
+    return {"ok": True, **out}
+
+
 @router.get("/setup_status")
 def api_setup_status(request: Request) -> dict[str, Any]:
     """无 Key 强制引导:进系统后判断有没有可用模型(网页 + TUI 一致)。

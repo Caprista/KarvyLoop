@@ -58,6 +58,7 @@ async function renderList(): Promise<void> {
   const bar = el("div", { class: "mgmt-toolbar" },
     el("button", { class: "mgmt-new-btn", text: t("mgmt.new") + " " + t("mgmt.roles_title"), onclick: () => renderCreate() }));
   body.appendChild(bar);
+  await _renderResidentsGallery(body);   // 请原住民进来(补掉"一生一次引荐卡"之后再没门的黑洞)
   if (!roles.length) { body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") })); return; }
   body.appendChild(_KW.pagedList({
     items: roles, pageSize: 8, searchPh: t("mgmt.search"), emptyText: t("mgmt.empty"),
@@ -86,6 +87,41 @@ async function renderList(): Promise<void> {
             } })));
     },
   }));
+}
+
+// ============ 请原住民进来(常驻门;补掉一生一次引荐卡的发现性黑洞)============
+// Hardy 2026-07-09:引荐卡一生只出一次,之后加的原住民(如报销员)再没门可进、没处浏览。
+// 这里随时列出**还没请进来**的随包原住民 + 一键「请进来」(在线实例化,不重启)。全请进来了则不占地方。
+async function _renderResidentsGallery(body: HTMLElement): Promise<void> {
+  let residents: any[] = [];
+  try {
+    const data = await _getJSON("/api/residents");
+    residents = (data && data.residents) || [];
+  } catch (e) { return; }
+  const notIn = residents.filter((r: any) => !r.instantiated);
+  if (!notIn.length) return;
+  const sec = el("div", { class: "residents-gallery" });
+  sec.appendChild(el("div", { class: "mgmt-section-title", text: t("residents.gallery_title") }));
+  sec.appendChild(el("div", { class: "mgmt-hint", text: t("residents.gallery_hint") }));
+  for (const r of notIn) {
+    const invite = el("button", { class: "dpref-confirm", text: t("residents.invite_btn"),
+      onclick: async () => {
+        (invite as HTMLButtonElement).disabled = true; invite.textContent = t("residents.inviting");
+        const res = await _postJSON("/api/residents/invite", { id: r.id });
+        if (res.ok && res.data && res.data.ok !== false) {
+          await renderList();   // 刷新:该原住民移出"可请进"、进入你的角色列表
+        } else {
+          (invite as HTMLButtonElement).disabled = false; invite.textContent = t("residents.invite_btn");
+          window.alert(t("residents.invite_failed", { reason: (res.data && res.data.reason) || res.status }));
+        }
+      } }) as HTMLButtonElement;
+    sec.appendChild(el("div", { class: "mgmt-card" },
+      el("div", { class: "mc-main" },
+        el("div", { class: "mc-name", text: r.name || r.id }),
+        r.pitch ? el("div", { class: "mc-meta", text: r.pitch }) : null),
+      el("div", { class: "dpref-actions" }, invite)));
+  }
+  body.appendChild(sec);
 }
 
 // ============ 创建页(与列表分离)============

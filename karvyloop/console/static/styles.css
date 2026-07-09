@@ -2305,6 +2305,8 @@ button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outl
 }
 .unlock-links a { color: var(--accent-deep); text-decoration: underline; }
 .unlock-links a:hover { color: var(--accent); }
+/* 请原住民进来:角色库顶部的常驻门(补一生一次引荐卡的黑洞);复用 mgmt-card 视觉,只加间距 */
+.residents-gallery { margin: 4px 0 14px; padding-bottom: 10px; border-bottom: 1px dashed var(--border); }
 /* 一键启用:主动作按钮 + 进度/结果小字;手动命令降级为次选 */
 .unlock-enable { margin: 8px 0 2px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .unlock-enable-note { color: var(--text-dim); font-size: var(--fs-12); }

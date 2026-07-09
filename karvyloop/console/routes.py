@@ -1897,12 +1897,15 @@ from .routes_files import (  # noqa: E402
 # 端点由 routes_system.router 提供(app.py include_router);re-export 其符号保既有 import 可达。
 from .routes_system import (  # noqa: E402
     LangRequest,
+    ResidentInviteRequest,
     api_decisions_audit,
     api_decisions_recent,
     api_health,
     api_lang_get,
     api_lang_set,
     api_proposals_pending,
+    api_residents,
+    api_residents_invite,
     api_setup_status,
     api_task_detail,
     api_task_trace,

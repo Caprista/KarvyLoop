@@ -39,6 +39,7 @@ var KarvyRolesPanelBundle = (function(exports) {
       el("button", { class: "mgmt-new-btn", text: t("mgmt.new") + " " + t("mgmt.roles_title"), onclick: () => renderCreate() })
     );
     body.appendChild(bar);
+    await _renderResidentsGallery(body);
     if (!roles.length) {
       body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") }));
       return;
@@ -85,6 +86,50 @@ var KarvyRolesPanelBundle = (function(exports) {
         );
       }
     }));
+  }
+  async function _renderResidentsGallery(body) {
+    let residents = [];
+    try {
+      const data = await _getJSON("/api/residents");
+      residents = data && data.residents || [];
+    } catch (e) {
+      return;
+    }
+    const notIn = residents.filter((r) => !r.instantiated);
+    if (!notIn.length) return;
+    const sec = el("div", { class: "residents-gallery" });
+    sec.appendChild(el("div", { class: "mgmt-section-title", text: t("residents.gallery_title") }));
+    sec.appendChild(el("div", { class: "mgmt-hint", text: t("residents.gallery_hint") }));
+    for (const r of notIn) {
+      const invite = el("button", {
+        class: "dpref-confirm",
+        text: t("residents.invite_btn"),
+        onclick: async () => {
+          invite.disabled = true;
+          invite.textContent = t("residents.inviting");
+          const res = await _postJSON("/api/residents/invite", { id: r.id });
+          if (res.ok && res.data && res.data.ok !== false) {
+            await renderList();
+          } else {
+            invite.disabled = false;
+            invite.textContent = t("residents.invite_btn");
+            window.alert(t("residents.invite_failed", { reason: res.data && res.data.reason || res.status }));
+          }
+        }
+      });
+      sec.appendChild(el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el("div", { class: "mc-name", text: r.name || r.id }),
+          r.pitch ? el("div", { class: "mc-meta", text: r.pitch }) : null
+        ),
+        el("div", { class: "dpref-actions" }, invite)
+      ));
+    }
+    body.appendChild(sec);
   }
   async function renderCreate() {
     const body = mgmtBody();
