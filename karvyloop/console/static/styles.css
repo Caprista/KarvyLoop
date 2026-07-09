@@ -138,6 +138,8 @@ html, body {
 }
 .pulse-mascot { width: 26px; height: 26px; object-fit: contain; }
 .pulse-text { font-weight: 600; color: var(--text); font-size: 14px; }
+/* 常显运行版本:品牌名旁的小字,一眼可判"我在哪个版本"(不抢主位,muted) */
+.brand-version { font-size: 11px; color: var(--text-dim); margin-left: 6px; font-weight: 600; letter-spacing: .2px; }
 .cockpit-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;       /* ch4 四象限:2×2 */

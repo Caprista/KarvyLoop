@@ -60,14 +60,19 @@ def _is_trusted_upgrade_origin(host: str) -> bool:
 
 
 def _read_last_upgrade() -> dict:
-    """读最近一次一键升级的结果(供重启后的前端显示成败);无 / 过旧(>10min)→ {}。"""
+    """读最近一次一键升级的结果(供重启后的前端显示成败);无 / 过旧(>24h)→ {}。
+
+    窗口 24h 不是 10min:升级会重启服务,用户常是**关掉标签、过一会儿重开**才回来看 —— 10 分钟
+    窗口会把"升级失败"的告知在重开时丢掉,只剩一条模棱两可的"有新版"横幅,人被晾在"到底升没升成"
+    的猜测里(fail-loud 变 fail-silent)。成功态天然不需要它(版本已变,横幅自然消失);失败态必须
+    活到用户下次真看见。前端另用 current==to 判定"其实已到目标"来抑制过期误报。"""
     import json as _json
     import time as _t
     from pathlib import Path as _P
     f = _P.home() / ".karvyloop" / "_upgrade_status.json"
     try:
         d = _json.loads(f.read_text(encoding="utf-8"))
-        if isinstance(d, dict) and (_t.time() - float(d.get("ts", 0))) < 600:
+        if isinstance(d, dict) and (_t.time() - float(d.get("ts", 0))) < 86400:
             return d
     except Exception:
         pass

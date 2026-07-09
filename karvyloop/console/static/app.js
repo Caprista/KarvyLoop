@@ -347,37 +347,52 @@
 
   // 版本检测:有新版 → 顶部可关掉的横幅(detect→notify→你按下,绝不自动升级)。
   // 关掉后按版本记进 localStorage,同一版本不再骚扰(notify ≠ nag)。
+  // 常显当前运行版本(顶栏品牌旁):一眼可判"我在哪个版本",不用靠横幅反推(Hardy 反馈:
+  // 一键升级失败却只剩模糊横幅,人被晾在"到底升没升成"里 —— 版本号常驻 = 判定的唯一真源)。
+  function _setBrandVersion(cur) {
+    const bv = document.getElementById("brand-version");
+    if (bv && cur) bv.textContent = "v" + cur;
+  }
   async function fetchUpdateStatus() {
     try {
       const r = await fetch("/api/update_status");
       if (!r.ok) return;
       const u = await r.json();
-      // E(升级预检+回滚):上次升级失败已自动回滚 → 大声横幅告知(fail-loud,不静默);
-      // 可回滚且刚升过 → 横幅带「回滚到上一版」按钮(一键后悔药)。
+      if (u && u.current) _setBrandVersion(u.current);   // 常显当前版本(成功/失败都先落这个真源)
+      // fail-loud(不静默、不止 10 分钟):上次升级/回滚**没成功**且你**仍没到目标版本** → 明确告知
+      // 为什么没升成,而不是只弹一条模棱两可的"有新版"。current==to 时抑制(其实已到目标 = 过期误报)。
       const lu = u && u.last_upgrade;
-      if (lu && lu.rolled_back && !document.getElementById("update-banner")) {
-        const bar = el("div", { class: "update-banner update-banner-err", id: "update-banner" });
-        bar.appendChild(el("span", { class: "update-banner-msg",
-          text: t("update.rolled_back", { reason: lu.rollback_reason || lu.msg || "" }) }));
-        bar.appendChild(el("button", { class: "update-x", text: "✕", onClick: () => bar.remove() }));
-        document.body.insertBefore(bar, document.body.firstChild);
+      const lastFailed = !!(lu && lu.ok === false && lu.to && String(u.current) !== String(lu.to));
+      if (!u || !u.newer || !u.latest) {
+        // 无新版可提示;但若上次确实失败了仍要 fail-loud(稳妥兜底,正常此时 newer 应为 true)
+        if (lastFailed && !document.getElementById("update-banner")) _showUpdateBanner(u, lu);
+        return;
       }
-      if (!u || !u.newer || !u.latest) return;
       let dismissed = null;
       try { dismissed = localStorage.getItem("karvyloop_update_dismissed"); } catch (e) {}
-      if (dismissed === u.latest) return;   // 这个版本已忽略过 → 不再提示
-      _showUpdateBanner(u);
+      // 失败态**永远**显示(不被"这版忽略过"压掉 —— 你需要知道为什么没升成、能不能重试)
+      if (dismissed === u.latest && !lastFailed) return;
+      _showUpdateBanner(u, lastFailed ? lu : null);
     } catch (e) {
       /* 检测失败静默(本地优先,不打扰) */
     }
   }
-  function _showUpdateBanner(u) {
+  // failInfo 非空 = 上次升级/回滚失败(fail-loud 红条,升级按钮变"重试");null = 普通"有新版"。
+  function _showUpdateBanner(u, failInfo) {
     if (document.getElementById("update-banner")) return;
-    const bar = el("div", { class: "update-banner", id: "update-banner" });
-    bar.appendChild(el("span", { class: "update-banner-msg",
-      text: t("update.banner", { current: u.current, latest: u.latest }) }));
-    // 一键升级:点了才升(=手动,不是静默自动);点完后端跑 停→装→起 整套,不用敲命令
-    bar.appendChild(el("button", { class: "update-go", text: t("update.upgrade_btn"),
+    const bar = el("div", { class: "update-banner" + (failInfo ? " update-banner-err" : ""), id: "update-banner" });
+    let msgText;
+    if (failInfo) {
+      const reason = failInfo.msg || failInfo.rollback_reason || "";
+      msgText = failInfo.rolled_back
+        ? t("update.rolled_back", { reason })
+        : t("update.last_failed", { current: u.current, latest: u.latest, reason });
+    } else {
+      msgText = t("update.banner", { current: u.current, latest: u.latest });
+    }
+    bar.appendChild(el("span", { class: "update-banner-msg", text: msgText }));
+    // 一键升级/重试:点了才升(=手动,不是静默自动);点完后端跑 停→装→起 整套,不用敲命令
+    if (u.newer) bar.appendChild(el("button", { class: "update-go", text: t(failInfo ? "update.retry_btn" : "update.upgrade_btn"),
       onClick: (e) => _doUpgrade(u, e.target) }));
     if (u.rollback_available) {
       bar.appendChild(el("button", { class: "update-rollback", text: t("update.rollback_btn", { prev: u.prev_version || "?" }),

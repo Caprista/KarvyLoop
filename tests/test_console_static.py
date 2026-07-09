@@ -456,3 +456,24 @@ def test_no_key_setup_gate_wired():
     i18n = (STATIC_DIR / "i18n.js").read_text(encoding="utf-8")
     for k in ("setup.title", "setup.add_model"):
         assert i18n.count(f'"{k}"') >= 2, k
+
+
+def test_update_flow_failloud_and_version_visible():
+    """升级流 fail-loud + 常显版本(Hardy 反馈:一键升级失败却只剩模糊横幅,人被晾在'升没升成'):
+    ① 顶栏常显当前运行版本(brand-version,靠 update_status.current 填);
+    ② 上次升级**任何失败**(不止 rolled_back)且仍没到目标版本 → fail-loud 红条 + 可重试;
+    ③ current==to 时抑制(其实已到目标,别陈年误报);④ 失败文案中英双语齐(parity)。"""
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    i18n = (STATIC_DIR / "i18n.js").read_text(encoding="utf-8")
+    # ① 常显版本锚点 + 填充函数
+    assert 'id="brand-version"' in html, "顶栏要有常显版本锚点"
+    assert "_setBrandVersion(" in app_js, "要有填当前版本的函数"
+    assert "_setBrandVersion(u.current)" in app_js, "版本必须来自 update_status.current(运行态真源)"
+    # ② 广义失败(ok===false)判定 + ③ current!=to 抑制误报
+    assert "lastFailed" in app_js and "lu.ok === false" in app_js, "失败判定不能只认 rolled_back"
+    assert "String(u.current) !== String(lu.to)" in app_js, "current==to 要抑制(已到目标不误报)"
+    assert "update.last_failed" in app_js and "update.retry_btn" in app_js, "失败态要有专属文案+重试按钮"
+    # ④ 新增文案中英双语齐(parity 锁)
+    for k in ("update.last_failed", "update.retry_btn", "update.version_title"):
+        assert i18n.count(f'"{k}"') >= 2, f"{k} 必须中英双语齐"

@@ -11,7 +11,18 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
-## [2026.7.9] — 2026-07-09
+### Fixed
+- **The one-click update now tells you what happened instead of leaving you guessing.** A failed
+  upgrade (e.g. `git pull` couldn't reach GitHub) used to silently restart the old version and
+  re-show the same ambiguous "a newer version is available" banner — the user was stranded on "did
+  it update or not?" (the exact *怎么样了?* status-anxiety anti-pattern this product exists to
+  kill). Three fixes: (1) the upgrade **outcome survives a normal reopen** — the result window went
+  from 10 minutes to 24 hours, so closing the tab and coming back still shows *why* it didn't take;
+  (2) **any** failed upgrade now surfaces a fail-loud red banner with the reason and a **Retry**
+  button — previously only an auto-rollback did, a plain `git pull` failure showed nothing; the
+  banner is suppressed once you're actually on the target version (no stale false alarms); and
+  (3) the **current running version is now always visible** in the top bar next to the logo, so
+  "what am I on?" is answerable at a glance without reverse-engineering the banner.
 
 ### Added
 - **🧾 Receipt Reader (票据员) — the fourth resident: receipt/invoice recognition → one checked
