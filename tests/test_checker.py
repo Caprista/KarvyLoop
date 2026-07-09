@@ -174,8 +174,8 @@ def test_read_only_tools_exclude_write():
     tok = types.SimpleNamespace()
     ro = make_coding_tools(sandbox=object(), file_state=FileState(),
                            workspace_root="/", token=tok, read_only=True)
-    # 只读 = 不给 write/edit;read/run + 联网只读(web_search/web_fetch)都给
-    assert set(ro.keys()) == {"read_file", "run_command", "web_search", "web_fetch"}
+    # 只读 = 不给 write/edit;read/run + 联网只读(web_search/web_fetch)+ 纯算术(reconcile_receipt)都给
+    assert set(ro.keys()) == {"read_file", "run_command", "web_search", "web_fetch", "reconcile_receipt"}
     assert "write_file" not in ro and "edit_file" not in ro
     full = make_coding_tools(sandbox=object(), file_state=FileState(),
                              workspace_root="/", token=tok)
