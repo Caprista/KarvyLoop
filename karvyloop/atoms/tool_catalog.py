@@ -16,6 +16,8 @@ BUILTIN_TOOL_NAMES: frozenset[str] = frozenset({
     "run_command", "read_file", "write_file", "edit_file", "web_fetch", "web_search",
     # 报销确定性算术 tool(coding/tools/reconcile.py):expense skill 声明、报销员 role 组合即用。
     "reconcile_receipt",
+    # 小卡随聊能力工具(karvy/tools.py):按 persona.karvy_self 挂进小卡 drive 的工具集。
+    "create_schedule", "remember_fact", "recall_memory",
 })
 
 

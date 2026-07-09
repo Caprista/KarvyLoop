@@ -45,6 +45,9 @@ DEFAULT_TOOL_REQUIREMENTS: dict[str, Mode] = {
     # 报销确定性算术(coding/tools/reconcile.py):纯计算、不碰文件/网络/沙箱、无副作用 →
     # READ_ONLY 下限(否则新工具默认 FULL 会被闸拦、报销员一调就 capability_denied)。
     "reconcile_receipt": Mode.READ_ONLY,
+    # recall_memory(karvy/tools.py):小卡随聊回忆 —— 只读 grep+overlap 召回个人记忆库,
+    # 无副作用(不写、不删)→ READ_ONLY 下限(同 web_search;否则默认 FULL 被拒)。
+    "recall_memory": Mode.READ_ONLY,
     "run_command": Mode.WORKSPACE_WRITE,
     "write_file": Mode.WORKSPACE_WRITE,
     "edit_file": Mode.WORKSPACE_WRITE,
@@ -56,6 +59,10 @@ DEFAULT_TOOL_REQUIREMENTS: dict[str, Mode] = {
     # 开模板域。写的是域/角色注册表(用户已在对话里拍板选定模板)→ 同 create_atom 的
     # WORKSPACE_WRITE 语义;只读 checker 仍拦。
     "instantiate_domain_template": Mode.WORKSPACE_WRITE,
+    # 小卡随聊能力(karvy/tools.py):写调度注册表 / 写个人记忆库,都是"做事中写"→ 同 create_atom
+    # 的 WORKSPACE_WRITE 语义(maker/forge 放行、只读 checker 仍拦;安全靠下游兜)。
+    "create_schedule": Mode.WORKSPACE_WRITE,
+    "remember_fact": Mode.WORKSPACE_WRITE,
     "git_commit": Mode.WORKSPACE_WRITE,
     "network": Mode.FULL,
     "process_spawn": Mode.FULL,

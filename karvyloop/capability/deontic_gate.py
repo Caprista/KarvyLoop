@@ -160,6 +160,7 @@ class DeonticHit:
 _READ_ONLY_TOOLS = frozenset({
     "read_file", "list_dir", "search_code", "web_search", "web_fetch",
     "reconcile_receipt",   # 纯算术、无副作用 → 永不拦
+    "recall_memory",       # 只读召回个人记忆(karvy/tools.py)、无副作用 → 永不拦
 })
 # 工具名首 token 是读语义 → 豁免(查订单/看行情 ≠ 下订单)
 _READ_VERB_PREFIXES = frozenset({

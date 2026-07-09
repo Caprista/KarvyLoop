@@ -59,6 +59,10 @@ async def drive_in_tui(
     self_create_role: str = "",  # §15.5:自造归属的 role id(空=进公共池 provisional)
     domain_registry: Any = None,  # 自我认知落地:给了+小卡人格+建 agent 意图 → 挂 instantiate_domain_template;None=不挂(0 回归)
     domain_store: Any = None,     # 同上:开出的域持久化(None=只进内存,同 /domain/create 语义)
+    scheduler_store: Any = None,  # 小卡随聊能力:给了+小卡人格 → 挂 create_schedule(只有小卡能起定时任务);None=不挂(0 回归)
+    schedule_parser: Any = None,  # NL→cron 解析闭包(make_schedule_parser);None=工具仍挂但调用时诚实回"没接LLM"
+    schedule_target_resolver: Any = None,  # (role_name)->(did,role,aid,disp):把委派角色名解析成定时目标;None=不解析
+    memory: Any = None,           # 小卡随聊能力:给了+小卡人格 → 挂 remember_fact/recall_memory;None=不挂(0 回归)
 ) -> DriveOutcome:
     """在 TUI asyncio loop 里跑 MainLoop.drive。
 
@@ -90,6 +94,33 @@ async def drive_in_tui(
         except Exception:
             logger.warning("[drive] 挂 instantiate_domain_template 失败(降级=只指导不落地)",
                            exc_info=True)
+
+    # 小卡随聊能力工具(karvy/tools.py):与 instantiate_domain_template 同一挂载模式 ——
+    # 小卡人格(karvy_self)+ 对应 registry/store 存在才挂,capability 护栏照走。业务角色 persona
+    # 无 karvy_self 标记 → 不挂(定时任务收口在小卡;记忆是全局个人库,业务角色不直接写)。
+    # 任一条件不满足 = 旧行为(0 回归)。挂载不看意图门(排程/记忆意图与"建 agent"不同门)。
+    if getattr(persona, "karvy_self", False):
+        _karvy_tools = {}
+        try:
+            if scheduler_store is not None:
+                from karvyloop.karvy.tools import make_create_schedule_tool
+                _t = make_create_schedule_tool(
+                    scheduler_store=scheduler_store, schedule_parser=schedule_parser,
+                    target_resolver=schedule_target_resolver)
+                _karvy_tools[_t.name] = _t
+            if memory is not None:
+                from karvyloop.karvy.tools import (
+                    make_recall_memory_tool, make_remember_fact_tool,
+                )
+                for _mk in (make_remember_fact_tool, make_recall_memory_tool):
+                    _t = _mk(memory=memory)
+                    _karvy_tools[_t.name] = _t
+        except Exception:
+            logger.warning("[drive] 挂小卡随聊能力工具失败(降级=只这些工具缺席,不挡对话)",
+                           exc_info=True)
+        if _karvy_tools:
+            mcp_tools = dict(mcp_tools) if isinstance(mcp_tools, dict) else {}
+            mcp_tools.update(_karvy_tools)
 
     def _run_drive() -> DriveOutcome:
         try:

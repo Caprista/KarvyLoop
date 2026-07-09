@@ -965,6 +965,13 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
                                          # 小卡自我认知落地:建 agent 意图 → 挂 instantiate_domain_template
                                          domain_registry=getattr(request.app.state, "domain_registry", None),
                                          domain_store=getattr(request.app.state, "domain_store", None),
+                                         # 小卡随聊能力(karvy/tools.py):定时任务(只小卡能起)+ 随聊记忆(写/召回)。
+                                         # 只在小卡人格挂(persona.karvy_self);业务角色 persona 不挂(drive_in_tui 内再门一道)。
+                                         scheduler_store=_scheduler_store(request.app),
+                                         schedule_parser=_schedule_parser(request.app),
+                                         schedule_target_resolver=(
+                                             lambda rn: _resolve_schedule_target(request.app, rn)),
+                                         memory=mem,
                                          **eff_rk)
     except Exception as e:
         logger.exception(f"api_intent drive 异常: {e}")
