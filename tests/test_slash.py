@@ -61,6 +61,14 @@ def test_reboot_safe_without_relaunch():
     assert out["ok"] is True and "无法重启" in out["text"]   # 处理了(没崩、没起线程),只是无从重启
 
 
-def test_unknown_command_points_to_help():
-    out = dispatch_slash("/nope", _stub_app())
-    assert out["ok"] is False and "/help" in out["text"]
+def test_unknown_command_falls_through():
+    # 未知命令 → 不拦(返 None),原样交给正常 drive —— 别吞以 "/" 开头的正文
+    assert dispatch_slash("/nope", _stub_app()) is None
+    assert dispatch_slash("/etc/hosts 怎么配", _stub_app()) is None   # 路径正文,不该被当命令吞
+
+
+def test_known_command_with_trailing_text_falls_through():
+    # 恰是命令但后面还有正文 → 不拦(用户在写句子,不是纯命令)
+    assert dispatch_slash("/status 现在怎么样", _stub_app()) is None
+    # 纯命令(无多余文本)才拦
+    assert dispatch_slash("/status", _stub_app())["ok"] is True

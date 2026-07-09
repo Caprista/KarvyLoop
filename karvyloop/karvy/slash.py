@@ -4,8 +4,11 @@
 0 请求)**。这不只是便捷:订阅计划多按"每窗口请求次数"限流,ops 走确定性快捷 = 不吃请求配额。
 只在私聊小卡(全局)时启用;业务域里不拦(那里的 "/" 可能是正文)。
 
-返回 `{"text", "cmd", "ok"}`(键名不是 "reason",不进后端 reason 双语门);输出以数字/URL 为主、
-语言中性。未知命令 → 提示 /help(不落 LLM,"/" 就是命令意图)。
+**拦截很保守**(宁可漏拦、不可错吞正文):必须 ① "/" 在最前、② 恰是已注册命令、③ 命令后无多余文本、
+④ 无图片/附件(附件门在 routes.api_intent 那侧)。任一不满足 → 返回 None,**原样交给正常 drive**——
+这样以 "/" 开头的正文(路径 `/etc/hosts`、分数 `/`、写错的命令)不会被吞掉、附带的图也不会被丢。
+
+返回 `{"text", "cmd", "ok"}`(键名不是 "reason",不进后端 reason 双语门);输出以数字/URL 为主、语言中性。
 """
 from __future__ import annotations
 
@@ -153,15 +156,15 @@ _REGISTRY: dict[str, tuple[Any, str]] = {
 
 
 def dispatch_slash(text: str, app: Any) -> Optional[dict]:
-    """跑一条斜杠命令。返回 {"text","cmd","ok"};非斜杠 → None(交给正常 drive)。
-    未知命令仍返回(提示 /help),不落 LLM —— "/" 就是命令意图。绝不抛。"""
+    """跑一条斜杠命令。**只在"恰是已注册命令、且命令后无多余文本"时拦截**,返回 {"text","cmd","ok"};
+    否则(非斜杠 / 未知命令 / 命令后带正文)→ None,原样交给正常 drive(别吞正文)。绝不抛。
+    (附件门在 routes.api_intent 那侧:有图/附件时压根不进这里。)"""
     if not is_slash(text):
         return None
     cmd, args = _parse(text)
     meta = _REGISTRY.get(cmd)
-    if meta is None:
-        avail = " ".join("/" + n for n in _REGISTRY)
-        return {"text": f"未知命令 /{cmd}。可用:{avail}(/help 看说明)", "cmd": cmd, "ok": False}
+    if meta is None or args:   # 未知命令,或命令后还有多余文本 → 不拦,交给正常 drive
+        return None
     try:
         return {"text": meta[0](args, app), "cmd": cmd, "ok": True}
     except Exception as e:  # noqa: BLE001

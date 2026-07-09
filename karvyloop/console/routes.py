@@ -824,7 +824,8 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     # 没配模型也能用 /doctor /url 自救。业务域里不拦(那的 "/" 可能是正文)。
     try:
         from karvyloop.karvy.slash import dispatch_slash, is_slash
-        if is_slash(req.intent):
+        # 有图/附件 → 不当斜杠命令(用户要处理内容,不是跑 ops)—— 别丢了图
+        if is_slash(req.intent) and not getattr(req, "images", None) and not getattr(req, "attachments", None):
             from karvyloop.karvy.capability import is_karvy_peer
             _mgr = getattr(request.app.state, "conversation_manager", None)
             _peer = _mgr.current_peer() if _mgr is not None else None
