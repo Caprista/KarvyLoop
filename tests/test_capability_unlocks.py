@@ -23,7 +23,7 @@ from karvyloop.console import build_console_app  # noqa: E402
 from karvyloop.console.unlocks import list_unlocks  # noqa: E402
 from karvyloop.karvy.observer import WorkbenchObserver  # noqa: E402
 
-EXPECTED_IDS = {"mcp", "files", "asr", "webhook_channel", "email_channel", "relay", "web_verify"}
+EXPECTED_IDS = {"mcp", "files", "asr", "ocr", "webhook_channel", "email_channel", "relay", "web_verify"}
 VALID_STATUS = {"on", "off", "missing_dep"}
 
 

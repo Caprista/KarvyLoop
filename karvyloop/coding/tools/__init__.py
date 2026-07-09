@@ -17,6 +17,7 @@ from .write import WriteTool
 from .edit import EditTool
 from .bash import BashTool
 from .web import WebFetchTool, WebSearchTool
+from .reconcile import ReconcileReceiptTool
 
 
 def make_coding_tools(sandbox, file_state, workspace_root: str,
@@ -35,6 +36,9 @@ def make_coding_tools(sandbox, file_state, workspace_root: str,
         # 基础能力(Hardy):知识库没命中 → 联网搜/读。只读网络,maker/checker 都给。
         "web_search": WebSearchTool(sandbox, file_state, workspace_root, token=token),
         "web_fetch": WebFetchTool(sandbox, file_state, workspace_root, token=token),
+        # 报销的确定性算术 tool(纯计算、只读、maker/checker 都给):expense skill 在 allowed-tools
+        # 声明、方法里调 —— 报销员 role 组合该 skill 即得。把"算"从模型脑子里搬到确定性代码(防降级)。
+        "reconcile_receipt": ReconcileReceiptTool(),
     }
     if not read_only:
         tools["write_file"] = WriteTool(sandbox, file_state, workspace_root, token=token)
@@ -45,5 +49,5 @@ def make_coding_tools(sandbox, file_state, workspace_root: str,
 __all__ = [
     "CodingResult",
     "ReadTool", "WriteTool", "EditTool", "BashTool", "WebFetchTool", "WebSearchTool",
-    "make_coding_tools",
+    "ReconcileReceiptTool", "make_coding_tools",
 ]

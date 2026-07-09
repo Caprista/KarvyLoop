@@ -14,6 +14,8 @@ from __future__ import annotations
 # MCP 接进来的工具名由调用方通过 extra_known 注入(M2+),不在此硬编码。
 BUILTIN_TOOL_NAMES: frozenset[str] = frozenset({
     "run_command", "read_file", "write_file", "edit_file", "web_fetch", "web_search",
+    # 报销确定性算术 tool(coding/tools/reconcile.py):expense skill 声明、报销员 role 组合即用。
+    "reconcile_receipt",
 })
 
 

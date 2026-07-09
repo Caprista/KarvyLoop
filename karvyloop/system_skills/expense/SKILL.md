@@ -10,6 +10,7 @@ when_to_use: When the user hands over a receipt, invoice (发票), shopping list
 tags: [报销, 发票, 增值税发票, 小票, 收据, 票据, 购物清单, 消费清单, 行程单, 账单, 金额, 税号, 抬头, 明细, 报账, 贴票, expense, expenses, reimbursement, receipt, receipts, invoice, invoices, itinerary, ocr, scan]
 allowed-tools:
   - read_file
+  - reconcile_receipt
 ---
 
 # Expense receipt reading (system template)
@@ -74,13 +75,19 @@ and flag it — never a confident fabrication.**
    category hint (step 5). Any field you can't read with confidence is `null`
    and named in the flags — a guessed amount is poison, a `null` is honest.
 
-4. **Check the arithmetic — this is the step that earns trust.** Sum the line
-   items' amounts and compare to the stated total (small tolerance for rounding
-   / tax lines). They match → say so. They don't → **flag `sum_mismatch` and
-   show both numbers**; do not silently "fix" either. This is deterministic —
-   do the addition, show your work, don't take the receipt's word for it. Also
-   flag the obvious gaps: missing total, no line items, missing merchant or
-   date.
+4. **Check the arithmetic — call `reconcile_receipt`, don't do it in your head.**
+   The arithmetic is deterministic, so it must not depend on you (the model)
+   adding correctly. Call the **`reconcile_receipt` tool** with what you
+   extracted — `line_items` (name / qty / unit_price / amount), `subtotal`,
+   `tax`, `total` — **leaving every low-confidence or unreadable number as
+   `null`** (don't pass a shaky reading down; the tool recovers it from the
+   receipt's own math). It reverse-solves values the arithmetic pins down
+   (`unit_price×qty=amount`, `Σamounts=subtotal`, `subtotal+tax=total`), flags
+   what it can't determine, and never guesses. **Use its returned numbers and
+   `flags` as the source of truth over your own mental arithmetic**, and surface
+   its `flags` (e.g. `sum_mismatch`, unresolved line amounts) to the user. If the
+   tool is unavailable, fall back to summing by hand — but flag that it was not
+   independently verified.
 
 5. **Suggest a category — as a hint, from the company sheet, never as a ruling.**
    Check the merchant / items against the team's expense-category sheet (the

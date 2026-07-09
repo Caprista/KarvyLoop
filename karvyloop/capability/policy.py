@@ -42,6 +42,9 @@ DEFAULT_TOOL_REQUIREMENTS: dict[str, Mode] = {
     # 它们走进程内 httpx(不进沙箱子进程),只读、无副作用 → READ_ONLY 下限。
     "web_search": Mode.READ_ONLY,
     "web_fetch": Mode.READ_ONLY,
+    # 报销确定性算术(coding/tools/reconcile.py):纯计算、不碰文件/网络/沙箱、无副作用 →
+    # READ_ONLY 下限(否则新工具默认 FULL 会被闸拦、报销员一调就 capability_denied)。
+    "reconcile_receipt": Mode.READ_ONLY,
     "run_command": Mode.WORKSPACE_WRITE,
     "write_file": Mode.WORKSPACE_WRITE,
     "edit_file": Mode.WORKSPACE_WRITE,
