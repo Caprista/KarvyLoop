@@ -460,6 +460,14 @@ def make_external_agent_tool(*, citizen_registry, bridge_factory, a2a_router=Non
         recipe = citizen.recipe()
         if recipe is None:
             return {"ok": False, "reason": f"「{citizen_id}」没有可用配方(runtime_kind={citizen.runtime_kind})"}
+        # use-time hash 复验(防 rug-pull):**每次派活前**复验目标二进制/配方指纹是否还对得上
+        # attach 时 pin 的值;漂移(有人换了目标 runtime)→ fail-loud 返 needs_reattach,绝不静默
+        # 跑一个被换过的 runtime(#71 §4 MCP rug-pull 实战教训:import 时审一次不够)。
+        from karvyloop.external_runtime import verify_manifest_hash
+        hv = verify_manifest_hash(recipe, citizen.manifest_hash)
+        if not hv.ok:
+            return {"ok": False, "needs_reattach": True, "citizen": citizen_id,
+                    "reason": f"「{citizen_id}」指纹复验不过(疑似被换过),没派活 —— 重新接入:{hv.reason}"}
         # 派活构造成 A2A 信封走 router(前置接线:router 须用 citizen-aware resolver,否则 REJECT_NO_TARGET)
         task_id = ""
         if a2a_router is not None:
@@ -538,8 +546,14 @@ def make_attach_external_agent_tool(*, citizen_registry, probe_fn=None,
         if citizen_registry is None:
             return {"ok": False, "reason": "external_runtime 未接,接不了外部同事"}
         from karvyloop.external_runtime import (
-            ExternalCitizen, STATUS_ACTIVE, builtin_recipe, compute_manifest_hash,
+            ExternalCitizen, STATUS_ACTIVE, TIER_GUEST, TIER_SCOPED, builtin_recipe,
+            normalize_tier,
         )
+        # tier:guest(T0 客人,现状)/ scoped(T1 受限成员,绑定单域深度协作)。deny-by-default:
+        # 未知 tier 值一律归 guest(normalize_tier);scoped **必须**给 domain_id(单域绑定)。
+        tier = normalize_tier(str(inp.get("tier") or TIER_GUEST))
+        if tier == TIER_SCOPED and not domain_id:
+            return {"ok": False, "reason": "受限成员(tier=scoped)必须绑定一个业务域(给 domain_id)"}
         import dataclasses as _dc
         base = builtin_recipe(runtime_kind)
         if base is None:
@@ -559,10 +573,11 @@ def make_attach_external_agent_tool(*, citizen_registry, probe_fn=None,
             citizen_id=citizen_id, runtime_kind=runtime_kind, bin_path=bin_path,
             domain_id=domain_id, capability_card=pr.capability_card,
             token_source=f"ext:{citizen_id}", manifest_hash=pr.manifest_hash,
-            created_by="user", status=STATUS_ACTIVE)
+            created_by="user", status=STATUS_ACTIVE, tier=tier)
         persisted = citizen_registry.add(citizen)
         out = {"ok": True, "citizen": citizen_id, "runtime_kind": runtime_kind,
-               "status": STATUS_ACTIVE, "version": pr.version, "persisted": persisted}
+               "status": STATUS_ACTIVE, "tier": tier, "domain_id": domain_id,
+               "version": pr.version, "persisted": persisted}
         if not persisted:
             out["warning"] = f"已接入但没落盘(重启可能丢):{citizen_registry.persist_error}"
         return out
@@ -572,15 +587,19 @@ def make_attach_external_agent_tool(*, citizen_registry, probe_fn=None,
         description=(
             "接入一个外部 AI runtime,注册成常驻频道同事(之后能被 @ 派活)。先跟用户聊清楚再接:"
             "citizen_id=给它起个花名(如「cc」);runtime_kind=它是哪类外部 runtime;"
-            "bin_path=它在用户机器上的可执行路径(可选,有默认)。系统会先探活(冒烟)确认它真能跑,"
-            "跑不起来会如实告诉你接入失败,别假装接上了。"),
+            "bin_path=它在用户机器上的可执行路径(可选,有默认);domain_id=挂到哪个业务域(可选);"
+            "tier=成员等级:「guest」=客人(默认,派个活拿产出、无域深度)/「scoped」=受限成员"
+            "(绑定单个业务域深度协作,只读该域公共料、写的都可撤,绝不碰域私有认知)——选 scoped 必须给 domain_id。"
+            "系统会先探活(冒烟)确认它真能跑,跑不起来会如实告诉你接入失败,别假装接上了。"),
         input_schema={
             "type": "object",
             "properties": {
                 "citizen_id": {"type": "string", "description": "外部同事花名(唯一)"},
                 "runtime_kind": {"type": "string", "description": "外部 runtime 类型"},
                 "bin_path": {"type": "string", "description": "可执行路径(可选,有默认)"},
-                "domain_id": {"type": "string", "description": "挂载到哪个业务域(可选,不填=私聊/无域)"},
+                "domain_id": {"type": "string", "description": "挂载到哪个业务域(可选;tier=scoped 时必填)"},
+                "tier": {"type": "string", "enum": ["guest", "scoped"],
+                         "description": "成员等级:guest=客人(默认)/ scoped=受限成员(绑定单域深度协作)"},
             },
             "required": ["citizen_id", "runtime_kind"],
         },
@@ -618,6 +637,55 @@ def make_list_external_agents_tool(*, citizen_registry):
     )
 
 
+def make_revoke_external_agent_tool(*, citizen_registry):
+    """把 'scoped 优雅撤销一个外部成员' 包成工具(WORKSPACE_WRITE,写注册表同 attach)。
+
+    撤一个成员 = detach(domain, citizen_id):**不 kill 整个域**——已被 H2A 采纳的产出=已是
+    用户数据不级联删,未采纳的供稿清理,撤销可追溯(返回它 seed 过哪些认知:哪些保留/哪些清)。
+    诚实边界:没有此成员 → ok=False + reason(不假装撤了)。
+    """
+    from karvyloop.capability import Mode
+    from karvyloop.registry.tool import build_tool
+
+    async def _call(inp: dict, token, sandbox) -> Any:
+        inp = inp or {}
+        citizen_id = str(inp.get("citizen_id") or "").strip()
+        domain_id = str(inp.get("domain_id") or "").strip()
+        if not citizen_id:
+            return {"ok": False, "reason": "需要 citizen_id(要撤销哪个外部成员)"}
+        if citizen_registry is None:
+            return {"ok": False, "reason": "external_runtime 未接,撤不了外部成员"}
+        try:
+            ok = citizen_registry.detach(domain_id, citizen_id)
+        except Exception as e:  # noqa: BLE001 — 工具永不穿透异常
+            return {"ok": False, "reason": f"撤销出错:{type(e).__name__}: {e}"}
+        if not ok:
+            return {"ok": False, "reason": f"没有叫「{citizen_id}」的外部成员(在域「{domain_id or '(无域)'}」)"}
+        trace = getattr(citizen_registry, "last_detach_trace", {}) or {}
+        return {"ok": True, "citizen": citizen_id, "domain_id": domain_id,
+                "kept_adopted": trace.get("kept_adopted", []),      # 已采纳:保留(用户数据)
+                "cleared_unadopted": trace.get("cleared_unadopted", []),  # 未采纳:已清
+                "note": "成员已撤销;它被采纳过的产出已是你的数据,原地保留;未采纳的供稿已清理"}
+
+    return build_tool(
+        name="revoke_external_agent",
+        description=(
+            "撤销一个已接入的外部 AI 成员(用户说「把 X 请出去 / 不用 X 了 / 撤了 X」时用)。"
+            "citizen_id=要撤谁;domain_id=它挂在哪个域(不填=无域挂载)。优雅撤销:它被你采纳过的"
+            "产出已是你的数据、原地保留;没采纳的供稿会清掉。不会因撤一个人就动整个域。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "citizen_id": {"type": "string", "description": "要撤销的外部成员花名"},
+                "domain_id": {"type": "string", "description": "它挂载的业务域(不填=无域)"},
+            },
+            "required": ["citizen_id"],
+        },
+        call=_call,
+        required_mode=Mode.WORKSPACE_WRITE,
+    )
+
+
 __all__ = [
     "make_create_schedule_tool",
     "make_remember_fact_tool",
@@ -627,4 +695,5 @@ __all__ = [
     "make_external_agent_tool",
     "make_attach_external_agent_tool",
     "make_list_external_agents_tool",
+    "make_revoke_external_agent_tool",
 ]

@@ -33,11 +33,14 @@ from .citizen import (
     STATUS_NEEDS_REATTACH,
     STATUS_RETIRED,
     STATUS_UNREACHABLE,
+    TIER_GUEST,
+    TIER_SCOPED,
     ExternalCitizen,
     ExternalCitizenRegistry,
     compute_manifest_hash,
+    normalize_tier,
 )
-from .probe import ProbeResult, probe
+from .probe import HashVerifyResult, ProbeResult, probe, verify_manifest_hash
 from .recipe import (
     DriveRecipe,
     ExitSpec,
@@ -58,12 +61,13 @@ __all__ = [
     "ExternalCitizen", "ExternalCitizenRegistry", "compute_manifest_hash", "EXTERNAL_ROLE",
     "STATUS_ACTIVE", "STATUS_UNREACHABLE", "STATUS_BLOCKED",
     "STATUS_RETIRED", "STATUS_NEEDS_REATTACH",
+    "TIER_GUEST", "TIER_SCOPED", "normalize_tier",
     # recipe
     "DriveRecipe", "ParseSpec", "ExitSpec",
     "PARSE_SINGLE_JSON", "PARSE_NDJSON", "PARSE_RAW_TEXT",
     "builtin_recipe", "builtin_kinds",
     # probe
-    "probe", "ProbeResult",
+    "probe", "ProbeResult", "verify_manifest_hash", "HashVerifyResult",
     # addressing
     "make_citizen_aware_resolver", "citizen_address",
     # redact

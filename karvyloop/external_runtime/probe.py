@@ -97,6 +97,42 @@ def probe(recipe: DriveRecipe, *, env_base: Optional[dict] = None,
                        capability_card=card, manifest_hash=manifest)
 
 
+@dataclasses.dataclass(frozen=True)
+class HashVerifyResult:
+    """use-time hash 复验结果(rug-pull 防御)。ok=False → 目标被换过,fail-loud 不派活。"""
+    ok: bool
+    current_hash: str = ""
+    pinned_hash: str = ""
+    reason: str = ""
+
+
+def verify_manifest_hash(recipe: DriveRecipe, pinned_hash: str) -> HashVerifyResult:
+    """派活前复验:目标二进制/配方的 hash 是否还对得上 attach 时 pin 的值(rug-pull 防御)。
+
+    **确定性、零模型、不起子进程** —— 只重算 manifest_hash(bin_path/version/argv 模板/黑名单)
+    并与 pin 值逐字比对。漂移(有人换了目标 runtime 的命令模板/入口)→ ok=False,
+    调用侧 fail-loud 返回 needs_reattach,**绝不静默跑一个被换过的 runtime**。
+
+    - pin 值为空(老记录没 pin)→ 视为不可复验,ok=False(deny-by-default:宁拒不放被换的)。
+    - bin 找不到 → ok=False(reason=二进制找不到;连目标都不在,更不能派)。
+    - 注:version 复算沿用 attach 时口径(空 version;冒烟才抓 model_hint),保证同配方 hash 稳定可比。
+    """
+    if not pinned_hash:
+        return HashVerifyResult(ok=False, pinned_hash="",
+                                reason="无 pin 值可复验(老记录?)—— 重新接入以 pin 当前指纹")
+    if _which(recipe.resolved_bin()) is None:
+        return HashVerifyResult(ok=False, pinned_hash=pinned_hash,
+                                reason=f"二进制找不到:{recipe.bin_path}")
+    current = compute_manifest_hash(
+        bin_path=recipe.bin_path, version="",
+        argv_template=recipe.argv_template,
+        blocked_entrypoints=recipe.blocked_entrypoints)
+    if current != pinned_hash:
+        return HashVerifyResult(ok=False, current_hash=current, pinned_hash=pinned_hash,
+                                reason="配方/命令指纹已漂移(疑似 rug-pull),需重新接入复审")
+    return HashVerifyResult(ok=True, current_hash=current, pinned_hash=pinned_hash)
+
+
 def _card(recipe: DriveRecipe, version: str, *, smoke_ok) -> dict:
     """能力卡(探测事实,非假 soul)。"""
     return {
@@ -110,4 +146,4 @@ def _card(recipe: DriveRecipe, version: str, *, smoke_ok) -> dict:
     }
 
 
-__all__ = ["probe", "ProbeResult"]
+__all__ = ["probe", "ProbeResult", "verify_manifest_hash", "HashVerifyResult"]

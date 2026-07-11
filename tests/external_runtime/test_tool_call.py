@@ -11,16 +11,25 @@ sys.path.insert(0, str(ROOT))
 
 from karvyloop.external_runtime import (  # noqa: E402
     BridgeResult, ExternalCitizen, ExternalCitizenRegistry, STATUS_ACTIVE,
-    STATUS_UNREACHABLE,
+    STATUS_UNREACHABLE, builtin_recipe, compute_manifest_hash,
 )
 from karvyloop.external_runtime.bridge import STATUS_DONE, STATUS_FAILED  # noqa: E402
 from karvyloop.karvy.tools import make_external_agent_tool  # noqa: E402
 
 
+def _pinned_hash(runtime_kind="raw_text_sidecar", bin_path=sys.executable):
+    r = builtin_recipe(runtime_kind)
+    return compute_manifest_hash(bin_path=bin_path, version="",
+                                 argv_template=r.argv_template,
+                                 blocked_entrypoints=r.blocked_entrypoints)
+
+
 def _reg_with_active():
+    # use-time hash 复验后:公民须有真 bin + 对得上的 pin,否则派活前就被 needs_reattach 拦
     reg = ExternalCitizenRegistry()
     reg.add(ExternalCitizen(citizen_id="cc", runtime_kind="raw_text_sidecar",
-                            bin_path="ext-cli", domain_id="", status=STATUS_ACTIVE))
+                            bin_path=sys.executable, domain_id="", status=STATUS_ACTIVE,
+                            manifest_hash=_pinned_hash()))
     return reg
 
 
