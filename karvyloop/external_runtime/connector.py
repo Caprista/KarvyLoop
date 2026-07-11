@@ -32,28 +32,36 @@ __M3_TODO__ = (
 
 
 def _self_report(runtime_kind: str, bin_path: str, version: str,
-                 capabilities: list[str]) -> dict:
-    """组装自报载荷(untrusted:后端登记不提权)。带一点确定性环境事实(OS/python)供人读诊断。"""
+                 capabilities: list[str], agent_id: str = "") -> dict:
+    """组装自报载荷(untrusted:后端登记不提权)。带一点确定性环境事实(OS/python)供人读诊断。
+
+    agent_id(single_json 多 agent 形态):自报"我这次代表哪个内部 agent 接入"。后端**已在建壳侧
+    存了 configured_agent_id**(create_pending 时用户选的),这里的自报只是回执一致性(untrusted,不提权)。
+    """
     caps = list(capabilities or [])
     # 环境事实(非机密):帮机主在 console 上认出"这是哪台 runtime";不含任何秘钥/凭证。
     env_note = f"{platform.system()}/{platform.machine()} py{platform.python_version()}"
-    return {
+    rep = {
         "runtime_kind": (runtime_kind or "").strip(),
         "bin_path": (bin_path or "").strip(),
         "version": (version or env_note).strip(),
         "capabilities": [str(c).strip() for c in caps if str(c).strip()],
     }
+    aid = (agent_id or "").strip()
+    if aid:
+        rep["agent_id"] = aid   # 后端 claim 忽略未识别字段(pydantic 默认丢弃);建壳侧的选定为准
+    return rep
 
 
 def claim(claim_url: str, secret: str, *, runtime_kind: str = "", bin_path: str = "",
           version: str = "", capabilities: list[str] | None = None,
-          timeout_s: float = 15.0) -> dict:
+          agent_id: str = "", timeout_s: float = 15.0) -> dict:
     """POST 认领秘钥 + 自报身份到 claim 端点。返回后端 JSON(dict);网络/解析出错抛异常。
 
     **不打印/不记 secret**;secret 只进请求体(HTTPS/HTTP 传输,本地优先常是 http://127.0.0.1)。
     """
     payload = {"secret": secret}
-    payload.update(_self_report(runtime_kind, bin_path, version, capabilities or []))
+    payload.update(_self_report(runtime_kind, bin_path, version, capabilities or [], agent_id))
     data = json.dumps(payload).encode("utf-8")
     reqst = urllib.request.Request(
         claim_url, data=data, method="POST",
@@ -87,6 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--citizen-id", default="", help="(可选)壳花名,仅用于人读日志,不参与校验")
     p.add_argument("--runtime-kind", default="",
                    help="(可选,自报)这个 runtime 是哪类:generic_cli / single_json_cli / raw_text_sidecar")
+    p.add_argument("--agent-id", dest="agent_id", default="",
+                   help="(可选,自报)single_json 多 agent 形态:代表哪个内部 agent 接入(默认 main;"
+                        "以建壳侧所选为准,这里只回执)")
     p.add_argument("--bin", dest="bin_path", default="",
                    help="(可选,自报)本机场景登记可执行路径 —— 之后本机驱动走现有子进程桥")
     p.add_argument("--version", default="", help="(可选,自报)runtime 版本/模型提示")
@@ -107,7 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = claim(
             args.claim_url, secret, runtime_kind=args.runtime_kind,
-            bin_path=args.bin_path, version=args.version, capabilities=args.capabilities)
+            bin_path=args.bin_path, version=args.version, capabilities=args.capabilities,
+            agent_id=args.agent_id)
     except urllib.error.HTTPError as e:
         # 400/403 等:后端拒(秘钥错/过期/来源门)。不回显秘钥,只回 HTTP 状态 + 尽力读原因。
         detail = ""

@@ -167,17 +167,37 @@ var KarvyExternalPanelBundle = (function(exports) {
       _pollTimer = null;
     }
   }
-  async function _startAddFlow(host) {
-    const citizenId = window.prompt(t("external.add_prompt_name"), "");
-    if (!citizenId || !citizenId.trim()) return;
-    const res = await _postJSON("/api/external/create_pending", { citizen_id: citizenId.trim() });
+  const _KIND_OPTIONS = [
+    {
+      kind: "single_json_cli",
+      labelKey: "external.kind.single_json.label",
+      hintKey: "external.kind.single_json.hint",
+      hasAgent: true
+    },
+    {
+      kind: "raw_text_sidecar",
+      labelKey: "external.kind.raw_text.label",
+      hintKey: "external.kind.raw_text.hint",
+      hasAgent: false
+    },
+    {
+      kind: "generic_cli",
+      labelKey: "external.kind.generic.label",
+      hintKey: "external.kind.generic.hint",
+      hasAgent: false
+    }
+  ];
+  async function _createPendingAndShowClaim(host, citizenId, runtimeKind, agentId) {
+    const payload = { citizen_id: citizenId, runtime_kind: runtimeKind };
+    if (agentId) payload.agent_id = agentId;
+    const res = await _postJSON("/api/external/create_pending", payload);
     if (!(res.ok && res.data && res.data.ok)) {
       window.alert(t("external.add_failed", { reason: res.data && res.data.reason || res.status }));
       return;
     }
     const d = res.data;
     const box = el("div", { class: "ext-claim-box" });
-    box.appendChild(el("div", { class: "ext-claim-title", text: t("external.claim_ready_title", { name: citizenId.trim() }) }));
+    box.appendChild(el("div", { class: "ext-claim-title", text: t("external.claim_ready_title", { name: citizenId }) }));
     box.appendChild(el("div", { class: "mgmt-hint ext-claim-warn", text: t("external.claim_secret_once") }));
     const mkCopyRow = (labelKey, cmd) => {
       const row = el("div", { class: "ext-claim-row" });
@@ -208,7 +228,7 @@ var KarvyExternalPanelBundle = (function(exports) {
     host.appendChild(box);
     _stopPoll();
     const dom = d.citizen ? d.citizen.domain_id || "" : "";
-    const cid = d.citizen ? d.citizen.citizen_id || citizenId.trim() : citizenId.trim();
+    const cid = d.citizen ? d.citizen.citizen_id || citizenId : citizenId;
     _pollTimer = window.setInterval(async () => {
       let data = null;
       try {
@@ -224,6 +244,94 @@ var KarvyExternalPanelBundle = (function(exports) {
         await render(host);
       }
     }, 2500);
+  }
+  async function _startAddFlow(host) {
+    const citizenId = window.prompt(t("external.add_prompt_name"), "");
+    if (!citizenId || !citizenId.trim()) return;
+    const name = citizenId.trim();
+    let detected = [];
+    try {
+      const dr = await _getJSON("/api/external/detect");
+      detected = dr && Array.isArray(dr.detected) ? dr.detected : [];
+    } catch (e) {
+    }
+    _renderKindStep(host, name, detected);
+  }
+  function _renderKindStep(host, name, detected) {
+    _stopPoll();
+    const box = el("div", { class: "ext-add-box" });
+    box.appendChild(el("div", { class: "ext-add-title", text: t("external.add_step_kind_title", { name }) }));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("external.add_step_kind_hint") }));
+    const detectedKinds = new Set(detected.map((x) => x.runtime_kind));
+    if (detected.length) {
+      box.appendChild(el("div", {
+        class: "mgmt-hint ext-detected-title",
+        text: t("external.detect_found", { list: detected.map((x) => x.bin).join(", ") })
+      }));
+    }
+    const list = el("div", { class: "ext-kind-list" });
+    for (const opt of _KIND_OPTIONS) {
+      const row = el("div", { class: "ext-kind-card" });
+      const isDetected = detectedKinds.has(opt.kind);
+      row.appendChild(el(
+        "div",
+        { class: "ext-kind-name" },
+        el("span", { text: t(opt.labelKey) }),
+        isDetected ? el("span", { class: "ext-kind-detected", text: " · " + t("external.detect_badge") }) : null
+      ));
+      row.appendChild(el("div", { class: "mgmt-hint ext-kind-hint", text: t(opt.hintKey) }));
+      const actions = el("div", { class: "dpref-actions" });
+      actions.appendChild(el("button", {
+        class: "dpref-confirm",
+        text: t("external.kind_choose"),
+        onclick: () => {
+          _afterKindChosen(host, name, opt);
+        }
+      }));
+      row.appendChild(actions);
+      list.appendChild(row);
+    }
+    box.appendChild(list);
+    const cancel = el("button", { class: "dpref-edit", text: t("external.add_cancel") });
+    cancel.addEventListener("click", async () => {
+      await render(host);
+    });
+    box.appendChild(cancel);
+    host.innerHTML = "";
+    host.appendChild(box);
+  }
+  function _afterKindChosen(host, name, opt) {
+    if (!opt.hasAgent) {
+      void _createPendingAndShowClaim(host, name, opt.kind, "");
+      return;
+    }
+    const box = el("div", { class: "ext-add-box" });
+    box.appendChild(el("div", { class: "ext-add-title", text: t("external.add_step_agent_title", { name }) }));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("external.add_step_agent_hint") }));
+    const input = el("input", {
+      class: "ext-agent-input",
+      type: "text",
+      placeholder: t("external.agent_placeholder")
+    });
+    box.appendChild(input);
+    const actions = el("div", { class: "dpref-actions" });
+    actions.appendChild(el("button", {
+      class: "dpref-confirm",
+      text: t("external.agent_confirm"),
+      onclick: () => {
+        void _createPendingAndShowClaim(host, name, opt.kind, input.value.trim());
+      }
+    }));
+    actions.appendChild(el("button", {
+      class: "dpref-edit",
+      text: t("external.agent_skip"),
+      onclick: () => {
+        void _createPendingAndShowClaim(host, name, opt.kind, "");
+      }
+    }));
+    box.appendChild(actions);
+    host.innerHTML = "";
+    host.appendChild(box);
   }
   async function _renderOnboarding(host) {
     const box = el("div", { class: "ext-onboarding" });

@@ -159,11 +159,25 @@ function _stopPoll(): void {
   if (_pollTimer !== null) { window.clearInterval(_pollTimer); _pollTimer = null; }
 }
 
-// 「＋添加外部 runtime」流:建壳发码 → 弹出"复制这段到你的 runtime 里跑,等待接入…" → 轮询翻在线。
-async function _startAddFlow(host: HTMLElement): Promise<void> {
-  const citizenId = window.prompt(t("external.add_prompt_name"), "");
-  if (!citizenId || !citizenId.trim()) return;
-  const res = await _postJSON("/api/external/create_pending", { citizen_id: citizenId.trim() });
+// runtime 类型选项:用**人读的形态描述**(别硬编码产品名 —— 中性名纪律)。每个带一句"怎么对号入座"
+// (看你的 runtime headless 输出长什么样)。value = 后端 runtime_kind;has_agent = 此形态 argv 有 --agent。
+interface KindOption { kind: string; labelKey: string; hintKey: string; hasAgent: boolean; }
+const _KIND_OPTIONS: KindOption[] = [
+  { kind: "single_json_cli", labelKey: "external.kind.single_json.label",
+    hintKey: "external.kind.single_json.hint", hasAgent: true },
+  { kind: "raw_text_sidecar", labelKey: "external.kind.raw_text.label",
+    hintKey: "external.kind.raw_text.hint", hasAgent: false },
+  { kind: "generic_cli", labelKey: "external.kind.generic.label",
+    hintKey: "external.kind.generic.hint", hasAgent: false },
+];
+
+// 建壳发码 + 弹"复制这段…等待接入" + 轮询翻在线。定型信息(runtime_kind/agent_id)已在参数里传给后端。
+async function _createPendingAndShowClaim(
+  host: HTMLElement, citizenId: string, runtimeKind: string, agentId: string,
+): Promise<void> {
+  const payload: Record<string, unknown> = { citizen_id: citizenId, runtime_kind: runtimeKind };
+  if (agentId) payload.agent_id = agentId;
+  const res = await _postJSON("/api/external/create_pending", payload);
   if (!(res.ok && res.data && res.data.ok)) {
     window.alert(t("external.add_failed", { reason: (res.data && res.data.reason) || res.status }));
     return;
@@ -171,7 +185,7 @@ async function _startAddFlow(host: HTMLElement): Promise<void> {
   const d = res.data;
   // 复制指令面板:秘钥 + 回调 URL + 现成命令。醒目提示"秘钥一次性、只显示这一次、10 分钟内认领"。
   const box = el("div", { class: "ext-claim-box" });
-  box.appendChild(el("div", { class: "ext-claim-title", text: t("external.claim_ready_title", { name: citizenId.trim() }) }));
+  box.appendChild(el("div", { class: "ext-claim-title", text: t("external.claim_ready_title", { name: citizenId }) }));
   box.appendChild(el("div", { class: "mgmt-hint ext-claim-warn", text: t("external.claim_secret_once") }));
   // 连接器命令(推荐)+ 应急 curl,各带复制按钮。
   const mkCopyRow = (labelKey: string, cmd: string) => {
@@ -199,7 +213,7 @@ async function _startAddFlow(host: HTMLElement): Promise<void> {
   // 轮询:壳翻 active(pending=false)→ 认领成功,刷新回列表;壳消失(取消/过期后清)→ 也刷新。
   _stopPoll();
   const dom = d.citizen ? (d.citizen.domain_id || "") : "";
-  const cid = d.citizen ? (d.citizen.citizen_id || citizenId.trim()) : citizenId.trim();
+  const cid = d.citizen ? (d.citizen.citizen_id || citizenId) : citizenId;
   _pollTimer = window.setInterval(async () => {
     let data: any = null;
     try { data = await _getJSON("/api/external/citizens"); } catch (e) { return; }
@@ -211,6 +225,82 @@ async function _startAddFlow(host: HTMLElement): Promise<void> {
       await render(host);
     }
   }, 2500) as unknown as number;
+}
+
+// 「＋添加外部 runtime」流(定型):起花名 → 选 runtime 类型(人读形态 + 怎么对号入座)→ single_json
+// 型再填 agent_id(可选,默认 main)→ create_pending 带 runtime_kind(+agent_id)→ 定型壳 → 复制指令。
+// 探到本机 bin(定型 + bin 已知)给"直接接入(本机)"快捷;探不到不影响主流程(纯形态自选)。
+async function _startAddFlow(host: HTMLElement): Promise<void> {
+  const citizenId = window.prompt(t("external.add_prompt_name"), "");
+  if (!citizenId || !citizenId.trim()) return;
+  const name = citizenId.trim();
+  // 探本机(辅助,失败/空不影响主流程):{runtime_kind, bin} 列表。
+  let detected: Array<{ runtime_kind: string; bin: string }> = [];
+  try {
+    const dr = await _getJSON("/api/external/detect");
+    detected = (dr && Array.isArray(dr.detected)) ? dr.detected : [];
+  } catch (e) { /* 探测失败:纯形态自选 */ }
+  _renderKindStep(host, name, detected);
+}
+
+// 第二步:选 runtime 类型(形态描述 + 怎么对号入座)。探到的类型置顶给"检测到 + 直接接入(本机)"快捷。
+function _renderKindStep(
+  host: HTMLElement, name: string,
+  detected: Array<{ runtime_kind: string; bin: string }>,
+): void {
+  _stopPoll();
+  const box = el("div", { class: "ext-add-box" });
+  box.appendChild(el("div", { class: "ext-add-title", text: t("external.add_step_kind_title", { name }) }));
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("external.add_step_kind_hint") }));
+  // 探到的定型 bin(去重):置顶"检测到:X"辅助自选(下方对应类型卡也标"检测到")。
+  const detectedKinds = new Set(detected.map((x) => x.runtime_kind));
+  if (detected.length) {
+    box.appendChild(el("div", { class: "mgmt-hint ext-detected-title",
+      text: t("external.detect_found", { list: detected.map((x) => x.bin).join(", ") }) }));
+  }
+  const list = el("div", { class: "ext-kind-list" });
+  for (const opt of _KIND_OPTIONS) {
+    const row = el("div", { class: "ext-kind-card" });
+    const isDetected = detectedKinds.has(opt.kind);
+    row.appendChild(el("div", { class: "ext-kind-name" },
+      el("span", { text: t(opt.labelKey) }),
+      isDetected ? el("span", { class: "ext-kind-detected", text: " · " + t("external.detect_badge") }) : null));
+    row.appendChild(el("div", { class: "mgmt-hint ext-kind-hint", text: t(opt.hintKey) }));
+    const actions = el("div", { class: "dpref-actions" });
+    // 选这个类型 → 进下一步(single_json 问 agent;否则直接建壳)。
+    actions.appendChild(el("button", { class: "dpref-confirm", text: t("external.kind_choose"),
+      onclick: () => { _afterKindChosen(host, name, opt); } }));
+    row.appendChild(actions);
+    list.appendChild(row);
+  }
+  box.appendChild(list);
+  const cancel = el("button", { class: "dpref-edit", text: t("external.add_cancel") });
+  cancel.addEventListener("click", async () => { await render(host); });
+  box.appendChild(cancel);
+  host.innerHTML = "";
+  host.appendChild(box);
+}
+
+// 选定类型后:single_json 型(有 --agent 槽)再问 agent_id(可选,默认 main);其余型直接建壳。
+function _afterKindChosen(host: HTMLElement, name: string, opt: KindOption): void {
+  if (!opt.hasAgent) {
+    void _createPendingAndShowClaim(host, name, opt.kind, "");
+    return;
+  }
+  const box = el("div", { class: "ext-add-box" });
+  box.appendChild(el("div", { class: "ext-add-title", text: t("external.add_step_agent_title", { name }) }));
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("external.add_step_agent_hint") }));
+  const input = el("input", { class: "ext-agent-input", type: "text",
+    placeholder: t("external.agent_placeholder") }) as HTMLInputElement;
+  box.appendChild(input);
+  const actions = el("div", { class: "dpref-actions" });
+  actions.appendChild(el("button", { class: "dpref-confirm", text: t("external.agent_confirm"),
+    onclick: () => { void _createPendingAndShowClaim(host, name, opt.kind, input.value.trim()); } }));
+  actions.appendChild(el("button", { class: "dpref-edit", text: t("external.agent_skip"),
+    onclick: () => { void _createPendingAndShowClaim(host, name, opt.kind, ""); } }));
+  box.appendChild(actions);
+  host.innerHTML = "";
+  host.appendChild(box);
 }
 
 // 按需接入引导：没装 → 官方安装指引（从官方源装；我们绝不代托管/不 bundle/不 git clone 他家代码）。

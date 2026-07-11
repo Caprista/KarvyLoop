@@ -293,7 +293,37 @@ def _console_base_url(request: Request) -> str:
 class ExternalCreatePendingRequest(BaseModel):
     citizen_id: str = Field(..., min_length=1, max_length=64)
     domain_id: str = Field(default="", max_length=64)
+    # 定型:前端选的 runtime 类型(generic_cli / single_json_cli / raw_text_sidecar)。
+    # 空 = 未选(壳没定型,取不到配方、驱动不了)—— 前端应逼选;后端不硬崩,只如实建空壳(诚实反映"待定型")。
     runtime_kind: str = Field(default="", max_length=64)
+    # 多 agent 支持:single_json_cli 形态的 argv 有 `--agent {agent_id}` —— 选此型时可指定接哪个 agent
+    # (默认 main)。存进壳的 capability_card.configured_agent_id,驱动时填进 argv 的 {agent_id} 槽。
+    agent_id: str = Field(default="", max_length=64)
+
+
+def _stamp_agent_id(reg: Any, pending: Any, agent_id: str) -> Any:
+    """把用户选的 agent_id 盖进 pending 壳的 capability_card(configured_agent_id),再 upsert 回注册表。
+
+    不改注册表内部逻辑、只用其公共面(add 是同键 upsert + 落盘)。agent_id 空 → 原样返回不动壳。
+    落盘失败不阻断建壳(壳/秘钥已发);只是 agent_id 没持久,fail-loud 记一条 warning(不含秘钥)。
+    """
+    aid = (agent_id or "").strip()
+    if not aid:
+        return pending
+    add = getattr(reg, "add", None)
+    if not callable(add):
+        return pending  # 注册表无 upsert 面(降级):agent_id 无处落,壳仍是 pending 可认领
+    try:
+        import dataclasses
+        card = dict(getattr(pending, "capability_card", {}) or {})
+        card["configured_agent_id"] = aid
+        stamped = dataclasses.replace(pending, capability_card=card)
+        if not add(stamped):
+            logger.warning("create_pending: agent_id 落盘失败(壳已建,agent_id 未持久)")
+        return stamped
+    except Exception as e:  # noqa: BLE001 — 盖 agent_id 失败不拖垮建壳
+        logger.warning(f"create_pending: 盖 agent_id 出错: {type(e).__name__}")
+        return pending
 
 
 @router.post("/external/create_pending")
@@ -302,6 +332,9 @@ def api_external_create_pending(req: ExternalCreatePendingRequest, request: Requ
 
     返回:pending 壳视图 + **一次性明文认领秘钥**(只此一次)+ 认领回调 URL + 一段复制指令
     (含秘钥 + 回调 URL,用户复制去自己的 runtime 里跑)。秘钥绝不进日志(和 API key 同纪律)。
+
+    定型:runtime_kind 决定壳取哪份配方(空=没定型、驱动不了);agent_id(single_json 形态可选,默认 main)
+    盖进 capability_card.configured_agent_id → 驱动时进 argv 的 {agent_id} 槽,明确"接哪个 agent"。
     """
     reg = _registry(request.app)
     if reg is None:
@@ -320,6 +353,8 @@ def api_external_create_pending(req: ExternalCreatePendingRequest, request: Requ
         return {"ok": False, "reason": f"建壳失败: {type(e).__name__}"}
     if pending is None:
         return {"ok": False, "reason": err or "建壳失败"}
+    # 定型后盖 agent_id(选了 single_json 型 + 填了 agent 才有值;空则不动壳)。
+    pending = _stamp_agent_id(reg, pending, req.agent_id)
     base = _console_base_url(request)
     claim_url = f"{base}/api/external/claim"
     # 复制指令:一段薄命令,POST 到 claim 端点带秘钥。**秘钥只在这个响应体里出现一次**;不落日志。
@@ -332,15 +367,35 @@ def api_external_create_pending(req: ExternalCreatePendingRequest, request: Requ
         "claim_secret": full_secret,
         # 现成可跑的两种复制指令(前端择一展示):
         #   ① connector 脚本(推荐,自报身份/能力):python -m karvyloop.external_runtime.connector ...
+        #      预填 --runtime-kind(选的定型),让自报 kind 一致;single_json 型 + 填了 agent 再预填 --agent-id。
         #   ② 应急 curl(裸 POST)。
-        "connector_cmd": (
-            f'python -m karvyloop.external_runtime.connector '
-            f'--claim-url "{claim_url}" --secret "{full_secret}" '
-            f'--citizen-id "{req.citizen_id}"'),
+        "connector_cmd": _connector_cmd(
+            claim_url, full_secret, req.citizen_id, req.runtime_kind or "", req.agent_id or ""),
         "curl_cmd": (
             f'curl -X POST "{claim_url}" -H "Content-Type: application/json" '
             f'-d \'{{"secret": "{full_secret}"}}\''),
     }
+
+
+def _connector_cmd(claim_url: str, secret: str, citizen_id: str,
+                   runtime_kind: str, agent_id: str) -> str:
+    """拼连接器复制指令。预填 --runtime-kind(选的定型)+ 可选 --agent-id(single_json 多 agent 时)。
+
+    argv 元素带引号包裹(值可能含空格/特殊字符);秘钥进 --secret(一次性,只在此响应体出现一次)。
+    """
+    parts = [
+        "python -m karvyloop.external_runtime.connector",
+        f'--claim-url "{claim_url}"',
+        f'--secret "{secret}"',
+        f'--citizen-id "{citizen_id}"',
+    ]
+    rk = (runtime_kind or "").strip()
+    if rk:
+        parts.append(f'--runtime-kind "{rk}"')
+    aid = (agent_id or "").strip()
+    if aid:
+        parts.append(f'--agent-id "{aid}"')
+    return " ".join(parts)
 
 
 class ExternalCancelPendingRequest(BaseModel):
@@ -406,6 +461,66 @@ def api_external_claim(req: ExternalClaimRequest, request: Request) -> dict[str,
         logger.warning(f"citizen_registry.claim 失败: {type(e).__name__}")  # 不记 secret
         return {"ok": False, "reason": f"认领处理出错: {type(e).__name__}"}
     return result if isinstance(result, dict) else {"ok": False, "reason": "认领返回异常"}
+
+
+# ---- GET /api/external/detect:探本机装了哪类可接入 runtime(辅助添加流"检测到:X")----
+
+def _detect_local_runtimes(which: Optional[Any] = None) -> list[dict[str, Any]]:
+    """按内置配方的 probe_bins 探 PATH,返回 [{runtime_kind, bin}] —— 只报**我们有配方能真驱动 + 确知
+    用此确切 CLI** 的 bin(probe_bins 非空的配方)。
+
+    **纪律**:不硬编码产品名;runtime_kind + 探到的 bin 都是确定性事实(PATH 上有没有这个可执行名)。
+    没有 probe_bins 的配方(shape-only,不认领具体产品)**不探**——那些靠添加流的形态自选。
+    永不执行候选 bin、永不联网、永不抛。which 可注入(测试);默认 shutil.which。
+    """
+    def _default_which(name: str) -> bool:
+        try:
+            import shutil
+            return shutil.which(name) is not None
+        except Exception:
+            return False
+    probe = which or _default_which
+    out: list[dict[str, Any]] = []
+    try:
+        from karvyloop.external_runtime.recipe import builtin_kinds, builtin_recipe
+    except Exception:
+        return out
+    seen: set[tuple[str, str]] = set()
+    for kind in builtin_kinds():
+        try:
+            r = builtin_recipe(kind)
+        except Exception:
+            r = None
+        if r is None:
+            continue
+        for b in (getattr(r, "probe_bins", ()) or ()):
+            b = (b or "").strip()
+            if not b or (kind, b) in seen:
+                continue
+            try:
+                present = bool(probe(b))
+            except Exception:
+                present = False
+            if present:
+                seen.add((kind, b))
+                out.append({"runtime_kind": kind, "bin": b})
+    return out
+
+
+@router.get("/external/detect")
+def api_external_detect(request: Request) -> dict[str, Any]:
+    """探本机装了哪类可接入 runtime,返回 {runtime_kind, bin} 列表让添加流"检测到:X"辅助自选。
+
+    只是**辅助**:探不到不影响主流程(用户仍靠形态描述对号入座)。探到的项前端可给"直接接入(本机)"
+    快捷(定型 + bin 已知)。只读、确定性、永不执行候选 bin、永不联网、不含 key。
+    """
+    detected = _detect_local_runtimes()
+    return {
+        "detected": detected,
+        "n": len(detected),
+        # 边界声明(审计事实):探到 = 本机 PATH 上有这个可执行名,不代表我们分发/托管它。
+        "we_bundle_it": False,
+    }
 
 
 # ---- GET /api/external/onboarding:按需接入引导(装没装 + 官方安装指引)----
