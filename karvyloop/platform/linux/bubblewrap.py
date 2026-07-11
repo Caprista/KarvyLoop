@@ -3,9 +3,15 @@
 规格：docs/modules/sandbox.md §3。
 实现要点：
   1) --unshare-all 起步，按 token.fs 显式放开（fail-closed）
-  2) token.net 缺 → --unshare-net 兜底（v1 仅二元网络）
+  2) token.net 缺 → --unshare-net 兜底（二元网络）
+  2b) **按域名 egress allowlist**(token.net_allowlist 非空):目标 = 隔离 netns 的唯一 egress
+     经免 root 用户态网络栈(pasta/slirp4netns)转给本机 allowlist 代理 → 域名级真强制。
+     部件(1)用户态 allowlist 代理**已焊已测**(egress_proxy.py:HTTP CONNECT+SOCKS5,命中放行
+     否则确定性拒、IP 字面量拒);部件(2)"不可绕过的 netns→代理专用路由"装配**尚未真机验证**。
+     安全是地基,宁 fail-closed 不假安全 → 在(2)验证前 **allowlist 非空一律 fail-closed 拒网**
+     (--unshare-net),**绝不**退回可被无视的 *_PROXY env 假放行。待(2)落地即翻真强制(P1)。
   3) 超时强杀 + 输出字节截断（UTF-8 边界，HR-9 同源）
-  4) 不接 L7 过滤（v1 范围外，留 P1）
+  4) 不接 L7 内容过滤（范围外，留 P1）
   5) **Landlock 深度防御**（landlock.py）：内核支持则在 bwrap 之上再叠一层 Landlock LSM
      文件系统门（workspace 可写、系统 bin 只读、其余默认拒）——mount 隔离 + 内核路径规则
      双层。旧核不支持 → 优雅降级为纯 bwrap（fail-closed 语义不变）。免特权（no_new_privs）。
@@ -21,7 +27,7 @@ from typing import Optional
 
 from karvyloop.capability import is_within_workspace
 from karvyloop.sandbox.exec_result import ExecResult
-from karvyloop.sandbox.mounts import has_net, mounts_from_token
+from karvyloop.sandbox.mounts import has_net, mounts_from_token, net_allowlist_of
 from karvyloop.schemas import CapabilityToken
 
 
@@ -143,6 +149,28 @@ class BubblewrapSandbox:
         except Exception:
             pass
         net = has_net(token)
+        allowlist = net_allowlist_of(token)
+
+        # ---- 按域名 egress allowlist(外部子进程成员化的确定性网络地基)----
+        # allowlist 非空 = 只放行这些域名、其余拒。需**域名级强制**,且强制必须**不可绕过**。
+        #
+        # 域名级强制的两个部件:
+        #   (1) 用户态 allowlist 代理(egress_proxy.AllowlistProxy)—— **已焊、已测**:HTTP CONNECT +
+        #       SOCKS5,命中 allowlist 放行、否则确定性拒(连 socket 都不给建),IP 字面量拒(防绕过)。
+        #   (2) 让子进程的**唯一 egress** 强制走该代理(否则客户端可无视 *_PROXY 直连 = 假放行)。
+        #       这要求「隔离 netns + 唯一路由指向代理」的 netns 装配(pasta/slirp4netns 免 root 栈)。
+        #
+        # 部件(2)的**不可绕过 netns 装配尚未落地/未在真机验证**。安全是地基,宁 fail-closed 不假安全:
+        # 在(2)被真机验证前,**allowlist 非空一律 fail-closed 拒网**(--unshare-net 全关)——
+        # **绝不**退回"仅 *_PROXY env"(可被子进程无视 = 假放行,违纪律)。这与 macOS/Windows 当前
+        # 同为 fail-closed 短板,但部件(1)代理已作为可复用地基落地并测通,待(2)装配即可翻成真强制。
+        # allowlist 空 = 保持二元(net 决定全放/全拒),零回归。
+        force_unshare_net = False
+        if allowlist:
+            # TODO(P1):落地并**真机验证**不可绕过的 netns→代理专用路由(pasta/slirp4netns),
+            #   验证通过后在此起 AllowlistProxy 并把 net 交给它夹;在那之前恒 fail-closed。
+            force_unshare_net = True
+            net = False
 
         bwrap: list[str] = [
             "bwrap",
@@ -155,7 +183,7 @@ class BubblewrapSandbox:
             "--tmpfs", "/tmp",
             "--chdir", cwd,
         ]
-        if not net:
+        if not net or force_unshare_net:
             bwrap.append("--unshare-net")
         for p in ro:
             bwrap += ["--ro-bind", p, p]

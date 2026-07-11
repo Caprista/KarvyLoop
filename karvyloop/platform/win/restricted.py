@@ -61,7 +61,7 @@ import threading
 from typing import Optional
 
 from karvyloop.sandbox.exec_result import ExecResult
-from karvyloop.sandbox.mounts import has_net
+from karvyloop.sandbox.mounts import has_net, net_allowlist_of
 from karvyloop.schemas import CapabilityToken
 
 from ._util import (
@@ -78,6 +78,16 @@ _NET_FAIL_CLOSED = (
     "无法实现网络门:断网/放行控制需要 admin 级防火墙规则,违背免 admin 约束 —— "
     "fail-closed 拒跑,不假装隔离地放行。此技能需网络请在 Linux/macOS(完整沙箱)"
     "上运行,或撤销该技能的网络授权后重试。"
+)
+
+# 按域名 egress allowlist:Windows 域名级强制需 admin 配 WFP 过滤器(违免 admin 约束)。
+# AppContainer 只能做**全有/全无**的默认拒出站(内核 WFP 默认规则),做不出**按域名**放行。
+# 故 allowlist 非空 → fail-closed 拒跑(不假装按域名放行)。诚实标注:Windows 域名级 = 短板。
+_EGRESS_FAIL_CLOSED = (
+    "此次执行请求按域名 egress allowlist,但 Windows Tier-3 沙箱做不出**域名级**放行:"
+    "内核只能全有/全无默认拒出站,按域名过滤需 admin 级 WFP 过滤器(违背免 admin 约束)。"
+    "遵守'宁拒不假放行'—— fail-closed 拒跑。需域名级 egress 请在 Linux(pasta/slirp4netns "
+    "用户态代理)上运行。"
 )
 
 # ---------------------------------------------------------------------------
@@ -795,6 +805,10 @@ class RestrictedTokenSandbox:
         #     拒网 + 授权门兜底,如实标 P2)。别人的代码默认无网,不再 socket 全通。
         #   - 第一方 workspace exec(非 skill-exec)保持原行为(不套 AppContainer,避免文件访问
         #     摩擦引回归;第一方 net token 同样 fail-closed)。
+        # 按域名 egress allowlist 非空 → Windows 短板:域名级需 admin WFP(违免 admin)→
+        # fail-closed 拒跑(先于 net 二元判定:allowlist 语境本身要求域名级,Windows 焊不出)。
+        if net_allowlist_of(token):
+            raise PermissionError(_EGRESS_FAIL_CLOSED)
         if has_net(token):
             raise PermissionError(_NET_FAIL_CLOSED)
         if not self.available():

@@ -193,17 +193,60 @@ class SubprocessBridge:
         self._runner = runner or self._real_run
         self._env_base = env_base
 
-    def _real_run(self, argv, *, env, timeout, cwd):
+    def _real_run(self, argv, *, env, timeout, cwd, egress_token=None):
+        # egress_token:按域名 egress allowlist 的能力令牌(非空 allowlist 时构造)。
+        # 默认 subprocess.run runner 不做沙箱 → 忽略它(非破坏:签名多一个带默认值的 kwarg)。
+        # 沙箱后端 runner(注入 _runner)据此对子进程做域名级 egress 强制/fail-closed。
         return subprocess.run(
             argv, env=env, cwd=cwd or None, timeout=timeout,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             check=False, shell=False)   # shell=False 硬纪律:绝不拼 shell
 
+    def _runner_takes_egress(self) -> bool:
+        """runner 是否接受 egress_token kwarg(签名内省,不靠 try/except 试跑 —— 避免对
+        有副作用的 runner 双执行)。带 **kwargs 的也算接受。"""
+        import inspect
+        try:
+            sig = inspect.signature(self._runner)
+        except (TypeError, ValueError):
+            return False
+        for p in sig.parameters.values():
+            if p.name == "egress_token" or p.kind == inspect.Parameter.VAR_KEYWORD:
+                return True
+        return False
+
+    def _call_runner(self, argv, *, env, timeout, cwd, egress_token):
+        """调 runner,把 egress_token 透传给**接受它**的 runner(沙箱后端);不接受的
+        (老式/注入测试 runner)用旧调用形态 —— **非破坏**:既有 runner 零改动仍工作。
+        """
+        if self._runner_takes_egress():
+            return self._runner(argv, env=env, timeout=timeout, cwd=cwd,
+                                egress_token=egress_token)
+        return self._runner(argv, env=env, timeout=timeout, cwd=cwd)
+
     def start(self, prompt: str, *, cwd: str = "", session_key: str = "",
-              agent_id: str = "main") -> BridgeResult:
-        """起一轮:组 argv + 组 env(无 key)+ 跑 + 解析 + 过滤 + fail-loud。"""
+              agent_id: str = "main", egress_allowlist: tuple[str, ...] = ()) -> BridgeResult:
+        """起一轮:组 argv + 组 env(无 key)+ 跑 + 解析 + 过滤 + fail-loud。
+
+        `egress_allowlist`(非破坏可选,默认空):按域名的 egress(出网)白名单。非空 →
+        构造一张 `net_allowlist` 非空的 `CapabilityToken` 传给沙箱后端 runner,对外部子进程
+        做**域名级 egress 强制**(平台能焊则真强制、焊不出则 fail-closed 拒网 —— 见各平台沙箱)。
+        默认空 = 保持现二元网络行为(C1 默认调用零回归:不构造 token、不改任何既有语义)。
+        """
         recipe = self._recipe
         extra_pats = compile_extra(recipe.redact_patterns)
+
+        # 按域名 egress allowlist → 构造能力令牌(net_allowlist 非空);空则不构造(零回归)。
+        egress_token = None
+        if egress_allowlist:
+            import time as _time
+            from karvyloop.schemas import CapabilityToken
+            egress_token = CapabilityToken(
+                task_id=f"ext-egress:{agent_id}",
+                grants=[],
+                expiry=_time.time() + max(recipe.timeout_wall_s, 60) + 60,
+                net_allowlist=tuple(egress_allowlist),
+            )
 
         # 边车路径(有元数据出口的 runtime 才用;临时文件,跑完清)
         sidecar_path = ""
@@ -224,7 +267,8 @@ class SubprocessBridge:
                                         reason=f"入口 {blocked} 在黑名单(已知泄 key),桥拒调")
             env = _sanitized_env(recipe, self._env_base)
             try:
-                proc = self._runner(argv, env=env, timeout=recipe.timeout_wall_s, cwd=cwd)
+                proc = self._call_runner(argv, env=env, timeout=recipe.timeout_wall_s,
+                                         cwd=cwd, egress_token=egress_token)
             except subprocess.TimeoutExpired:
                 # 真挂死:超 wall-clock(runner 已 kill)
                 return BridgeResult(status=STATUS_FAILED,

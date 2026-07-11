@@ -46,5 +46,30 @@ def read_only_token(token: CapabilityToken) -> CapabilityToken:
 
 
 def has_net(token: CapabilityToken) -> bool:
-    """是否存在任何 net: 能力。MVP 二元网络(有/无),域名级白名单 P1。"""
+    """是否存在任何 net: 能力。二元网络(有/无);域名级收紧见 net_allowlist_of。"""
     return any(g.resource.startswith("net:") for g in token.grants)
+
+
+def net_allowlist_of(token: CapabilityToken) -> tuple[str, ...]:
+    """token 的按域名 egress 白名单(平台无关取值,规范化)。
+
+    - 空 tuple → 保持二元网络语义(has_net 决定全放/全拒)。
+    - 非空 → 只允许连这些 host,其余由沙箱层确定性拒/fail-closed。
+
+    规范化:去空白、去空串、小写(域名大小写无关)、去重保序。非 tuple/list(损坏 token)
+    → 空 tuple(fail-safe:当作二元,不误当成"已限制"而假放行)。
+    """
+    raw = getattr(token, "net_allowlist", ()) or ()
+    if isinstance(raw, str):  # 防御:单串误传 → 当单元素
+        raw = (raw,)
+    out: list[str] = []
+    seen: set[str] = set()
+    try:
+        for h in raw:
+            s = str(h).strip().lower()
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+    except TypeError:
+        return ()
+    return tuple(out)

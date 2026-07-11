@@ -31,9 +31,17 @@ class CapabilityToken(Schema):
 
     `sig`：仅在令牌**跨信任边界**时才需要 broker 私钥签名（交给沙箱/Forge 子进程、
     或跨设备投递）。进程内（M0，Tier 1）令牌即一个可信对象引用，`sig` 可留空。
+
+    `net_allowlist`：按域名的 egress（出网）白名单。**默认空 tuple = 保持现二元网络行为**
+    （net 关时拒网、net 开时全放）；这不改变任何既有 token 的语义。**非空** = 收紧成
+    「只允许连这些域名/host，其余确定性拒」——用于约束我们不控其执行的**外部子进程**
+    （external_runtime 成员化的确定性安全地基:唯一能限制 opaque 外部执行体网络行为的抓手）。
+    强制**由沙箱层实现**;若当前平台焊不出域名级强制,沙箱层 **fail-closed 拒网**(宁拒不假放行)。
     """
 
     task_id: str
     grants: list[Capability] = Field(default_factory=list)
     expiry: float  # unix ts
     sig: str = ""  # 跨信任边界时签名；进程内可空（#5 §4 注）
+    #: 按域名的 egress 白名单(空=保持二元;非空=只放行这些 host,其余沙箱层确定性拒/fail-closed)
+    net_allowlist: tuple[str, ...] = ()

@@ -25,6 +25,7 @@ import subprocess
 
 from karvyloop.capability import is_within_workspace
 from karvyloop.sandbox.exec_result import ExecResult
+from karvyloop.sandbox.mounts import net_allowlist_of
 from karvyloop.schemas import CapabilityToken
 
 from ._util import (
@@ -58,6 +59,12 @@ class DegradedWindowsSandbox:
                    max_output_bytes=30_000) -> ExecResult:
         if not argv:
             raise ValueError("argv 必须非空")
+        # 按域名 egress allowlist:降级模式无任何 OS 级网络门,更做不出域名级强制 →
+        # fail-closed 拒跑(绝不在无隔离下假装按域名放行,守住地基纪律)。
+        if net_allowlist_of(token):
+            raise PermissionError(
+                "Windows 降级模式无 OS 级网络门,做不出域名级 egress 强制 —— fail-closed 拒跑。"
+                "需域名级 egress 请在 Linux(pasta/slirp4netns 用户态代理)上运行。")
         # 第三方技能脚本:fail-closed(唯一被禁用的路径)
         if is_skill_exec_token(token):
             raise PermissionError(_THIRD_PARTY_REFUSED)

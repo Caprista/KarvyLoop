@@ -5,7 +5,13 @@
 
 实现要点（与 bubblewrap 对齐）：
   1) `(deny default)` 起步,按 token.fs 显式放开**写**（fail-closed）。
-  2) token 无 `net:` → `(deny network*)`；有 → `(allow network*)`（v1 仅二元网络,域名级白名单 P1）。
+  2) token 无 `net:` → `(deny network*)`；有 → `(allow network*)`（二元网络）。
+  2b) **按域名 egress allowlist**(token.net_allowlist 非空):**macOS 短板 —— fail-closed**。
+     SBPL 网络规则是 **host/port(IP)级**,`(allow network* (remote ip ...))` 在**连接建立时**
+     按 IP 匹配,而**域名在解析前**就被翻成 IP —— SBPL **无法按域名字符串**判定(会被 DNS
+     rebind / 多 IP 绕过)。域名级真强制需在解析层挂代理(Linux 那条路),Seatbelt 单靠 SBPL
+     **表达不出域名粒度**。故遵守"宁拒不假放行"地基纪律:allowlist 非空 → **`(deny network*)`
+     拒网**(fail-closed),不假装按域名放行。诚实标注:macOS 域名级 = **fail-closed 兜底**短板。
   3) 超时强杀 + 输出字节截断（UTF-8 边界,与 bubblewrap 同源）。
   4) write_file / read_file 是**纯 token 闸 IO**,跨平台一致,直接照搬 bubblewrap 语义。
 
@@ -24,7 +30,7 @@ import shutil
 
 from karvyloop.capability import is_within_workspace
 from karvyloop.sandbox.exec_result import ExecResult
-from karvyloop.sandbox.mounts import has_net, mounts_from_token
+from karvyloop.sandbox.mounts import has_net, mounts_from_token, net_allowlist_of
 from karvyloop.schemas import CapabilityToken
 
 
@@ -59,6 +65,11 @@ def build_profile(token: CapabilityToken) -> str:
     except Exception:
         pass
     net = has_net(token)
+    # 按域名 egress allowlist 非空 → macOS 短板:SBPL 无法按域名判定(见模块 docstring 2b)。
+    # 遵守"宁拒不假放行":拒网(fail-closed),不假装按域名放行。
+    egress_allowlist = net_allowlist_of(token)
+    if egress_allowlist:
+        net = False   # fail-closed:allowlist 语义在 macOS 收紧为拒网
     lines = [
         "(version 1)",
         "(deny default)",
@@ -74,6 +85,10 @@ def build_profile(token: CapabilityToken) -> str:
     subpaths = [f"(subpath {_sbpl_str(os.path.realpath(p))})" for p in rw]
     if subpaths:
         lines.append("(allow file-write* " + " ".join(subpaths) + ")")
+    if egress_allowlist:
+        # 域名级 egress 在 macOS = fail-closed(SBPL 表达不出域名粒度);注释里留审计痕。
+        lines.append("; egress allowlist requested but domain-level unenforceable in SBPL"
+                     " -> fail-closed deny (see module docstring 2b)")
     lines.append("(allow network*)" if net else "(deny network*)")
     # 敏感地板(fs_grants 同源):密钥/凭据类显式 deny —— SBPL 后写的规则赢,盖过上面的读放宽。
     home = os.path.expanduser("~")
