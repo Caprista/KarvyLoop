@@ -33,6 +33,7 @@ class RoleCreateRequest(BaseModel):
     nickname: str = Field(default="", max_length=64)        # brick4:花名(进某域的人名)
     title: str = Field(default="", max_length=64)           # brick4:职务
     model: str = Field(default="", max_length=64)           # 角色级模型(空=默认;软默认层叠)
+    tags: list = Field(default_factory=list)                # #3b:语义标签(双语 dict 或旧英文串;缺则默认打来源标签)
 
 
 def _role_to_dict(v) -> dict[str, Any]:
@@ -40,6 +41,7 @@ def _role_to_dict(v) -> dict[str, Any]:
             "skill_ids": list(getattr(v, "skill_ids", [])),
             "nickname": getattr(v, "nickname", ""), "title": getattr(v, "title", ""),
             "model": getattr(v, "model", ""),
+            "tags": [dict(tg) for tg in getattr(v, "tags", [])],   # #3b:双语语义标签(筛选/显示)
             "display_name": v.display_name() if hasattr(v, "display_name") else v.id}
 
 
@@ -97,7 +99,8 @@ def api_role_create(req: RoleCreateRequest, request: Request) -> dict[str, Any]:
         v = reg.create(req.role_id, identity=req.identity, soul=req.soul,
                        user_desc=req.user_desc, atom_ids=list(req.atom_ids),
                        skill_ids=list(req.skill_ids),
-                       nickname=req.nickname, title=req.title, model=req.model)
+                       nickname=req.nickname, title=req.title, model=req.model,
+                       tags=list(req.tags))
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"建角色失败:{e}")
     return {"ok": True, "role": _role_to_dict(v)}

@@ -48,6 +48,8 @@ def api_skills(request: Request) -> dict[str, Any]:
             "source": getattr(e, "source", "user"),
             "when_to_use": getattr(e, "when_to_use", ""),
             "description": getattr(e, "description", ""),
+            # #3b:语义标签(skill_tags_tick 打的,可能是 "en|zh" 双语编码 / 旧英文串)——面板筛选 + 双语显示
+            "tags": list(getattr(e, "tags", ()) or ()),
             "usage_count": getattr(st, "usage_count", 0) if st else 0,
             "success_count": getattr(st, "success_count", 0) if st else 0,
             "recall_count": getattr(st, "recall_count", 0) if st else 0,

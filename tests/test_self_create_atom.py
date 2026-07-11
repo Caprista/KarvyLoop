@@ -124,8 +124,10 @@ _GOOD_TAGGED = ('{"id":"translate_x","prompt":"将材料译成英语","tools":[]
 
 
 def test_parse_spec_extracts_tags():
+    # #3b:tags 现归一成双语 "en|zh" 编码;英文-only 合成输出缺 zh → 回退 en(向后兼容)。
     from karvyloop.atoms.self_create import _parse_spec
-    assert _parse_spec(_GOOD_TAGGED)["tags"] == ["translate", "english", "localize"]
+    assert _parse_spec(_GOOD_TAGGED)["tags"] == [
+        "translate|translate", "english|english", "localize|localize"]
 
 
 def test_tag_overlap_merge_gate_reuses_paraphrase():
@@ -149,7 +151,9 @@ def test_created_atom_carries_tags():
     res = asyncio.run(create_atom("把某种没见过的东西foobarbaz处理一下", gateway=FakeGateway(_GOOD_TAGGED),
                                   atom_registry=areg))
     assert res["action"] == "created"
-    assert areg.get(res["atom_id"]).tags == ["translate", "english", "localize"]
+    # #3b:落库的 tags 是双语 "en|zh" 编码(英文-only 合成 → zh 回退 en)
+    assert areg.get(res["atom_id"]).tags == [
+        "translate|translate", "english|english", "localize|localize"]
 
 
 def test_cjk_bigram_lexical_reuses_surface_near_dup():

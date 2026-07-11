@@ -10,6 +10,60 @@ var KarvySkillsPanelBundle = (function(exports) {
     const w = window.KarvyI18n;
     return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
   };
+  function _tagEn(tag) {
+    if (tag && typeof tag === "object") return String(tag.en || "").trim().toLowerCase();
+    return String(tag == null ? "" : tag).split("|")[0].trim().toLowerCase();
+  }
+  function _tagText(tag) {
+    const _i18n = window.KarvyI18n;
+    const zh = !!(_i18n && _i18n.getLang && _i18n.getLang() === "zh");
+    if (tag && typeof tag === "object") {
+      const o = tag;
+      return (zh ? o.zh || o.en : o.en || o.zh) || "";
+    }
+    const s = String(tag == null ? "" : tag);
+    const parts = s.split("|");
+    if (parts.length >= 2) return (zh ? parts[1] : parts[0]).trim() || parts[0].trim();
+    return s.trim();
+  }
+  function _collectTags(items, tagsOf) {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const it of items) for (const tg of tagsOf(it) || []) {
+      const k = _tagEn(tg);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      out.push(tg);
+    }
+    return out;
+  }
+  function _tagFilterBar(items, tagsOf, onChange) {
+    const tags = _collectTags(items, tagsOf);
+    if (!tags.length) return null;
+    const bar = el("div", { class: "tag-filter-bar" });
+    bar.appendChild(el("span", { class: "tag-filter-label", text: t("mgmt.filter_by_tag") }));
+    let active = null;
+    const chips = [];
+    const paint = () => {
+      for (const c of chips) c.classList.toggle("active", c.dataset.k === active);
+    };
+    for (const tg of tags) {
+      const k = _tagEn(tg);
+      const chip = el("span", {
+        class: "tag-chip",
+        text: _tagText(tg),
+        onclick: () => {
+          active = active === k ? null : k;
+          paint();
+          onChange(active);
+        }
+      });
+      chip.dataset.k = k;
+      chips.push(chip);
+      bar.appendChild(chip);
+    }
+    return bar;
+  }
   const _SVG_NS = "http://www.w3.org/2000/svg";
   function _svgEl(tag, attrs) {
     const n = document.createElementNS(_SVG_NS, tag);
@@ -324,69 +378,81 @@ var KarvySkillsPanelBundle = (function(exports) {
       body.appendChild(el("div", { class: "mgmt-empty", text: t("skills.empty") }));
       return;
     }
-    const list = el("div", { class: "mgmt-list" });
-    for (const s of skills) {
-      const archived = !!s.archived;
-      const badge = el("span", {
-        class: "dpref-badge " + (archived ? "provisional" : "confirmed"),
-        text: archived ? t("skills.archived_badge") : t("skills.active_badge")
-      });
-      const st = s.status || "pending";
-      const stCls = st === "crystallized" ? "confirmed" : st === "unverified" ? "provisional" : "provisional";
-      const stBadge = el("span", { class: "dpref-badge " + stCls, text: t("skills.status_" + st) });
-      const tpBadge = s.third_party ? el("span", {
-        class: "dpref-badge provisional",
-        title: t("skills.untrusted_hint"),
-        text: "🌐 " + t("skills.third_party_badge")
-      }) : null;
-      const stats = t("skills.stats", { recall: s.recall_count || 0, use: s.usage_count || 0, ok: s.success_count || 0 });
-      const cpts = curveBySig[s.sig] || [];
-      const lastPt = cpts.length ? cpts[cpts.length - 1] : null;
-      const spark = lastPt ? _sparkline(cpts, { title: t("skills.spark_title", {
-        score: (Number(lastPt.usage_score) || 0).toFixed(1),
-        rate: Math.round((Number(lastPt.success_rate) || 0) * 100),
-        prog: Math.round((Number(lastPt.promote_progress) || 0) * 100)
-      }) }) : null;
-      const actions = el("div", { class: "dpref-actions" });
-      if (archived) {
-        actions.appendChild(el("button", {
-          class: "dpref-confirm",
-          text: t("skills.restore"),
-          onclick: async () => {
-            await _postJSON("/api/skill/restore", { sig: s.sig });
-            await renderSkillsPanel();
-          }
-        }));
-      }
+    const listHost = el("div", {});
+    const _renderList = (active) => {
+      listHost.innerHTML = "";
+      const shown = active ? skills.filter((s) => (s.tags || []).some((tg) => _tagEn(tg) === active)) : skills;
+      const list = el("div", { class: "mgmt-list" });
+      for (const s of shown) list.appendChild(_skillCard(s, curveBySig));
+      listHost.appendChild(list);
+    };
+    const filterBar = _tagFilterBar(skills, (s) => s.tags || [], _renderList);
+    if (filterBar) body.appendChild(filterBar);
+    body.appendChild(listHost);
+    _renderList(null);
+  }
+  function _skillCard(s, curveBySig) {
+    const archived = !!s.archived;
+    const badge = el("span", {
+      class: "dpref-badge " + (archived ? "provisional" : "confirmed"),
+      text: archived ? t("skills.archived_badge") : t("skills.active_badge")
+    });
+    const st = s.status || "pending";
+    const stCls = st === "crystallized" ? "confirmed" : st === "unverified" ? "provisional" : "provisional";
+    const stBadge = el("span", { class: "dpref-badge " + stCls, text: t("skills.status_" + st) });
+    const tpBadge = s.third_party ? el("span", {
+      class: "dpref-badge provisional",
+      title: t("skills.untrusted_hint"),
+      text: "🌐 " + t("skills.third_party_badge")
+    }) : null;
+    const stats = t("skills.stats", { recall: s.recall_count || 0, use: s.usage_count || 0, ok: s.success_count || 0 });
+    const cpts = curveBySig[s.sig] || [];
+    const lastPt = cpts.length ? cpts[cpts.length - 1] : null;
+    const spark = lastPt ? _sparkline(cpts, { title: t("skills.spark_title", {
+      score: (Number(lastPt.usage_score) || 0).toFixed(1),
+      rate: Math.round((Number(lastPt.success_rate) || 0) * 100),
+      prog: Math.round((Number(lastPt.promote_progress) || 0) * 100)
+    }) }) : null;
+    const semTags = (s.tags || []).map((tg) => el("span", { class: "mc-tag mc-tag-sem", text: "🏷 " + _tagText(tg) }));
+    const actions = el("div", { class: "dpref-actions" });
+    if (archived) {
       actions.appendChild(el("button", {
-        class: "dpref-edit",
-        text: t("skills.view"),
-        onclick: () => _openSkillDetail(s)
+        class: "dpref-confirm",
+        text: t("skills.restore"),
+        onclick: async () => {
+          await _postJSON("/api/skill/restore", { sig: s.sig });
+          await renderSkillsPanel();
+        }
       }));
-      list.appendChild(el(
+    }
+    actions.appendChild(el("button", {
+      class: "dpref-edit",
+      text: t("skills.view"),
+      onclick: () => _openSkillDetail(s)
+    }));
+    return el(
+      "div",
+      { class: "mgmt-card" },
+      el(
         "div",
-        { class: "mgmt-card" },
+        { class: "mc-main" },
         el(
           "div",
-          { class: "mc-main" },
-          el(
-            "div",
-            { class: "mc-name" },
-            el("span", { text: "🧩 " + s.name }),
-            " ",
-            stBadge,
-            " ",
-            badge,
-            tpBadge ? " " : null,
-            tpBadge
-          ),
-          el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
-          spark ? el("div", { class: "mc-meta skill-spark-row" }, spark, el("span", { text: " " + stats })) : el("div", { class: "mc-meta", text: stats })
+          { class: "mc-name" },
+          el("span", { text: "🧩 " + s.name }),
+          " ",
+          stBadge,
+          " ",
+          badge,
+          tpBadge ? " " : null,
+          tpBadge
         ),
-        actions
-      ));
-    }
-    body.appendChild(list);
+        el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
+        semTags.length ? el("div", { class: "mc-meta" }, ...semTags) : null,
+        spark ? el("div", { class: "mc-meta skill-spark-row" }, spark, el("span", { text: " " + stats })) : el("div", { class: "mc-meta", text: stats })
+      ),
+      actions
+    );
   }
   async function _renderCodingCapability(body) {
     const cap = await _getJSON("/api/coding/capability");

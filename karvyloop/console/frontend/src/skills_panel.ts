@@ -31,6 +31,52 @@ const tB = (x: unknown): string => {
   return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
 };
 
+// ============ tag 系统(#3b):双语显示 + 筛选条 ============
+// 标签形态兼容:"en|zh" 双语串 / {en,zh} dict / 旧纯英文串。en=语言中立匹配键,zh=中文界面显示(缺回退 en)。
+function _tagEn(tag: unknown): string {
+  if (tag && typeof tag === "object") return String((tag as { en?: string }).en || "").trim().toLowerCase();
+  return String(tag == null ? "" : tag).split("|")[0].trim().toLowerCase();
+}
+function _tagText(tag: unknown): string {
+  const _i18n = (window as unknown as { KarvyI18n?: { getLang?: () => string } }).KarvyI18n;
+  const zh = !!(_i18n && _i18n.getLang && _i18n.getLang() === "zh");
+  if (tag && typeof tag === "object") {
+    const o = tag as { en?: string; zh?: string };
+    return (zh ? (o.zh || o.en) : (o.en || o.zh)) || "";
+  }
+  const s = String(tag == null ? "" : tag);
+  const parts = s.split("|");
+  if (parts.length >= 2) return (zh ? parts[1] : parts[0]).trim() || parts[0].trim();
+  return s.trim();
+}
+function _collectTags(items: any[], tagsOf: (it: any) => unknown[]): unknown[] {
+  const seen = new Set<string>(); const out: unknown[] = [];
+  for (const it of items) for (const tg of (tagsOf(it) || [])) {
+    const k = _tagEn(tg); if (!k || seen.has(k)) continue; seen.add(k); out.push(tg);
+  }
+  return out;
+}
+// 筛选条:点一个 tag → onChange(activeEnKeyOrNull) 让调用方重渲列表。没标签 → null(优雅缺席)。
+// TODO(#3b 第二步):完整手动 tag 增删编辑管理(这里只做打标+筛选)。
+function _tagFilterBar(items: any[], tagsOf: (it: any) => unknown[],
+  onChange: (active: string | null) => void): HTMLElement | null {
+  const tags = _collectTags(items, tagsOf);
+  if (!tags.length) return null;
+  const bar = el("div", { class: "tag-filter-bar" });
+  bar.appendChild(el("span", { class: "tag-filter-label", text: t("mgmt.filter_by_tag") }));
+  let active: string | null = null;
+  const chips: HTMLElement[] = [];
+  const paint = () => { for (const c of chips) c.classList.toggle("active", c.dataset.k === active); };
+  for (const tg of tags) {
+    const k = _tagEn(tg);
+    const chip = el("span", { class: "tag-chip", text: _tagText(tg),
+      onclick: () => { active = (active === k) ? null : k; paint(); onChange(active); } }) as HTMLElement;
+    chip.dataset.k = k;
+    chips.push(chip); bar.appendChild(chip);
+  }
+  return bar;
+}
+
 // ---- 结晶裸分曲线(docs/57 P1 护城河可感知):纯 SVG 手画,不引第三方图表库 ----
 const _SVG_NS = "http://www.w3.org/2000/svg";
 function _svgEl(tag: string, attrs: Record<string, string>): SVGElement {
@@ -257,46 +303,63 @@ async function renderSkillsPanel(): Promise<void> {
   body.appendChild(_skillImportForm());   // 导入入口常驻顶部(空库时也能先导)
   const skills = (data && data.skills) || [];
   if (!skills.length) { body.appendChild(el("div", { class: "mgmt-empty", text: t("skills.empty") })); return; }
-  const list = el("div", { class: "mgmt-list" });
-  for (const s of skills) {
-    const archived = !!s.archived;
-    const badge = el("span", { class: "dpref-badge " + (archived ? "provisional" : "confirmed"),
-      text: archived ? t("skills.archived_badge") : t("skills.active_badge") });
-    // btw-1:生命周期状态徽章(待沉淀/待验证/已沉淀)
-    const st = s.status || "pending";
-    const stCls = st === "crystallized" ? "confirmed" : (st === "unverified" ? "provisional" : "provisional");
-    const stBadge = el("span", { class: "dpref-badge " + stCls, text: t("skills.status_" + st) });
-    // 第三方导入的技能:🌐 来源徽章(untrusted → 提示执行走沙箱)
-    const tpBadge = s.third_party
-      ? el("span", { class: "dpref-badge provisional", title: t("skills.untrusted_hint"),
-          text: "🌐 " + t("skills.third_party_badge") })
-      : null;
-    const stats = t("skills.stats", { recall: s.recall_count || 0, use: s.usage_count || 0, ok: s.success_count || 0 });
-    // 迷你 sparkline:该技能的 usage_score 时间曲线(Trace 回放推导);无数据 → 优雅缺席
-    const cpts = curveBySig[s.sig] || [];
-    const lastPt = cpts.length ? cpts[cpts.length - 1] : null;
-    const spark = lastPt ? _sparkline(cpts, { title: t("skills.spark_title", {
-      score: (Number(lastPt.usage_score) || 0).toFixed(1),
-      rate: Math.round((Number(lastPt.success_rate) || 0) * 100),
-      prog: Math.round((Number(lastPt.promote_progress) || 0) * 100) }) }) : null;
-    const actions = el("div", { class: "dpref-actions" });
-    if (archived) {
-      actions.appendChild(el("button", { class: "dpref-confirm", text: t("skills.restore"),
-        onclick: async () => { await _postJSON("/api/skill/restore", { sig: s.sig }); await renderSkillsPanel(); } }));
-    }
-    actions.appendChild(el("button", { class: "dpref-edit", text: t("skills.view"),
-      onclick: () => _openSkillDetail(s) }));
-    list.appendChild(el("div", { class: "mgmt-card" },
-      el("div", { class: "mc-main" },
-        el("div", { class: "mc-name" }, el("span", { text: "🧩 " + s.name }), " ", stBadge,
-          " ", badge, tpBadge ? " " : null, tpBadge),
-        el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
-        spark
-          ? el("div", { class: "mc-meta skill-spark-row" }, spark, el("span", { text: " " + stats }))
-          : el("div", { class: "mc-meta", text: stats })),
-      actions));
+  // tag 筛选条(#3b):点一个语义标签只留带它的技能。重渲列表实现过滤。
+  const listHost = el("div", {});
+  const _renderList = (active: string | null) => {
+    listHost.innerHTML = "";
+    const shown = active ? skills.filter((s: any) => (s.tags || []).some((tg: unknown) => _tagEn(tg) === active)) : skills;
+    const list = el("div", { class: "mgmt-list" });
+    for (const s of shown) list.appendChild(_skillCard(s, curveBySig));
+    listHost.appendChild(list);
+  };
+  const filterBar = _tagFilterBar(skills, (s: any) => s.tags || [], _renderList);
+  if (filterBar) body.appendChild(filterBar);
+  body.appendChild(listHost);
+  _renderList(null);
+}
+
+// 单张技能卡(抽出:tag 筛选后重渲用同一份渲染)
+function _skillCard(s: any, curveBySig: Record<string, any[]>): HTMLElement {
+  const archived = !!s.archived;
+  const badge = el("span", { class: "dpref-badge " + (archived ? "provisional" : "confirmed"),
+    text: archived ? t("skills.archived_badge") : t("skills.active_badge") });
+  // btw-1:生命周期状态徽章(待沉淀/待验证/已沉淀)
+  const st = s.status || "pending";
+  const stCls = st === "crystallized" ? "confirmed" : (st === "unverified" ? "provisional" : "provisional");
+  const stBadge = el("span", { class: "dpref-badge " + stCls, text: t("skills.status_" + st) });
+  // 第三方导入的技能:🌐 来源徽章(untrusted → 提示执行走沙箱)
+  const tpBadge = s.third_party
+    ? el("span", { class: "dpref-badge provisional", title: t("skills.untrusted_hint"),
+        text: "🌐 " + t("skills.third_party_badge") })
+    : null;
+  const stats = t("skills.stats", { recall: s.recall_count || 0, use: s.usage_count || 0, ok: s.success_count || 0 });
+  // 迷你 sparkline:该技能的 usage_score 时间曲线(Trace 回放推导);无数据 → 优雅缺席
+  const cpts = curveBySig[s.sig] || [];
+  const lastPt = cpts.length ? cpts[cpts.length - 1] : null;
+  const spark = lastPt ? _sparkline(cpts, { title: t("skills.spark_title", {
+    score: (Number(lastPt.usage_score) || 0).toFixed(1),
+    rate: Math.round((Number(lastPt.success_rate) || 0) * 100),
+    prog: Math.round((Number(lastPt.promote_progress) || 0) * 100) }) }) : null;
+  // #3b:语义标签(双语)—— 让技能也能一眼看见并被筛
+  const semTags = (s.tags || []).map((tg: unknown) =>
+    el("span", { class: "mc-tag mc-tag-sem", text: "🏷 " + _tagText(tg) }));
+  const actions = el("div", { class: "dpref-actions" });
+  if (archived) {
+    actions.appendChild(el("button", { class: "dpref-confirm", text: t("skills.restore"),
+      onclick: async () => { await _postJSON("/api/skill/restore", { sig: s.sig }); await renderSkillsPanel(); } }));
   }
-  body.appendChild(list);
+  actions.appendChild(el("button", { class: "dpref-edit", text: t("skills.view"),
+    onclick: () => _openSkillDetail(s) }));
+  return el("div", { class: "mgmt-card" },
+    el("div", { class: "mc-main" },
+      el("div", { class: "mc-name" }, el("span", { text: "🧩 " + s.name }), " ", stBadge,
+        " ", badge, tpBadge ? " " : null, tpBadge),
+      el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
+      semTags.length ? el("div", { class: "mc-meta" }, ...semTags) : null,
+      spark
+        ? el("div", { class: "mc-meta skill-spark-row" }, spark, el("span", { text: " " + stats }))
+        : el("div", { class: "mc-meta", text: stats })),
+    actions);
 }
 
 // #1:内建「Coding」技能卡 —— 把编码能力当一个技能库里看得见、(执行器)可配置的技能露出。

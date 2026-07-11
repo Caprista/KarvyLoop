@@ -7,6 +7,60 @@ var KarvyAtomsPanelBundle = (function(exports) {
   const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
   const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
+  function _tagEn(tag) {
+    if (tag && typeof tag === "object") return String(tag.en || "").trim().toLowerCase();
+    return String(tag == null ? "" : tag).split("|")[0].trim().toLowerCase();
+  }
+  function _tagText(tag) {
+    const _i18n = window.KarvyI18n;
+    const zh = !!(_i18n && _i18n.getLang && _i18n.getLang() === "zh");
+    if (tag && typeof tag === "object") {
+      const o = tag;
+      return (zh ? o.zh || o.en : o.en || o.zh) || "";
+    }
+    const s = String(tag == null ? "" : tag);
+    const parts = s.split("|");
+    if (parts.length >= 2) return (zh ? parts[1] : parts[0]).trim() || parts[0].trim();
+    return s.trim();
+  }
+  function _collectTags(items, tagsOf) {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const it of items) for (const tg of tagsOf(it) || []) {
+      const k = _tagEn(tg);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      out.push(tg);
+    }
+    return out;
+  }
+  function _tagFilterBar(items, tagsOf, onChange) {
+    const tags = _collectTags(items, tagsOf);
+    if (!tags.length) return null;
+    const bar = el("div", { class: "tag-filter-bar" });
+    bar.appendChild(el("span", { class: "tag-filter-label", text: t("mgmt.filter_by_tag") }));
+    let active = null;
+    const chips = [];
+    const paint = () => {
+      for (const c of chips) c.classList.toggle("active", c.dataset.k === active);
+    };
+    for (const tg of tags) {
+      const k = _tagEn(tg);
+      const chip = el("span", {
+        class: "tag-chip",
+        text: _tagText(tg),
+        onclick: () => {
+          active = active === k ? null : k;
+          paint();
+          onChange(active);
+        }
+      });
+      chip.dataset.k = k;
+      chips.push(chip);
+      bar.appendChild(chip);
+    }
+    return bar;
+  }
   async function renderList() {
     const body = mgmtBody();
     if (!body) return;
@@ -28,12 +82,24 @@ var KarvyAtomsPanelBundle = (function(exports) {
       body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") }));
       return;
     }
-    body.appendChild(_KW.pagedList({
+    const listHost = el("div", {});
+    const _render = (active) => {
+      listHost.innerHTML = "";
+      const shown = active ? atoms.filter((a) => (a.tags || []).some((tg) => _tagEn(tg) === active)) : atoms;
+      listHost.appendChild(_pagedAtoms(shown));
+    };
+    const filterBar = _tagFilterBar(atoms, (a) => a.tags || [], _render);
+    if (filterBar) body.appendChild(filterBar);
+    body.appendChild(listHost);
+    _render(null);
+  }
+  function _pagedAtoms(atoms) {
+    return _KW.pagedList({
       items: atoms,
       pageSize: 8,
       searchPh: t("mgmt.search"),
       emptyText: t("mgmt.empty"),
-      searchOf: (a) => a.id + " " + (a.kind || "") + " " + (a.prompt || "") + " " + (a.tools || []).join(" "),
+      searchOf: (a) => a.id + " " + (a.kind || "") + " " + (a.prompt || "") + " " + (a.tools || []).join(" ") + " " + (a.tags || []).map((tg) => _tagEn(tg) + " " + _tagText(tg)).join(" "),
       renderItem: (a) => el(
         "div",
         { class: "mgmt-card" },
@@ -42,6 +108,11 @@ var KarvyAtomsPanelBundle = (function(exports) {
           { class: "mc-main" },
           el("div", { class: "mc-name" }, a.id + " ", el("span", { class: "mc-tag", text: a.kind })),
           a.prompt ? el("div", { class: "mc-meta", text: a.prompt }) : null,
+          a.tags && a.tags.length ? el(
+            "div",
+            { class: "mc-meta" },
+            ...a.tags.map((tg) => el("span", { class: "mc-tag mc-tag-sem", text: "🏷 " + _tagText(tg) }))
+          ) : null,
           a.tools && a.tools.length ? el("div", { class: "mc-meta", text: "🔧 " + a.tools.join(", ") }) : null
         ),
         el(
@@ -59,7 +130,7 @@ var KarvyAtomsPanelBundle = (function(exports) {
           })
         )
       )
-    }));
+    });
   }
   function renderCreate() {
     _renderForm(null);

@@ -36,6 +36,40 @@ _ATOM_REF_RE = re.compile(r"atom:\s*([A-Za-z0-9_]+)")
 _SKILL_REF_RE = re.compile(r"skill:\s*([\w\-]+)")
 
 
+def normalize_tags(raw) -> list[dict]:
+    """归一化标签成**双语 dict** 列表(#3b tag 系统)。
+
+    接受三种历史/新形态,统一成 `{"en": <小写词>, "zh": <中文,缺则回退 en>}`:
+      - 旧字符串:`"search"` → `{"en": "search", "zh": "search"}`(向后兼容,缺 zh 显 en)
+      - 新双语 dict:`{"en": "search", "zh": "检索"}`
+      - 单键 dict(只有 en 或只有 zh)→ 缺的那侧回退到另一侧
+    去空、去重(按 en 归一键)、保序、每侧 ≤32 字、≤8 个。`en` 是**语言中立匹配键**
+    (grep+overlap+LLM 标签,无向量);`zh` 只为界面显示,让中文用户读得懂。
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for t in (raw or []):
+        if t is None:
+            continue
+        if isinstance(t, dict):
+            en = str(t.get("en", "") or "").strip().lower()[:32]
+            zh = str(t.get("zh", "") or "").strip()[:32]
+        else:
+            en = str(t).strip().lower()[:32]
+            zh = ""
+        if not en and not zh:
+            continue
+        if not en:            # 只有中文 → 用中文兜底当匹配键(不丢标签)
+            en = zh.lower()[:32]
+        if not zh:
+            zh = en           # 缺 zh 就显 en(向后兼容)
+        if en in seen:
+            continue
+        seen.add(en)
+        out.append({"en": en, "zh": zh})
+    return out[:8]
+
+
 def _slot_filename(slot: str) -> str:
     return "COMPOSITION.yaml" if slot == "COMPOSITION" else f"{slot}.md"
 
@@ -77,7 +111,8 @@ class RoleView:
 
     def __init__(self, role_id: str, identity: str, atom_ids: list[str], path: Path,
                  *, nickname: str = "", title: str = "", model: str = "",
-                 skill_ids: Optional[list[str]] = None) -> None:
+                 skill_ids: Optional[list[str]] = None,
+                 tags: Optional[list] = None) -> None:
         self.id = role_id
         self.identity = identity
         self.atom_ids = atom_ids
@@ -86,12 +121,16 @@ class RoleView:
         self.title = title         # brick4:职务(如"产品经理")
         self.model = model         # 角色级模型引用(空=层叠到域/全局 default;#1 §3.1 软默认层叠)
         self.skill_ids = list(skill_ids or [])  # 角色随身技能(L0,引用公共技能库;绑定即生效)
+        # 语义标签(#3b,同 atom 语义):双语标签集,给筛选 + 跨语言语义匹配用(无向量,LLM 打一次)。
+        # 每个标签 = {"en": "...", "zh": "..."};旧英文字符串向后兼容(读时归一到 dict,缺 zh 显 en)。
+        self.tags = normalize_tags(tags)
 
     def to_dict(self) -> dict:
         return {"id": self.id, "identity": self.identity,
                 "atom_ids": list(self.atom_ids), "path": str(self.path),
                 "nickname": self.nickname, "title": self.title, "model": self.model,
-                "skill_ids": list(self.skill_ids)}
+                "skill_ids": list(self.skill_ids),
+                "tags": [dict(t) for t in self.tags]}
 
     def display_name(self) -> str:
         """场内显示名:花名(职务) / 花名 / role_id —— 给"哟吼/张三(产品经理)"那种表述用。"""
@@ -205,6 +244,7 @@ class RoleRegistry:
         nickname: str = "",   # brick4:花名(进某域时的人名)
         title: str = "",      # brick4:职务
         model: str = "",      # 角色级模型引用(空=默认)
+        tags: Optional[list] = None,   # #3b:语义标签(双语 dict 或旧英文串);缺则默认打个来源标签
     ) -> RoleView:
         rid = (role_id or "").strip()
         if not rid:
@@ -246,13 +286,18 @@ class RoleRegistry:
             else:
                 content = _stub_slot(slot)
             (d / fname).write_text(content, encoding="utf-8")
-        # brick4:花名/职务存进 profile.json(身份显示用,与七魂分开)
+        # #3b:标签归一成双语 dict;手动新建缺标签 → 默认打个基础「来源」标签,不裸奔(可后续 LLM 补语义标签)。
+        norm_tags = normalize_tags(tags)
+        if not norm_tags:
+            norm_tags = [{"en": "custom", "zh": "自建"}]
+        # brick4:花名/职务/标签存进 profile.json(身份显示/筛选用,与七魂分开)
         import json as _json
         nn, tt, mdl = nickname.strip(), title.strip(), (model or "").strip()
         (d / "profile.json").write_text(
-            _json.dumps({"nickname": nn, "title": tt, "model": mdl}, ensure_ascii=False), encoding="utf-8")
+            _json.dumps({"nickname": nn, "title": tt, "model": mdl, "tags": norm_tags},
+                        ensure_ascii=False), encoding="utf-8")
         return RoleView(rid, identity.strip(), picks, d, nickname=nn, title=tt, model=mdl,
-                        skill_ids=skills)
+                        skill_ids=skills, tags=norm_tags)
 
     # ---- 读 ----
     @_locked
@@ -260,7 +305,8 @@ class RoleRegistry:
                model: Optional[str] = None, nickname: Optional[str] = None,
                title: Optional[str] = None,
                skill_ids: Optional[list[str]] = None,
-               atom_ids: Optional[list[str]] = None) -> Optional["RoleView"]:
+               atom_ids: Optional[list[str]] = None,
+               tags: Optional[list] = None) -> Optional["RoleView"]:
         """编辑角色(P0 审计:此前写错只能删重建)。只改传入字段:identity(人格)/ model / 花名 / 职务 /
         skill_ids(随身技能)/ atom_ids(可用原子)。不存在返 None。七魂里只让改 IDENTITY;MEMORY/COMMITMENT
         等运行时文件走 update_soul 不动这里。改 skill_ids/atom_ids 时重写 COMPOSITION.yaml(未传的那段保留)。"""
@@ -281,9 +327,9 @@ class RoleRegistry:
         if identity is not None:
             body = (identity or "").strip() or "(待充实)"
             (d / _slot_filename("IDENTITY")).write_text(f"# IDENTITY\n\n{body}\n", encoding="utf-8")
-        if model is not None or nickname is not None or title is not None:
+        if model is not None or nickname is not None or title is not None or tags is not None:
             import json as _json
-            prof = {"nickname": "", "title": "", "model": ""}
+            prof = {"nickname": "", "title": "", "model": "", "tags": []}
             pf = d / "profile.json"
             if pf.exists():
                 try:
@@ -296,6 +342,8 @@ class RoleRegistry:
                 prof["nickname"] = (nickname or "").strip()
             if title is not None:
                 prof["title"] = (title or "").strip()
+            if tags is not None:
+                prof["tags"] = normalize_tags(tags)   # 双语归一(#3b;手动编辑管理是第二步 TODO)
             pf.write_text(_json.dumps(prof, ensure_ascii=False), encoding="utf-8")
         return self.get(rid)
 
@@ -409,8 +457,9 @@ class RoleRegistry:
             txt = ident.read_text(encoding="utf-8")
             # 去掉 "# IDENTITY" 标题行,取正文
             identity = re.sub(r"^#\s*IDENTITY\s*\n+", "", txt).strip()
-        # brick4:读花名/职务/模型(profile.json;无则空,display_name 回退 role_id)
+        # brick4:读花名/职务/模型/标签(profile.json;无则空,display_name 回退 role_id)
         nickname = title = model = ""
+        tags: list = []
         prof = d / "profile.json"
         if prof.exists():
             try:
@@ -419,10 +468,11 @@ class RoleRegistry:
                 nickname = (pd.get("nickname") or "").strip()
                 title = (pd.get("title") or "").strip()
                 model = (pd.get("model") or "").strip()
+                tags = pd.get("tags") or []   # normalize_tags 兜底旧英文串/坏形态
             except Exception:
                 pass
         return RoleView(role_id, identity, atom_ids, d, nickname=nickname, title=title,
-                        model=model, skill_ids=skill_ids)
+                        model=model, skill_ids=skill_ids, tags=tags)
 
     def list_all(self) -> list[RoleView]:
         out: list[RoleView] = []
@@ -449,6 +499,6 @@ class RoleRegistry:
 
 
 __all__ = [
-    "RoleRegistry", "RoleView", "SLOT_NAMES",
+    "RoleRegistry", "RoleView", "SLOT_NAMES", "normalize_tags",
     "DuplicateRoleError", "UnknownAtomError", "UnknownSkillError",
 ]

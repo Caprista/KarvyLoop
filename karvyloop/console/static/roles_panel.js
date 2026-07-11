@@ -8,9 +8,64 @@ var KarvyRolesPanelBundle = (function(exports) {
   const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
   const _xferTitles = () => ({ titleLeft: t("mgmt.available"), titleRight: t("mgmt.selected"), searchPh: t("mgmt.search") });
+  function _tagEn(tag) {
+    if (tag && typeof tag === "object") return String(tag.en || "").trim().toLowerCase();
+    return String(tag == null ? "" : tag).split("|")[0].trim().toLowerCase();
+  }
+  function _tagText(tag) {
+    const _i18n = window.KarvyI18n;
+    const zh = !!(_i18n && _i18n.getLang && _i18n.getLang() === "zh");
+    if (tag && typeof tag === "object") {
+      const o = tag;
+      return (zh ? o.zh || o.en : o.en || o.zh) || "";
+    }
+    const s = String(tag == null ? "" : tag);
+    const parts = s.split("|");
+    if (parts.length >= 2) return (zh ? parts[1] : parts[0]).trim() || parts[0].trim();
+    return s.trim();
+  }
+  function _collectTags(items, tagsOf) {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const it of items) for (const tg of tagsOf(it) || []) {
+      const k = _tagEn(tg);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      out.push(tg);
+    }
+    return out;
+  }
+  function _tagFilterBar(items, tagsOf, onChange) {
+    const tags = _collectTags(items, tagsOf);
+    if (!tags.length) return null;
+    const bar = el("div", { class: "tag-filter-bar" });
+    bar.appendChild(el("span", { class: "tag-filter-label", text: t("mgmt.filter_by_tag") }));
+    let active = null;
+    const chips = [];
+    const paint = () => {
+      for (const c of chips) c.classList.toggle("active", c.dataset.k === active);
+    };
+    for (const tg of tags) {
+      const k = _tagEn(tg);
+      const chip = el("span", {
+        class: "tag-chip",
+        text: _tagText(tg),
+        onclick: () => {
+          active = active === k ? null : k;
+          paint();
+          onChange(active);
+        }
+      });
+      chip.dataset.k = k;
+      chips.push(chip);
+      bar.appendChild(chip);
+    }
+    return bar;
+  }
   let _deps = {};
   function _directChatRole(roleId) {
-    const fn = _deps.directChatRole || (window.KarvyChat && window.KarvyChat.directChatRole);
+    var _a;
+    const fn = _deps.directChatRole || ((_a = window.KarvyChat) == null ? void 0 : _a.directChatRole);
     if (fn) fn(roleId);
   }
   function _modelSelect(current) {
@@ -41,7 +96,7 @@ var KarvyRolesPanelBundle = (function(exports) {
     const bar = el(
       "div",
       { class: "mgmt-toolbar" },
-      el("button", { class: "mgmt-new-btn", text: t("mgmt.new") + " " + t("mgmt.roles_title"), onclick: () => renderCreate() })
+      el("button", { class: "mgmt-new-btn", text: t("mgmt.new_role"), onclick: () => renderCreate() })
     );
     body.appendChild(bar);
     await _renderResidentsGallery(body);
@@ -49,13 +104,26 @@ var KarvyRolesPanelBundle = (function(exports) {
       body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") }));
       return;
     }
-    body.appendChild(_KW.pagedList({
+    const listHost = el("div", {});
+    const _renderRoleList = (active) => {
+      listHost.innerHTML = "";
+      const shown = active ? roles.filter((v) => (v.tags || []).some((tg) => _tagEn(tg) === active)) : roles;
+      listHost.appendChild(_pagedRoles(shown));
+    };
+    const filterBar = _tagFilterBar(roles, (v) => v.tags || [], _renderRoleList);
+    if (filterBar) body.appendChild(filterBar);
+    body.appendChild(listHost);
+    _renderRoleList(null);
+  }
+  function _pagedRoles(roles) {
+    return _KW.pagedList({
       items: roles,
       pageSize: 8,
       searchPh: t("mgmt.search"),
       emptyText: t("mgmt.empty"),
-      searchOf: (v) => v.id + " " + (v.identity || "") + " " + (v.atom_ids || []).join(" ") + " " + (v.skill_ids || []).join(" "),
+      searchOf: (v) => v.id + " " + (v.identity || "") + " " + (v.atom_ids || []).join(" ") + " " + (v.skill_ids || []).join(" ") + " " + (v.tags || []).map((tg) => _tagEn(tg) + " " + _tagText(tg)).join(" "),
       renderItem: (v) => {
+        const semTags = (v.tags || []).map((tg) => el("span", { class: "mc-tag mc-tag-sem", text: "🏷 " + _tagText(tg) }));
         const tags = (v.atom_ids || []).map((a) => el("span", { class: "mc-tag", text: "🔧 " + a }));
         const skTags = (v.skill_ids || []).map((s) => el("span", { class: "mc-tag mc-tag-skill", text: "🧩 " + s }));
         return el(
@@ -66,11 +134,13 @@ var KarvyRolesPanelBundle = (function(exports) {
             { class: "mc-main" },
             el("div", { class: "mc-name", text: v.id }),
             v.identity ? el("div", { class: "mc-meta", text: v.identity }) : null,
+            semTags.length ? el("div", { class: "mc-meta" }, ...semTags) : null,
             tags.length || skTags.length ? el("div", { class: "mc-meta" }, ...tags, ...skTags) : null
           ),
           el(
             "div",
             { class: "dpref-actions" },
+            // Hardy:角色在这儿了就该能直接聊,不必先加进业务域(点这个 = 切到与它的私聊)。
             el("button", { class: "dpref-confirm", text: t("role.direct_chat"), onclick: () => _directChatRole(v.id) }),
             el("button", { class: "dpref-edit", text: t("role.view_edit"), onclick: () => _openRoleEdit(v) }),
             el("button", { class: "dpref-edit", text: t("eval.btn"), onclick: () => _openRoleEvals(v.id) }),
@@ -91,7 +161,7 @@ var KarvyRolesPanelBundle = (function(exports) {
           )
         );
       }
-    }));
+    });
   }
   async function _renderResidentsGallery(body) {
     let residents = [];
@@ -143,8 +213,11 @@ var KarvyRolesPanelBundle = (function(exports) {
     body.innerHTML = "";
     const atomsData = await _getJSON("/api/atoms");
     const skillsData = await _getJSON("/api/skills");
-    let atomIds = (atomsData && atomsData.atoms || []).map((a) => a.id);
+    let allAtoms = atomsData && atomsData.atoms || [];
+    let atomIds = allAtoms.map((a) => a.id);
     const skillIds = (skillsData && skillsData.skills || []).map((s) => s.name);
+    const atomTagKeys = {};
+    for (const a of allAtoms) atomTagKeys[a.id] = (a.tags || []).map((tg) => _tagEn(tg));
     const idIn = el("input", { type: "text", placeholder: "pm" });
     const identityIn = el("textarea", {});
     const soulIn = el("textarea", {});
@@ -153,6 +226,14 @@ var KarvyRolesPanelBundle = (function(exports) {
     const atomBox = el("div", {});
     let atomTL = _KW.transferList({ items: atomIds.map((id) => ({ id, label: id })), selected: [], ..._xferTitles() });
     atomBox.appendChild(atomTL.el);
+    const _rebuildAtomBox = (active) => {
+      const cur = atomTL.getSelected();
+      const shown = active ? atomIds.filter((id) => (atomTagKeys[id] || []).includes(active) || cur.includes(id)) : atomIds;
+      atomBox.innerHTML = "";
+      atomTL = _KW.transferList({ items: shown.map((id) => ({ id, label: id })), selected: cur, ..._xferTitles() });
+      atomBox.appendChild(atomTL.el);
+    };
+    const atomFilterBar = _tagFilterBar(allAtoms, (a) => a.tags || [], _rebuildAtomBox);
     const skillTL = _KW.transferList({ items: skillIds.map((id) => ({ id, label: "🧩 " + id })), selected: [], ..._xferTitles() });
     const buyId = el("input", { type: "text", placeholder: "new_atom" });
     const buyKind = el(
@@ -173,6 +254,7 @@ var KarvyRolesPanelBundle = (function(exports) {
           const cur = atomTL.getSelected();
           if (!cur.includes(id)) cur.push(id);
           if (!atomIds.includes(id)) atomIds = atomIds.concat([id]);
+          if (!atomTagKeys[id]) atomTagKeys[id] = [];
           atomBox.innerHTML = "";
           atomTL = _KW.transferList({ items: atomIds.map((x) => ({ id: x, label: x })), selected: cur, ..._xferTitles() });
           atomBox.appendChild(atomTL.el);
@@ -221,6 +303,7 @@ var KarvyRolesPanelBundle = (function(exports) {
       el("label", { text: t("role.model_label") }),
       modelSel,
       el("label", { text: t("role.pick_atoms") }),
+      atomFilterBar || null,
       atomBox,
       buyRow,
       el("label", { text: t("role.pick_skills") }),

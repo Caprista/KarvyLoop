@@ -28,6 +28,52 @@ const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
 const t = (k: string, vars?: Record<string, unknown>) =>
   (window as unknown as { KarvyI18n: I18n }).KarvyI18n.t(k, vars);
 
+// ============ tag 系统(#3b):双语显示 + 筛选条 ============
+// 标签形态兼容:"en|zh" 双语串 / {en,zh} dict / 旧纯英文串。en=语言中立匹配键,zh=中文界面显示(缺回退 en)。
+function _tagEn(tag: unknown): string {
+  if (tag && typeof tag === "object") return String((tag as { en?: string }).en || "").trim().toLowerCase();
+  return String(tag == null ? "" : tag).split("|")[0].trim().toLowerCase();
+}
+function _tagText(tag: unknown): string {
+  const _i18n = (window as unknown as { KarvyI18n?: { getLang?: () => string } }).KarvyI18n;
+  const zh = !!(_i18n && _i18n.getLang && _i18n.getLang() === "zh");
+  if (tag && typeof tag === "object") {
+    const o = tag as { en?: string; zh?: string };
+    return (zh ? (o.zh || o.en) : (o.en || o.zh)) || "";
+  }
+  const s = String(tag == null ? "" : tag);
+  const parts = s.split("|");
+  if (parts.length >= 2) return (zh ? parts[1] : parts[0]).trim() || parts[0].trim();
+  return s.trim();
+}
+function _collectTags(items: any[], tagsOf: (it: any) => unknown[]): unknown[] {
+  const seen = new Set<string>(); const out: unknown[] = [];
+  for (const it of items) for (const tg of (tagsOf(it) || [])) {
+    const k = _tagEn(tg); if (!k || seen.has(k)) continue; seen.add(k); out.push(tg);
+  }
+  return out;
+}
+// 筛选条:点一个 tag → onChange(activeEnKeyOrNull) 让调用方重渲列表。没标签 → 返回 null(优雅缺席)。
+// TODO(#3b 第二步):完整手动 tag 增删编辑管理(这里只做打标+筛选)。
+function _tagFilterBar(items: any[], tagsOf: (it: any) => unknown[],
+  onChange: (active: string | null) => void): HTMLElement | null {
+  const tags = _collectTags(items, tagsOf);
+  if (!tags.length) return null;
+  const bar = el("div", { class: "tag-filter-bar" });
+  bar.appendChild(el("span", { class: "tag-filter-label", text: t("mgmt.filter_by_tag") }));
+  let active: string | null = null;
+  const chips: HTMLElement[] = [];
+  const paint = () => { for (const c of chips) c.classList.toggle("active", c.dataset.k === active); };
+  for (const tg of tags) {
+    const k = _tagEn(tg);
+    const chip = el("span", { class: "tag-chip", text: _tagText(tg),
+      onclick: () => { active = (active === k) ? null : k; paint(); onChange(active); } }) as HTMLElement;
+    chip.dataset.k = k;
+    chips.push(chip); bar.appendChild(chip);
+  }
+  return bar;
+}
+
 // 列表(搜索 + 分页 + 「＋新建」)
 async function renderList(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
@@ -39,13 +85,33 @@ async function renderList(): Promise<void> {
     atoms.length >= 2 ? el("button", { class: "mgmt-inline-link atom-consolidate-btn",
       text: t("atom.consolidate_btn"), onclick: () => _runConsolidate() }) : null));
   if (!atoms.length) { body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") })); return; }
-  body.appendChild(_KW.pagedList({
+  // tag 筛选条(#3b):点一个语义标签只留带它的原子。重渲分页列表实现过滤。
+  const listHost = el("div", {});
+  const _render = (active: string | null) => {
+    listHost.innerHTML = "";
+    const shown = active ? atoms.filter((a: any) => (a.tags || []).some((tg: unknown) => _tagEn(tg) === active)) : atoms;
+    listHost.appendChild(_pagedAtoms(shown));
+  };
+  const filterBar = _tagFilterBar(atoms, (a: any) => a.tags || [], _render);
+  if (filterBar) body.appendChild(filterBar);
+  body.appendChild(listHost);
+  _render(null);
+}
+
+// 原子分页列表(抽出:tag 筛选后重渲同一份渲染)
+function _pagedAtoms(atoms: any[]): HTMLElement {
+  return _KW.pagedList({
     items: atoms, pageSize: 8, searchPh: t("mgmt.search"), emptyText: t("mgmt.empty"),
-    searchOf: (a: any) => a.id + " " + (a.kind || "") + " " + (a.prompt || "") + " " + (a.tools || []).join(" "),
+    searchOf: (a: any) => a.id + " " + (a.kind || "") + " " + (a.prompt || "") + " " + (a.tools || []).join(" ")
+      + " " + (a.tags || []).map((tg: unknown) => _tagEn(tg) + " " + _tagText(tg)).join(" "),
     renderItem: (a: any) => el("div", { class: "mgmt-card" },
       el("div", { class: "mc-main" },
         el("div", { class: "mc-name" }, a.id + " ", el("span", { class: "mc-tag", text: a.kind })),
         a.prompt ? el("div", { class: "mc-meta", text: a.prompt }) : null,
+        (a.tags && a.tags.length)
+          ? el("div", { class: "mc-meta" },
+              ...a.tags.map((tg: unknown) => el("span", { class: "mc-tag mc-tag-sem", text: "🏷 " + _tagText(tg) })))
+          : null,
         (a.tools && a.tools.length) ? el("div", { class: "mc-meta", text: "🔧 " + a.tools.join(", ") }) : null),
       el("div", { class: "dpref-actions" },
         el("button", { class: "dpref-edit", text: t("mgmt.edit"), onclick: () => _renderForm(a) }),
@@ -55,7 +121,7 @@ async function renderList(): Promise<void> {
             await _postJSON("/api/atom/remove", { atom_id: a.id });
             await renderList();
           } }))),
-  }));
+  });
 }
 
 // 创建/编辑页(与列表分离)。existing=null → 新建;existing=atom → 编辑(id 只读,改 prompt/kind/tools)。

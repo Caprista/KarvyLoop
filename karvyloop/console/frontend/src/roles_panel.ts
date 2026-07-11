@@ -34,6 +34,54 @@ const t = (k: string, vars?: Record<string, unknown>) =>
 
 const _xferTitles = () => ({ titleLeft: t("mgmt.available"), titleRight: t("mgmt.selected"), searchPh: t("mgmt.search") });
 
+// ============ tag 系统(#3b):双语显示 + 逐面板筛选条 ============
+// 标签形态兼容:后端可能给 "en|zh" 双语串 / {en,zh} dict / 旧纯英文串。
+// en = 语言中立匹配键(去重/筛选);zh 给中文界面显示,缺则回退 en(向后兼容)。
+function _tagEn(tag: unknown): string {
+  if (tag && typeof tag === "object") return String((tag as { en?: string }).en || "").trim().toLowerCase();
+  return String(tag == null ? "" : tag).split("|")[0].trim().toLowerCase();
+}
+function _tagText(tag: unknown): string {
+  const _i18n = (window as unknown as { KarvyI18n?: { getLang?: () => string } }).KarvyI18n;
+  const zh = !!(_i18n && _i18n.getLang && _i18n.getLang() === "zh");
+  if (tag && typeof tag === "object") {
+    const o = tag as { en?: string; zh?: string };
+    return (zh ? (o.zh || o.en) : (o.en || o.zh)) || "";
+  }
+  const s = String(tag == null ? "" : tag);
+  const parts = s.split("|");
+  if (parts.length >= 2) return (zh ? parts[1] : parts[0]).trim() || parts[0].trim();
+  return s.trim();
+}
+// 从一列对象抽全部去重标签(按 en 键),保留首见的原始标签形态供显示。
+function _collectTags(items: any[], tagsOf: (it: any) => unknown[]): unknown[] {
+  const seen = new Set<string>(); const out: unknown[] = [];
+  for (const it of items) for (const tg of (tagsOf(it) || [])) {
+    const k = _tagEn(tg); if (!k || seen.has(k)) continue; seen.add(k); out.push(tg);
+  }
+  return out;
+}
+// 筛选条:点一个 tag → 只留带该 tag 的项(再点取消)。onChange(activeEnKeyOrNull) 让调用方重渲列表。
+// TODO(#3b 第二步):完整手动 tag 增删编辑管理(这里只做打标+筛选,不含编辑)。
+function _tagFilterBar(items: any[], tagsOf: (it: any) => unknown[],
+  onChange: (active: string | null) => void): HTMLElement | null {
+  const tags = _collectTags(items, tagsOf);
+  if (!tags.length) return null;   // 没标签 → 优雅缺席,不占地方
+  const bar = el("div", { class: "tag-filter-bar" });
+  bar.appendChild(el("span", { class: "tag-filter-label", text: t("mgmt.filter_by_tag") }));
+  let active: string | null = null;
+  const chips: HTMLElement[] = [];
+  const paint = () => { for (const c of chips) c.classList.toggle("active", c.dataset.k === active); };
+  for (const tg of tags) {
+    const k = _tagEn(tg);
+    const chip = el("span", { class: "tag-chip", text: _tagText(tg),
+      onclick: () => { active = (active === k) ? null : k; paint(); onChange(active); } }) as HTMLElement;
+    chip.dataset.k = k;
+    chips.push(chip); bar.appendChild(chip);
+  }
+  return bar;
+}
+
 // 跨面板依赖:点角色卡「💬 直聊」→ 切到与该角色的私聊(l0/personal scope,不必先加进业务域)。
 // 由 app.js 经 open({directChatRole}) 注入;缺注入时回退到全局 window.KarvyChat.directChatRole。
 interface RolesDeps { directChatRole?: (roleId: string) => void }
@@ -66,20 +114,40 @@ async function renderList(): Promise<void> {
   const rolesData = await _getJSON("/api/roles");
   const roles = (rolesData && rolesData.roles) || [];
   const bar = el("div", { class: "mgmt-toolbar" },
-    el("button", { class: "mgmt-new-btn", text: t("mgmt.new") + " " + t("mgmt.roles_title"), onclick: () => renderCreate() }));
+    el("button", { class: "mgmt-new-btn", text: t("mgmt.new_role"), onclick: () => renderCreate() }));
   body.appendChild(bar);
   await _renderResidentsGallery(body);   // 请原住民进来(补掉"一生一次引荐卡"之后再没门的黑洞)
   if (!roles.length) { body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") })); return; }
-  body.appendChild(_KW.pagedList({
+  // tag 筛选条(#3b):点一个语义标签只留带它的角色。挂在分页列表上方,重渲列表实现过滤。
+  const listHost = el("div", {});
+  const _renderRoleList = (active: string | null) => {
+    listHost.innerHTML = "";
+    const shown = active ? roles.filter((v: any) => (v.tags || []).some((tg: unknown) => _tagEn(tg) === active)) : roles;
+    listHost.appendChild(_pagedRoles(shown));
+  };
+  const filterBar = _tagFilterBar(roles, (v: any) => v.tags || [], _renderRoleList);
+  if (filterBar) body.appendChild(filterBar);
+  body.appendChild(listHost);
+  _renderRoleList(null);
+}
+
+// 角色分页列表(抽出:tag 筛选后重渲用同一份渲染)
+function _pagedRoles(roles: any[]): HTMLElement {
+  return _KW.pagedList({
     items: roles, pageSize: 8, searchPh: t("mgmt.search"), emptyText: t("mgmt.empty"),
-    searchOf: (v: any) => v.id + " " + (v.identity || "") + " " + (v.atom_ids || []).join(" ") + " " + (v.skill_ids || []).join(" "),
+    searchOf: (v: any) => v.id + " " + (v.identity || "") + " " + (v.atom_ids || []).join(" ")
+      + " " + (v.skill_ids || []).join(" ")
+      + " " + (v.tags || []).map((tg: unknown) => _tagEn(tg) + " " + _tagText(tg)).join(" "),
     renderItem: (v: any) => {
+      const semTags = (v.tags || []).map((tg: unknown) =>
+        el("span", { class: "mc-tag mc-tag-sem", text: "🏷 " + _tagText(tg) }));
       const tags = (v.atom_ids || []).map((a: string) => el("span", { class: "mc-tag", text: "🔧 " + a }));
       const skTags = (v.skill_ids || []).map((s: string) => el("span", { class: "mc-tag mc-tag-skill", text: "🧩 " + s }));
       return el("div", { class: "mgmt-card" },
         el("div", { class: "mc-main" },
           el("div", { class: "mc-name", text: v.id }),
           v.identity ? el("div", { class: "mc-meta", text: v.identity }) : null,
+          semTags.length ? el("div", { class: "mc-meta" }, ...semTags) : null,
           (tags.length || skTags.length) ? el("div", { class: "mc-meta" }, ...tags, ...skTags) : null),
         el("div", { class: "dpref-actions" },
           // Hardy:角色在这儿了就该能直接聊,不必先加进业务域(点这个 = 切到与它的私聊)。
@@ -98,7 +166,7 @@ async function renderList(): Promise<void> {
               await renderList();
             } })));
     },
-  }));
+  });
 }
 
 // ============ 请原住民进来(常驻门;补掉一生一次引荐卡的发现性黑洞)============
@@ -141,18 +209,33 @@ async function renderCreate(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
   const atomsData = await _getJSON("/api/atoms");
   const skillsData = await _getJSON("/api/skills");
-  let atomIds: string[] = ((atomsData && atomsData.atoms) || []).map((a: any) => a.id);
+  let allAtoms: any[] = (atomsData && atomsData.atoms) || [];
+  let atomIds: string[] = allAtoms.map((a: any) => a.id);
   const skillIds: string[] = ((skillsData && skillsData.skills) || []).map((s: any) => s.name);
+  // atom_id → tags(en 键集合),给"新建 role 关联 atom"选择器按 tag 筛(解"atom 多了找不到")
+  const atomTagKeys: Record<string, string[]> = {};
+  for (const a of allAtoms) atomTagKeys[a.id] = (a.tags || []).map((tg: unknown) => _tagEn(tg));
 
   const idIn = el("input", { type: "text", placeholder: "pm" }) as HTMLInputElement;
   const identityIn = el("textarea", {}) as HTMLTextAreaElement;
   const soulIn = el("textarea", {}) as HTMLTextAreaElement;
   const userIn = el("textarea", {}) as HTMLTextAreaElement;
   const modelSel = _modelSelect("");
-  // atoms 穿梭框(就地买糖会重建它,保留已选)
+  // atoms 穿梭框(就地买糖会重建它,保留已选)+ tag 筛选条(点 tag 只在框里放带该 tag 的 atom)
   const atomBox = el("div", {});
   let atomTL = _KW.transferList({ items: atomIds.map((id) => ({ id, label: id })), selected: [], ..._xferTitles() });
   atomBox.appendChild(atomTL.el);
+  // #3b:atom 选择器 tag 筛选 —— 点一个 tag,穿梭框只列带该 tag 的 atom(保留已选,不丢)。
+  const _rebuildAtomBox = (active: string | null): void => {
+    const cur = atomTL.getSelected();
+    const shown = active
+      ? atomIds.filter((id) => (atomTagKeys[id] || []).includes(active) || cur.includes(id))
+      : atomIds;
+    atomBox.innerHTML = "";
+    atomTL = _KW.transferList({ items: shown.map((id) => ({ id, label: id })), selected: cur, ..._xferTitles() });
+    atomBox.appendChild(atomTL.el);
+  };
+  const atomFilterBar = _tagFilterBar(allAtoms, (a: any) => a.tags || [], _rebuildAtomBox);
   const skillTL = _KW.transferList({ items: skillIds.map((id) => ({ id, label: "🧩 " + id })), selected: [], ..._xferTitles() });
   // 就地买糖:缺原子内联建 → 建完并入穿梭框且预选
   const buyId = el("input", { type: "text", placeholder: "new_atom" }) as HTMLInputElement;
@@ -168,6 +251,7 @@ async function renderCreate(): Promise<void> {
       if (res.ok) {
         const cur = atomTL.getSelected(); if (!cur.includes(id)) cur.push(id);
         if (!atomIds.includes(id)) atomIds = atomIds.concat([id]);
+        if (!atomTagKeys[id]) atomTagKeys[id] = [];   // 新买的糖暂无 tag(daily 慢侧再补语义标签)
         atomBox.innerHTML = "";
         atomTL = _KW.transferList({ items: atomIds.map((x) => ({ id: x, label: x })), selected: cur, ..._xferTitles() });
         atomBox.appendChild(atomTL.el);
@@ -195,7 +279,8 @@ async function renderCreate(): Promise<void> {
     el("label", { text: t("role.soul_label") }), soulIn,
     el("label", { text: t("role.user_label") }), userIn,
     el("label", { text: t("role.model_label") }), modelSel,
-    el("label", { text: t("role.pick_atoms") }), atomBox, buyRow,
+    el("label", { text: t("role.pick_atoms") }),
+    atomFilterBar || null, atomBox, buyRow,
     el("label", { text: t("role.pick_skills") }), el("div", { class: "mgmt-hint", text: t("role.skills_hint") }), skillTL.el,
     el("div", { class: "mgmt-row" }, submit,
       el("button", { class: "mgmt-inline-link", text: t("role.back"), onclick: () => renderList() })),

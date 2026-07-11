@@ -66,7 +66,11 @@ def search_pool(desc: str, atom_registry: Any, *, threshold: float = 0.5) -> Opt
     best_id, best_score, best_provisional = None, threshold, True
     for a in atom_registry.list_all():
         prov = bool(getattr(a, "provisional", False))
-        _tags_txt = " ".join(getattr(a, "tags", []) or [])
+        # 标签可能是 "en|zh" 双语编码 → 拆出两段都进匹配文本(en 匹配键 + zh 让中文 desc 也能命中)
+        _tag_parts: list = []
+        for _t in (getattr(a, "tags", []) or []):
+            _tag_parts.extend(str(_t).split("|"))
+        _tags_txt = " ".join(p for p in _tag_parts if p.strip())
         for cand in (getattr(a, "prompt", "") or "", getattr(a, "id", "") or "", _tags_txt):
             tc = _toks(cand)
             shared = dq & tc
@@ -82,27 +86,64 @@ _SYNTH_SYSTEM = (
     "你把一句『需要什么能力』的描述,凝成一个**单一职责**的可复用原子规格。"
     "只输出严格 JSON(无解释、无 markdown fence):"
     '{"id": "<字母数字下划线的短名>", "prompt": "<这个原子做什么、怎么做的指令>", '
-    '"tools": ["<只从允许工具里选>"], "tags": ["<2-5个归一化语义标签,英文小写,如 web/search/translate>"]}。'
+    '"tools": ["<只从允许工具里选>"], '
+    '"tags": [{"en": "<英文小写归一化词,如 web/search/translate>", "zh": "<对应中文,如 网页/检索/翻译>"}]}。'
     "允许的工具:run_command, read_file, write_file, edit_file, web_search, web_fetch。"
-    "tags 是这个能力的概念标签(给跨语言/改写的语义匹配用,务必归一化、别用整句)。"
-    "凝不出单一职责的可复用能力就输出 {}。"
+    "tags 是这个能力的**双语概念标签**(2-5 个):en 给跨语言语义匹配用(务必归一化小写、别用整句),"
+    "zh 是给中文用户看的对应中文词。凝不出单一职责的可复用能力就输出 {}。"
 )
 _REAL_TOOLS = {"run_command", "read_file", "write_file", "edit_file", "web_search", "web_fetch"}
 
 
+# 双语标签编码(#3b tag 系统):registry 把 tags 存成 list[str],所以每个标签编成 **"en|zh"** 紧凑串
+# (en 是语言中立匹配键、小写归一;zh 给中文用户看)。前端按 `|` 拆分双语显示,缺 zh 回退 en(向后兼容
+# 旧的纯英文串)。这样既留在 str 形态(registry-safe),又不丢中文——守 grep+overlap+LLM 标签,无向量。
+def _tag_en(tag: Any) -> str:
+    """取一个标签的**英文匹配键**(en 段;旧纯英文串就是自身;dict 取 en)。小写归一,给 overlap 用。"""
+    if isinstance(tag, dict):
+        return str(tag.get("en", "") or "").strip().lower()
+    return (str(tag).split("|", 1)[0] or "").strip().lower()
+
+
 def _norm_tags(raw: Any) -> list:
-    """归一化标签:小写、去空、去重保序、每个 ≤32 字、≤8 个。"""
+    """归一化标签成 **"en|zh"** 双语串:接受旧英文串 / {"en","zh"} dict / "en|zh" 串。
+
+    en 小写归一(语言中立匹配键),zh 保留中文;缺 zh 回退 en(向后兼容)。
+    去空、按 en 去重保序、每段 ≤32 字、≤8 个。
+    """
     out: list = []
+    seen: set = set()
     for t in (raw or []):
-        s = str(t).strip().lower()[:32]
-        if s and s not in out:
-            out.append(s)
+        if t is None:
+            continue
+        if isinstance(t, dict):
+            en = str(t.get("en", "") or "").strip().lower()[:32]
+            zh = str(t.get("zh", "") or "").strip()[:32]
+        else:
+            s = str(t).strip()
+            if "|" in s:                       # 已是 "en|zh" 编码
+                en, _, zh = s.partition("|")
+                en, zh = en.strip().lower()[:32], zh.strip()[:32]
+            else:
+                en, zh = s.lower()[:32], ""
+        if not en and not zh:
+            continue
+        if not en:
+            en = zh.lower()[:32]
+        if not zh:
+            zh = en                            # 缺 zh 显 en(向后兼容)
+        if en in seen:
+            continue
+        seen.add(en)
+        out.append(f"{en}|{zh}")
     return out[:8]
 
 
 def _tag_overlap(a: list, b: list) -> float:
-    """标签集相似(交集/较小集),要求**共享 ≥2 标签**才算(避免单个宽标签如 web 误判同义)。"""
-    sa, sb = set(a), set(b)
+    """标签集相似(交集/较小集),按 **en 匹配键**比对,要求**共享 ≥2 标签**才算
+    (避免单个宽标签如 web 误判同义)。双语编码不影响匹配——只看语言中立的 en 段。"""
+    sa = {_tag_en(t) for t in (a or []) if _tag_en(t)}
+    sb = {_tag_en(t) for t in (b or []) if _tag_en(t)}
     shared = sa & sb
     if len(shared) < 2:
         return 0.0
