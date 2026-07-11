@@ -127,11 +127,11 @@ def api_external_citizens(request: Request, domain: str = "") -> dict[str, Any]:
     """列已接入的外部公民(带 tier + 活性灯)。K4 只读(读注册表,不改)。
 
     domain 传空 = 全部挂载点;传具体域 = 只列该域(复合键 (域, citizen_id))。
-    未接注册表(C1 未 merge app.state.citizen_registry)→ 返空清单 + _integration_pending。
+    注册表未构造(--no-llm 或构造失败)→ 返空清单 + _integration_pending。
     """
     reg = _registry(request.app)
     if reg is None:
-        return {"citizens": [], "_integration_pending": "app.state.citizen_registry 未接线(C1)"}
+        return {"citizens": [], "_integration_pending": "外部公民注册表未就绪"}
     dom = domain if domain else None
     citizens, pending = _list_citizens(reg, dom)
     out = {"citizens": [_citizen_view(reg, c) for c in citizens]}
@@ -152,7 +152,7 @@ def api_external_liveness(request: Request, citizen_id: str = "", domain: str = 
     if not citizen_id:
         return {"ok": False, "reason": "缺 citizen_id"}
     if reg is None:
-        return {"ok": False, "reason": "未接注册表(C1 未 merge)", "status": "unreachable"}
+        return {"ok": False, "reason": "外部公民注册表未就绪", "status": "unreachable"}
     citizen = None
     resolve_in = getattr(reg, "resolve_in", None)
     if callable(resolve_in):
@@ -200,7 +200,7 @@ def api_external_detach(req: ExternalDetachRequest, request: Request) -> dict[st
     """
     reg = _registry(request.app)
     if reg is None:
-        return {"ok": False, "reason": "未接注册表(C1 未 merge app.state.citizen_registry)"}
+        return {"ok": False, "reason": "外部公民注册表未就绪"}
     if not _is_trusted_origin(request):
         client = (request.client.host if request.client else "") or ""
         return {"ok": False, "reason": f"删除只能从本机或同局域网触发(你的来源 {client} 不在可信网内)"}
@@ -215,7 +215,7 @@ def api_external_detach(req: ExternalDetachRequest, request: Request) -> dict[st
     else:
         remove = getattr(reg, "remove", None)  # 回退:当前已 merge 的 remove()
         if not callable(remove):
-            return {"ok": False, "reason": "注册表既无 detach 也无 remove(集成点未就绪)"}
+            return {"ok": False, "reason": "注册表不支持解绑操作"}
         try:
             removed = bool(remove(req.domain_id or "", req.citizen_id))
         except Exception as e:

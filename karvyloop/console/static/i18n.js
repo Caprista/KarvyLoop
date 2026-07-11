@@ -2332,6 +2332,11 @@
       return s;
     }
     const BACKEND_ZH_EN = {
+      "公民不存在": "external citizen not found",
+      "公民不存在或已解绑": "external citizen not found or already detached",
+      "缺 citizen_id": "missing citizen_id",
+      "外部公民注册表未就绪": "external citizen registry not ready",
+      "注册表不支持解绑操作": "registry does not support detach",
       "memory 未接": "memory not wired",
       "memory 未接(--no-llm?)": "memory not wired (--no-llm?)",
       "缺 q(要召回什么)": "missing q (what to recall)",
