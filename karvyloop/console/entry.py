@@ -499,6 +499,22 @@ def cmd_console(args: argparse.Namespace) -> int:
             logger.warning(f"[karvyloop console] citizen_registry 构造失败(无外部公民,管理面返空): {e}")
             citizen_registry = None
         app.state.citizen_registry = citizen_registry
+        # M2(#71 §7)接活:圆桌客人席/workflow 外部步/小卡 external_agent 工具的**执行面**hook。
+        # 病根(critic):app.py 里这俩默认 None,console 启动路径从没显式接 → 外部执行面永远走"隐式回退",
+        # 且 app.state 上是 None(看起来像没接线)。这里接成**内置 subprocess 桥工厂**(第四类实体 opaque、
+        # 输出恒 untrusted、密钥过滤 + fail-loud 都在桥里),让 hook 真活;token_recorder 无独立 ext: 账本
+        # 需求时保持 None(=只落 provenance,gateway 咽喉照记)。构造失败 → 回落 None(下游仍有内置回退,0 回归)。
+        # citizen_registry 未就绪(--no-llm 前的构造失败)→ 不接执行面(没公民可派活,接了也空转)。
+        if citizen_registry is not None:
+            try:
+                from karvyloop.external_runtime import bridge_factory as _ext_bridge_factory
+                app.state.external_bridge_factory = _ext_bridge_factory
+                logger.info("[karvyloop console] 外部 runtime 执行面已接线(圆桌客人席/workflow 外部步/小卡工具可派活)")
+            except Exception as e:
+                logger.warning(f"[karvyloop console] 外部执行面接线失败(降级为内置回退): {e}")
+                app.state.external_bridge_factory = None
+            # token_recorder:默认 None(外部 usage 只落 provenance;gateway 记账咽喉不双计)。留 hook 给未来独立 ext: 账本。
+            app.state.external_token_recorder = None
         # 9.5 P2/step2:任务看板登记 + 落盘(重启记得住;running 中断标 interrupted)
         from karvyloop.console.tasks import TaskRegistry, TaskStore
         app.state.task_registry = TaskRegistry(

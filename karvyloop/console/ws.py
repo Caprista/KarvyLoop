@@ -321,6 +321,12 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                                      # 小卡自我认知落地:建 agent 意图 → 挂 instantiate_domain_template
                                      domain_registry=getattr(app.state, "domain_registry", None),
                                      domain_store=getattr(app.state, "domain_store", None),
+                                     # 跨 runtime 协作(docs/71 M1):小卡人格 + 接了 citizen_registry →
+                                     # 挂 external_agent/attach/list/revoke(WS 聊天里也能接入/派活外部 runtime)。
+                                     # drive_in_tui 内再门一道(persona.karvy_self);业务角色不挂(0 回归)。
+                                     citizen_registry=getattr(app.state, "citizen_registry", None),
+                                     external_bridge_factory=getattr(app.state, "external_bridge_factory", None),
+                                     external_token_recorder=getattr(app.state, "external_token_recorder", None),
                                      **runtime_kwargs)
     except Exception as e:
         await websocket.send_json({

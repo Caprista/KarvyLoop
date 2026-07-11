@@ -1025,6 +1025,12 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
                                          schedule_target_resolver=(
                                              lambda rn: _resolve_schedule_target(request.app, rn)),
                                          memory=mem,
+                                         # 跨 runtime 协作(docs/71 M1):小卡人格 + 接了 citizen_registry →
+                                         # 挂 external_agent/attach/list/revoke(直接聊天里"接入/派活外部 runtime")。
+                                         # drive_in_tui 内再门一道(persona.karvy_self);业务角色不挂(0 回归)。
+                                         citizen_registry=getattr(request.app.state, "citizen_registry", None),
+                                         external_bridge_factory=getattr(request.app.state, "external_bridge_factory", None),
+                                         external_token_recorder=getattr(request.app.state, "external_token_recorder", None),
                                          **eff_rk)
     except Exception as e:
         logger.exception(f"api_intent drive 异常: {e}")
