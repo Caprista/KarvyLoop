@@ -1752,8 +1752,10 @@
         const cb = el("input", { type: "checkbox", id: id, value: key, checked: "checked" });
         cb.checked = true;   // 默认全勾,用户取消不想上桌的
         row.appendChild(cb);
-        const name = m.domain_name ? `${m.display} · ${m.domain_name}` : m.display;
-        row.appendChild(el("span", { class: "rt-member-name", text: name }));
+        // 🔌 外部公民客人席(untrusted 供稿、走采纳门、不占决策席)——标清别和自家 role 混脸
+        const badge = m.is_external ? "🔌 " : "";
+        const base = m.domain_name ? `${m.display} · ${m.domain_name}` : m.display;
+        row.appendChild(el("span", { class: "rt-member-name", text: badge + base }));
         roster.appendChild(row);
       }
     }

@@ -22,6 +22,9 @@ from karvyloop.cognition.conversation import (  # noqa: E402
     ConversationManager, ConversationStore, karvy_world_peer,
 )
 from karvyloop.domain.registry import Address, BusinessDomainRegistry  # noqa: E402
+from karvyloop.external_runtime.citizen import (  # noqa: E402
+    ExternalCitizen, ExternalCitizenRegistry,
+)
 from karvyloop.karvy.observer import WorkbenchObserver  # noqa: E402
 
 
@@ -69,6 +72,46 @@ def test_roster_in_karvy_world_group(setup):
     assert body["ok"] is True
     ids = sorted(m["agent_id"] for m in body["members"])
     assert "设计师" in ids and "会计" in ids               # 跨域聚合(Hardy:大群也能起圆桌)
+
+
+# ---- 圆桌客人席入口:外部公民进名册(自闭环审计逮到的 built-not-wired 缺口修复)----
+def test_roster_includes_eligible_external_guests(setup):
+    """能进这个场的外部公民也列进名册(带 is_external 标),用户才能勾选上桌当客人供稿。
+
+    - guest(T0,无域绑定)→ 任意域可列;scoped(T1,绑 d1)→ 只在 d1 列、d2 deny-by-default 不列。
+    """
+    app, mgr, reg, d1, d2 = setup
+    creg = ExternalCitizenRegistry()
+    creg.add(ExternalCitizen(citizen_id="cc-helper", runtime_kind="raw_text_sidecar",
+                             bin_path="ext", domain_id="", status="active", tier="guest"))
+    creg.add(ExternalCitizen(citizen_id="d1-scout", runtime_kind="generic_cli",
+                             bin_path="ext", domain_id=d1.id, status="active", tier="scoped"))
+    app.state.citizen_registry = creg
+
+    mgr.set_peer(_group_peer(d1.id))
+    body = TestClient(app).get("/api/roundtable/roster").json()
+    ext = [m for m in body["members"] if m.get("is_external")]
+    ext_ids = {m["agent_id"] for m in ext}
+    assert "cc-helper" in ext_ids, "guest 客人应进 d1 名册"
+    assert "d1-scout" in ext_ids, "绑 d1 的 scoped 应进 d1 名册"
+    assert all(m["role"] == "external" for m in ext)
+    assert "设计师" in {m["agent_id"] for m in body["members"]}, "原生 role 不受影响"
+
+    # d2 场:绑 d1 的 scoped 跨域 → deny-by-default 不列;guest 仍可列
+    mgr.set_peer(_group_peer(d2.id))
+    body2 = TestClient(app).get("/api/roundtable/roster").json()
+    ext2 = {m["agent_id"] for m in body2["members"] if m.get("is_external")}
+    assert "cc-helper" in ext2, "guest 任意域可列"
+    assert "d1-scout" not in ext2, "绑 d1 的 scoped 不该出现在 d2(跨域 deny-by-default)"
+
+
+def test_roster_no_citizen_registry_degrades(setup):
+    """未接外部 runtime(无 citizen_registry)→ 名册只有原生 role,零回归。"""
+    app, mgr, reg, d1, d2 = setup
+    mgr.set_peer(_group_peer(d1.id))
+    body = TestClient(app).get("/api/roundtable/roster").json()
+    assert body["ok"] is True
+    assert not any(m.get("is_external") for m in body["members"])
 
 
 # ---- AC3: 私聊非群场 → ok:False ----

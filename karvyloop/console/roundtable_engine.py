@@ -341,6 +341,33 @@ def _roundtable_external_guests(app, peer, participants):
     return guests
 
 
+def _roundtable_external_roster(app, peer) -> list[dict]:
+    """圆桌客人席入口(#71 §7.1 + docs/73 §4):能进这个场的**外部公民**列成名册项,让用户能勾选
+    上桌当客人供稿(产出恒 untrusted、走 external_adopt 采纳门、不占决策席)。
+
+    后端供稿链本就全通,此前只差这个入口 → 圆桌外部协作在生产里几乎触发不到(自闭环审计逮到的
+    built-not-wired 缺口)。key 复用前端同一套 `域::citizen_id`:`_roundtable_external_guests` 提
+    末段 citizen_id 解析成客人;`_roundtable_members`(纯原生 roster)不会误收。返回 [member dict]。
+    """
+    cit_reg = getattr(app.state, "citizen_registry", None)
+    if cit_reg is None or peer is None:
+        return []
+    from karvyloop.karvy.external_collab import can_join_domain
+    dom_id = getattr(peer, "domain_id", "") or ""
+    out: list[dict] = []
+    try:
+        for c in cit_reg.list_active():
+            cid = getattr(c, "citizen_id", "") or ""
+            if not cid or not can_join_domain(c, dom_id):
+                continue   # scoped(T1)跨域 / 无 id → deny-by-default 不列
+            out.append({"agent_id": cid, "role": "external",
+                        "domain_id": getattr(c, "domain_id", "") or "",
+                        "domain_name": "", "display": cid, "is_external": True})
+    except Exception:  # noqa: BLE001 — 取外部名册失败不拖垮原生名册
+        return out
+    return out
+
+
 def _build_roundtable_room(app, peer, conversation_id, members, guests):
     """docs/73 §4:把这场圆桌收进一个一等 **Room**,用 opacity **属性**(而非"哪个 resolver
     返回的"这条约定)结构化钉死"谁的产出能进对话主线"。

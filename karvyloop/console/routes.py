@@ -68,6 +68,7 @@ from .roundtable_engine import (  # P2-e:圆桌引擎已下沉(纯搬移);同上
     _resolve_roundtable_from_intent,
     _roundtable_clarify_opening,
     _roundtable_clarify_turn,
+    _roundtable_external_roster,
     _roundtable_members,
     _roundtable_pending,
     _roundtable_result_doc,
@@ -1555,6 +1556,8 @@ def api_roundtable_roster(request: Request) -> dict[str, Any]:
             "domain_name": getattr(dom, "name", "") if dom is not None else "",
             "display": _member_display(app, a),
         })
+    # 圆桌客人席入口:能进这个场的外部公民也列进名册(逻辑在 roundtable_engine,routes 只调用)。
+    members.extend(_roundtable_external_roster(app, peer))
     return {"ok": True, "members": members}
 
 
