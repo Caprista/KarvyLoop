@@ -85,17 +85,15 @@ var KarvyDomainsPanelBundle = (function(exports) {
   async function _renderDomainTemplates(body) {
     const data = await _getJSON("/api/domain/templates");
     const tpls = data && data.templates || [];
-    if (!tpls.length) return;
-    body.appendChild(el("div", { class: "mgmt-section-title", text: t("domtpl.title") }));
-    body.appendChild(el("div", { class: "mgmt-hint", text: t("domtpl.hint") }));
+    if (!tpls.length) return false;
     const list = el("div", { class: "mgmt-list domtpl-list" });
     for (const tp of tpls) {
       const rolesTxt = (tp.roles || []).map((r) => r.nickname + "·" + r.title).join(" / ");
       const btn = el("button", {
         class: "dpref-confirm",
-        text: t("domtpl.open"),
+        text: t("domtpl.use"),
         onclick: async () => {
-          btn.textContent = t("domtpl.opening");
+          btn.textContent = t("domtpl.creating");
           btn.disabled = true;
           const r = await _postJSON("/api/domain/templates/instantiate", { template_id: tp.id });
           if (r.ok && r.data && r.data.ok) {
@@ -103,6 +101,7 @@ var KarvyDomainsPanelBundle = (function(exports) {
             await renderDomainsPanel();
           } else {
             btn.textContent = r.data && r.data.reason ? tB(r.data.reason) : "?";
+            btn.disabled = false;
           }
         }
       });
@@ -120,160 +119,9 @@ var KarvyDomainsPanelBundle = (function(exports) {
       ));
     }
     body.appendChild(list);
+    return true;
   }
-  async function renderDomainsPanel() {
-    const body = mgmtBody();
-    if (!body) return;
-    body.innerHTML = "";
-    await _renderDomainTemplates(body);
-    const data = await _getJSON("/api/domains");
-    const rolesData = await _getJSON("/api/roles");
-    const roles = rolesData && rolesData.roles || [];
-    const doms = data && data.domains || [];
-    {
-      const peersData = await _getJSON("/api/peers");
-      const allPeers = peersData && peersData.peers || [];
-      const membersByDom = {};
-      for (const p of allPeers) {
-        if (p.is_group || p.is_private) continue;
-        (membersByDom[p.domain_id] = membersByDom[p.domain_id] || []).push(p);
-      }
-      body.appendChild(el("div", { class: "mgmt-section-title", text: t("mgmt.org_title") }));
-      const active = doms.filter((d) => d.lifecycle !== "archived");
-      const seenName = /* @__PURE__ */ new Set();
-      const clean = [];
-      for (const d of active) {
-        if (seenName.has(d.name)) continue;
-        seenName.add(d.name);
-        clean.push(d);
-      }
-      const ids = new Set(clean.map((d) => d.id));
-      const childrenOf = {};
-      const roots = [];
-      for (const d of clean) {
-        const pid = d.parent_id && ids.has(d.parent_id) ? d.parent_id : null;
-        if (pid) (childrenOf[pid] = childrenOf[pid] || []).push(d);
-        else roots.push(d);
-      }
-      if (!clean.length) {
-        body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") }));
-      } else {
-        const tree = el("div", { class: "org-tree" });
-        const renderNode = (d, depth) => {
-          const node = el("div", { class: "org-domain" + (depth ? " is-sub" : "") });
-          node.style.marginLeft = depth * 18 + "px";
-          node.appendChild(el(
-            "div",
-            { class: "org-domain-head" },
-            el("span", { class: "org-ico", text: depth ? "↳ 📁" : "📂" }),
-            el("span", { text: d.name }),
-            depth ? el("span", { class: "org-sub-badge", text: t("domain.sub_badge") }) : null
-          ));
-          const members = membersByDom[d.id] || [];
-          const seenRole = /* @__PURE__ */ new Set();
-          let shown = 0;
-          for (const m of members) {
-            const rk = m.role + "|" + (m.agent_id || "");
-            if (seenRole.has(rk)) continue;
-            seenRole.add(rk);
-            shown++;
-            const rid = m.role === "agent" && m.agent_id ? m.agent_id : m.role || "";
-            node.appendChild(el(
-              "div",
-              { class: "org-role-row" },
-              el(
-                "button",
-                {
-                  class: "org-role",
-                  title: t("mgmt.org_chat_hint"),
-                  onclick: () => _deps.openPeerChat(m)
-                },
-                el("span", {
-                  class: "org-role-name",
-                  text: "🧑‍💼 " + (m.role || "") + (m.agent_id ? " · " + m.agent_id : "")
-                }),
-                el("span", { class: "org-role-go", text: "💬" })
-              ),
-              // #4:看它在本域的合并样子(原生范式 + 本域 value.md/deontic 准则,只读)
-              el("button", {
-                class: "org-role-view",
-                title: t("domain.role_view_hint"),
-                text: "👁",
-                onclick: () => _openRoleInDomain(rid, d.id, d.name)
-              })
-            ));
-          }
-          if (!shown) node.appendChild(el("div", { class: "org-empty", text: t("mgmt.org_no_role") }));
-          tree.appendChild(node);
-          (childrenOf[d.id] || []).forEach((c) => renderNode(c, depth + 1));
-        };
-        roots.forEach((d) => renderNode(d, 0));
-        body.appendChild(tree);
-      }
-    }
-    body.appendChild(el("div", { class: "mgmt-section-title", text: t("mgmt.existing") }));
-    if (!doms.length) body.appendChild(el("div", { class: "mgmt-empty", text: t("mgmt.empty") }));
-    else {
-      const list = el("div", { class: "mgmt-list" });
-      for (const d of doms) {
-        const archived = d.lifecycle === "archived";
-        const actions = el("div", { class: "dpref-actions" });
-        if (archived) {
-          actions.appendChild(el("button", {
-            class: "dpref-confirm",
-            text: t("domain.restore"),
-            onclick: async () => {
-              await _postJSON("/api/domain/restore", { domain_id: d.id });
-              _deps.refreshPeers();
-              await renderDomainsPanel();
-            }
-          }));
-        } else {
-          actions.appendChild(el("button", {
-            class: "dpref-edit",
-            text: t("dpref.edit"),
-            onclick: () => _openDomainEdit(d)
-          }));
-          actions.appendChild(el("button", {
-            class: "mc-del",
-            text: t("domain.archive"),
-            onclick: async () => {
-              if (!window.confirm(t("domain.archive_confirm", { name: d.name }))) return;
-              const res = await _postJSON("/api/domain/archive", { domain_id: d.id });
-              if (res.ok) {
-                _deps.pushChatLine("system", t("domain.archived", { name: d.name, n: res.data.purged_cognition || 0 }));
-                _deps.refreshPeers();
-                await renderDomainsPanel();
-              } else alert(res.data.reason || "archive failed");
-            }
-          }));
-        }
-        const badge = el("span", {
-          class: "dpref-badge " + (archived ? "provisional" : "confirmed"),
-          text: archived ? t("domain.archived_badge") : t("domain.active_badge")
-        });
-        list.appendChild(el(
-          "div",
-          { class: "mgmt-card" },
-          el(
-            "div",
-            { class: "mc-main" },
-            el(
-              "div",
-              { class: "mc-name" },
-              el("span", { text: d.name }),
-              " ",
-              badge,
-              d.parent_id ? el("span", { class: "mc-meta", text: " ⊂ 子域" }) : null
-            ),
-            el("div", { class: "mc-meta", text: d.id })
-          ),
-          actions
-        ));
-      }
-      body.appendChild(list);
-    }
-    const activeDoms = doms.filter((d) => d.lifecycle !== "archived");
+  function _renderCreateForm(body, roles, activeDoms) {
     const nameIn = el("input", { type: "text" });
     const valueIn = el("textarea", {});
     const pickedRoles = /* @__PURE__ */ new Set();
@@ -339,6 +187,201 @@ var KarvyDomainsPanelBundle = (function(exports) {
       submit,
       msg
     ));
+  }
+  async function _renderEmptyGuide(body, roles, activeDoms) {
+    body.appendChild(el(
+      "div",
+      { class: "mgmt-empty-guide" },
+      el("div", { class: "mgmt-section-title", text: t("domain.empty_guide") }),
+      el("div", { class: "mgmt-hint", text: t("domain.empty_guide_hint") })
+    ));
+    const tplTitle = el("div", { class: "mgmt-section-title", text: t("domtpl.pick_title") });
+    body.appendChild(tplTitle);
+    body.appendChild(el("div", { class: "mgmt-hint", text: t("domtpl.hint") }));
+    const hasTpl = await _renderDomainTemplates(body);
+    if (!hasTpl) tplTitle.remove();
+    body.appendChild(el("div", { class: "mgmt-section-title", text: t("domain.or_from_scratch") }));
+    _renderCreateForm(body, roles, activeDoms);
+  }
+  async function renderDomainsPanel() {
+    const body = mgmtBody();
+    if (!body) return;
+    body.innerHTML = "";
+    const data = await _getJSON("/api/domains");
+    const rolesData = await _getJSON("/api/roles");
+    const roles = rolesData && rolesData.roles || [];
+    const doms = data && data.domains || [];
+    const activeDoms = doms.filter((d) => d.lifecycle !== "archived");
+    if (!activeDoms.length) {
+      await _renderEmptyGuide(body, roles, activeDoms);
+      return;
+    }
+    {
+      const peersData = await _getJSON("/api/peers");
+      const allPeers = peersData && peersData.peers || [];
+      const membersByDom = {};
+      for (const p of allPeers) {
+        if (p.is_group || p.is_private) continue;
+        (membersByDom[p.domain_id] = membersByDom[p.domain_id] || []).push(p);
+      }
+      body.appendChild(el("div", { class: "mgmt-section-title", text: t("mgmt.org_title") }));
+      const seenName = /* @__PURE__ */ new Set();
+      const clean = [];
+      for (const d of activeDoms) {
+        if (seenName.has(d.name)) continue;
+        seenName.add(d.name);
+        clean.push(d);
+      }
+      const ids = new Set(clean.map((d) => d.id));
+      const childrenOf = {};
+      const roots = [];
+      for (const d of clean) {
+        const pid = d.parent_id && ids.has(d.parent_id) ? d.parent_id : null;
+        if (pid) (childrenOf[pid] = childrenOf[pid] || []).push(d);
+        else roots.push(d);
+      }
+      const tree = el("div", { class: "org-tree" });
+      const renderNode = (d, depth) => {
+        const node = el("div", { class: "org-domain" + (depth ? " is-sub" : "") });
+        node.style.marginLeft = depth * 18 + "px";
+        node.appendChild(el(
+          "div",
+          { class: "org-domain-head" },
+          el("span", { class: "org-ico", text: depth ? "↳ 📁" : "📂" }),
+          el("span", { text: d.name }),
+          depth ? el("span", { class: "org-sub-badge", text: t("domain.sub_badge") }) : null
+        ));
+        const members = membersByDom[d.id] || [];
+        const seenRole = /* @__PURE__ */ new Set();
+        let shown = 0;
+        for (const m of members) {
+          const rk = m.role + "|" + (m.agent_id || "");
+          if (seenRole.has(rk)) continue;
+          seenRole.add(rk);
+          shown++;
+          const rid = m.role === "agent" && m.agent_id ? m.agent_id : m.role || "";
+          node.appendChild(el(
+            "div",
+            { class: "org-role-row" },
+            el(
+              "button",
+              {
+                class: "org-role",
+                title: t("mgmt.org_chat_hint"),
+                onclick: () => _deps.openPeerChat(m)
+              },
+              el("span", {
+                class: "org-role-name",
+                text: "🧑‍💼 " + (m.role || "") + (m.agent_id ? " · " + m.agent_id : "")
+              }),
+              el("span", { class: "org-role-go", text: "💬" })
+            ),
+            // #4:看它在本域的合并样子(原生范式 + 本域 value.md/deontic 准则,只读)
+            el("button", {
+              class: "org-role-view",
+              title: t("domain.role_view_hint"),
+              text: "👁",
+              onclick: () => _openRoleInDomain(rid, d.id, d.name)
+            })
+          ));
+        }
+        if (!shown) node.appendChild(el("div", { class: "org-empty", text: t("mgmt.org_no_role") }));
+        tree.appendChild(node);
+        (childrenOf[d.id] || []).forEach((c) => renderNode(c, depth + 1));
+      };
+      roots.forEach((d) => renderNode(d, 0));
+      body.appendChild(tree);
+    }
+    body.appendChild(el("div", { class: "mgmt-section-title", text: t("mgmt.existing") }));
+    {
+      const list = el("div", { class: "mgmt-list" });
+      for (const d of doms) {
+        const archived = d.lifecycle === "archived";
+        const actions = el("div", { class: "dpref-actions" });
+        if (archived) {
+          actions.appendChild(el("button", {
+            class: "dpref-confirm",
+            text: t("domain.restore"),
+            onclick: async () => {
+              await _postJSON("/api/domain/restore", { domain_id: d.id });
+              _deps.refreshPeers();
+              await renderDomainsPanel();
+            }
+          }));
+        } else {
+          actions.appendChild(el("button", {
+            class: "dpref-edit",
+            text: t("dpref.edit"),
+            onclick: () => _openDomainEdit(d)
+          }));
+          actions.appendChild(el("button", {
+            class: "mc-del",
+            text: t("domain.archive"),
+            onclick: async () => {
+              if (!window.confirm(t("domain.archive_confirm", { name: d.name }))) return;
+              const res = await _postJSON("/api/domain/archive", { domain_id: d.id });
+              if (res.ok) {
+                _deps.pushChatLine("system", t("domain.archived", { name: d.name, n: res.data.purged_cognition || 0 }));
+                _deps.refreshPeers();
+                await renderDomainsPanel();
+              } else alert(res.data.reason || "archive failed");
+            }
+          }));
+        }
+        const badge = el("span", {
+          class: "dpref-badge " + (archived ? "provisional" : "confirmed"),
+          text: archived ? t("domain.archived_badge") : t("domain.active_badge")
+        });
+        list.appendChild(el(
+          "div",
+          { class: "mgmt-card" },
+          el(
+            "div",
+            { class: "mc-main" },
+            el(
+              "div",
+              { class: "mc-name" },
+              el("span", { text: d.name }),
+              " ",
+              badge,
+              d.parent_id ? el("span", { class: "mc-meta", text: " ⊂ 子域" }) : null
+            ),
+            el("div", { class: "mc-meta", text: d.id })
+          ),
+          actions
+        ));
+      }
+      body.appendChild(list);
+    }
+    const newWrap = el("div", { class: "domtpl-new-wrap" });
+    const newBtn = el("button", { class: "mgmt-inline-link domtpl-new-toggle", text: t("domain.new_entry") });
+    const newBody = el("div", { class: "domtpl-new-body", style: "display:none" });
+    let built = false;
+    newBtn.addEventListener("click", async () => {
+      const shown = newBody.style.display !== "none";
+      if (shown) {
+        newBody.style.display = "none";
+        newBtn.classList.remove("on");
+        return;
+      }
+      if (!built) {
+        built = true;
+        const tplTitle = el("div", { class: "mgmt-section-title", text: t("domtpl.pick_title") });
+        newBody.appendChild(tplTitle);
+        newBody.appendChild(el("div", { class: "mgmt-hint", text: t("domtpl.hint") }));
+        const hasTpl = await _renderDomainTemplates(newBody);
+        if (!hasTpl) {
+          tplTitle.remove();
+        }
+        newBody.appendChild(el("div", { class: "mgmt-section-title", text: t("domain.or_from_scratch") }));
+        _renderCreateForm(newBody, roles, activeDoms);
+      }
+      newBody.style.display = "";
+      newBtn.classList.add("on");
+    });
+    newWrap.appendChild(newBtn);
+    newWrap.appendChild(newBody);
+    body.appendChild(newWrap);
   }
   async function _openRoleInDomain(roleId, domainId, domainName) {
     openMgmtModal("👁 " + roleId + " @ " + domainName);
