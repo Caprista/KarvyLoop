@@ -1347,8 +1347,11 @@
     // 群场(Karvy World / 业务域群)是**多人**,标题就是群名,不是"你 & 某人"(那是 1:1 的框)。
     if (peer && peer.is_world) { ttl.textContent = "👥 Karvy World"; _chatSpeaker = ""; return; }
     if (peer && peer.is_group) { ttl.textContent = "👥 " + (peer.domain_name || peer.role || ""); _chatSpeaker = ""; return; }
-    const isKarvy = !peer || peer.is_private || peer.domain_id === "l0";
-    const who = isKarvy ? t("chat.karvy") : (_peerLabel() || peer.role || t("chat.karvy"));
+    // l0 直聊某角色(role==agent + agent_id)= 是那个角色,不是小卡(判据同后端 is_direct_role_peer)。
+    const isDirectRole = peer && peer.domain_id === "l0" && peer.role === "agent" && !!peer.agent_id;
+    const isKarvy = (!peer || peer.is_private || peer.domain_id === "l0") && !isDirectRole;
+    const who = isKarvy ? t("chat.karvy")
+      : (isDirectRole ? (_peerLabel() || peer.agent_id) : (_peerLabel() || peer.role || t("chat.karvy")));
     ttl.textContent = "💬 " + t("chat.you") + " & " + who;
     _chatSpeaker = isKarvy ? "" : who;   // 回复方身份(agent tag)同步
   }
@@ -1517,7 +1520,19 @@
   // ---- 角色库 ----
   // 🎭 角色面板已迁 TS(源 frontend/src/roles_panel.ts,整簇 _skillPicker/_openRoleEvals/_openRoleEdit 一起)
   // → window.KarvyRolesPanel.open()。留薄 wrapper:nav 派发 + 业务域面板的「新建角色」链接都还调 openRolesPanel。
-  function openRolesPanel() { return window.KarvyRolesPanel.open(); }
+  // 注入 directChatRole(Hardy:角色卡「💬 直聊」→ 切到与该角色的私聊,不必先加进业务域)。
+  function openRolesPanel() { return window.KarvyRolesPanel.open({ directChatRole }); }
+
+  // Hardy:直聊某角色 = 切到 l0/personal scope 的「你 & 该角色」私聊线(不挂任何业务域治理)。
+  // peer=(l0, agent, <roleId>):后端 is_direct_role_peer 认它 → 用该角色人格,不路由给小卡。
+  function directChatRole(roleId) {
+    if (!roleId) return;
+    closeMgmtModal();                     // 从角色面板切走 → 关面板进聊天
+    _currentPeerLabel = "🏢 " + roleId;   // 标题/回复方身份用它(l0 场也显角色名,不落成"小卡")
+    switchPeer(JSON.stringify({ domain_id: "l0", role: "agent", agent_id: roleId, is_group: false }));
+  }
+  // nav 派发/别处调 open() 无参时的兜底通道(全局钩子;roles_panel 缺注入时回退到它)。
+  window.KarvyChat = Object.assign(window.KarvyChat || {}, { directChatRole });
 
   // ---- 外部 Agent 导入(按 KarvyLoop 范式改造 → 落角色库)----
   // 🤖 外部 Agent 导入面板已迁 TS(源 frontend/src/agents_panel.ts)→ window.KarvyAgentsPanel.open({refreshPeers})
@@ -2923,7 +2938,8 @@
       for (const row of rows) {
         let p = null;
         try { p = JSON.parse(row.dataset.peer || ""); } catch (e) { continue; }
-        if (p && p.domain_id === "l0" && !p.is_group) {     // 小卡私聊线(isKarvy 判据同 _setChatTitle)
+        // 小卡私聊线:l0 非群 **且非直聊角色**(role==agent 是直聊某角色,不是小卡)。
+        if (p && p.domain_id === "l0" && !p.is_group && !(p.role === "agent" && p.agent_id)) {
           if (!row.classList.contains("active")) row.click();   // 已在小卡场就不重切(免重拉历史)
           break;
         }

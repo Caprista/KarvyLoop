@@ -34,6 +34,16 @@ const t = (k: string, vars?: Record<string, unknown>) =>
 
 const _xferTitles = () => ({ titleLeft: t("mgmt.available"), titleRight: t("mgmt.selected"), searchPh: t("mgmt.search") });
 
+// 跨面板依赖:点角色卡「💬 直聊」→ 切到与该角色的私聊(l0/personal scope,不必先加进业务域)。
+// 由 app.js 经 open({directChatRole}) 注入;缺注入时回退到全局 window.KarvyChat.directChatRole。
+interface RolesDeps { directChatRole?: (roleId: string) => void }
+let _deps: RolesDeps = {};
+function _directChatRole(roleId: string): void {
+  const fn = _deps.directChatRole
+    || (window as unknown as { KarvyChat?: { directChatRole?: (id: string) => void } }).KarvyChat?.directChatRole;
+  if (fn) fn(roleId);
+}
+
 // 异步填模型下拉(空=默认;软默认层叠 role→域→全局)
 function _modelSelect(current: string): HTMLSelectElement {
   const sel = el("select", { class: "role-model" },
@@ -72,6 +82,8 @@ async function renderList(): Promise<void> {
           v.identity ? el("div", { class: "mc-meta", text: v.identity }) : null,
           (tags.length || skTags.length) ? el("div", { class: "mc-meta" }, ...tags, ...skTags) : null),
         el("div", { class: "dpref-actions" },
+          // Hardy:角色在这儿了就该能直接聊,不必先加进业务域(点这个 = 切到与它的私聊)。
+          el("button", { class: "dpref-confirm", text: t("role.direct_chat"), onclick: () => _directChatRole(v.id) }),
           el("button", { class: "dpref-edit", text: t("role.view_edit"), onclick: () => _openRoleEdit(v) }),
           el("button", { class: "dpref-edit", text: t("eval.btn"), onclick: () => _openRoleEvals(v.id) }),
           el("button", { class: "mc-del", text: t("mgmt.delete"),
@@ -350,7 +362,8 @@ async function _renderRoleEvals(roleId: string): Promise<void> {
   body.appendChild(el("button", { class: "mgmt-inline-link", text: t("role.back"), onclick: () => open() }));
 }
 
-async function open(): Promise<void> {
+async function open(deps?: RolesDeps): Promise<void> {
+  if (deps) _deps = deps;   // app.js 注入直聊等跨面板依赖;nav 无参调用保留上次注入
   openMgmtModal(t("mgmt.roles_title")); await renderList();
 }
 

@@ -8,6 +8,11 @@ var KarvyRolesPanelBundle = (function(exports) {
   const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
   const _xferTitles = () => ({ titleLeft: t("mgmt.available"), titleRight: t("mgmt.selected"), searchPh: t("mgmt.search") });
+  let _deps = {};
+  function _directChatRole(roleId) {
+    const fn = _deps.directChatRole || (window.KarvyChat && window.KarvyChat.directChatRole);
+    if (fn) fn(roleId);
+  }
   function _modelSelect(current) {
     const sel = el(
       "select",
@@ -66,6 +71,7 @@ var KarvyRolesPanelBundle = (function(exports) {
           el(
             "div",
             { class: "dpref-actions" },
+            el("button", { class: "dpref-confirm", text: t("role.direct_chat"), onclick: () => _directChatRole(v.id) }),
             el("button", { class: "dpref-edit", text: t("role.view_edit"), onclick: () => _openRoleEdit(v) }),
             el("button", { class: "dpref-edit", text: t("eval.btn"), onclick: () => _openRoleEvals(v.id) }),
             el("button", {
@@ -455,7 +461,8 @@ var KarvyRolesPanelBundle = (function(exports) {
     }));
     body.appendChild(el("button", { class: "mgmt-inline-link", text: t("role.back"), onclick: () => open() }));
   }
-  async function open() {
+  async function open(deps) {
+    if (deps) _deps = deps;
     openMgmtModal(t("mgmt.roles_title"));
     await renderList();
   }

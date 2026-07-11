@@ -177,9 +177,11 @@ def speaker_display(app, mgr) -> str:
     业务域 → 该角色的**花名(职务)**(brick4,profile.json);没花名则 agent_id/role。
     """
     try:
-        from karvyloop.karvy.capability import is_karvy_peer
+        from karvyloop.karvy.capability import is_direct_role_peer, is_karvy_peer
         peer = mgr.current_peer() if mgr is not None else None
-        if peer is None or is_karvy_peer(getattr(peer, "domain_id", "l0")):
+        # Hardy:l0 直聊某角色 → 回复方是**那个角色**(不是小卡);其余 l0 才是小卡。走下方共用尾段。
+        _direct = is_direct_role_peer(peer)
+        if not _direct and (peer is None or is_karvy_peer(getattr(peer, "domain_id", "l0"))):
             return ""  # 小卡:前端本地化
         if getattr(peer, "role", "") == "group":
             return ""  # 群场:小卡当协调者发言
@@ -206,7 +208,7 @@ def _persona_for_current_peer(app, mgr, workspace_root: str, *, intent: str = ""
     任何异常 → 返 None(退回默认 coding 提示)。
     """
     try:
-        from karvyloop.karvy.capability import is_karvy_peer
+        from karvyloop.karvy.capability import is_direct_role_peer, is_karvy_peer
         from karvyloop.coding.persona import (
             build_karvy_persona_prompt, build_role_persona_prompt,
         )
@@ -226,6 +228,22 @@ def _persona_for_current_peer(app, mgr, workspace_root: str, *, intent: str = ""
                 except Exception:
                     pass
             return build_group_coordinator_prompt(gname, members, cwd=workspace_root)
+        # Hardy:角色面板点角色卡即聊(不必先加进业务域)。l0 直聊某角色 → **该角色**人格,走
+        # l0/personal scope(domain=None → 不挂业务域 value.md/deontic)。须在 is_karvy_peer(l0) 前判。
+        if is_direct_role_peer(peer):
+            role_reg = getattr(app.state, "role_registry", None)
+            rid = (getattr(peer, "agent_id", "") or getattr(peer, "role", "")) or ""
+            if role_reg is not None and rid:
+                from karvyloop.coding.paradigm_prompt import build_role_paradigm_prompt
+                try:
+                    rv = role_reg.get(rid)
+                except Exception:
+                    rv = None
+                if rv is not None:
+                    cp = build_role_paradigm_prompt(rv, None, intent=intent, cwd=workspace_root)
+                    if cp is not None:
+                        return cp   # per-role 人格(无域治理)
+            return build_role_persona_prompt(rid or "角色", domain_name=None, cwd=workspace_root)
         if is_karvy_peer(domain_id):
             # intent 透传:建 agent 类意图命中 → 注入小卡的系统自我认知(架构 101 + 方法论)
             return build_karvy_persona_prompt(cwd=workspace_root, intent=intent)
@@ -826,10 +844,12 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         from karvyloop.karvy.slash import dispatch_slash, is_slash
         # 有图/附件 → 不当斜杠命令(用户要处理内容,不是跑 ops)—— 别丢了图
         if is_slash(req.intent) and not getattr(req, "images", None) and not getattr(req, "attachments", None):
-            from karvyloop.karvy.capability import is_karvy_peer
+            from karvyloop.karvy.capability import is_direct_role_peer, is_karvy_peer
             _mgr = getattr(request.app.state, "conversation_manager", None)
             _peer = _mgr.current_peer() if _mgr is not None else None
-            if _peer is None or is_karvy_peer(getattr(_peer, "domain_id", "l0")):
+            # 私聊小卡才拦斜杠 ops;l0 直聊某角色时 "/" 交给角色(ops 不越到角色场)。
+            if (_peer is None or is_karvy_peer(getattr(_peer, "domain_id", "l0"))) \
+                    and not is_direct_role_peer(_peer):
                 _sl = dispatch_slash(req.intent, request.app)
                 if _sl is not None:
                     if workbench_app is not None:
@@ -974,7 +994,8 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         _peer = mgr.current_peer() if mgr is not None else None
         _did = (_peer.domain_id if _peer is not None else "l0") or "l0"
         _role = (getattr(_peer, "role", "") or "") if _peer is not None else ""
-        _who = m_speaker or ("小卡" if _did == "l0" else (_role or "角色"))   # @ 命中 → 是那个角色在忙
+        # @ 命中/l0 直聊角色 → 是那个角色在忙(speaker_display 返角色名,私聊小卡/群返 "")
+        _who = m_speaker or speaker_display(request.app, mgr) or ("小卡" if _did == "l0" else (_role or "角色"))
         task_id = task_reg.start(who=_who, domain_id=_did, role=_role, intent=req.intent)
 
     # 走 drive_in_tui(asyncio.to_thread 包装,防 R3-async 嵌套)
@@ -1133,13 +1154,16 @@ async def maybe_route_to_role(app, mgr, intent: str):
     编排升级(Hardy 2026-06-25 bug):"让几个角色开圆桌讨论X" = **多人圆桌**,不是单点委派 ——
     先试圆桌解析,命中 → 出 roundtable PROPOSE;否则退回单角色 route_to_role(0 回归)。
     """
-    from karvyloop.karvy.capability import dispatch_for_peer, is_karvy_peer
+    from karvyloop.karvy.capability import dispatch_for_peer, is_direct_role_peer, is_karvy_peer
 
     peer = mgr.current_peer() if mgr is not None else None
     # docs/66 §F:知识线 = 馆员自己接(专职消化知识),不路由不提圆桌 —— 真机实拍:
     # "帮我消化一个说法"被截胡成"拉俩角色开圆桌讨论",馆员根本没答。知识线豁免整个路由层。
     from karvyloop.cognition.knowledge_chat import is_knowledge_peer
     if is_knowledge_peer(peer):
+        return None
+    # Hardy:l0 直聊某角色 → 那个角色自己答,不经小卡路由/委派/ops 截胡(别落进 is_karvy_peer 分支)。
+    if is_direct_role_peer(peer):
         return None
     domain_id = peer.domain_id if peer is not None else "l0"  # 默认私聊小卡
     if not is_karvy_peer(domain_id):

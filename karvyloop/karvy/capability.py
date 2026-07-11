@@ -33,6 +33,28 @@ def is_karvy_peer(domain_id: Optional[str]) -> bool:
     return (domain_id or "") == KARVY_DOMAIN_ID
 
 
+def is_direct_role_peer(peer) -> bool:
+    """peer 是否**l0 场里直聊某个业务角色**(Hardy:角色面板点角色卡即聊,不必先加进业务域)。
+
+    判据:domain_id==l0(个人场)+ role=="agent" + 有 agent_id + 不是小卡自己(observer/karvy)。
+    这是 **l0/personal scope 的直聊**:用角色的通用/镜像认知层,**不挂任何业务域的
+    value.md/deontic 治理**(§2.6 域私有认知按(域,角色)隔离,无域=不掺域治理),也不做
+    域专属角色经验沉淀(experience.py 对无域已返 False,天然一致)。
+
+    小卡私聊 = (l0, observer, karvy) → False(它走 is_karvy_peer 分支,人格=小卡)。
+    """
+    if peer is None:
+        return False
+    did = getattr(peer, "domain_id", "") or ""
+    if did != KARVY_DOMAIN_ID:
+        return False   # 业务域直聊走既有 per-role 编译(带域治理),不归这条
+    role = getattr(peer, "role", "") or ""
+    aid = getattr(peer, "agent_id", "") or ""
+    if role != "agent" or not aid:
+        return False   # observer/group/无 agent_id → 不是"直聊某角色"
+    return not karvy_can_take_role(role)   # 稳妥:observer 永不当直聊角色(小卡自己)
+
+
 def is_business_domain(domain_id: Optional[str]) -> bool:
     """domain_id 是否一个业务域(L3/L4)—— 即非 l0 个人场、非空。
 
@@ -116,7 +138,7 @@ def dispatch_for_peer(domain_id: Optional[str], intent: str) -> PeerDispatch:
 
 __all__ = [
     "KARVY_ROLE_OBSERVER", "KARVY_DOMAIN_ID",
-    "is_karvy_peer", "is_business_domain", "karvy_can_take_role",
+    "is_karvy_peer", "is_direct_role_peer", "is_business_domain", "karvy_can_take_role",
     "classify_karvy_intent", "dispatch_for_peer", "PeerDispatch",
     "INTENT_EXECUTE", "INTENT_COURIER", "INTENT_ROUTE",
 ]

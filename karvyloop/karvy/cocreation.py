@@ -126,10 +126,14 @@ def _conv_key(mgr: Any) -> str:
         return ""
     if peer is None or conv is None:
         return ""
-    from karvyloop.karvy.capability import is_karvy_peer
+    from karvyloop.karvy.capability import is_direct_role_peer, is_karvy_peer
     if not is_karvy_peer(getattr(peer, "domain_id", "")):
         return ""
     if getattr(peer, "role", "") == "group":
+        return ""
+    # Hardy:l0 直聊某角色时,建 agent/域是小卡的 K1 编排活,不该由业务角色接
+    # (共创递口/共创态是小卡专属)。虽也在 l0,但排除掉 —— 那个角色只管答自己的活。
+    if is_direct_role_peer(peer):
         return ""
     return f"{peer.domain_id}|{getattr(peer, 'role', '')}|{getattr(peer, 'agent_id', '')}|{conv.id}"
 
