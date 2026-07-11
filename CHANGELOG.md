@@ -23,6 +23,21 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   (attach / dispatch / list) through capability-gated tools; failures are fail-loud (nonzero exit,
   timeout, empty-success, or an approval request all surface instead of hanging). Adding another
   runtime is a recipe file, not new code.
+- **Manage your external runtimes from the console — and connect one on demand.** A new
+  **External Runtimes** panel (🔌 in the left nav) lists every connected external citizen with a
+  distinct, off-colored **external** badge (so an opaque, untrusted external executor is *never*
+  mistaken for a native role), a live online/offline/unreachable status light you can refresh per
+  citizen, a remove (detach) button, and a **direct-chat** button — external citizens get their own
+  l0 conversation line, addressed as `(domain, external, citizen_id)` so they never blend into the
+  native role space. New management endpoints (`GET /api/external/citizens`,
+  `GET /api/external/liveness`, `POST /api/external/detach`) live in their own `routes_external.py`
+  and go through the same local-first origin gate as one-click install (writes only from
+  loopback/LAN). **On-demand onboarding:** Diagnose and the panel deterministically detect whether a
+  compatible headless CLI runtime is installed and, if not, walk you through connecting one **from
+  its own official source** — the same degradation-guidance pattern as the `[asr]`/`[ocr]` unlocks
+  and the MCP registry links. The hard boundary is spelled out in the UI and the README: an external
+  runtime is **third-party software you bring yourself — KarvyLoop does not bundle, host, download,
+  or `git clone` it.** We ship the bridge, adapters, and management UI; you bring the runtime.
 
 ### Fixed
 - **The one-click update now tells you what happened instead of leaving you guessing.** A failed

@@ -139,6 +139,17 @@ Combine them: `pip install -e ".[mcp,web]"`. None of these gate the core loop �
 
 You don't need to memorize this table: the console has an **"Unlock more capabilities"** panel (Skill Library → 🔓, also linked from Diagnose and at the end of the first-10-minutes journey) that detects each capability's live status — ready / not set up / needs install — and shows exactly what each one is worth and how to get it, including where to find MCP servers (the [official registry](https://registry.modelcontextprotocol.io/) and community directories like [PulseMCP](https://www.pulsemcp.com/servers) and [Glama](https://glama.ai/mcp/servers)).
 
+### Optional: connect your own external AI runtime (BYO)
+
+**Installing KarvyLoop is one command** (the Quickstart above). **Connecting an external AI runtime is a separate, on-demand step** — and it's entirely optional.
+
+Beyond its own agents, KarvyLoop can treat a **third-party headless CLI agent you already run** (any of the various headless CLI agents out there) as a channel participant: you `@` it for work and see it run. That external runtime is **software you bring yourself** — **KarvyLoop does not bundle, host, download, or ship it.** You install it from its **own official source**, on your own terms; we only point you there.
+
+By design, an external runtime stays an **opaque, untrusted executor**: its output is untrusted data, it never takes a decision seat, and it never touches your memory or crystallized skills (those are the moat). You manage connected runtimes from the console's **External Runtimes** panel (🔌 in the left nav) — each shows a distinct **external** badge so it's never mistaken for a native role, plus a live status light, a direct-chat button, and a remove button. The Diagnose panel and that same panel detect whether a compatible runtime is installed and, if not, walk you through connecting one from its official docs.
+
+- What we ship: the **bridge, adapters, and management UI** to connect one — and honest guidance on where to get it.
+- What we don't ship: **the runtime itself.** No vendoring, no hosting, no `git clone` of anyone's code.
+
 <a id="your-first-15-minutes-guided"></a>
 ## Your first 15 minutes (guided)
 

@@ -153,4 +153,52 @@ def run_liveness(
     return findings
 
 
-__all__ = ["check_endpoint", "check_disk_writable", "check_sandbox", "run_liveness"]
+# ---- 按需接入引导:外部 runtime 装没装(BYO 第三方 headless CLI)----
+# 定位:这和 [asr]/[ocr] 的"装了没装"降级引导、MCP registry 外链是**同一套模式**——
+# 确定性探测"你机器上有没有可接入的外部 runtime",没有就给**官方安装指引**(从人家官方源装)。
+# **红线**:我们绝不代托管 / 不 bundle / 不 git clone 他家代码;这里只查 PATH 存在性 + 给指引。
+# **中性名纪律**(公开仓):候选二进制名是"业界常见 headless CLI agent 的可执行名"这一确定性事实,
+# 不点参照工程名、不写成依赖;逐字符名只是 PATH 探测键,不构成对某产品的背书或绑定。
+#
+# 候选可执行名 = 各类 headless CLI agent 常见的 `bin` 名(探测事实,非依赖清单)。
+# 命中任一 = 用户已自带某个可接入的外部 runtime;一个没命中 = 给按需安装引导。
+_EXTERNAL_RUNTIME_BINS: tuple[str, ...] = (
+    "claude", "codex", "gemini", "opencode", "aider", "goose", "crush",
+)
+
+
+def _probe_bin(name: str) -> bool:
+    """PATH 上有没有这个可执行名(确定性,不执行它、不读任何内容)。"""
+    try:
+        import shutil
+        return shutil.which(name) is not None
+    except Exception:
+        return False
+
+
+def check_external_runtime(
+    *, which: Optional[Callable[[str], bool]] = None,
+) -> list[Finding]:
+    """按需接入引导:探测机器上有没有可接入的外部 runtime(headless CLI)。
+
+    - 命中任一候选 bin → OK("已就绪,可在外部 runtime 面板接入"),detail 只带命中的 bin 名(非机密)。
+    - 一个都没有 → WARN(降级引导:去官方源装一个再来接;**我们不分发它**)。
+    `which` 可注入(测试用);默认 shutil.which。永不执行候选 bin、永不联网、永不抛。
+    """
+    probe = which or _probe_bin
+    found: list[str] = []
+    for name in _EXTERNAL_RUNTIME_BINS:
+        try:
+            if probe(name):
+                found.append(name)
+        except Exception:
+            continue
+    if found:
+        # 只报"有几个 / 命中哪些名"(确定性事实,非机密);接入在外部 runtime 面板走探活向导。
+        return [Finding(OK, "external_runtime_present", {"bins": ", ".join(found), "n": len(found)})]
+    # 一个都没命中:按需引导(不是错,只是还没自带)——文案在 i18n 层给官方安装指引。
+    return [Finding(WARN, "external_runtime_absent", {})]
+
+
+__all__ = ["check_endpoint", "check_disk_writable", "check_sandbox", "run_liveness",
+           "check_external_runtime"]

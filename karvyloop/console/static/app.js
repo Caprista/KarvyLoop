@@ -1552,6 +1552,19 @@
     });
   }
 
+  // 🔌 外部 runtime 管理面(跨 runtime 协作:列/删/在线灯/直聊 外部公民 + 按需接入引导)。
+  // 直聊外部公民 = 切到 peer=(域, "external", citizen_id)(后端 EXTERNAL_ROLE,不与原生角色混脸)。
+  function openExternalPanel() {
+    return window.KarvyExternalPanel.open({
+      refreshPeers,
+      directChatPeer: (peer, label) => {
+        _currentPeerLabel = label || ("🔌 " + (peer.agent_id || "external"));
+        switchPeer(JSON.stringify({ domain_id: peer.domain_id || "", role: peer.role || "external",
+          agent_id: peer.agent_id || "", is_group: false }));
+      },
+    });
+  }
+
   function setupMgmtPanels() {
     const close = document.getElementById("mgmt-close");
     if (close) close.addEventListener("click", closeMgmtModal);
@@ -1565,6 +1578,7 @@
         else if (p === "roles") openRolesPanel();
         else if (p === "domains") openDomainsPanel();
         else if (p === "agents") window.KarvyAgentsPanel.open({ refreshPeers });
+        else if (p === "external") openExternalPanel();
         else if (p === "memory") window.KarvyMemoryPanel.open();
         else if (p === "decision_prefs") window.KarvyDecisionPrefs.open();
         else if (p === "skills") window.KarvySkillsPanel.open();

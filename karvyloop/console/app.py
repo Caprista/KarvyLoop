@@ -36,6 +36,7 @@ from .routes_decision_prefs import router as decision_prefs_router
 from .routes_demo import router as demo_router
 from .routes_domain import router as domain_router
 from .routes_butler import router as butler_router
+from .routes_external import router as external_router
 from .routes_files import router as files_router
 from .routes_lines import router as lines_router
 from .routes_memory import router as memory_router
@@ -627,6 +628,7 @@ def build_console_app(
     app.state.domain_registry = None          # 9.2b:entry 接线时设(列业务域 peer;None=仅私聊)
     app.state.domain_store = None             # 9.2c-持久化:entry 接线时设(建域存盘)
     app.state.token_ledger = None             # 9.3a:entry 接线时设(token 账本/看板)
+    app.state.citizen_registry = None         # 外部 runtime 公民注册表(C1 接线点;None=无外部公民,管理面返空)
     app.state.ws_clients = set()  # 立即 set,lifespan 里也 set 同引用
 
     # mount routers
@@ -650,6 +652,7 @@ def build_console_app(
     app.include_router(onboarding_router)  # /api/onboarding/*(「第一个 10 分钟」新手旅程 + 人格采集器)
     app.include_router(demo_router)        # /api/demo/*(随包演示实例「小林/Lin」只读浏览,GET-only)
     app.include_router(butler_router)      # /api/butler/*(文件管家第一课:扫描→方案预览卡)
+    app.include_router(external_router)    # /api/external/*(跨 runtime 协作:外部公民管理面 + 按需接入引导)
     app.include_router(ws_router)
 
     # 静态资源禁用浏览器**强缓存**(no-cache = 每次带 ETag 条件请求 → 没变 304、变了 200)。

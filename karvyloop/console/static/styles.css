@@ -1500,6 +1500,24 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .dpref-edit { color: var(--accent-strong); }
 .dpref-edit:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
 
+/* ---- 🔌 外部 runtime 管理面(醒目外部徽标 + 在线状态灯;异色,绝不与原生角色混脸) ---- */
+/* 徽标用紫罗兰系(既不是咖啡主色、也不是 teal 信息态)—— 一眼区分"不透明外部执行体、输出 untrusted"。 */
+.ext-badge { font-size: 10px; padding: 1px 8px; border-radius: 8px; margin-left: 6px;
+  background: rgba(139,92,246,0.14); color: #8b5cf6; border: 1px solid rgba(139,92,246,0.42);
+  font-weight: 600; letter-spacing: .2px; }
+.ext-card { border-left: 3px solid #8b5cf6; }   /* 卡左沿异色条:整卡就是外部体,别看漏徽标也知道 */
+.ext-untrusted { color: #8b5cf6; opacity: .85; font-style: italic; }
+.ext-boundary { color: var(--text-dim); font-style: italic; }
+.ext-pending { color: var(--danger); }
+/* 在线状态灯:online=绿 / offline=灰 / unreachable=玫红 */
+.ext-light { display: inline-flex; align-items: center; gap: 4px; }
+.ext-light .ext-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.ext-light-online .ext-dot { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.ext-light-offline .ext-dot { background: var(--text-dim); }
+.ext-light-unreachable .ext-dot { background: var(--danger); box-shadow: 0 0 4px var(--danger); }
+.ext-light-label { font-size: 11px; }
+.ext-onboarding { border-top: 1px dashed var(--border); margin-top: 14px; padding-top: 12px; }
+
 .mgmt-form { display: flex; flex-direction: column; gap: 10px;
   border-top: 1px solid var(--border); padding-top: 14px; }
 .mgmt-form label { font-size: 12px; color: var(--text-dim); font-weight: 600; }

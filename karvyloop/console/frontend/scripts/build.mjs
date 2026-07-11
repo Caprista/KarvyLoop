@@ -21,6 +21,7 @@ const MODULES = [
   { entry: "src/roles_panel.ts", name: "KarvyRolesPanelBundle", file: "roles_panel.js" },
   { entry: "src/domains_panel.ts", name: "KarvyDomainsPanelBundle", file: "domains_panel.js" },
   { entry: "src/agents_panel.ts", name: "KarvyAgentsPanelBundle", file: "agents_panel.js" },
+  { entry: "src/external_panel.ts", name: "KarvyExternalPanelBundle", file: "external_panel.js" },
   { entry: "src/skills_panel.ts", name: "KarvySkillsPanelBundle", file: "skills_panel.js" },
   { entry: "src/unlock_panel.ts", name: "KarvyUnlockPanelBundle", file: "unlock_panel.js" },
   { entry: "src/demo_panel.ts", name: "KarvyDemoPanelBundle", file: "demo_panel.js" },
