@@ -99,4 +99,5 @@ def test_api_templates_and_instantiate(tmp_path):
     assert not r2["ok"]
     # 前端接线
     src = (ROOT / "karvyloop" / "console" / "frontend" / "src" / "domains_panel.ts").read_text(encoding="utf-8")
-    assert "/api/domain/templates" in src and "domtpl.open" in src
+    # domtpl.use(旧 domtpl.open 已按 Hardy 语义纠正:模板是"用此模板新建"不是"打开已有")
+    assert "/api/domain/templates" in src and "domtpl.use" in src
