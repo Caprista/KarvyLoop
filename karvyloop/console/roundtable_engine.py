@@ -341,6 +341,34 @@ def _roundtable_external_guests(app, peer, participants):
     return guests
 
 
+def _build_roundtable_room(app, peer, conversation_id, members, guests):
+    """docs/73 §4:把这场圆桌收进一个一等 **Room**,用 opacity **属性**(而非"哪个 resolver
+    返回的"这条约定)结构化钉死"谁的产出能进对话主线"。
+
+    - 自家 role 成员 → RoomMember(kind=role) → normalize 恒 `internal` → enters_mainline()=True。
+    - 外部客人 → RoomMember(kind=external, opacity=opaque) → **强制 opaque**(哪怕上游误标
+      internal 也 deny-by-default 降级)→ enters_mainline()=False → **结构上**进不了 member_reply
+      transcript。**A2A Contagion 防御从"约定"升成 Room 的不变量**(§4 防平行独白强制)。
+    - scope:圆桌用默认 workspace(未 share);share 出去的 channel 单独 workspace 是 M3(§0.5)。
+    """
+    from karvyloop.collab.registry import Room
+    from karvyloop.collab.room import (
+        OPACITY_OPAQUE, PARTICIPANT_EXTERNAL, PARTICIPANT_ROLE, RoomMember,
+    )
+    domain_id = (getattr(peer, "domain_id", "") or "") if peer is not None else ""
+    rm: list = []
+    for a in (members or []):
+        rm.append(RoomMember(participant_id=(a.agent_id or a.role or ""),
+                             kind=PARTICIPANT_ROLE, domain_id=(a.domain_id or ""),
+                             display_name=_member_display(app, a)))
+    for g in (guests or []):
+        cid = getattr(g, "citizen_id", "") or ""
+        rm.append(RoomMember(participant_id=cid, kind=PARTICIPANT_EXTERNAL,
+                             opacity=OPACITY_OPAQUE, domain_id=domain_id, display_name=cid))
+    return Room(room_id=f"rt::{conversation_id or ''}", members=tuple(rm),
+                origin_domain_id=domain_id, title=f"🎡 {conversation_id or ''}")
+
+
 async def _roundtable_clarify_turn(gw, model_ref, topic, align_history, user_msg):
     """阶段0 对话式(Hardy:少按钮)—— 小卡看对齐对话 + 用户最新一句,判断够不够开始讨论了。
 
@@ -475,6 +503,20 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
     members = _roundtable_members(app, peer, st["participants"])
     # M2(#71 §7.1):外部公民作为**客人供稿席**上桌(不占 role 决策席、只供稿、产出恒 untrusted)。
     guests = _roundtable_external_guests(app, peer, st["participants"])
+    if not members and not guests:
+        return {"ok": False, "reason": "圆桌成员不在了(域里角色变动?)"}
+    # docs/73 §4 防平行独白 · A2A Contagion 结构强制:把成员+客人收进一个一等 Room,
+    # 用 opacity **属性**结构化钉死决策席(member_reply 主线只放 enters_mainline() 的 internal)。
+    # members 本就 role/internal、guests 本就 external/opaque → 正常路径 safe==members(零回归);
+    # 但万一有外部混进决策席(未来重构/重名),Room 强制 opaque → 此处 fail-loud 剔除,绝不让它
+    # 进 record_turn 触发别的 role(A2A 防御从"两个 resolver 各管一半"的约定升成 Room 的不变量)。
+    room = _build_roundtable_room(app, peer, conversation_id, members, guests)
+    _mainline_ids = {m.participant_id for m in room.internal_members()}
+    _safe = [a for a in members if (a.agent_id or a.role or "") in _mainline_ids]
+    if len(_safe) != len(members):
+        logger.error("[roundtable] 结构守卫:非-internal 成员混进决策席,已按 Room opacity 剔除"
+                     f"(A2A 防御;{len(members)}→{len(_safe)})")
+        members = _safe
     if not members and not guests:
         return {"ok": False, "reason": "圆桌成员不在了(域里角色变动?)"}
     governance = mgr.governance_text() or ""

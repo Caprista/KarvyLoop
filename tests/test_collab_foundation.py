@@ -93,3 +93,55 @@ def test_registry_imports_and_constructs():
     """registry 基座能导入构造(未接圆桌,只验不炸)。"""
     import karvyloop.collab.registry as reg  # noqa: F401
     assert hasattr(reg, "__all__") or True
+
+
+# ---- 接进圆桌:_build_roundtable_room 的 A2A 结构不变量(docs/73 §4)----
+
+class _Addr:
+    def __init__(self, agent_id, role="agent", domain_id="finance"):
+        self.agent_id = agent_id
+        self.role = role
+        self.domain_id = domain_id
+
+
+class _Citizen:
+    def __init__(self, citizen_id):
+        self.citizen_id = citizen_id
+
+
+def _fake_app():
+    """最小 app:_member_display 只摸 app.state.role_registry(给 None → 退回 id 名)。"""
+    import types
+    return types.SimpleNamespace(state=types.SimpleNamespace(role_registry=None))
+
+
+def test_roundtable_room_partitions_by_opacity():
+    """圆桌成员→internal(进主线)、外部客人→opaque(不进主线),按 opacity 属性分区。"""
+    from karvyloop.console.roundtable_engine import _build_roundtable_room
+    room = _build_roundtable_room(
+        _fake_app(), None, "conv1",
+        members=[_Addr("analyst"), _Addr("designer")],
+        guests=[_Citizen("cc-guest")])
+    internal = {m.participant_id for m in room.internal_members()}
+    external = {m.participant_id for m in room.external_members()}
+    assert internal == {"analyst", "designer"}, "自家 role 进决策席"
+    assert external == {"cc-guest"}, "外部客人只在供稿席"
+    assert not any(m.enters_mainline() for m in room.external_members()), "外部结构上不进主线"
+
+
+def test_roundtable_room_forces_leaked_external_out_of_mainline():
+    """载重红线:若外部执行体被当成"成员"塞进决策席,Room 强制 opaque → enters_mainline()=False。
+
+    这是 A2A Contagion 防御从"约定"(members/guests 两个 resolver 各管一半)升成 **Room 属性**:
+    哪怕上游误把外部当 role 成员传进来,它也进不了 record_turn 主线触发别的 role。
+    """
+    from karvyloop.collab.room import PARTICIPANT_EXTERNAL, RoomMember
+    # 模拟:一个外部执行体被误标成 role/internal 塞进成员表
+    leaked = RoomMember(participant_id="evil-cc", kind=PARTICIPANT_EXTERNAL, opacity="internal")
+    assert leaked.enters_mainline() is False, "外部即使误标 internal 也进不了主线"
+    # 圆桌结构守卫的判据:mainline_ids 只含真 internal;外部不在其中 → 被剔除
+    from karvyloop.console.roundtable_engine import _build_roundtable_room
+    room = _build_roundtable_room(_fake_app(), None, "c", members=[_Addr("real_role")],
+                                  guests=[_Citizen("guest1")])
+    mainline_ids = {m.participant_id for m in room.internal_members()}
+    assert "real_role" in mainline_ids and "guest1" not in mainline_ids
