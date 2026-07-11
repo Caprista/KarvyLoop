@@ -44,6 +44,7 @@ from .routes_models import router as models_router
 from .routes_onboarding import router as onboarding_router
 from .routes_ops import router as ops_router
 from .routes_peers import router as peers_router
+from .routes_workflow import router as workflow_router
 from .routes_roles import router as roles_router
 from .routes_schedules import router as schedules_router
 from .routes_system import router as system_router
@@ -642,6 +643,7 @@ def build_console_app(
     app.include_router(schedules_router)   # /api/schedule*(P2-② 从 routes.py 拆出)
     app.include_router(models_router)      # /api/model/* + /api/providers/*(P2-② 从 routes.py 拆出)
     app.include_router(ops_router)         # /api/update* + /api/ops/* + /api/search/config + /api/doctor/fix(P2-② 从 routes.py 拆出)
+    app.include_router(workflow_router)    # /api/workflow/{pending_resume,resume,discard}(2026-07-11 从 routes.py carve 给红线头寸)
     app.include_router(tokens_router)      # /api/tokens*(P2-② 从 routes.py 拆出)
     app.include_router(decision_prefs_router)  # /api/decision_prefs*(P2-② 从 routes.py 拆出)
     app.include_router(atoms_router)       # /api/atoms* + /api/atom/*(P2-② 从 routes.py 拆出)

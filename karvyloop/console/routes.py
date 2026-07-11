@@ -53,9 +53,7 @@ from .workflow_engine import (  # P2-e:workflow 引擎已下沉(纯搬移);re-ex
     _workflow_roles_from_mentions,
     _workflow_run_store,
     _workflow_store,
-    discard_workflow,
     execute_workflow_durable,
-    resume_one_workflow,
 )
 from .distill_engine import (  # P2-e:沉淀引擎已下沉(纯搬移);同上 re-export
     _distill_analyze,
@@ -784,27 +782,8 @@ async def api_roundtable_cancel(req: WorkflowCancelRequest, request: Request) ->
     return {"ok": True, "task_id": req.task_id}
 
 
-@router.get("/workflow/pending_resume")
-def api_workflow_pending_resume(request: Request) -> dict[str, Any]:
-    """重启后**挂起待拍板**的中断 workflow 清单(逃生门:不自动复活,让人续/丢)。"""
-    pend = getattr(request.app.state, "pending_resume", None) or []
-    return {"pending": list(pend)}
-
-
-class WorkflowResumeRequest(BaseModel):
-    run_id: str = Field(..., min_length=1, max_length=64)
-
-
-@router.post("/workflow/resume")
-async def api_workflow_resume(req: WorkflowResumeRequest, request: Request) -> dict[str, Any]:
-    """人显式选择"续跑"一条中断的 workflow(已完成步秒命中缓存、只续剩余)。"""
-    return await resume_one_workflow(request.app, req.run_id)
-
-
-@router.post("/workflow/discard")
-async def api_workflow_discard(req: WorkflowResumeRequest, request: Request) -> dict[str, Any]:
-    """人显式选择"丢弃"一条中断的 workflow(标死,不复活)。"""
-    return discard_workflow(request.app, req.run_id)
+# workflow 逃生门端点(pending_resume / resume / discard)已 carve 到 routes_workflow.py
+# (2026-07-11 激活外部 runtime 把 routes.py 顶破 2000 红线 → 拆自包含端点给头寸,路径不变)。
 
 
 def _recall_domain(mgr) -> str:
