@@ -136,7 +136,7 @@ async def drive_in_tui(
             if citizen_registry is not None:
                 from karvyloop.karvy.tools import (
                     make_attach_external_agent_tool, make_external_agent_tool,
-                    make_list_external_agents_tool,
+                    make_list_external_agents_tool, make_revoke_external_agent_tool,
                 )
                 _bf = external_bridge_factory
                 if _bf is None:
@@ -148,6 +148,8 @@ async def drive_in_tui(
                         token_recorder=external_token_recorder)),
                     (make_attach_external_agent_tool, dict(citizen_registry=citizen_registry)),
                     (make_list_external_agents_tool, dict(citizen_registry=citizen_registry)),
+                    # 撤销外部成员(优雅 detach):同 citizen_registry 存在即挂,policy=WORKSPACE_WRITE。
+                    (make_revoke_external_agent_tool, dict(citizen_registry=citizen_registry)),
                 ):
                     _t = _mk(**_kw)
                     _karvy_tools[_t.name] = _t

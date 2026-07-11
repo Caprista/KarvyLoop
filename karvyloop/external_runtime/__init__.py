@@ -25,6 +25,8 @@ from .bridge import (
     STATUS_FAILED,
     SubprocessBridge,
     bridge_factory,
+    make_sandbox_runner,
+    sandbox_bridge_factory,
 )
 from .citizen import (
     EXTERNAL_ROLE,
@@ -49,6 +51,7 @@ from .recipe import (
     PARSE_RAW_TEXT,
     PARSE_SINGLE_JSON,
     builtin_kinds,
+    builtin_probe_bins,
     builtin_recipe,
 )
 from .redact import contains_secret, redact
@@ -56,7 +59,9 @@ from .store import ExternalCitizenStore
 
 __all__ = [
     # bridge
-    "SubprocessBridge", "BridgeResult", "bridge_factory", "STATUS_DONE", "STATUS_FAILED",
+    "SubprocessBridge", "BridgeResult", "bridge_factory",
+    "make_sandbox_runner", "sandbox_bridge_factory",
+    "STATUS_DONE", "STATUS_FAILED",
     # citizen
     "ExternalCitizen", "ExternalCitizenRegistry", "compute_manifest_hash", "EXTERNAL_ROLE",
     "STATUS_ACTIVE", "STATUS_UNREACHABLE", "STATUS_BLOCKED",
@@ -65,7 +70,7 @@ __all__ = [
     # recipe
     "DriveRecipe", "ParseSpec", "ExitSpec",
     "PARSE_SINGLE_JSON", "PARSE_NDJSON", "PARSE_RAW_TEXT",
-    "builtin_recipe", "builtin_kinds",
+    "builtin_recipe", "builtin_kinds", "builtin_probe_bins",
     # probe
     "probe", "ProbeResult", "verify_manifest_hash", "HashVerifyResult",
     # addressing

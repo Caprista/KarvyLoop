@@ -160,11 +160,22 @@ def run_liveness(
 # **中性名纪律**(公开仓):候选二进制名是"业界常见 headless CLI agent 的可执行名"这一确定性事实,
 # 不点参照工程名、不写成依赖;逐字符名只是 PATH 探测键,不构成对某产品的背书或绑定。
 #
-# 候选可执行名 = 各类 headless CLI agent 常见的 `bin` 名(探测事实,非依赖清单)。
-# 命中任一 = 用户已自带某个可接入的外部 runtime;一个没命中 = 给按需安装引导。
-_EXTERNAL_RUNTIME_BINS: tuple[str, ...] = (
-    "claude", "codex", "gemini", "opencode", "aider", "goose", "crush",
-)
+# **recipe-driven(不硬编码产品名清单)**:候选 bin 名从 external_runtime 我们**真 ship 的配方**
+# (recipe.py 的 probe_bins)派生 —— 只探"我们有配方能真驱动它"的 bin,让"可接入"是真的
+# (旧硬编码串会给没配方的 runtime 画饼)。派生 = builtin_probe_bins()(懒加载,避免 import 环)。
+
+
+def _external_runtime_bins() -> tuple[str, ...]:
+    """从我们 ship 的内置配方派生候选 bin 名(recipe-driven;懒加载避免 import 环)。
+
+    取不到(极端降级)→ 空 tuple:check_external_runtime 会诚实报"没探到可接入 runtime"
+    (absent 引导),不硬编码一串没配方的产品名画饼。
+    """
+    try:
+        from karvyloop.external_runtime import builtin_probe_bins
+        return builtin_probe_bins()
+    except Exception:
+        return ()
 
 
 def _probe_bin(name: str) -> bool:
@@ -187,7 +198,7 @@ def check_external_runtime(
     """
     probe = which or _probe_bin
     found: list[str] = []
-    for name in _EXTERNAL_RUNTIME_BINS:
+    for name in _external_runtime_bins():   # recipe-driven:只探我们有配方能驱动的 bin
         try:
             if probe(name):
                 found.append(name)

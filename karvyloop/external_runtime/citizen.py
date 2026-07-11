@@ -64,8 +64,18 @@ class ExternalCitizen:
     created_by: str = "user"
     status: str = STATUS_ACTIVE
     tier: str = TIER_GUEST                  # 成员等级(guest=T0 客人 / scoped=T1 受限成员;deny-by-default)
+    #: 按域名的 egress(出网)白名单(默认空=保持二元网络行为;非空=只放行这些 host,其余沙箱层
+    #: 确定性拒/fail-closed)。**只对 scoped(T1 绑域)成员生效**——派活时经 bridge.start(egress_allowlist=)
+    #: 构造 net_allowlist 非空的 CapabilityToken,由沙箱后端 runner 对 opaque 外部子进程做域名级 egress
+    #: 强制。guest 成员不设(默认空=零回归)。attach scoped 时可设。
+    egress_allowlist: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        # egress_allowlist 归一到 tuple[str,...](from_dict 可能给 list;去空白项)。
+        raw = self.egress_allowlist
+        norm_eg = tuple(str(x).strip() for x in raw if str(x).strip()) if raw else ()
+        if norm_eg != self.egress_allowlist:
+            object.__setattr__(self, "egress_allowlist", norm_eg)
         # tier 归一(deny-by-default):未知/篡改的 tier 值一律降到 guest。
         # frozen dataclass → object.__setattr__ 绕过不可变(仅归一,不放宽)。
         norm = normalize_tier(self.tier)
@@ -108,6 +118,8 @@ class ExternalCitizen:
             "capability_card": self.capability_card, "token_source": self.token_source,
             "manifest_hash": self.manifest_hash, "created_by": self.created_by,
             "status": self.status, "tier": self.tier,
+            # egress 白名单落 list(JSON 无 tuple);from_dict 读回归一成 tuple。空=不占位也可,显式落审计更清。
+            "egress_allowlist": list(self.egress_allowlist),
         }
 
     @staticmethod
@@ -125,6 +137,8 @@ class ExternalCitizen:
             status=str(d.get("status") or STATUS_ACTIVE),
             # 旧记录无 tier → 默认 guest(向后兼容,deny-by-default);normalize 在 __post_init__ 兜。
             tier=str(d.get("tier") or TIER_GUEST),
+            # 旧记录无 egress_allowlist → 空(向后兼容,二元网络);__post_init__ 归一成 tuple。
+            egress_allowlist=tuple(d.get("egress_allowlist") or ()),
         )
 
 

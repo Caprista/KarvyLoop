@@ -57,6 +57,8 @@ def test_list_citizens_shape(tmp_path):
     body = r.json()
     cits = {c["citizen_id"]: c for c in body["citizens"]}
     assert set(cits) == {"helper", "scout"}
+    # 缝 2 接线:真 registry(有 .list(domain=)/.detach/.liveness 契约面)接上 → 走真面、不再 _integration_pending
+    assert "_integration_pending" not in body, "真 registry 应走 .list 契约面,不该落回退面"
     # 醒目外部标识:每个都 is_external=True + chat_peer.role=="external"(不与原生 role 混脸)
     for c in cits.values():
         assert c["is_external"] is True
@@ -166,10 +168,11 @@ def test_doctor_external_absent():
 
 
 def test_doctor_external_present():
-    findings = check_external_runtime(which=lambda n: n in ("claude", "codex"))
+    # 只探"确知用此 CLI"的 bin;claude(Claude Code 真 headless 语法)是内置认领的那个。
+    findings = check_external_runtime(which=lambda n: n == "claude")
     assert findings[0].level == "ok"
     assert findings[0].code == "external_runtime_present"
-    assert findings[0].params["n"] == 2
+    assert findings[0].params["n"] == 1
 
 
 def test_doctor_external_never_raises():
@@ -226,12 +229,16 @@ def test_neutral_names_no_reference_products():
 def test_doctor_bin_names_are_probe_keys_not_narrative():
     """doctor 候选 bin 名只是 PATH 探测键(确定性事实),不构成注释里对某产品的背书文字。
 
-    锁:candidate bins 只出现在 _EXTERNAL_RUNTIME_BINS 元组里(探测键),
+    锁:candidate bins **recipe-driven** —— 从 external_runtime 真 ship 的配方(recipe.probe_bins)
+    派生(builtin_probe_bins),doctor 不再硬编码一串没配方的产品名清单;
     源码里不得有'如 <产品名> 这类营销/背书句式点名某产品当依赖'。中性表述(headless CLI agent)不受限。
     """
     src = (ROOT / "karvyloop" / "doctor_liveness.py").read_text(encoding="utf-8")
     # 中性表述在场(证明走的是"业界做法"口径)
     assert "headless CLI" in src
+    # recipe-driven:doctor 不再硬编码产品名清单,改从配方派生(_external_runtime_bins → builtin_probe_bins)
+    assert "builtin_probe_bins" in src, "doctor 应 recipe-driven(从配方 probe_bins 派生),不硬编码 bin 清单"
+    assert "_EXTERNAL_RUNTIME_BINS" not in src, "旧硬编码 bin 清单常量应已移除(recipe-driven)"
     # 不写死成依赖清单/背书句(仅探测键,已在注释里说明)
     assert "external_runtime_absent" in src and "external_runtime_present" in src
     # bin 名不能出现在注释里被当依赖点名(粗查:注释行里不含把 bin 名接 '依赖' 的句式)

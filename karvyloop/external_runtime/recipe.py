@@ -67,6 +67,10 @@ class DriveRecipe:
     timeout_wall_s: int = 900                 # 桥侧 wall-clock 上限(不依赖 CLI 自己的 timeout)
     smoke_prompt: str = "reply with the single word READY"  # 探活冒烟 prompt
     smoke_anchor: str = "READY"               # 冒烟锚(确定性可判,不用 LLM 判)
+    #: 这份配方**能真驱动**的外部 runtime 常见可执行名(doctor 按需接入引导按此探 PATH)。
+    #: 纪律:只列"我们 ship 了能驱动它的配方"的 bin —— "可接入"是真的,不给没配方的 runtime 画饼。
+    #: 中性名纪律(公开仓):这些是各类 headless CLI agent 的确定性 bin 名(PATH 探测键),非依赖/非背书。
+    probe_bins: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.parse.mode not in _PARSE_MODES:
@@ -100,6 +104,10 @@ def _generic_cli_recipe() -> DriveRecipe:
         exit=ExitSpec(ok_codes=(0,), empty_is_failure=True),
         redact_patterns=(),
         timeout_wall_s=900,
+        # probe_bins 纪律:只列**确知用此确切 CLI**的 bin,别给没验过的 runtime 画饼。
+        # `claude -p "<task>" --output-format stream-json` 是公开文档化的 headless 语法(互操作名可留);
+        # codex/gemini/opencode 未验此语法 → 不列(用户自己配方里填 bin)。
+        probe_bins=("claude",),
     )
 
 
@@ -114,6 +122,10 @@ def _single_json_recipe() -> DriveRecipe:
         exit=ExitSpec(ok_codes=(0,), empty_is_failure=True),
         preflight=("exec-policy ask=off(否则 headless 挂死等人审)",),
         timeout_wall_s=900,
+        # 此 CLI 形态(`agent --local --json`)= VM 实测过的那个 runtime 的确切语法,但它是我们的
+        # 参照工程、按中性名纪律不写进出货代码 → 内置 **shape-only**、不认领具体产品名(不画饼);
+        # 用户在自己配方里填这份形态对应的 bin。
+        probe_bins=(),
     )
 
 
@@ -135,6 +147,10 @@ def _raw_text_sidecar_recipe() -> DriveRecipe:
         # 已知泄 key 的入口:空 provider 打 404 且把 key 前缀打进 stdout → 桥拒调
         blocked_entrypoints=("agent_entrypoint", "run_agent"),
         timeout_wall_s=900,
+        # 此 CLI 形态(`-z --safe-mode --usage-file`)= VM 实测过的那个 runtime 的确切语法,同属
+        # 参照工程、中性名纪律不写进出货代码 → 内置 **shape-only**、不认领具体产品名(不画饼);
+        # 用户在自己配方里填这份形态对应的 bin。
+        probe_bins=(),
     )
 
 
@@ -155,8 +171,32 @@ def builtin_kinds() -> tuple[str, ...]:
     return tuple(_BUILTIN.keys())
 
 
+def builtin_probe_bins() -> tuple[str, ...]:
+    """我们 ship 的所有内置配方**能真驱动**的外部 runtime bin 名(去重、保持稳定顺序)。
+
+    doctor 按需接入引导据此探 PATH —— **只探我们有配方能驱动的 bin**,让"可接入"是真的
+    (不给没配方的 runtime 画饼)。派生规则:
+      - 配方显式 `probe_bins` → 用它(首选,人读清楚这份配方驱动谁)。
+      - 没显式 probe_bins 时,退回 `argv_template[0]` —— 但仅当它不是选项(不以 '-' 起、非占位符),
+        否则跳过(argv[0] 是 flag/占位符 = 无 bin 名可派生,不硬塞)。
+    """
+    seen: dict[str, None] = {}
+    for factory in _BUILTIN.values():
+        r = factory()
+        bins = list(r.probe_bins or ())
+        if not bins:
+            first = (r.argv_template[0] if r.argv_template else "") or ""
+            if first and not first.startswith("-") and "{" not in first:
+                bins = [first]
+        for b in bins:
+            b = (b or "").strip()
+            if b:
+                seen.setdefault(b, None)
+    return tuple(seen.keys())
+
+
 __all__ = [
     "DriveRecipe", "ParseSpec", "ExitSpec",
     "PARSE_SINGLE_JSON", "PARSE_NDJSON", "PARSE_RAW_TEXT",
-    "builtin_recipe", "builtin_kinds",
+    "builtin_recipe", "builtin_kinds", "builtin_probe_bins",
 ]

@@ -478,10 +478,22 @@ def make_external_agent_tool(*, citizen_registry, bridge_factory, a2a_router=Non
                     return {"ok": False, "reason": f"派活被拦:{route.reason}"}
             except Exception as e:  # noqa: BLE001 — 工具永不穿透异常
                 return {"ok": False, "reason": f"派活信封构造/路由出错:{type(e).__name__}: {e}"}
+        # egress 端到端(docs/71 §3.4 确定性网络地基):**只对 scoped(T1 绑域)成员**且**设了
+        # egress_allowlist** 时,把域名白名单传进 bridge.start —— bridge 据此构造 net_allowlist 非空的
+        # CapabilityToken 透传给沙箱后端 runner,对这个 opaque 外部子进程做**域名级 egress 强制**
+        # (平台焊不出则 fail-closed 拒网,见各平台沙箱)。guest / 未设 allowlist → 不传(默认空=二元
+        # 网络,零回归;既有 guest 派活/测试 bridge 的 start(task, cwd=) 签名不受影响)。
+        egress_allowlist: tuple[str, ...] = ()
+        if getattr(citizen, "is_scoped_member", None) and citizen.is_scoped_member():
+            egress_allowlist = tuple(getattr(citizen, "egress_allowlist", ()) or ())
         # 起子进程桥(fail-loud;沙箱硬化由配方/调用侧兜)
         try:
             bridge = bridge_factory(recipe)
-            result = bridge.start(task, cwd=getattr(sandbox, "cwd", "") or "")
+            _cwd = getattr(sandbox, "cwd", "") or ""
+            if egress_allowlist:
+                result = bridge.start(task, cwd=_cwd, egress_allowlist=egress_allowlist)
+            else:
+                result = bridge.start(task, cwd=_cwd)
         except Exception as e:  # noqa: BLE001 — 工具永不穿透异常
             return {"ok": False, "reason": f"「{citizen_id}」起不来:{type(e).__name__}"}
         # input_required → 诚实上报(调用侧升 H2A;不静默等)

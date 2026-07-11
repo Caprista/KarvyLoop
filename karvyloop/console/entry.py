@@ -483,6 +483,20 @@ def cmd_console(args: argparse.Namespace) -> int:
             role_registry = None
         app.state.atom_registry = atom_registry
         app.state.role_registry = role_registry
+        # 跨 runtime 协作(docs/71):外部 runtime 公民注册表(第四类实体)——管理面 routes_external
+        # + 小卡 external_agent/attach/list/revoke 工具共用同一个。持久在 ~/.karvyloop/(用户数据默认存盘,
+        # 与其它 registry 同路径纪律);store 只落"从哪读 key"元信息,真 key 绝不进这个文件。
+        # 构造失败 → None(降级:管理面返空 + _integration_pending,小卡工具不挂),不挡 console 起。
+        try:
+            from karvyloop.external_runtime import (
+                ExternalCitizenRegistry, ExternalCitizenStore,
+            )
+            citizen_registry = ExternalCitizenRegistry(
+                store=ExternalCitizenStore(_Path.home() / ".karvyloop" / "external_citizens.json"))
+        except Exception as e:
+            logger.warning(f"[karvyloop console] citizen_registry 构造失败(无外部公民,管理面返空): {e}")
+            citizen_registry = None
+        app.state.citizen_registry = citizen_registry
         # 9.5 P2/step2:任务看板登记 + 落盘(重启记得住;running 中断标 interrupted)
         from karvyloop.console.tasks import TaskRegistry, TaskStore
         app.state.task_registry = TaskRegistry(

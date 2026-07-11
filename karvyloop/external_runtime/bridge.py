@@ -342,5 +342,100 @@ def bridge_factory(recipe: DriveRecipe, *, env_base: Optional[dict] = None,
     return SubprocessBridge(recipe, runner=runner, env_base=env_base)
 
 
+# ---- 沙箱后端 runner:让 net_allowlist(egress_token)真到 Sandbox.exec(B 留的另一半)----
+#
+# bridge 的默认 _real_run(subprocess.run)**不做沙箱**——它内省接受 egress_token 但忽略它
+# (非破坏)。egress 端到端的另一半 = 一个**真把子进程放进沙箱跑**的 runner:它接受 egress_token
+# (一张 net_allowlist 非空的 CapabilityToken),原样交给 `Sandbox.exec(token=...)`——沙箱层据此
+# 做域名级 egress 强制(平台焊不出则 fail-closed 拒网,见 platform/*)。net_allowlist 由此**真到
+# 沙箱 exec**,不再半途蒸发。
+#
+# Sandbox.exec 是 async(见 sandbox/base.py Protocol);runner 是同步契约(bridge 在 subprocess.run
+# 语义下调),故在此起一个私有 event loop 跑它,并把 ExecResult 适配成 bridge 读的 proc 形态
+# (.returncode / .stdout / .stderr 皆 str —— bridge 后续 redact 按 str 处理)。
+
+
+class _SandboxProc:
+    """把 Sandbox.exec 的 ExecResult 适配成 subprocess.run 风格 proc(bridge 只读这三个字段)。"""
+    __slots__ = ("returncode", "stdout", "stderr")
+
+    def __init__(self, returncode: int, stdout: str, stderr: str) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _decode(b) -> str:
+    if isinstance(b, str):
+        return b
+    if isinstance(b, (bytes, bytearray)):
+        return bytes(b).decode("utf-8", errors="replace")
+    return "" if b is None else str(b)
+
+
+def make_sandbox_runner(sandbox, *, base_token=None):
+    """造一个**沙箱后端 runner**:接受 `egress_token`,把子进程放进 `sandbox` 跑,net_allowlist 真强制。
+
+    - `sandbox`:实现 `sandbox/base.py` 的 `Sandbox` Protocol(async exec(argv, *, token, cwd, ...))。
+    - `base_token`:egress_token 为空(guest/未设 allowlist)时用的兜底 token(如给基础 fs/net 授权);
+      为 None 时用一张最小 token(仅 net_allowlist 生效于 egress_token 那条路径)。
+
+    返回的 runner 签名 = `(argv, *, env, timeout, cwd, egress_token=None)` —— bridge 的签名内省
+    (`_runner_takes_egress`)因带 `egress_token` 形参而识别为"接受",于是 start() 把 egress_token
+    透传进来。**egress_token 非空 → 用它(net_allowlist 生效)**;为空 → 用 base_token(或最小 token)。
+    """
+    import asyncio as _asyncio
+    import time as _time
+
+    from karvyloop.schemas import CapabilityToken
+
+    def _runner(argv, *, env, timeout, cwd, egress_token=None):
+        # 选 token:egress_token(带 net_allowlist)优先;否则 base_token;都无则一张最小 token。
+        token = egress_token or base_token
+        if token is None:
+            token = CapabilityToken(task_id="ext-sandbox", grants=[],
+                                    expiry=_time.time() + max(float(timeout or 0), 60) + 60)
+
+        def _make_coro():
+            return sandbox.exec(list(argv), token=token, cwd=cwd or "",
+                                timeout_s=float(timeout or 0) or 120.0)
+
+        # 沙箱 exec 是 async;runner 是同步契约。两种运行位境都要跑得动:
+        #   ① 生产:bridge.start 在 drive_in_tui 的 asyncio.to_thread worker 线程(**无**运行中的
+        #      loop)→ 直接 asyncio.run 起私有 loop 跑。
+        #   ② 若被从"已有运行中 loop 的线程"同步调到(如直接 asyncio.run(tool.call(...)))→ 不能
+        #      在本线程再起 loop(会 RuntimeError)→ 甩到独立线程各起各的 loop 跑,阻塞等结果。
+        try:
+            running = _asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is None:
+            res = _asyncio.run(_make_coro())
+        else:
+            import concurrent.futures as _cf
+            with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+                res = _ex.submit(lambda: _asyncio.run(_make_coro())).result()
+        return _SandboxProc(
+            returncode=int(getattr(res, "exit_code", 0) or 0),
+            stdout=_decode(getattr(res, "stdout", "")),
+            stderr=_decode(getattr(res, "stderr", "")))
+
+    return _runner
+
+
+def sandbox_bridge_factory(sandbox, *, env_base: Optional[dict] = None, base_token=None):
+    """(DriveRecipe) -> 沙箱后端 Bridge:子进程放进 `sandbox` 跑,egress_token 的 net_allowlist 真到 exec。
+
+    与内置 `bridge_factory` 同签名口(可注入 make_external_agent_tool 的 bridge_factory),但 runner
+    换成 `make_sandbox_runner(sandbox)` —— **补上 egress 端到端的另一半**。平台焊不出域名级 egress
+    强制时,沙箱层自己 fail-closed 拒网(安全是地基,宁拒不假放行)。
+    """
+    def _factory(recipe: DriveRecipe) -> SubprocessBridge:
+        return SubprocessBridge(recipe, env_base=env_base,
+                                runner=make_sandbox_runner(sandbox, base_token=base_token))
+    return _factory
+
+
 __all__ = ["SubprocessBridge", "BridgeResult", "bridge_factory",
+           "make_sandbox_runner", "sandbox_bridge_factory",
            "STATUS_DONE", "STATUS_FAILED"]

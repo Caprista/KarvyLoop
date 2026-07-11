@@ -73,6 +73,9 @@ DEFAULT_TOOL_REQUIREMENTS: dict[str, Mode] = {
     "external_agent": Mode.FULL,
     # attach_external_agent = 写外部公民注册表(用户已在对话里拍板要接)→ WORKSPACE_WRITE(同 create_role)。
     "attach_external_agent": Mode.WORKSPACE_WRITE,
+    # revoke_external_agent = scoped 优雅撤销一个外部成员(detach 写注册表)→ WORKSPACE_WRITE(同 attach)。
+    #   已采纳产出不级联删、未采纳供稿清理;安全靠下游兜(优雅撤销语义),不在这里一票 FULL 拒。
+    "revoke_external_agent": Mode.WORKSPACE_WRITE,
     # list_external_agents = 只读公民注册表 → READ_ONLY(同 recall_memory)。
     # **键名必须与工厂 build_tool(name=...) 逐字相同**——required_mode 走精确查表(line 78-87),无复数容错;
     # 工厂是 make_list_external_agents_tool → name="list_external_agents"(复数),故键必须复数,
