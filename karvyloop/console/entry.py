@@ -489,10 +489,12 @@ def cmd_console(args: argparse.Namespace) -> int:
         # 构造失败 → None(降级:管理面返空 + _integration_pending,小卡工具不挂),不挡 console 起。
         try:
             from karvyloop.external_runtime import (
-                ExternalCitizenRegistry, ExternalCitizenStore,
+                ClaimTicketStore, ExternalCitizenRegistry, ExternalCitizenStore,
             )
+            # ticket_store 落认领秘钥的**盐+摘要**(明文秘钥绝不落盘);持久化 → 重启后 pending 壳仍可认领。
             citizen_registry = ExternalCitizenRegistry(
-                store=ExternalCitizenStore(_Path.home() / ".karvyloop" / "external_citizens.json"))
+                store=ExternalCitizenStore(_Path.home() / ".karvyloop" / "external_citizens.json"),
+                ticket_store=ClaimTicketStore(_Path.home() / ".karvyloop" / "external_claim_tickets.json"))
         except Exception as e:
             logger.warning(f"[karvyloop console] citizen_registry 构造失败(无外部公民,管理面返空): {e}")
             citizen_registry = None

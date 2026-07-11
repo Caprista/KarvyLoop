@@ -29,18 +29,23 @@ from .bridge import (
     sandbox_bridge_factory,
 )
 from .citizen import (
+    CLAIM_TICKET_TTL_S,
     EXTERNAL_ROLE,
     STATUS_ACTIVE,
     STATUS_BLOCKED,
     STATUS_NEEDS_REATTACH,
+    STATUS_PENDING,
     STATUS_RETIRED,
     STATUS_UNREACHABLE,
     TIER_GUEST,
     TIER_SCOPED,
+    ClaimTicket,
     ExternalCitizen,
     ExternalCitizenRegistry,
     compute_manifest_hash,
+    mint_claim_ticket,
     normalize_tier,
+    split_claim_secret,
 )
 from .probe import HashVerifyResult, ProbeResult, probe, verify_manifest_hash
 from .recipe import (
@@ -55,7 +60,7 @@ from .recipe import (
     builtin_recipe,
 )
 from .redact import contains_secret, redact
-from .store import ExternalCitizenStore
+from .store import ClaimTicketStore, ExternalCitizenStore
 
 __all__ = [
     # bridge
@@ -65,8 +70,10 @@ __all__ = [
     # citizen
     "ExternalCitizen", "ExternalCitizenRegistry", "compute_manifest_hash", "EXTERNAL_ROLE",
     "STATUS_ACTIVE", "STATUS_UNREACHABLE", "STATUS_BLOCKED",
-    "STATUS_RETIRED", "STATUS_NEEDS_REATTACH",
+    "STATUS_RETIRED", "STATUS_NEEDS_REATTACH", "STATUS_PENDING",
     "TIER_GUEST", "TIER_SCOPED", "normalize_tier",
+    # 认领码握手
+    "ClaimTicket", "mint_claim_ticket", "split_claim_secret", "CLAIM_TICKET_TTL_S",
     # recipe
     "DriveRecipe", "ParseSpec", "ExitSpec",
     "PARSE_SINGLE_JSON", "PARSE_NDJSON", "PARSE_RAW_TEXT",
@@ -78,5 +85,5 @@ __all__ = [
     # redact
     "redact", "contains_secret",
     # store
-    "ExternalCitizenStore",
+    "ExternalCitizenStore", "ClaimTicketStore",
 ]

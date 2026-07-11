@@ -1517,6 +1517,29 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .ext-light-unreachable .ext-dot { background: var(--danger); box-shadow: 0 0 4px var(--danger); }
 .ext-light-label { font-size: 11px; }
 .ext-onboarding { border-top: 1px dashed var(--border); margin-top: 14px; padding-top: 12px; }
+/* ＋添加外部 runtime 按钮(认领码握手入口) */
+.ext-add-btn, .mgmt-add-btn { display: inline-block; margin: 4px 0 12px; padding: 8px 14px;
+  font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: #8b5cf6; background: rgba(139,92,246,0.10); border: 1px solid rgba(139,92,246,0.42);
+  border-radius: 9px; }
+.ext-add-btn:hover { background: rgba(139,92,246,0.18); }
+/* 等待接入(pending)壳:异色虚线边 + 呼吸感,一眼知"还没接上、在等认领回连" */
+.ext-card-pending { border-left-style: dashed; opacity: .92; }
+.ext-badge-pending { background: rgba(234,179,8,0.14); color: #eab308; border-color: rgba(234,179,8,0.45); }
+.ext-light-pending .ext-dot { background: #eab308; box-shadow: 0 0 4px #eab308; }
+.ext-pending-hint { color: #eab308; font-style: italic; }
+/* 复制指令面板(建壳后弹出:秘钥 + 回调 URL + 现成命令) */
+.ext-claim-box { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
+.ext-claim-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.ext-claim-warn { color: #eab308; font-weight: 600; }
+.ext-claim-row { display: flex; flex-direction: column; gap: 4px;
+  border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; }
+.ext-claim-label { font-size: 12px; color: var(--text-dim); font-weight: 600; }
+.ext-claim-cmd { font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 12px;
+  white-space: pre-wrap; word-break: break-all; background: var(--surface); color: var(--text);
+  padding: 8px 10px; border-radius: 7px; margin: 0; max-height: 120px; overflow: auto; }
+.ext-claim-row .dpref-edit { align-self: flex-start; }
+.ext-claim-waiting { color: #8b5cf6; font-style: italic; }
 
 .mgmt-form { display: flex; flex-direction: column; gap: 10px;
   border-top: 1px solid var(--border); padding-top: 14px; }

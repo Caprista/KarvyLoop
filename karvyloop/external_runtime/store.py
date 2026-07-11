@@ -38,4 +38,32 @@ class ExternalCitizenStore:
         os.replace(tmp, self._path)
 
 
-__all__ = ["ExternalCitizenStore"]
+class ClaimTicketStore:
+    """认领秘钥台账的磁盘存储(JSON 数组,atomic 写)。ExternalCitizenRegistry 消费。
+
+    **秘钥纪律(和 config key 同)**:这里落的只有秘钥的**盐 + HMAC 摘要**(secret_hash/salt)+
+    过期/使用元信息 —— **明文认领秘钥绝不落这个文件**(明文只在建壳时返回一次给前端,系统之后不持有)。
+    就算这个文件泄了,也反推不出明文秘钥。形态同 ExternalCitizenStore(atomic 写,坏文件返空不阻塞启动)。
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+    def load_all(self) -> list[dict]:
+        if not self._path.exists():
+            return []
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return []
+        return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
+    def save_all(self, records) -> None:
+        payload = json.dumps(list(records), ensure_ascii=False, indent=2)
+        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, self._path)
+
+
+__all__ = ["ExternalCitizenStore", "ClaimTicketStore"]

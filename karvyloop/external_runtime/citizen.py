@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import hmac
 import json
+import secrets
+import time
 from typing import Optional
 
 from .recipe import DriveRecipe, builtin_recipe
@@ -29,6 +32,8 @@ STATUS_UNREACHABLE = "unreachable"
 STATUS_BLOCKED = "blocked"
 STATUS_RETIRED = "retired"
 STATUS_NEEDS_REATTACH = "needs_reattach"
+# pending:建壳但外部 runtime 还没认领回连(等待接入)。认领成功后翻成 active。
+STATUS_PENDING = "pending"
 
 # ---- 成员等级(受限成员生命周期,承 T0 客人)----
 # T0 = guest(现状:opaque 供稿人,无域绑定深度,私聊/无域派活)。
@@ -153,6 +158,109 @@ def compute_manifest_hash(*, bin_path: str, version: str,
     return h.hexdigest()[:16]
 
 
+# ---- 认领码握手(反向接入:GitHub-runner-注册那种)----
+# 模型:建壳(pending 公民)+ 发一把一次性、带过期的认领秘钥 → 外部 runtime 拿秘钥连回
+# claim 端点 → 校验(一次性/未过期/匹配某 pending 壳)→ 激活该壳成正式公民 → 秘钥立即作废。
+#
+# **秘钥纪律(和 API key 同):明文秘钥绝不落盘、绝不进日志。** 只落**盐 + HMAC 摘要**;校验时
+# 用 hmac.compare_digest 常量时间比对(防时序侧信道)。明文秘钥只在建壳那一刻返回一次(前端展示),
+# 之后系统再也拿不到明文——就算注册表文件泄了,也反推不出秘钥。
+
+# 认领秘钥默认有效期(秒)=10 分钟(短窗:接入是即时动作,过期即作废逼重发)。
+CLAIM_TICKET_TTL_S = 600
+# 秘钥明文长度(token_urlsafe 的字节数;32 字节 ≈ 43 字符 base64url,足够抗暴力)。
+_CLAIM_SECRET_BYTES = 32
+
+
+def _hash_claim_secret(secret: str, salt: str) -> str:
+    """盐 + HMAC-SHA256 摘要(明文秘钥永不落盘;校验只比对摘要)。"""
+    return hmac.new(salt.encode("utf-8"), (secret or "").encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
+@dataclasses.dataclass(frozen=True)
+class ClaimTicket:
+    """一把绑定到某个 pending 壳的一次性认领秘钥(只存摘要,不存明文)。
+
+    - `ticket_id`:秘钥的公开标识(明文秘钥 = "<ticket_id>.<secret>",外部 runtime 回连时带整串;
+      校验时按 ticket_id 找到本票、再比对 secret 摘要)。用公开 id 定位、密文比对 secret,避免遍历。
+    - `secret_hash` / `salt`:秘钥的 HMAC 摘要 + 盐(明文绝不落)。
+    - `citizen_id`/`domain_id`:这把秘钥绑定的那个 pending 壳(复合键)。别的壳不能用这把认领。
+    - `expires_at`:过期墙(epoch 秒)。过期即废。
+    - `used_at`:一次性 —— 认领成功即写 used_at,再来(重放)一律拒。
+    """
+    ticket_id: str
+    secret_hash: str
+    salt: str
+    citizen_id: str
+    domain_id: str = ""
+    issued_at: float = 0.0
+    expires_at: float = 0.0
+    used_at: float = 0.0
+
+    def is_expired(self, now: Optional[float] = None) -> bool:
+        return (now if now is not None else time.time()) >= self.expires_at
+
+    def is_used(self) -> bool:
+        return self.used_at > 0.0
+
+    def verify(self, secret: str, *, now: Optional[float] = None) -> bool:
+        """常量时间比对 secret 摘要(未过期、未用过才算通过)。"""
+        if self.is_used() or self.is_expired(now):
+            return False
+        cand = _hash_claim_secret(secret or "", self.salt)
+        return hmac.compare_digest(cand, self.secret_hash)
+
+    def to_dict(self) -> dict:
+        return {
+            "ticket_id": self.ticket_id, "secret_hash": self.secret_hash, "salt": self.salt,
+            "citizen_id": self.citizen_id, "domain_id": self.domain_id,
+            "issued_at": self.issued_at, "expires_at": self.expires_at, "used_at": self.used_at,
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "ClaimTicket":
+        d = d or {}
+        return ClaimTicket(
+            ticket_id=str(d.get("ticket_id") or ""),
+            secret_hash=str(d.get("secret_hash") or ""),
+            salt=str(d.get("salt") or ""),
+            citizen_id=str(d.get("citizen_id") or ""),
+            domain_id=str(d.get("domain_id") or ""),
+            issued_at=float(d.get("issued_at") or 0.0),
+            expires_at=float(d.get("expires_at") or 0.0),
+            used_at=float(d.get("used_at") or 0.0),
+        )
+
+
+def mint_claim_ticket(citizen_id: str, domain_id: str = "", *,
+                      ttl_s: int = CLAIM_TICKET_TTL_S,
+                      now: Optional[float] = None) -> tuple[ClaimTicket, str]:
+    """发一把新认领秘钥,返回 (ticket, 明文完整秘钥)。**明文只此一次返回,之后系统不再持有。**
+
+    完整秘钥形态 = "<ticket_id>.<secret>"(前段公开定位、后段密文比对)。
+    """
+    now = now if now is not None else time.time()
+    ticket_id = secrets.token_urlsafe(9)          # 短公开 id
+    secret = secrets.token_urlsafe(_CLAIM_SECRET_BYTES)  # 高熵密文段
+    salt = secrets.token_urlsafe(9)
+    ticket = ClaimTicket(
+        ticket_id=ticket_id, secret_hash=_hash_claim_secret(secret, salt), salt=salt,
+        citizen_id=citizen_id or "", domain_id=domain_id or "",
+        issued_at=now, expires_at=now + max(1, int(ttl_s)), used_at=0.0)
+    full_secret = f"{ticket_id}.{secret}"
+    return ticket, full_secret
+
+
+def split_claim_secret(full_secret: str) -> tuple[str, str]:
+    """把外部 runtime 回连带的完整秘钥拆成 (ticket_id, secret);形态不对 → ("", "")。"""
+    s = (full_secret or "").strip()
+    if "." not in s:
+        return "", ""
+    tid, _, sec = s.partition(".")
+    return tid.strip(), sec.strip()
+
+
 class ExternalCitizenRegistry:
     """已接入公民注册表(持久化;用户数据默认存盘)。
 
@@ -160,7 +268,7 @@ class ExternalCitizenRegistry:
     `resolve(citizen_id)` 是调用侧带当前域的便捷入口(域可空=私聊/无域)。
     """
 
-    def __init__(self, *, store=None, probe_fn=None) -> None:
+    def __init__(self, *, store=None, probe_fn=None, ticket_store=None) -> None:
         # 键 = (domain_id, citizen_id);同花名跨域独立
         self._by_key: dict[tuple[str, str], ExternalCitizen] = {}
         # 供稿账本(可撤销供稿的可追溯性):key=(domain_id, citizen_id) → list[dict]
@@ -169,10 +277,26 @@ class ExternalCitizenRegistry:
         # 采纳后的产出去向由消费侧(记忆/结晶)持久化,这里只做撤销可追溯的登记面。
         self._contributions: dict[tuple[str, str], list[dict]] = {}
         self._store = store
+        # 认领秘钥台账:ticket_id → ClaimTicket(只存摘要,明文绝不落)。持久化(重启后 pending 壳仍可认领)。
+        self._tickets: dict[str, ClaimTicket] = {}
+        self._ticket_store = ticket_store
         # 探活函数注入(liveness 复用探活;默认懒加载真 probe)。测试可注入假 probe。
         self._probe_fn = probe_fn
         self.persist_error: str = ""
+        self.ticket_persist_error: str = ""
         self.last_detach_trace: dict = {}   # 最近一次 detach 的撤销可追溯记录
+        if ticket_store is not None:
+            try:
+                for td in (ticket_store.load_all() or []):
+                    tk = ClaimTicket.from_dict(td)
+                    if tk.ticket_id:
+                        self._tickets[tk.ticket_id] = tk
+                # 启动时反收已过期票(台账跨重启不无限增长;过期票留着也会被 verify 的 is_expired 拦)。
+                # 持久票携带的是真实时钟 expires_at(生产 mint 用真 time),startup 用真时钟反收安全。
+                if self._reap_tickets_at_load():
+                    self._persist_tickets()
+            except Exception as e:  # noqa: BLE001 — 票据加载失败不炸(空台账起步)
+                self.ticket_persist_error = f"load: {type(e).__name__}: {e}"
         if store is not None:
             try:
                 for d in (store.load_all() or []):
@@ -228,6 +352,149 @@ class ExternalCitizenRegistry:
             return list(self._by_key.values())
         did = domain or ""
         return [c for (d, _cid), c in self._by_key.items() if d == did]
+
+    # ---- 认领码握手:建壳 + 发码 → 外部 runtime 回连认领 → 激活 ----
+
+    def create_pending(self, citizen_id: str, *, domain_id: str = "",
+                       runtime_kind: str = "", tier: str = TIER_GUEST,
+                       ttl_s: int = CLAIM_TICKET_TTL_S,
+                       now: Optional[float] = None) -> tuple[Optional[ExternalCitizen], str, str]:
+        """建一个 pending 壳 + 发一把一次性认领秘钥。
+
+        返回 (pending_citizen, 明文完整秘钥, error)。error 非空 = 失败(壳/秘钥都不发)。
+        **明文秘钥只此一次返回**(前端展示给用户复制去 runtime 里跑),系统之后只留摘要。
+
+        - citizen_id 复合键 (域, id) 已存在 → 拒(别覆盖在线公民;认领是"加新的")。
+        - tier 归一(deny-by-default):未知一律 guest。pending 壳 status=pending,认领成功才 active。
+        """
+        cid = (citizen_id or "").strip()
+        did = (domain_id or "").strip()
+        if not cid:
+            return None, "", "需要 citizen_id(给外部 runtime 起个花名)"
+        if (did, cid) in self._by_key:
+            return None, "", f"「{cid}」已存在(复合键 (域={did or '—'}, {cid}));换个花名"
+        pending = ExternalCitizen(
+            citizen_id=cid, runtime_kind=(runtime_kind or "").strip(), bin_path="",
+            domain_id=did, capability_card={}, token_source=f"ext:{cid}",
+            created_by="user", status=STATUS_PENDING, tier=normalize_tier(tier))
+        ticket, full_secret = mint_claim_ticket(cid, did, ttl_s=ttl_s, now=now)
+        self._by_key[(did, cid)] = pending
+        self._tickets[ticket.ticket_id] = ticket
+        self._persist()
+        self._persist_tickets()
+        return pending, full_secret, ""
+
+    def claim(self, full_secret: str, *, reported: Optional[dict] = None,
+              now: Optional[float] = None) -> dict:
+        """外部 runtime 拿秘钥回连认领:校验(一次性/未过期/匹配某 pending 壳)→ 激活壳 → 秘钥作废。
+
+        `reported` = 外部 runtime 自报的身份/能力(**untrusted 数据**:登记但不当指令、不据此提权)。
+          认可的字段:runtime_kind / bin_path / version / capabilities(其余忽略)。tier/domain 由**建壳侧**
+          定,外部自报一律不改(防自提权)。
+        返回 {ok, reason?, citizen_id?, domain_id?, status?}。秘钥错/过期/重放/壳不在 → ok=False(fail-loud)。
+        """
+        now = now if now is not None else time.time()
+        reported = reported or {}
+        tid, sec = split_claim_secret(full_secret)
+        # 统一的拒绝话术:不区分"没这个 ticket"和"secret 错"(别给暴力/枚举侧信道)。
+        deny = {"ok": False, "reason": "认领秘钥无效、已过期或已使用"}
+        if not tid or not sec:
+            return deny
+        ticket = self._tickets.get(tid)
+        if ticket is None:
+            return deny
+        if not ticket.verify(sec, now=now):
+            # 过期/已用/摘要不匹配 —— 一律统一拒(fail-loud,不透露是哪种)。
+            return deny
+        key = (ticket.domain_id or "", ticket.citizen_id or "")
+        shell = self._by_key.get(key)
+        if shell is None or shell.status != STATUS_PENDING:
+            # 壳被删了 or 已不是 pending(已认领过/被改)→ 秘钥同时作废(防悬空票)。
+            self._invalidate_ticket(tid, now)
+            return {"ok": False, "reason": "对应的待接入壳不存在或已激活"}
+        # 激活:外部自报的 runtime_kind/bin/能力登记(untrusted);tier/domain 保持建壳侧所定不变。
+        rk = str(reported.get("runtime_kind") or shell.runtime_kind or "").strip()
+        bin_path = str(reported.get("bin_path") or "").strip()
+        card = dict(shell.capability_card or {})
+        rep_caps = reported.get("capabilities")
+        # capability_card 里明确标 source=external_self_report(消费侧一眼知这是 untrusted 自报,不是我们探的)。
+        card.update({
+            "version": str(reported.get("version") or ""),
+            "self_reported": True,
+            "reported_capabilities": list(rep_caps) if isinstance(rep_caps, (list, tuple)) else [],
+        })
+        activated = dataclasses.replace(
+            shell, runtime_kind=rk, bin_path=bin_path,
+            capability_card=card, status=STATUS_ACTIVE)
+        self._by_key[key] = activated
+        # **顺序纪律(防半写锁死)**:先把激活落盘,成功了才作废秘钥。否则一旦
+        # 秘钥先作废、公民却没落盘,重启后壳退回 pending 而秘钥已死 → 用户永久锁死。
+        if not self._persist():
+            # 公民落盘失败:回滚内存激活、**不作废秘钥**(让用户能重试同一把码),fail-loud 报错。
+            self._by_key[key] = shell
+            return {"ok": False,
+                    "reason": f"认领落盘失败(未激活,可重试):{self.persist_error}"}
+        # 激活已持久 → 秘钥立即作废(一次性:标 used_at + 落盘;重放这把再来一律拒)。
+        self._invalidate_ticket(tid, now)
+        return {"ok": True, "citizen_id": activated.citizen_id,
+                "domain_id": activated.domain_id, "status": STATUS_ACTIVE,
+                "tier": activated.tier}
+
+    def _invalidate_ticket(self, ticket_id: str, now: float) -> None:
+        """把一把秘钥标为已用(一次性回收);落盘。"""
+        tk = self._tickets.get(ticket_id)
+        if tk is not None and not tk.is_used():
+            self._tickets[ticket_id] = dataclasses.replace(tk, used_at=now)
+            self._persist_tickets()
+
+    def cancel_pending(self, domain_id: str, citizen_id: str) -> bool:
+        """撤掉一个还没认领的 pending 壳(用户取消等待):删壳 + 作废它的所有未用秘钥。返回是否有此壳。"""
+        key = (domain_id or "", citizen_id or "")
+        c = self._by_key.get(key)
+        if c is None or c.status != STATUS_PENDING:
+            return False
+        self._by_key.pop(key, None)
+        now = time.time()
+        for tid, tk in list(self._tickets.items()):
+            if (tk.domain_id or "") == (domain_id or "") and tk.citizen_id == citizen_id and not tk.is_used():
+                self._tickets[tid] = dataclasses.replace(tk, used_at=now)
+        self._persist()
+        self._persist_tickets()
+        return True
+
+    def pending_ticket_for(self, domain_id: str, citizen_id: str,
+                           now: Optional[float] = None) -> Optional[ClaimTicket]:
+        """取某 pending 壳当前**仍有效**(未用未过期)的认领票(供前端显示过期时间);无 → None。"""
+        now = now if now is not None else time.time()
+        for tk in self._tickets.values():
+            if ((tk.domain_id or "") == (domain_id or "") and tk.citizen_id == citizen_id
+                    and not tk.is_used() and not tk.is_expired(now)):
+                return tk
+        return None
+
+    def _reap_tickets_at_load(self, now: Optional[float] = None) -> bool:
+        """启动时回收**已过期**的票(台账跨重启不无限增长)。返回是否反收了任何票。
+
+        安全:只反收已过期的 —— 过期票就算被重放也会被 verify 的 is_expired 拦(不靠留着它做拒);
+        未过期的票(含刚 used_at 的一次性票)必须留到过期,否则一次性/重放检测会因票消失而失效。
+        **只在 load 时用真实时钟反收**(持久票携带真实 expires_at);不在每次写时跑,免得干扰注入合成时钟的测试。
+        """
+        now = now if now is not None else time.time()
+        expired = [tid for tid, tk in self._tickets.items() if tk.is_expired(now)]
+        for tid in expired:
+            self._tickets.pop(tid, None)
+        return bool(expired)
+
+    def _persist_tickets(self) -> bool:
+        if self._ticket_store is None:
+            return True
+        try:
+            self._ticket_store.save_all([t.to_dict() for t in self._tickets.values()])
+            self.ticket_persist_error = ""
+            return True
+        except Exception as e:  # noqa: BLE001
+            self.ticket_persist_error = f"{type(e).__name__}: {e}"
+            return False
 
     # ---- 供稿账本(可撤销供稿的可追溯性)----
 
@@ -334,6 +601,8 @@ __all__ = [
     "ExternalCitizen", "ExternalCitizenRegistry", "compute_manifest_hash",
     "EXTERNAL_ROLE",
     "STATUS_ACTIVE", "STATUS_UNREACHABLE", "STATUS_BLOCKED",
-    "STATUS_RETIRED", "STATUS_NEEDS_REATTACH",
+    "STATUS_RETIRED", "STATUS_NEEDS_REATTACH", "STATUS_PENDING",
     "TIER_GUEST", "TIER_SCOPED", "normalize_tier",
+    # 认领码握手
+    "ClaimTicket", "mint_claim_ticket", "split_claim_secret", "CLAIM_TICKET_TTL_S",
 ]

@@ -41,8 +41,10 @@ let getJSONImpl = async (url) => {
   if (url.includes("/api/external/liveness")) return { ok: true, citizen_id: "helper", status: "offline" };
   return null;
 };
+// 可变的 post 实现(模块 load 时把 _postJSON 绑死,所以走一层间接 → 后续改 postJSONImpl 生效)
+let postJSONImpl = async () => ({ ok: true, status: 200, data: { ok: true } });
 dom.window.KarvyDom.getJSON = async (url) => getJSONImpl(url);
-dom.window.KarvyDom.postJSON = async () => ({ ok: true, status: 200, data: { ok: true } });
+dom.window.KarvyDom.postJSON = async (url, payload) => postJSONImpl(url, payload);
 load("external_panel.js");
 
 const P = dom.window.KarvyExternalPanel;
@@ -107,4 +109,64 @@ await P.open();
 assert.ok(dom.window.document.getElementById("mgmt-body").textContent.includes("external.onboarding"),
   "后端不可达时接入引导仍应渲染(不崩)");
 
-console.log("✓ external panel smoke OK — 契约 + 🔌异色徽标+tier + 在线灯 + 直聊/刷新/删除 + untrusted提示 + 按需引导(present/absent+不bundle红线) + C1待接标注(不触网不崩)");
+// ---- 认领码握手:＋添加按钮 → 建壳发码 → 复制指令 + 等待接入(pending 卡)----
+
+// ＋添加按钮在列表视图恒在(反向接入入口)
+getJSONImpl = async (url) => {
+  if (url.includes("/api/external/citizens")) return { citizens: [] };
+  if (url.includes("/api/external/onboarding")) return ONBOARDING_ABSENT;
+  return null;
+};
+await P.open();
+const body3 = dom.window.document.getElementById("mgmt-body");
+assert.ok(body3.textContent.includes("external.add_btn"), "列表视图应有 ＋添加外部 runtime 按钮");
+const addBtn = [...body3.querySelectorAll("button")].find((b) => b.textContent.includes("external.add_btn"));
+assert.ok(addBtn, "＋添加按钮应可点");
+
+// 点添加 → prompt 花名 → create_pending 返回壳 + 秘钥 + 现成命令 → 弹复制指令面板
+dom.window.prompt = () => "cc";
+let postedCreate = null;
+postJSONImpl = async (url, payload) => {
+  if (url.includes("/api/external/create_pending")) {
+    postedCreate = payload;
+    return { ok: true, status: 200, data: {
+      ok: true,
+      citizen: { citizen_id: "cc", domain_id: "", pending: true, is_external: true },
+      claim_url: "http://127.0.0.1:8766/api/external/claim",
+      claim_secret: "abc.FAKE-DO-NOT-LEAK-SECRET",
+      connector_cmd: "python -m karvyloop.external_runtime.connector --claim-url \"http://127.0.0.1:8766/api/external/claim\" --secret \"abc.FAKE-DO-NOT-LEAK-SECRET\" --citizen-id \"cc\"",
+      curl_cmd: "curl -X POST \"http://127.0.0.1:8766/api/external/claim\" -H \"Content-Type: application/json\" -d '{\"secret\": \"abc.FAKE-DO-NOT-LEAK-SECRET\"}'",
+    } };
+  }
+  return { ok: true, status: 200, data: { ok: true } };
+};
+addBtn.click();
+await new Promise((r) => setTimeout(r, 20));   // 让 _startAddFlow 的 async 走完
+assert.equal(postedCreate && postedCreate.citizen_id, "cc", "添加应 POST create_pending 带花名");
+const claimBody = dom.window.document.getElementById("mgmt-body").textContent;
+assert.ok(claimBody.includes("external.claim_ready_title"), "应弹出接入码已生成标题");
+assert.ok(claimBody.includes("external.claim_secret_once"), "应醒目提示秘钥一次性/过期");
+assert.ok(claimBody.includes("external.claim_connector_label"), "应给连接器脚本命令");
+assert.ok(claimBody.includes("external.claim_curl_label"), "应给应急 curl 命令");
+assert.ok(claimBody.includes("karvyloop.external_runtime.connector"), "复制指令应含连接器脚本入口");
+assert.ok(dom.window.document.querySelector(".ext-claim-box"), "应有 .ext-claim-box 复制面板");
+
+// pending 壳渲染成"等待接入"卡(异色 pending 徽标 + 状态灯)
+getJSONImpl = async (url) => {
+  if (url.includes("/api/external/citizens")) return { citizens: [
+    { citizen_id: "cc", domain_id: "", runtime_kind: "", tier: "guest", status: "pending",
+      liveness: "pending", pending: true, is_external: true, version: "",
+      chat_peer: { domain_id: "", role: "external", agent_id: "cc" } },
+  ] };
+  if (url.includes("/api/external/onboarding")) return ONBOARDING_ABSENT;
+  return null;
+};
+await P.open();
+const pendBody = dom.window.document.getElementById("mgmt-body");
+assert.ok(pendBody.querySelector(".ext-card-pending"), "pending 壳应渲染成'等待接入'卡");
+assert.ok(pendBody.querySelector(".ext-badge-pending"), "应有 pending 异色徽标");
+assert.ok(pendBody.querySelector(".ext-light-pending"), "应有 pending 状态灯");
+assert.ok(pendBody.textContent.includes("external.pending_waiting"), "pending 卡应有等待接入提示");
+assert.ok(pendBody.textContent.includes("external.cancel_pending"), "pending 卡应有取消按钮");
+
+console.log("✓ external panel smoke OK — 契约 + 🔌异色徽标+tier + 在线灯 + 直聊/刷新/删除 + untrusted提示 + 按需引导(present/absent+不bundle红线) + C1待接标注 + ＋添加认领码握手(建壳发码/复制指令/pending卡)(不触网不崩)");

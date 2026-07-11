@@ -109,7 +109,9 @@ def _citizen_view(reg: Any, citizen: Any) -> dict[str, Any]:
         # tier:C1 给则用,没给按最保守 guest(不假装更宽授权)。
         "tier": (getattr(citizen, "tier", "") or _DEFAULT_TIER),
         "status": getattr(citizen, "status", "") or "",
-        "liveness": _liveness_of(reg, citizen)["status"],
+        # pending 壳(建了码还没认领回连)不探活(它本就不在线);其余走注册表活性面。
+        "liveness": ("pending" if (getattr(citizen, "status", "") == "pending")
+                     else _liveness_of(reg, citizen)["status"]),
         # 醒目外部标识:恒 True —— 前端据此渲染 🔌 异色徽标(untrusted 外部执行体,不与原生角色混脸)。
         "is_external": True,
         # 直聊寻址(与 external_runtime.citizen_address 一致:role 段固定 "external")。
@@ -117,6 +119,10 @@ def _citizen_view(reg: Any, citizen: Any) -> dict[str, Any]:
                       "role": _EXTERNAL_ROLE, "agent_id": cid},
         # 能力卡里的非机密事实(版本/模型提示),供 UI 展示"这是个什么执行体"。
         "version": str(card.get("version") or ""),
+        # 认领码握手:pending=建了壳发了码、还没认领回连(前端渲染"等待接入"卡);active 后翻正式公民。
+        "pending": (getattr(citizen, "status", "") == "pending"),
+        # capability_card.self_reported=True 表示能力是外部自报(untrusted),非我们探的 —— 供 UI 标注。
+        "self_reported": bool(card.get("self_reported")),
     }
 
 
@@ -224,6 +230,182 @@ def api_external_detach(req: ExternalDetachRequest, request: Request) -> dict[st
     if not removed:
         return {"ok": False, "reason": "公民不存在或已解绑", "citizen_id": req.citizen_id}
     return {"ok": True, "citizen_id": req.citizen_id, "domain_id": req.domain_id or ""}
+
+
+# ---- 认领码握手:建壳发码 → 外部 runtime 回连认领 → 激活(反向接入,不是本机填 bin)----
+
+def _is_local_authority(host: str) -> bool:
+    """Host 头的 host 部分是否是**本地/私网**权威(loopback IP / 私网 IP / localhost / *.local)。
+
+    只信本地权威:Host 头是可被恶意页/错配反代影响的,而这个基址会**连同明文认领秘钥**拼进复制指令
+    —— 若信了被引导的公网 Host,用户就会把一次性秘钥 POST 到攻击者端点。所以只反射能确定是本地的 Host,
+    其余一律退回 request.base_url(由真实连接派生,不可伪造)。
+    """
+    import ipaddress
+    h = (host or "").strip().lower()
+    if not h:
+        return False
+    # 去端口:IPv6 字面量是 [::1]:port,IPv4/hostname 是 host:port。
+    if h.startswith("[") and "]" in h:
+        h = h[1:h.index("]")]
+    elif h.count(":") == 1:
+        h = h.split(":", 1)[0]
+    if h in ("localhost",) or h.endswith(".local") or h.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return False   # 不是 IP 字面量、也不是已知本地主机名 → 不信(退回真实连接基址)
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return not ip.is_global   # loopback/私网/LAN/链路本地 → 本地权威可信
+
+
+def _console_base_url(request: Request) -> str:
+    """拼出外部 runtime 回连的 console 基址(用于把认领回调 URL 拼进复制指令)。
+
+    **安全**:这个基址会连同明文认领秘钥一起进复制指令,绝不能被伪造的 Host 头引导到攻击者端点。
+    - 只在 Host 头是**本地/私网权威**(_is_local_authority)时才反射它(可达性最好:机主浏览器用啥连的就用啥回连)。
+    - 否则**不信 Host、也不用 request.base_url**(base_url 本身由 Host 头派生,同样可伪造)——退回 ASGI
+      `scope["server"]`(服务器真实绑定的 host:port,不受 Host 头影响,不可伪造)。
+    scheme 跟随请求(本地优先常是 http)。
+    """
+    scheme = request.url.scheme or "http"
+    host = (request.headers.get("host") or "").strip()
+    if host and _is_local_authority(host):
+        return f"{scheme}://{host}"
+    # 不可信 Host → 用服务器真实绑定地址(scope["server"] = (host, port),Host 头改不了它)。
+    server = request.scope.get("server") or ()
+    if server and server[0]:
+        srv_host = str(server[0])
+        srv_port = server[1]
+        # 绑到 0.0.0.0/:: 时对外用回环表述(连接器同机/同网,127.0.0.1 可达且不假装某公网名)。
+        if srv_host in ("0.0.0.0", "::", ""):
+            srv_host = "127.0.0.1"
+        authority = f"{srv_host}:{srv_port}" if srv_port else srv_host
+        return f"{scheme}://{authority}"
+    # 兜底(scope 无 server,极少见):回环 + 请求端口。
+    port = request.url.port
+    return f"{scheme}://127.0.0.1{(':' + str(port)) if port else ''}"
+
+
+class ExternalCreatePendingRequest(BaseModel):
+    citizen_id: str = Field(..., min_length=1, max_length=64)
+    domain_id: str = Field(default="", max_length=64)
+    runtime_kind: str = Field(default="", max_length=64)
+
+
+@router.post("/external/create_pending")
+def api_external_create_pending(req: ExternalCreatePendingRequest, request: Request) -> dict[str, Any]:
+    """建壳 + 发一次性认领秘钥:点「＋添加外部 runtime」走这里。写操作 → 走来源门(本机/私网)。
+
+    返回:pending 壳视图 + **一次性明文认领秘钥**(只此一次)+ 认领回调 URL + 一段复制指令
+    (含秘钥 + 回调 URL,用户复制去自己的 runtime 里跑)。秘钥绝不进日志(和 API key 同纪律)。
+    """
+    reg = _registry(request.app)
+    if reg is None:
+        return {"ok": False, "reason": "外部公民注册表未就绪"}
+    if not _is_trusted_origin(request):
+        client = (request.client.host if request.client else "") or ""
+        return {"ok": False, "reason": f"添加外部 runtime 只能从本机或同局域网触发(你的来源 {client} 不在可信网内)"}
+    create = getattr(reg, "create_pending", None)
+    if not callable(create):
+        return {"ok": False, "reason": "注册表不支持认领码握手(create_pending 未接)", "_integration_pending": True}
+    try:
+        pending, full_secret, err = create(
+            req.citizen_id, domain_id=req.domain_id or "", runtime_kind=req.runtime_kind or "")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"citizen_registry.create_pending 失败: {type(e).__name__}")  # 不记秘钥/入参明文
+        return {"ok": False, "reason": f"建壳失败: {type(e).__name__}"}
+    if pending is None:
+        return {"ok": False, "reason": err or "建壳失败"}
+    base = _console_base_url(request)
+    claim_url = f"{base}/api/external/claim"
+    # 复制指令:一段薄命令,POST 到 claim 端点带秘钥。**秘钥只在这个响应体里出现一次**;不落日志。
+    # 用 connector 脚本(推荐)或直接 curl(应急)。前端把这段放进"复制这段到你的 runtime 里跑"框。
+    return {
+        "ok": True,
+        "citizen": _citizen_view(reg, pending),
+        "claim_url": claim_url,
+        # 明文认领秘钥:一次性返回。前端展示、用户复制;刷新后系统不再持有明文(只留摘要)。
+        "claim_secret": full_secret,
+        # 现成可跑的两种复制指令(前端择一展示):
+        #   ① connector 脚本(推荐,自报身份/能力):python -m karvyloop.external_runtime.connector ...
+        #   ② 应急 curl(裸 POST)。
+        "connector_cmd": (
+            f'python -m karvyloop.external_runtime.connector '
+            f'--claim-url "{claim_url}" --secret "{full_secret}" '
+            f'--citizen-id "{req.citizen_id}"'),
+        "curl_cmd": (
+            f'curl -X POST "{claim_url}" -H "Content-Type: application/json" '
+            f'-d \'{{"secret": "{full_secret}"}}\''),
+    }
+
+
+class ExternalCancelPendingRequest(BaseModel):
+    citizen_id: str = Field(..., min_length=1, max_length=64)
+    domain_id: str = Field(default="", max_length=64)
+
+
+@router.post("/external/cancel_pending")
+def api_external_cancel_pending(req: ExternalCancelPendingRequest, request: Request) -> dict[str, Any]:
+    """撤掉一个还没认领的 pending 壳(用户取消等待):删壳 + 作废它的秘钥。走来源门。"""
+    reg = _registry(request.app)
+    if reg is None:
+        return {"ok": False, "reason": "外部公民注册表未就绪"}
+    if not _is_trusted_origin(request):
+        client = (request.client.host if request.client else "") or ""
+        return {"ok": False, "reason": f"取消只能从本机或同局域网触发(你的来源 {client} 不在可信网内)"}
+    cancel = getattr(reg, "cancel_pending", None)
+    if not callable(cancel):
+        return {"ok": False, "reason": "注册表不支持取消 pending(cancel_pending 未接)"}
+    try:
+        ok = bool(cancel(req.domain_id or "", req.citizen_id))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"取消失败: {type(e).__name__}"}
+    if not ok:
+        return {"ok": False, "reason": "没有这个待接入壳(或已激活)", "citizen_id": req.citizen_id}
+    return {"ok": True, "citizen_id": req.citizen_id, "domain_id": req.domain_id or ""}
+
+
+class ExternalClaimRequest(BaseModel):
+    """外部 runtime 回连认领的载荷。secret=一次性认领秘钥。其余字段=**untrusted 自报**(登记不提权)。"""
+    secret: str = Field(..., min_length=1, max_length=256)
+    runtime_kind: str = Field(default="", max_length=64)
+    bin_path: str = Field(default="", max_length=512)
+    version: str = Field(default="", max_length=128)
+    capabilities: list[str] = Field(default_factory=list, max_length=64)
+
+
+@router.post("/external/claim")
+def api_external_claim(req: ExternalClaimRequest, request: Request) -> dict[str, Any]:
+    """认领回调:外部 runtime 拿秘钥连回 → 校验(一次性/未过期/匹配某 pending 壳)→ 激活 → 秘钥作废。
+
+    秘钥是主认证;来源门(本机/私网)是纵深防御(挡公网裸暴时陌生人拿泄露秘钥远程认领)。
+    外部自报的身份/能力 = **untrusted 数据**:登记进能力卡(标 self_reported),但绝不当指令、不据此提权
+    (tier/域由建壳侧定,自报改不了)。秘钥绝不进日志(fail-loud 只回统一拒绝话术,不透露是哪种错)。
+    """
+    reg = _registry(request.app)
+    if reg is None:
+        return {"ok": False, "reason": "外部公民注册表未就绪"}
+    if not _is_trusted_origin(request):
+        client = (request.client.host if request.client else "") or ""
+        return {"ok": False, "reason": f"认领只能从本机或同局域网连回(来源 {client} 不在可信网内)"}
+    claim = getattr(reg, "claim", None)
+    if not callable(claim):
+        return {"ok": False, "reason": "注册表不支持认领(claim 未接)"}
+    reported = {
+        "runtime_kind": req.runtime_kind or "", "bin_path": req.bin_path or "",
+        "version": req.version or "", "capabilities": list(req.capabilities or []),
+    }
+    try:
+        # 只把 secret 交给注册表;**绝不 log secret**(注册表内部也只比对摘要)。
+        result = claim(req.secret, reported=reported)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"citizen_registry.claim 失败: {type(e).__name__}")  # 不记 secret
+        return {"ok": False, "reason": f"认领处理出错: {type(e).__name__}"}
+    return result if isinstance(result, dict) else {"ok": False, "reason": "认领返回异常"}
 
 
 # ---- GET /api/external/onboarding:按需接入引导(装没装 + 官方安装指引)----
