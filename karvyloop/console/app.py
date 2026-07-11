@@ -629,6 +629,10 @@ def build_console_app(
     app.state.domain_store = None             # 9.2c-持久化:entry 接线时设(建域存盘)
     app.state.token_ledger = None             # 9.3a:entry 接线时设(token 账本/看板)
     app.state.citizen_registry = None         # 外部 runtime 公民注册表(C1 接线点;None=无外部公民,管理面返空)
+    # M2(#71 §7):外部公民进圆桌/workflow 派活用的桥工厂 + token 记账口(entry 接线时设;
+    # None → 圆桌/workflow 执行外部步时回退到内置 external_runtime.bridge_factory)。
+    app.state.external_bridge_factory = None
+    app.state.external_token_recorder = None
     app.state.ws_clients = set()  # 立即 set,lifespan 里也 set 同引用
 
     # mount routers

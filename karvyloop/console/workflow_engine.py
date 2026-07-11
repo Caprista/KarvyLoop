@@ -47,24 +47,29 @@ def _is_infra_dead_error(err: str) -> bool:
 
 
 def _workflow_roles_from_mentions(app, peer, mentions):
-    """把 @ 的 mentions 解析成角色 [{role_id, display, agent_id, domain_id, domain_name}](去重保序)。
+    """把 @ 的 mentions 解析成角色 [{role_id, display, agent_id, domain_id, domain_name, is_external?}](去重保序)。
 
-    mentions 元素接 dict {agent_id, domain_id?} 或纯字符串 "agent_id"(API 直调最自然的写法)。"""
+    mentions 元素接 dict {agent_id, domain_id?} 或纯字符串 "agent_id"(API 直调最自然的写法)。
+    M2(#71 §7.2):名册认不到、但 citizen_registry 有的 → **外部公民 step 执行者**(标 is_external,
+    产出恒 untrusted 数据流给下游、不自动采纳)。scoped 跨域拒(deny-by-default)。"""
     from karvyloop.karvy.capability import is_karvy_peer
     from .roundtable_engine import _member_display, _roundtable_roster
     dom_reg = getattr(app.state, "domain_registry", None)
     roster = _roundtable_roster(app, peer)
     is_world = is_karvy_peer(peer.domain_id)
+    peer_domain = getattr(peer, "domain_id", "") or ""
     out, seen = [], set()
     for m in (mentions or []):
         if isinstance(m, str):
             m = {"agent_id": m}
         aid = (m.get("agent_id") or "").strip()
         did = (m.get("domain_id") or "").strip()
+        matched_native = False
         for a in roster:
             if a.agent_id == aid and (not did or a.domain_id == did):
                 key = (a.domain_id, a.agent_id)
                 if key in seen:
+                    matched_native = True
                     break
                 seen.add(key)
                 dom = dom_reg.get(a.domain_id) if dom_reg is not None else None
@@ -73,7 +78,30 @@ def _workflow_roles_from_mentions(app, peer, mentions):
                 out.append({"role_id": f"r{len(out)}", "display": disp,
                             "agent_id": a.agent_id, "domain_id": a.domain_id,
                             "domain_name": dname if is_world else ""})
+                matched_native = True
                 break
+        if matched_native or not aid:
+            continue
+        # 原生名册认不到 → 试外部公民(#71 §7.2 workflow step 执行者)
+        reg = getattr(app.state, "citizen_registry", None)
+        if reg is None:
+            continue
+        from karvyloop.karvy.external_collab import can_join_domain, find_external_target
+        ext_domain = did or peer_domain
+        citizen = find_external_target(reg, ext_domain, aid)
+        if citizen is None:
+            continue
+        if not can_join_domain(citizen, ext_domain):
+            logger.info(f"[workflow] 外部公民「{aid}」不能进域「{ext_domain}」(scoped 跨域),跳过")
+            continue
+        key = (ext_domain, aid)
+        if key in seen:
+            continue
+        seen.add(key)
+        # 外部公民 step:agent_id=citizen_id,标 is_external(执行走 bridge、产出 untrusted)。
+        out.append({"role_id": f"r{len(out)}", "display": f"🔌 {aid}",
+                    "agent_id": aid, "domain_id": ext_domain,
+                    "domain_name": "", "is_external": True})
     return out
 
 
@@ -177,6 +205,73 @@ def _workflow_run_store(app):
     return st
 
 
+async def _maybe_run_external_step(app, step, upstream, disp_by_id, *, goal, run_id,
+                                   task_id=None):
+    """M2(#71 §7.2):若这一步的目标是**外部公民**,走 bridge 执行,产出恒 untrusted 数据流给下游。
+
+    返回 None = 不是外部步(调用侧走原生 role drive);返回 dict = 已当外部步处理:
+      - {"output": str}                成功(untrusted 产出,memoize + 数据流给下游 role 参考)
+      - {"output": "", "error": str}   失败/要权限(input_required 升 H2A,不静默)
+
+    铁律:外部产出**不自动被采纳**——每条成功产出升 external_adopt 采纳门(H2A 才穿来源边界);
+    它对下游只是**参考数据**,下游 role 要不要信仍是 role 自己的 authorize 链上的事。
+    确定性域约束:scoped 跨域拒(deny-by-default);guest 任意域当纯客人。
+    """
+    from karvyloop.karvy.external_collab import (
+        build_external_adopt_proposal, can_join_domain, drive_external_contribution,
+        find_external_target,
+    )
+    reg = getattr(app.state, "citizen_registry", None)
+    if reg is None:
+        return None
+    agent_id = (step.get("agent_id") or "").strip()
+    domain_id = (step.get("domain_id") or "").strip()
+    if not agent_id:
+        return None
+    citizen = find_external_target(reg, domain_id, agent_id)
+    if citizen is None:
+        return None   # 原生 role,交回原路径
+    cid = getattr(citizen, "citizen_id", "") or agent_id
+    # 域约束:scoped 跨域 → fail-loud 拒(deny-by-default),不静默当没这步
+    if not can_join_domain(citizen, domain_id):
+        return {"output": "", "error": f"外部公民「{cid}」不能进域「{domain_id}」(scoped 跨域,已拒)"}
+    import time as _t
+
+    bf = getattr(app.state, "external_bridge_factory", None)
+    if bf is None:
+        from karvyloop.external_runtime import bridge_factory as bf
+    token_recorder = getattr(app.state, "external_token_recorder", None)
+    # 上游产出当**纯文本参考**喂给外部执行体(它自足;标清是参考,不是它的记忆)。
+    up_txt = "\n\n".join(f"【{disp_by_id.get(dep, dep)} 的产出】\n{out}"
+                         for dep, out in (upstream or {}).items() if out)
+    task = (f"工作流目标:{goal}\n\n你的任务:{step.get('task', '')}\n\n"
+            + (f"上游产出(参考):\n{up_txt}\n\n" if up_txt else "")
+            + "请完成你这一步,给出能交给下游参考的产出(自足描述)。")
+    seed_id = f"wf-{run_id}-{step.get('id', '')}-{int(_t.time() * 1000)}"
+    contrib = await drive_external_contribution(
+        citizen, task, bridge_factory=bf, token_recorder=token_recorder,
+        citizen_registry=reg, seed_id=seed_id, context_note="")
+    if not contrib.get("ok"):
+        reason = contrib.get("reason", "") or "外部执行体失败"
+        if contrib.get("input_required"):
+            reason = "要权限/澄清(input_required,已升 H2A)"
+        return {"output": "", "error": reason}
+    # 成功 untrusted 产出 → 升 external_adopt 采纳门(H2A;下游拿它只当参考,采纳才穿来源边界)
+    proposal_reg = getattr(app.state, "proposal_registry", None)
+    if proposal_reg is not None:
+        try:
+            prop = build_external_adopt_proposal(
+                citizen_id=cid, domain_id=domain_id, seed_id=seed_id,
+                output=contrib.get("text", ""),
+                context=f"工作流「{goal[:40]}」步骤 {step.get('id', '')} 的外部产出", ts=_t.time())
+            proposal_reg.register(prop)
+            from karvyloop.console.proposals import broadcast_proposal
+            await broadcast_proposal(app, prop)
+        except Exception as e:  # noqa: BLE001 — 升卡失败不阻断工作流
+            logger.warning(f"[workflow] 外部步升采纳卡失败(cid={cid}): {e}")
+    return {"output": contrib.get("text", "")}
+
+
 async def execute_workflow_durable(app, *, run_id: str, goal: str, steps: list,
                                    governance: str = "", task_id=None) -> dict:
     """#39 ①:持久化执行 workflow —— 每步产出 memoize 落盘,重启后 replay 时已完成步秒命中、只续剩余。
@@ -199,6 +294,17 @@ async def execute_workflow_durable(app, *, run_id: str, goal: str, steps: list,
         cached = store.step_output(run_id, sid)
         if cached is not None:        # 重启续:已完成步秒命中缓存,绝不重烧 token
             return {"output": cached}
+        # M2(#71 §7.2):这一步可指派给**外部公民**执行 —— 走 bridge 子进程,产出恒 untrusted
+        # 数据流给下游 role 参考(**不自动被采纳**;每条升 external_adopt 采纳门,H2A 才穿来源边界)。
+        ext = await _maybe_run_external_step(app, step, upstream, disp_by_id, goal=goal,
+                                             run_id=run_id, task_id=task_id)
+        if ext is not None:
+            sid2 = step.get("id", "")
+            await _push_step(app, task_id, sid2, disp_by_id.get(sid2, step.get("agent_id", "?")),
+                             "done" if ext.get("output") else "failed", ext.get("error", ""))
+            if ext.get("output"):
+                store.set_step(run_id, sid2, ext["output"])   # memoize 成功产出(untrusted 数据流给下游)
+            return ext
         addr = Address(domain_id=step.get("domain_id", ""), role="agent",
                        agent_id=step.get("agent_id", ""))
         dom = dom_reg.get(addr.domain_id) if dom_reg is not None else None

@@ -431,6 +431,9 @@ def _enrich_plan(plan, roles) -> dict:
                 "agent_id": r["agent_id"], "domain_id": r["domain_id"],
                 "task": (s.get("task") or "").strip() or "完成你这部分",
                 "depends_on": deps}
+        # M2(#71 §7.2):外部公民 step 标 is_external(前端 🔌 徽标;执行走 bridge、产出 untrusted)。
+        if r.get("is_external"):
+            step["is_external"] = True
         if inputs:
             step["inputs"] = inputs
         when = _sanitize_when(s.get("when"), valid_ids, sid)

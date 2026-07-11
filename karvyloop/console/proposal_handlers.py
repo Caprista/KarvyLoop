@@ -23,7 +23,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_CONFIRM_DECISION_PREF, KIND_CONFIRM_RESULT, KIND_CRYSTALLIZE_SKILL,
     KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
     KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
-    KIND_FS_ACCESS,
+    KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -667,6 +667,56 @@ def _resolve_conflict_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     return handler
 
 
+def _external_adopt_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """external_adopt ACCEPT 兑现(M2 采纳门,#71 §7.3):外部公民 untrusted 供稿穿过来源边界。
+
+    **唯一升级门**:只有人 ACCEPT 才让这条外部产出升记忆/被当结论(采纳=H2A)。诚实边界:
+    - 采纳前它恒 provenance=untrusted(payload 带标签);ACCEPT = 你拍板信这一份 → 把它写进
+      认知库(source 标 external_runtime + origin,来源标签跟数据走,可审计"这条来自外部")。
+    - 同时把 registry 供稿账本里这条标 adopted=True → 之后 detach 外部公民**不级联删它**
+      (已是用户数据,归属已转移给你)。REJECT/不处理 → registry 自动丢弃(未采纳临时数据)。
+    - **绝不替人自动采纳**(那就架空了 H2A);无 memory 时诚实回执不假装写了。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        payload = getattr(proposal, "payload", None) or {}
+        citizen_id = (payload.get("citizen_id") or "").strip() or "外部同事"
+        domain_id = (payload.get("domain_id") or "").strip()
+        seed_id = (payload.get("seed_id") or "").strip()
+        output = (payload.get("output") or "").strip()
+        if not output:
+            return True, f"「{citizen_id}」这条供稿是空的,没什么可采纳的"
+        mem = getattr(app.state, "memory", None)
+        # 先在供稿账本标 adopted(即便无 memory 也标——它已被人拍板,detach 不该清它)。
+        reg = getattr(app.state, "citizen_registry", None)
+        if reg is not None and seed_id:
+            mark = getattr(reg, "mark_adopted", None)
+            if callable(mark):
+                try:
+                    mark(domain_id, citizen_id, seed_id)
+                except Exception:  # noqa: BLE001 — 标记失败不阻断采纳主路径
+                    logger.warning("[external_adopt] mark_adopted 失败", exc_info=True)
+        if mem is None:
+            return True, (f"已采纳「{citizen_id}」这份产出(记下你拍了板);认知库未接,"
+                          f"暂未落盘 —— 接上后它会作为你确认过的参考进库")
+        # 采纳 = 写进认知库,来源标 external_runtime(untrusted 已过 H2A 升级为你确认的参考)。
+        try:
+            import time as _t
+            from karvyloop.schemas.cognition import Belief
+            mem.write(Belief(
+                content=f"外部同事「{citizen_id}」产出(你已采纳):{output[:600]}",
+                # 来源标签跟着数据走:即便进了库也标清它源自外部执行体、经 H2A 采纳。
+                provenance={"source": "external_runtime", "kind": "fact",
+                            "origin": f"external:{citizen_id}", "adopted_via": "h2a",
+                            "integrity": "adopted"},
+                freshness_ts=_t.time(), scope="personal"))
+        except Exception as e:
+            logger.warning(f"[external_adopt] 写认知失败: {e}")
+            return False, f"采纳落库失败:{e}"
+        return True, (f"已采纳「{citizen_id}」的产出并记进认知库(标记来源=外部执行体、经你拍板)。"
+                      f"外部产出永远是你拍板才算数,不会自动进记忆。")
+    return handler
+
+
 def _weekly_digest_handler(proposal) -> Tuple[bool, str]:
     """周报卡 ACCEPT = 收下归档(卡本身就是"已读即价值";此前无 handler → ACCEPT 回执是
     内部错误串 no handler,前端 i18n 却承诺"接受=归档" —— 对齐承诺,一行知悉回执)。"""
@@ -777,6 +827,7 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_WEEKLY_DIGEST: _weekly_digest_handler,              # ACCEPT=归档(对齐前端承诺)
         KIND_SILENCE_GRANT: _silence_grant_handler(app),         # 挣来的静音:授权落台账(可撤)
         KIND_SILENCE_REVOKED: _silence_revoked_handler,          # 吊销告知:纯知悉
+        KIND_EXTERNAL_ADOPT: _external_adopt_handler(app),       # M2 采纳门:外部 untrusted 供稿 H2A 采纳才升记忆
         **_inbox,                                                # 收件箱管道:记台账/存草稿(只进不出)
     }
 

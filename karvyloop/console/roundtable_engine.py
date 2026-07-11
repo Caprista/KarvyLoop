@@ -307,6 +307,40 @@ def _roundtable_members(app, peer, participants):
     return list(roster)
 
 
+def _roundtable_external_guests(app, peer, participants):
+    """M2(#71 §7.1):从勾选成员里挑出**外部公民客人席**(不占 role 决策席、只供稿)。
+
+    - participants 里被原生名册认掉的是 role;剩下的 citizen_id 若在 citizen_registry 里 →
+      外部客人。返回 [ExternalCitizen]。
+    - 确定性域约束(#71 §2.6.5):scoped(T1)只能进它绑定的那个域;guest(T0)任意域当纯客人。
+      进不了这个域(跨域的 scoped)一律拒(deny-by-default),不上桌。
+    - 未接 external_runtime → 空(零回归:纯原生 role 圆桌)。
+    """
+    from karvyloop.karvy.external_collab import can_join_domain, find_external_target
+    reg = getattr(app.state, "citizen_registry", None)
+    if reg is None or not participants:
+        return []
+    domain_id = getattr(peer, "domain_id", "") or "" if peer is not None else ""
+    # 已被原生名册认掉的裸/复合键,不再当外部目标(避免重名误判)。
+    native = _roundtable_members(app, peer, participants)
+    native_ids = {a.agent_id for a in native} | {f"{a.domain_id}::{a.agent_id}" for a in native}
+    guests, seen = [], set()
+    for p in participants:
+        name = (p or "").split("::")[-1] if isinstance(p, str) else ""
+        if not name or name in native_ids or p in native_ids or name in seen:
+            continue
+        citizen = find_external_target(reg, domain_id, name)
+        if citizen is None:
+            continue
+        # 域约束:scoped 跨域 → 不上桌(deny-by-default);guest 任意域当纯客人。
+        if not can_join_domain(citizen, domain_id):
+            logger.info(f"[roundtable] 外部公民「{name}」不能进域「{domain_id}」的圆桌(scoped 跨域),跳过")
+            continue
+        seen.add(name)
+        guests.append(citizen)
+    return guests
+
+
 async def _roundtable_clarify_turn(gw, model_ref, topic, align_history, user_msg):
     """阶段0 对话式(Hardy:少按钮)—— 小卡看对齐对话 + 用户最新一句,判断够不够开始讨论了。
 
@@ -342,6 +376,87 @@ async def _roundtable_clarify_turn(gw, model_ref, topic, align_history, user_msg
     return (text or "（我再想想怎么帮你对齐）"), ready
 
 
+def _external_supply_doc(external_supply: list) -> str:
+    """把外部客人供稿拼成文档段(醒目标外部·untrusted·需采纳;不与原生讨论混脸)。"""
+    if not external_supply:
+        return ""
+    parts = ["\n\n---\n\n**🔌 外部供稿**(不可信数据 · 需你拍板采纳才算数):"]
+    for s in external_supply:
+        cid = s.get("citizen_id", "?")
+        if s.get("ok"):
+            body = (s.get("text") or "").strip() or "(无产出)"
+            parts.append(f"\n- **🔌 {cid}**(待采纳):{body}")
+        else:
+            reason = s.get("reason", "") or "失败"
+            tag = "要权限/澄清(已升 H2A)" if s.get("input_required") else reason
+            parts.append(f"\n- **🔌 {cid}** ✗:{tag}")
+    return "".join(parts)
+
+
+async def _run_external_guest_supply(app, *, guests, goal, topic, peer, task_id,
+                                     conversation_id, should_cancel=None) -> list:
+    """M2 客人供稿(#71 §7.1):外部公民各派一次活拿 untrusted 产出,每条升 external_adopt 采纳门。
+
+    - 走 external_collab.drive_external_contribution(bridge 子进程,产出恒 untrusted、登记供稿账本)。
+    - 成功产出 → 建 external_adopt 提案(H2A 采纳门)+ 广播到决策舱;input_required → 也升卡提醒。
+    - **不写记忆、不进 record_turn 主线、不喂给 role**(不占决策席、不触发别人)。
+    - 客人席失败不拖垮整桌(fail-loud 记 reason,继续下一个)。返回 [contribution dict]。
+    """
+    if not guests:
+        return []
+    import time as _t
+
+    from karvyloop.karvy.external_collab import (
+        build_external_adopt_proposal, drive_external_contribution,
+    )
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    bridge_factory = getattr(app.state, "external_bridge_factory", None)
+    if bridge_factory is None:
+        # 无桥工厂(未接执行面)→ 诚实降级:客人上桌了但派不了活,标 fail-loud,不静默。
+        from karvyloop.external_runtime import bridge_factory as _default_bf
+        bridge_factory = _default_bf
+    token_recorder = getattr(app.state, "external_token_recorder", None)
+    reg = getattr(app.state, "citizen_registry", None)
+    proposal_reg = getattr(app.state, "proposal_registry", None)
+    domain_id = getattr(peer, "domain_id", "") or "" if peer is not None else ""
+    task = (f"圆桌目标:{goal}\n(原始主题:{topic})\n\n"
+            "请你围绕这个目标给出你的看法/产出(它会作为外部供稿交给用户拍板,自足描述你的结论)。")
+    out: list = []
+    for citizen in guests:
+        if should_cancel is not None:
+            try:
+                if should_cancel():
+                    break
+            except Exception:
+                pass
+        cid = getattr(citizen, "citizen_id", "") or ""
+        seed_id = f"rt-{conversation_id}-{cid}-{int(_t.time() * 1000)}"
+        contrib = await drive_external_contribution(
+            citizen, task, bridge_factory=bridge_factory, token_recorder=token_recorder,
+            citizen_registry=reg, seed_id=seed_id, context_note="")
+        out.append(contrib)
+        # 实时推送(谁供了稿 / 谁失败;客人席也上时间线,🔌 标外部)
+        await _push_step(app, task_id, cid, f"🔌 {cid}",
+                         "done" if contrib.get("ok") else "failed",
+                         "" if contrib.get("ok") else (contrib.get("reason") or ""))
+        if not contrib.get("ok"):
+            continue
+        # 成功产出 → 升 external_adopt 采纳门(H2A 唯一升级门:采纳才穿来源边界)
+        if proposal_reg is not None:
+            try:
+                prop = build_external_adopt_proposal(
+                    citizen_id=cid, domain_id=domain_id, seed_id=seed_id,
+                    output=contrib.get("text", ""),
+                    context=f"圆桌「{topic[:40]}」的外部供稿", ts=_t.time(),
+                    conversation_id=conversation_id)
+                proposal_reg.register(prop)
+                from karvyloop.console.proposals import broadcast_proposal
+                await broadcast_proposal(app, prop)
+            except Exception as e:  # noqa: BLE001 — 升卡失败不阻断供稿收集
+                logger.warning(f"[roundtable] 外部供稿升采纳卡失败(cid={cid}): {e}")
+    return out
+
+
 async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str, Any]:
     """圆桌阶段1 执行核心(被 /discuss 和 对话式自动开始 复用):goal→成员群聊→收敛→产出→记录。"""
     from .routes import _model_for_role, _persona_for_role_addr, _rk_model, drive_in_tui
@@ -358,7 +473,9 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
         return {"ok": False, "reason": "请在圆桌窗里开始"}
     mgr.resume(peer, conversation_id)   # 确保结果追加进这条圆桌对话
     members = _roundtable_members(app, peer, st["participants"])
-    if not members:
+    # M2(#71 §7.1):外部公民作为**客人供稿席**上桌(不占 role 决策席、只供稿、产出恒 untrusted)。
+    guests = _roundtable_external_guests(app, peer, st["participants"])
+    if not members and not guests:
         return {"ok": False, "reason": "圆桌成员不在了(域里角色变动?)"}
     governance = mgr.governance_text() or ""
     ws = rk.get("workspace_root", "/")
@@ -412,19 +529,34 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
         return _is_task_cancelled(app, task_id or "")
     # 50+ 大桌:全员上桌(封顶 64,防真·失控),但**并发只 6 路**——别 50 路同时打一把 key 截断。
     _seats = min(len(members), 64)
-    try:
-        result = await run_roundtable_session(goal, members, member_reply=member_reply,
-                                              host_moderate=host_moderate, max_rounds=3,
-                                              max_seats=_seats, concurrency=6,
-                                              should_cancel=_should_cancel)
-    except Exception as e:
-        if task_reg is not None and task_id is not None:
-            task_reg.finish(task_id, error=str(e))
-        logger.exception(f"[roundtable] 讨论异常: {e}")
-        return {"ok": False, "reason": f"圆桌讨论失败: {e}"}
+    if members:
+        try:
+            result = await run_roundtable_session(goal, members, member_reply=member_reply,
+                                                  host_moderate=host_moderate, max_rounds=3,
+                                                  max_seats=_seats, concurrency=6,
+                                                  should_cancel=_should_cancel)
+        except Exception as e:
+            if task_reg is not None and task_id is not None:
+                task_reg.finish(task_id, error=str(e))
+            logger.exception(f"[roundtable] 讨论异常: {e}")
+            return {"ok": False, "reason": f"圆桌讨论失败: {e}"}
+    else:
+        # 只有外部客人、无原生 role → 无 role 讨论主线(外部不占决策席);只做客人供稿。
+        result = {"topic": topic, "transcript": [], "rounds": 0,
+                  "converged": False, "conclusion": "", "cancelled": False}
+    # M2 客人供稿席(#71 §7.1):外部公民**不进 role 讨论主线**(不占决策席、不被 record_turn),
+    # 单独派活(走 bridge)拿 untrusted 产出,每条升 external_adopt 采纳门(H2A 才穿来源边界)。
+    # 铁律:外部产出**不直接触发别的 agent**——它不喂进 role 的 member_reply transcript(A2A
+    # Contagion 防御:要接力必经小卡编排 + H2A)。
+    external_supply = await _run_external_guest_supply(
+        app, guests=guests, goal=goal, topic=topic, peer=peer, task_id=task_id,
+        conversation_id=conversation_id, should_cancel=_should_cancel)
+    result["external_supply"] = external_supply
     result["topic"] = topic
     result["goal"] = goal
     result_doc = _roundtable_result_doc(result)
+    if external_supply:
+        result_doc += _external_supply_doc(external_supply)
     # 中止旗用完即清(下次同 task_id 复用不误判);中止的圆桌在文档里如实标一句。
     _clear_task_cancelled(app, task_id or "")
     if result.get("cancelled"):
