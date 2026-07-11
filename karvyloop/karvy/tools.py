@@ -382,10 +382,249 @@ def make_create_domain_tool(*, domain_registry: Any, domain_store: Any = None,
     )
 
 
+# ---- 6. 跨 runtime 协作:把活派给一个外部 runtime 公民(external_agent 等三件)----
+#
+# 设计(docs/71+72):让小卡把"别人家的 agent 运行时"当频道公民拉进来、@ 它派活、拿真实回复。
+# 外部执行体 = opaque、归属外部主人、输出恒 untrusted、只供稿不占决策席、H2A 采纳才升记忆。
+# 中性词纪律:代码/注释走 external_runtime/bridge/公民,不点参照工程名。
+#
+# 五步接线(与 make_create_schedule_tool 同族):
+#   步1 工厂(本文件)→ 步2 注入(main_loop_bridge.drive_in_tui,gated on karvy_self)→
+#   步3 下限表(capability/policy.py:external_agent=FULL / attach_external_agent=WORKSPACE_WRITE /
+#        list_external_agents=READ_ONLY)→ 步4 deontic_gate(list 进只读豁免)→
+#   步5 tool_catalog(三名进 BUILTIN_TOOL_NAMES 防 unresolved 误判)。
+
+
+def _build_task_assign(citizen, task: str):
+    """把"派活给外部公民"构造成 A2A TASK_ASSIGN 信封(from_=user, by=(karvy,);A1/A3)。
+
+    外部执行体**永不作为 envelope 的 from_ 主体**(它无签名身份)——from_ 是发起人(user),
+    by=(karvy,) 中间人,origin=external:<id> 作为 payload 数据字段标来源(#71 §3.3)。
+    返回 (envelope, task_id)。
+    """
+    import time as _t
+
+    from karvyloop.a2a import Envelope, EnvelopeType, TaskPayload, sign_envelope
+    from karvyloop.domain import Address
+    from karvyloop.external_runtime import citizen_address
+
+    domain_id = getattr(citizen, "domain_id", "") or ""
+    task_id = f"ext-{citizen.citizen_id}-{int(_t.time() * 1000)}"
+    frm = Address(domain_id=domain_id, role="user", agent_id="ch")
+    karvy = Address(domain_id=domain_id, role="observer", agent_id="karvy")
+    to = citizen_address(domain_id, citizen.citizen_id)
+    payload = TaskPayload(task_id=task_id, description=task,
+                          context={"origin": f"external:{citizen.citizen_id}",
+                                   "provenance": "untrusted"})
+    env = Envelope(type=EnvelopeType.TASK_ASSIGN.value, from_=frm, by=(karvy,),
+                   to=to, payload=payload, ts=str(_t.time()))
+    env = dataclasses_replace_signature(env, sign_envelope(env))
+    return env, task_id
+
+
+def dataclasses_replace_signature(env, signature):
+    """Envelope 是 frozen dataclass —— 用 dataclasses.replace 挂签名(构造后签)。"""
+    import dataclasses as _dc
+    return _dc.replace(env, signature=signature)
+
+
+def make_external_agent_tool(*, citizen_registry, bridge_factory, a2a_router=None,
+                             token_recorder=None):
+    """把'派活给一个外部 runtime 公民'包成小卡可调用的 Tool(FULL 下限——起子进程=process_spawn+network)。
+
+    - citizen_registry: ExternalCitizenRegistry(解析 citizen_id → ExternalCitizen)。
+    - bridge_factory: (DriveRecipe) -> Bridge(§3.1;起子进程、fail-loud、密钥过滤)。
+    - a2a_router: 可选 EnvelopeRouter(派活走信封 + 审计链;须用 citizen-aware resolver 构造,
+      否则 to=Address(域, external, id) 解析不到 → REJECT_NO_TARGET)。为空 = 跳过 route(仍可跑)。
+    - token_recorder: 可选 (source, usage_dict)->None:把外部 usage 记进独立 ext: 账本(§6)。
+
+    安全:输出恒 untrusted(§4.1),落数据通道不进对话主线;工具永不穿透异常。
+    """
+    from karvyloop.capability import Mode
+    from karvyloop.registry.tool import build_tool
+
+    async def _call(inp: dict, token, sandbox) -> Any:
+        inp = inp or {}
+        citizen_id = str(inp.get("citizen_id") or "").strip()
+        task = str(inp.get("task") or "").strip()
+        if not (citizen_id and task):
+            return {"ok": False, "reason": "需要 citizen_id(哪个外部同事)+ task(让它做什么)"}
+        if citizen_registry is None:
+            return {"ok": False, "reason": "external_runtime 未接,派不了活"}
+        citizen = citizen_registry.resolve(citizen_id)
+        if citizen is None:
+            return {"ok": False, "reason": f"没有叫「{citizen_id}」的外部同事(先接入)"}
+        from karvyloop.external_runtime import STATUS_ACTIVE
+        if citizen.status != STATUS_ACTIVE:
+            return {"ok": False, "reason": f"「{citizen_id}」当前不可达({citizen.status}),检查它的 runtime"}
+        recipe = citizen.recipe()
+        if recipe is None:
+            return {"ok": False, "reason": f"「{citizen_id}」没有可用配方(runtime_kind={citizen.runtime_kind})"}
+        # 派活构造成 A2A 信封走 router(前置接线:router 须用 citizen-aware resolver,否则 REJECT_NO_TARGET)
+        task_id = ""
+        if a2a_router is not None:
+            try:
+                env, task_id = _build_task_assign(citizen, task)
+                route = a2a_router.route(env)
+                if getattr(route, "rejected", False):
+                    return {"ok": False, "reason": f"派活被拦:{route.reason}"}
+            except Exception as e:  # noqa: BLE001 — 工具永不穿透异常
+                return {"ok": False, "reason": f"派活信封构造/路由出错:{type(e).__name__}: {e}"}
+        # 起子进程桥(fail-loud;沙箱硬化由配方/调用侧兜)
+        try:
+            bridge = bridge_factory(recipe)
+            result = bridge.start(task, cwd=getattr(sandbox, "cwd", "") or "")
+        except Exception as e:  # noqa: BLE001 — 工具永不穿透异常
+            return {"ok": False, "reason": f"「{citizen_id}」起不来:{type(e).__name__}"}
+        # input_required → 诚实上报(调用侧升 H2A;不静默等)
+        if getattr(result, "input_required", False):
+            return {"ok": False, "input_required": True, "citizen": citizen_id,
+                    "task_id": task_id, "reason": result.reason}
+        if not result.ok:
+            return {"ok": False, "citizen": citizen_id, "task_id": task_id,
+                    "reason": result.reason or "外部执行体失败"}
+        # 记独立 token_source(§6):有 usage 才记(边车/内嵌 meta),拿不到只落 provenance
+        usage_note = "no_usage"
+        if token_recorder is not None and result.usage:
+            try:
+                token_recorder(citizen.source_tag(), result.usage)
+                usage_note = f"{citizen.source_tag()}:{result.usage.get('total', 0)}tok"
+            except Exception:  # noqa: BLE001 — 记账失败绝不打断
+                usage_note = "usage_record_failed"
+        # 产出 = untrusted 供稿:回给小卡,提醒采纳才算数(H2A)
+        return {"ok": True, "citizen": citizen_id, "task_id": task_id,
+                "status": "done", "provenance": "untrusted", "usage": usage_note,
+                "output": result.text,
+                "note": "这是外部执行体的产出(不可信数据)——请用户看一眼再采纳,别当已确认的事实"}
+
+    return build_tool(
+        name="external_agent",
+        description=(
+            "把一件事派给一个已接入的外部 AI 同事(你接进来的外部 runtime)去做,拿回它的产出。"
+            "citizen_id=哪个外部同事的花名;task=让它做什么(说清楚,它看不到你和用户的上下文)。"
+            "它是外部执行体:产出是**不可信数据**、需要用户拍板采纳才算数——"
+            "**别把它的产出当已确认的事实**,拿到后提醒用户看一眼。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "citizen_id": {"type": "string", "description": "外部同事花名(先接入过的)"},
+                "task": {"type": "string", "description": "派给它的任务(自足描述,它无我方上下文)"},
+            },
+            "required": ["citizen_id", "task"],
+        },
+        call=_call,
+        required_mode=Mode.FULL,   # 起子进程=process_spawn+network → FULL(见 policy 步3)
+    )
+
+
+def make_attach_external_agent_tool(*, citizen_registry, probe_fn=None,
+                                    default_bin: str = ""):
+    """把'接入一个外部 runtime 当频道公民'包成工具(WORKSPACE_WRITE,写注册表同 create_role 语义)。
+
+    接入向导:探测能力卡(doctor 式冒烟)+ hash-pin + 注册。probe_fn 可注入(默认走真探活)。
+    诚实边界:探活失败(bin 找不到/冒烟不过)→ ok=False + reason,不假装接上了。
+    """
+    from karvyloop.capability import Mode
+    from karvyloop.registry.tool import build_tool
+
+    async def _call(inp: dict, token, sandbox) -> Any:
+        inp = inp or {}
+        citizen_id = str(inp.get("citizen_id") or "").strip()
+        runtime_kind = str(inp.get("runtime_kind") or "").strip()
+        bin_path = str(inp.get("bin_path") or default_bin or "").strip()
+        domain_id = str(inp.get("domain_id") or "").strip()
+        if not (citizen_id and runtime_kind):
+            return {"ok": False, "reason": "需要 citizen_id(花名)+ runtime_kind(外部 runtime 类型)"}
+        if citizen_registry is None:
+            return {"ok": False, "reason": "external_runtime 未接,接不了外部同事"}
+        from karvyloop.external_runtime import (
+            ExternalCitizen, STATUS_ACTIVE, builtin_recipe, compute_manifest_hash,
+        )
+        import dataclasses as _dc
+        base = builtin_recipe(runtime_kind)
+        if base is None:
+            from karvyloop.external_runtime import builtin_kinds
+            return {"ok": False, "reason": f"未知 runtime_kind「{runtime_kind}」(支持:{list(builtin_kinds())})"}
+        recipe = _dc.replace(base, bin_path=bin_path or base.bin_path)
+        _probe = probe_fn
+        if _probe is None:
+            from karvyloop.external_runtime import probe as _probe
+        try:
+            pr = _probe(recipe)
+        except Exception as e:  # noqa: BLE001 — 工具永不穿透异常
+            return {"ok": False, "reason": f"探活出错:{type(e).__name__}: {e}"}
+        if not pr.ok:
+            return {"ok": False, "reason": f"「{citizen_id}」接入失败(探活不过):{pr.reason}"}
+        citizen = ExternalCitizen(
+            citizen_id=citizen_id, runtime_kind=runtime_kind, bin_path=bin_path,
+            domain_id=domain_id, capability_card=pr.capability_card,
+            token_source=f"ext:{citizen_id}", manifest_hash=pr.manifest_hash,
+            created_by="user", status=STATUS_ACTIVE)
+        persisted = citizen_registry.add(citizen)
+        out = {"ok": True, "citizen": citizen_id, "runtime_kind": runtime_kind,
+               "status": STATUS_ACTIVE, "version": pr.version, "persisted": persisted}
+        if not persisted:
+            out["warning"] = f"已接入但没落盘(重启可能丢):{citizen_registry.persist_error}"
+        return out
+
+    return build_tool(
+        name="attach_external_agent",
+        description=(
+            "接入一个外部 AI runtime,注册成常驻频道同事(之后能被 @ 派活)。先跟用户聊清楚再接:"
+            "citizen_id=给它起个花名(如「cc」);runtime_kind=它是哪类外部 runtime;"
+            "bin_path=它在用户机器上的可执行路径(可选,有默认)。系统会先探活(冒烟)确认它真能跑,"
+            "跑不起来会如实告诉你接入失败,别假装接上了。"),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "citizen_id": {"type": "string", "description": "外部同事花名(唯一)"},
+                "runtime_kind": {"type": "string", "description": "外部 runtime 类型"},
+                "bin_path": {"type": "string", "description": "可执行路径(可选,有默认)"},
+                "domain_id": {"type": "string", "description": "挂载到哪个业务域(可选,不填=私聊/无域)"},
+            },
+            "required": ["citizen_id", "runtime_kind"],
+        },
+        call=_call,
+        required_mode=Mode.WORKSPACE_WRITE,   # 写公民注册表 → 同 create_role
+    )
+
+
+def make_list_external_agents_tool(*, citizen_registry):
+    """把'列出已接入的外部同事'包成工具(READ_ONLY,只读注册表,同 recall_memory)。"""
+    from karvyloop.capability import Mode
+    from karvyloop.registry.tool import build_tool
+
+    async def _call(inp: dict, token, sandbox) -> Any:
+        if citizen_registry is None:
+            return {"ok": False, "reason": "external_runtime 未接"}
+        try:
+            citizens = citizen_registry.list_all()
+        except Exception as e:  # noqa: BLE001 — 工具永不穿透异常
+            return {"ok": False, "reason": f"列举出错:{type(e).__name__}"}
+        return {"ok": True, "count": len(citizens), "agents": [
+            {"citizen_id": c.citizen_id, "runtime_kind": c.runtime_kind,
+             "status": c.status, "domain_id": c.domain_id,
+             "version": (c.capability_card or {}).get("version", "")}
+            for c in citizens]}
+
+    return build_tool(
+        name="list_external_agents",   # 复数!与 policy 键 / catalog 逐字对齐(R1:防命名漂移落回 FULL)
+        description=(
+            "列出用户已接入的所有外部 AI 同事(花名/类型/是否可达)。用户问「我接了哪些外部 agent」时用。"
+            "只读,不改动任何东西。"),
+        input_schema={"type": "object", "properties": {}, "required": []},
+        call=_call,
+        required_mode=Mode.READ_ONLY,
+    )
+
+
 __all__ = [
     "make_create_schedule_tool",
     "make_remember_fact_tool",
     "make_recall_memory_tool",
     "make_create_role_tool",
     "make_create_domain_tool",
+    "make_external_agent_tool",
+    "make_attach_external_agent_tool",
+    "make_list_external_agents_tool",
 ]

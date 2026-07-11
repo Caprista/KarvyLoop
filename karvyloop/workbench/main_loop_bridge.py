@@ -63,6 +63,10 @@ async def drive_in_tui(
     schedule_parser: Any = None,  # NL→cron 解析闭包(make_schedule_parser);None=工具仍挂但调用时诚实回"没接LLM"
     schedule_target_resolver: Any = None,  # (role_name)->(did,role,aid,disp):把委派角色名解析成定时目标;None=不解析
     memory: Any = None,           # 小卡随聊能力:给了+小卡人格 → 挂 remember_fact/recall_memory;None=不挂(0 回归)
+    citizen_registry: Any = None,  # 跨 runtime 协作(docs/71):给了+小卡人格 → 挂 external_agent/attach/list;None=不挂(0 回归)
+    external_bridge_factory: Any = None,  # (DriveRecipe)->Bridge;None=用内置 subprocess bridge_factory
+    external_a2a_router: Any = None,      # 派活走信封+审计链(须 citizen-aware resolver 构造);None=跳过 route
+    external_token_recorder: Any = None,  # (source, usage)->None:外部 usage 记进独立 ext: 账本;None=只落 provenance
 ) -> DriveOutcome:
     """在 TUI asyncio loop 里跑 MainLoop.drive。
 
@@ -126,6 +130,27 @@ async def drive_in_tui(
                 _t = make_create_domain_tool(
                     domain_registry=domain_registry, domain_store=domain_store)
                 _karvy_tools[_t.name] = _t
+            # 跨 runtime 协作(docs/71 §5 步2):小卡编排职责(业务角色不拉外部执行体,同不建同僚/不开域)——
+            # citizen_registry 存在才挂,capability 护栏照走(external_agent=FULL 下限)。默认 bridge_factory
+            # 用内置 subprocess 桥。任一条件不满足 = 旧行为(0 回归)。
+            if citizen_registry is not None:
+                from karvyloop.karvy.tools import (
+                    make_attach_external_agent_tool, make_external_agent_tool,
+                    make_list_external_agents_tool,
+                )
+                _bf = external_bridge_factory
+                if _bf is None:
+                    from karvyloop.external_runtime import bridge_factory as _bf
+                for _mk, _kw in (
+                    (make_external_agent_tool, dict(
+                        citizen_registry=citizen_registry, bridge_factory=_bf,
+                        a2a_router=external_a2a_router,
+                        token_recorder=external_token_recorder)),
+                    (make_attach_external_agent_tool, dict(citizen_registry=citizen_registry)),
+                    (make_list_external_agents_tool, dict(citizen_registry=citizen_registry)),
+                ):
+                    _t = _mk(**_kw)
+                    _karvy_tools[_t.name] = _t
         except Exception:
             logger.warning("[drive] 挂小卡随聊能力工具失败(降级=只这些工具缺席,不挡对话)",
                            exc_info=True)

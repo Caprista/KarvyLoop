@@ -11,6 +11,19 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **Bring your own AI runtime into the driver's seat (M1).** You can now attach an external
+  headless-CLI AI runtime as a channel citizen, @-dispatch a task to it, and get its real reply
+  back — while it stays an opaque external executor whose output is always **untrusted data** that
+  never auto-enters your memory. Federate capability, not trust, not memory: the external runtime's
+  token spend is metered under its own independent `ext:<name>` ledger source (never mixed into your
+  main gateway buckets), its stdout/stderr are treated as possibly-carrying-secrets and scrubbed
+  before touching any log/Trace, and credentials are never placed in the subprocess environment (a
+  hard first line of defense, not a redaction afterthought). The global assistant orchestrates this
+  (attach / dispatch / list) through capability-gated tools; failures are fail-loud (nonzero exit,
+  timeout, empty-success, or an approval request all surface instead of hanging). Adding another
+  runtime is a recipe file, not new code.
+
 ### Fixed
 - **The one-click update now tells you what happened instead of leaving you guessing.** A failed
   upgrade (e.g. `git pull` couldn't reach GitHub) used to silently restart the old version and

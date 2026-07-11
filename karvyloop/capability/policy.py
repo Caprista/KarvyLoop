@@ -67,6 +67,17 @@ DEFAULT_TOOL_REQUIREMENTS: dict[str, Mode] = {
     # 语义(小卡人格 maker 放行、只读 checker 仍拦;查重/父域校验/持久化诚实兜)。
     "create_role": Mode.WORKSPACE_WRITE,
     "create_domain": Mode.WORKSPACE_WRITE,
+    # 跨 runtime 协作(karvy/tools.py,docs/71 §5 步3):
+    # external_agent = 起外部子进程(process_spawn + network 出站)→ FULL 下限(同 network/process_spawn);
+    #   安全靠下游兜(输出 untrusted + 采纳走 H2A + 桥凭证隔离/密钥过滤),**不在这里放宽**。
+    "external_agent": Mode.FULL,
+    # attach_external_agent = 写外部公民注册表(用户已在对话里拍板要接)→ WORKSPACE_WRITE(同 create_role)。
+    "attach_external_agent": Mode.WORKSPACE_WRITE,
+    # list_external_agents = 只读公民注册表 → READ_ONLY(同 recall_memory)。
+    # **键名必须与工厂 build_tool(name=...) 逐字相同**——required_mode 走精确查表(line 78-87),无复数容错;
+    # 工厂是 make_list_external_agents_tool → name="list_external_agents"(复数),故键必须复数,
+    # 写成单数会查不中 → 落回 FULL → 只读列举工具被误判 capability_denied(R1 病根)。
+    "list_external_agents": Mode.READ_ONLY,
     "git_commit": Mode.WORKSPACE_WRITE,
     "network": Mode.FULL,
     "process_spawn": Mode.FULL,

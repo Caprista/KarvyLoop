@@ -20,6 +20,9 @@ BUILTIN_TOOL_NAMES: frozenset[str] = frozenset({
     "create_schedule", "remember_fact", "recall_memory",
     # 小卡编排能力(karvy/tools.py):从对话里建角色 / 开业务域(role_registry / domain_registry 存在才挂)。
     "create_role", "create_domain",
+    # 跨 runtime 协作(karvy/tools.py,docs/71 §5 步5):派活给外部同事 / 接入 / 列举。
+    # 登记目录条目防"unresolved_tool"误判(M1 不做 atom 侧,仅归一)。三名逐字与工厂/policy 键对齐。
+    "external_agent", "attach_external_agent", "list_external_agents",
 })
 
 
