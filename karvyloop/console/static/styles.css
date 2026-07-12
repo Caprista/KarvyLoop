@@ -2650,6 +2650,11 @@ body.demo-modal-full .demo-hero-grid { grid-template-columns: repeat(6, 1fr); }
 /* docs/66 §F 布局终版:沉淀页 = 整窗 IM(左栏会话切换 | 记录唯一滚动 | 底部输入条) */
 .modal-body.kchat-mode { display: flex; flex-direction: column; overflow: hidden; flex: 1; min-height: 0; }
 .modal-body.kchat-mode .mem-tabs { flex: none; }
+/* 桌面视图:面板是绝对定位可拖窗,脱离了 overlay 的居中 flex —— 默认开在顶栏下方(y≈顶栏+48),
+   若沿用 86vh 上限,底部会顶穿视口、内容(如 token 用量的柱状图)被裁且没滚动条(Hardy 2026-07-13 实拍)。
+   改为按"顶栏 + 拖拽起点"留白封顶,配合 .modal-body 的 overflow-y:auto 就有滚动条了。用户手动拖到更低
+   仍可能出界(那是他自己的操作,可拖回);默认开的场景必须能滚。 */
+body.desk-view #mgmt-modal .modal { max-height: calc(100vh - 140px); }
 /* 聊天页把模态撑满(高度不随内容抖;桌面视图的 max-height 上限照旧生效) */
 #mgmt-modal .modal:has(.modal-body.kchat-mode) { height: 86vh; }
 body.desk-view #mgmt-modal .modal:has(.modal-body.kchat-mode) { height: calc(100vh - 196px); }

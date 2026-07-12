@@ -907,7 +907,26 @@
     // 决策卡:把执行翻成「你能判断的东西」—— 已核验区(接地✓/✗)与小卡复述区分开,
     // 逐条 认/改/删。改/删过 = engaged(真判断,非 rubber-stamp)。回喂结晶 + 反投降。
     const judgeState = { engaged: false, edited: [], basis: "" };
-    _renderDecisionCard(card, proposalId, judgeState);
+    // 懒加载(2026-07-13 Hardy 报 LAN 开屏卡):/api/decision_card 建卡含召回 +（有预对齐时）违背 LLM,
+    // 单卡 ~1.5s。积压 N 张若开屏全拉 → N 并发把 worker 池 + 限流堵成秒级齐返(实测 39 张→10s)。
+    // 改为**卡真滚进视口才建 detail**:收在 dock 里没打开的卡一次都不拉;跑评分离(违背 LLM 只对你在看的
+    // 那张跑,不对没人看的 38 张跑)。judgeState 随 detail 回填 —— 要操作必先看见=先触发,拍前拦不丢。
+    if (typeof IntersectionObserver === "function") {
+      let _dcDone = false;
+      const _io = new IntersectionObserver(function (ents) {
+        if (_dcDone) return;
+        for (var i = 0; i < ents.length; i++) {
+          if (ents[i].isIntersecting) {
+            _dcDone = true; _io.disconnect();
+            _renderDecisionCard(card, proposalId, judgeState);
+            return;
+          }
+        }
+      }, { rootMargin: "300px" });
+      _io.observe(card);
+    } else {
+      _renderDecisionCard(card, proposalId, judgeState);   // 老浏览器无 IO → 退回即时(不劣化)
+    }
 
     // #42 优化①「改了再批」:kind→可编辑的"行动文本"字段。你不只认/拒,还能亲手改到该有的样子
     // 再批 —— 修改本身是楔子最富的偏好信号(原文→改文的对照会进偏好结晶)。
