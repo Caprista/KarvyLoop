@@ -149,7 +149,7 @@ def test_remove_unknown_and_ambiguous(tmp_path, capsys):
 # ---- 对抗验收回归锁(2026-07-12):register_self 合并语义 + 坏形态宁空勿崩 ----
 
 def test_register_self_merge_preserves_label_relay_room(tmp_path):
-    """刷新登记(指纹不带 label/relay/room)绝不抹掉用户起的名和配对信息 —— 
+    """刷新登记(指纹不带 label/relay/room)绝不抹掉用户起的名和配对信息 ——
     对抗验收抓的真伤:开一次设备面板就清空 label/relay_url/room。"""
     reg = DeviceRegistry(tmp_path)
     reg.register_self({"device_id": "self-1", "label": "my-desk-pc", "os": "linux"},
