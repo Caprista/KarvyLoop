@@ -2,11 +2,35 @@
 
 > 🌐 **Language**: **English (current)** · [中文](README.zh-CN.md)
 
-**A local-first, loop-native AI agent runtime — build a team of AI agents that run your work, verify themselves, and compound into skills that are _yours_, while you stay the one who decides.**
+**The 40th time your agents run a job, it's cheaper, better-verified, and more your-style than the 1st. That's the whole product.**
 
 [![CI](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml/badge.svg)](https://github.com/Caprista/KarvyLoop/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![status](https://img.shields.io/badge/status-early%2Fpre--1.0-orange)
 
 `AI agents` · `multi-agent orchestration` · `LLM runtime` · `loop engineering` · `local-first` · `human-in-the-loop` · `skill crystallization` · `MCP` · `sandboxed execution`
+
+---
+
+Most agent frameworks optimize a *call* — and the 40th call costs exactly what the 1st did. KarvyLoop optimizes the **loop** around it: *discover work → run → verify → crystallize → **you decide** → repeat*. Every pass leaves something behind on your machine — a **skill** (the method, written down), a **decision preference** (how you call it), a **belief** (what it learned about your world). Value compounds; babysitting decays.
+
+```text
+value
+  ↑                                        ●   loop-native (KarvyLoop)
+  │                                ●
+  │                        ●
+  │                ●
+  │        ●
+  │  ●──●────●────●────●────●────●────●────●   call-native (most frameworks)
+  └────────────────────────────────────────→   times you run the same job
+     1         10         20          40
+```
+
+### Three bets we place against the industry
+
+1. **Loop-native, not call-native.** The unit of design isn't an LLM call — it's the self-running cycle that repeats. A repeated task doesn't cache its answer (stale answers are poison); it crystallizes its *method* into a readable `SKILL.md` and reruns it on fresh input — often with **zero LLM calls**.
+2. **You stay the decider — by construction, not by option.** While the industry races toward maximum autonomy, KarvyLoop hard-codes **H2A**: the AI proposes on a *decision card*, you decide. And it *earns* silence instead of assuming it — only after a decision type clears a statistical bar (Wilson 95% lower bound ≥ 0.90 over 35+ cases) does it *offer* to handle that one quietly; you grant it explicitly, and a single miss revokes it.
+3. **The image is copyable. Your instance is not.** The code is MIT — clone it, fork it, ship it. But the skills, preferences and beliefs that grow on *your* machine from *your* use are a local asset nobody else can copy — and no platform can take away.
+
+**Receipts, not adjectives:** repeated jobs hit a zero-token fast path; a real sandbox on all three platforms (bubblewrap / Seatbelt / restricted-token) with fail-closed capability tokens; 3,800+ tests including 25 adversarial attack-vector classes, in CI; and your agent's memory is inspectable and editable down to *"which belief got superseded, when, by what, and why."*
 
 ---
 
