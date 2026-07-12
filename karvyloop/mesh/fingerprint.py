@@ -56,16 +56,36 @@ def _device_id(state_dir=None) -> str:
         return ""
 
 
-def device_fingerprint(state_dir=None, *, label: Optional[str] = None) -> dict:
-    """本设备能力指纹(能力广告)。label 可选(人给设备起的名,如"家里的 Linux")。"""
+def _capabilities(osname: str, sandbox: str) -> list:
+    """本设备能**执行**哪类任务(调度 feasibility 的硬过滤词典;不含普适参与——发起/决策/旁观人人有)。
+
+    PC 三平台 → coding/shell/big-task(能跑代码、shell、大任务);有沙箱 → sandbox。
+    移动端的独占能力(camera/location/voice/mic)由移动客户端 declare(现无移动端,PC 不臆造)。
+    """
+    caps = set()
+    if osname in ("linux", "darwin", "windows"):
+        caps |= {"coding", "shell", "big-task"}
+    if sandbox and sandbox != "none":
+        caps.add("sandbox")
+    return sorted(caps)
+
+
+def device_fingerprint(state_dir=None, *, label: Optional[str] = None,
+                       extra_capabilities: Optional[list] = None) -> dict:
+    """本设备能力指纹(能力广告)。label = 人给设备起的名;extra_capabilities = 设备自报的额外
+    执行能力(如移动端 declare camera/location,或某机装了特殊工具链)。"""
+    osname = (_platform.system() or sys.platform).lower()      # linux/darwin/windows
+    sandbox = _sandbox_backend()
+    caps = set(_capabilities(osname, sandbox)) | set(extra_capabilities or ())
     return {
         "device_id": _device_id(state_dir),
         "label": label or "",
-        "os": (_platform.system() or sys.platform).lower(),   # linux/darwin/windows
+        "os": osname,
         "arch": (_platform.machine() or "").lower(),           # x86_64/arm64/amd64
         "python": _platform.python_version(),
         "karvyloop": _karvyloop_version(),
-        "sandbox": _sandbox_backend(),                         # bwrap/seatbelt/win-restricted/none
+        "sandbox": sandbox,                                    # bwrap/seatbelt/win-restricted/none
+        "capabilities": sorted(caps),                          # 执行能力集(feasibility 硬过滤输入)
     }
 
 

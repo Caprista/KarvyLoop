@@ -37,6 +37,7 @@ class DeviceRecord:
     room: str = ""                 # 它的 relay 房间号
     last_seen: float = 0.0
     is_self: bool = False
+    capabilities: list = dataclasses.field(default_factory=list)   # 执行能力集(feasibility 输入)
 
     def online(self, now: Optional[float] = None) -> bool:
         _now = time.time() if now is None else now
@@ -54,7 +55,8 @@ class DeviceRecord:
             os=str(d.get("os") or ""), arch=str(d.get("arch") or ""),
             sandbox=str(d.get("sandbox") or ""), karvyloop=str(d.get("karvyloop") or ""),
             relay_url=str(d.get("relay_url") or ""), room=str(d.get("room") or ""),
-            last_seen=float(d.get("last_seen") or 0.0), is_self=bool(d.get("is_self")))
+            last_seen=float(d.get("last_seen") or 0.0), is_self=bool(d.get("is_self")),
+            capabilities=list(d.get("capabilities") or []))
 
 
 class DeviceRegistry:
@@ -106,7 +108,8 @@ class DeviceRegistry:
             sandbox=str(fingerprint.get("sandbox") or ""),
             karvyloop=str(fingerprint.get("karvyloop") or ""),
             relay_url=relay_url, room=room,
-            last_seen=(time.time() if now is None else now), is_self=True)
+            last_seen=(time.time() if now is None else now), is_self=True,
+            capabilities=list(fingerprint.get("capabilities") or []))
         self.register(rec)
         return rec
 
