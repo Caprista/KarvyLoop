@@ -358,6 +358,9 @@ var KarvyExternalPanelBundle = (function(exports) {
     _stopPoll();
     body.innerHTML = "";
     body.appendChild(el("div", { class: "mgmt-hint", text: t("external.intro") }));
+    // 诚实标注(Q3):当前外部子进程网络是二元(全通/全断),域名级白名单尚未真机接线。
+    // 别让用户以为设了 allowlist 就按域名收窄了 —— 源码里的诚实要冒泡到用户面。
+    body.appendChild(el("div", { class: "mgmt-hint ext-net-note", text: t("external.net_mode_note") }));
     const addBtn = el("button", { class: "mgmt-add-btn ext-add-btn", text: t("external.add_btn") });
     addBtn.addEventListener("click", () => {
       _startAddFlow(body);
