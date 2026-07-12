@@ -173,3 +173,67 @@ def test_maybe_route_fuzzy_self_returns_none():
     mgr.start()
     out = asyncio.run(maybe_route_to_role(app, mgr, "帮我找几个人随便聊聊天气"))
     assert out is None and not app.state.proposal_registry.pending(), "self 不该出提案"
+
+
+# ---- 第三镜修:no-keyword 任务不再被关键词门锁死,一律给 fuzzy_dispatch 机会 ----
+
+def _wire_app(app, gw):
+    """给 _roster() 的 app 接上 maybe_route_to_role 需要的 state。"""
+    from karvyloop.karvy.proposal_registry import PendingProposalRegistry
+    app.state.proposal_registry = PendingProposalRegistry()
+    app.state.runtime_kwargs = {"gateway": gw, "model_ref": ""}
+    app.state.ws_clients = set()
+
+
+def _mgr():
+    import tempfile
+    from pathlib import Path
+
+    from karvyloop.cognition.conversation import ConversationManager, ConversationStore
+    m = ConversationManager(ConversationStore(Path(tempfile.mkdtemp()) / "conv"))
+    m.start()
+    return m
+
+
+def test_no_keyword_task_still_reaches_fuzzy_dispatch():
+    """核心修复:一句**没有委派暗号**的活("整理分析竞品")以前判 execute→小卡自己干,
+    现在也交 fuzzy_dispatch 兜底 → LLM 认出该编排 → 出提案。关键词门不再锁死 LLM 编排。"""
+    from karvyloop.console.routes import maybe_route_to_role
+    from karvyloop.karvy.proposal_registry import KIND_ROUNDTABLE
+
+    _, app = _roster()
+    gw = FakeGateway('{"action":"roundtable","domain":"产品研发",'
+                     '"participants":["产品经理","前端工程师"],"topic":"竞品分析"}')
+    _wire_app(app, gw)
+    # 无 让/交给/找/委派/告诉 —— 纯 execute 分类
+    out = asyncio.run(maybe_route_to_role(app, _mgr(), "帮我把最近的竞品都整理分析一下"))
+    assert out is not None and out["routed"] is True, f"no-keyword 任务没到 fuzzy(仍被门锁): {out}"
+    assert gw.calls == 1, "fuzzy_dispatch 的 LLM 没被调用(门还在锁)"
+    pend = app.state.proposal_registry.pending()
+    assert pend and pend[-1].kind == KIND_ROUNDTABLE
+
+
+def test_courier_intent_self_relays_not_orchestrated():
+    """转达("告诉X…")仍是小卡自己传话 → 返 None,**不**进 fuzzy 编排(零回归)。"""
+    from karvyloop.console.routes import maybe_route_to_role
+
+    _, app = _roster()
+    gw = FakeGateway('{"action":"roundtable","domain":"产品研发","participants":["产品经理"],"topic":"x"}')
+    _wire_app(app, gw)
+    out = asyncio.run(maybe_route_to_role(app, _mgr(), "告诉产品经理明天十点开会"))
+    assert out is None, "转达不该被拆成编排"
+    assert gw.calls == 0, "转达不该触发 fuzzy_dispatch 的 LLM"
+
+
+def test_empty_roster_skips_fuzzy_no_llm_burn():
+    """能力护栏:没有可编排角色(空 roster)→ 直接小卡自己干,**不烧 LLM**(非关键词启发式)。"""
+    import types
+
+    from karvyloop.console.routes import maybe_route_to_role
+    reg = FakeDomainRegistry([])                       # 零域 → build_roster 空
+    app = types.SimpleNamespace(state=types.SimpleNamespace(domain_registry=reg))
+    gw = FakeGateway('{"action":"roundtable"}')        # 若被调用会计数
+    _wire_app(app, gw)
+    out = asyncio.run(maybe_route_to_role(app, _mgr(), "帮我把最近的竞品都整理分析一下"))
+    assert out is None, "空 roster 该降级小卡自己干"
+    assert gw.calls == 0, "空 roster 不该烧 LLM(能力护栏没生效)"

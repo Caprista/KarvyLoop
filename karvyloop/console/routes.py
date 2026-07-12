@@ -1143,7 +1143,9 @@ async def maybe_route_to_role(app, mgr, intent: str):
     编排升级(Hardy 2026-06-25 bug):"让几个角色开圆桌讨论X" = **多人圆桌**,不是单点委派 ——
     先试圆桌解析,命中 → 出 roundtable PROPOSE;否则退回单角色 route_to_role(0 回归)。
     """
-    from karvyloop.karvy.capability import dispatch_for_peer, is_direct_role_peer, is_karvy_peer
+    from karvyloop.karvy.capability import (
+        INTENT_COURIER, dispatch_for_peer, is_direct_role_peer, is_karvy_peer,
+    )
 
     peer = mgr.current_peer() if mgr is not None else None
     # docs/66 §F:知识线 = 馆员自己接(专职消化知识),不路由不提圆桌 —— 真机实拍:
@@ -1163,59 +1165,65 @@ async def maybe_route_to_role(app, mgr, intent: str):
         routed = await _fuzzy_ops_proposal(app, intent)
         if routed is not None:
             return routed
-    if not dispatch_for_peer(domain_id, intent).should_route:
-        return None  # execute / courier → 小卡自己处理(照常)
+    dispatch = dispatch_for_peer(domain_id, intent)
+    if dispatch.intent_class == INTENT_COURIER:
+        return None  # 转达 → 小卡自己传话(照常),不进编排
     registry = getattr(app.state, "proposal_registry", None)
-    if registry is None:
-        return None
 
-    # ① 先试圆桌(多人协作)—— 命中则出 roundtable PROPOSE,不降级成单点委派。
-    rt = _resolve_roundtable_from_intent(app, intent)
-    if rt is not None:
-        import time as _t
-        from karvyloop.console.proposals import broadcast_proposal
-        from karvyloop.karvy.proposal_registry import proposal_for_roundtable
+    # 第三镜修(2026-07-12):关键词门从"锁死 LLM 编排的硬 gate"降为 **fast-path 信号**。
+    # 病根:LLM 拆解器 fuzzy_dispatch 早写好,却被前置关键词门(should_route)反锁——"帮我把
+    # 竞品分析整理出来"没委派暗号 → 判 execute → return None → 小卡自己硬干,该编排的活漏判。
+    # 修:明确委派词 → 先走确定性圆桌/单角色匹配(命中省一次 LLM);**没说暗号 → 一律交 fuzzy_dispatch
+    # 兜底判断**,别让"没命中关键词"就等于"小卡自己干"。fuzzy_dispatch 内含 empty-roster 护栏(无角色
+    # 可编排则不烧 LLM——这是"编排是否可能"的状态判断,不是关键词启发式)。
+    if dispatch.should_route and registry is not None:
+        # ① 先试圆桌(多人协作)—— 命中则出 roundtable PROPOSE,不降级成单点委派。
+        rt = _resolve_roundtable_from_intent(app, intent)
+        if rt is not None:
+            import time as _t
+            from karvyloop.console.proposals import broadcast_proposal
+            from karvyloop.karvy.proposal_registry import proposal_for_roundtable
 
-        proposal = proposal_for_roundtable(ts=_t.time(), **rt)
-        registry.register(proposal)
-        try:
-            await broadcast_proposal(app, proposal)
-        except Exception:
-            pass
-        who = "、".join(rt["participant_names"]) if rt["participant_names"] else "群里的角色"
-        return {
-            "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
-            "crystallized": False, "skill_name": "", "routed": True,
-            "text": (f"想让 {who} 一起讨论 —— 这是开**圆桌**(几个人坐一起),不是交给一个人。"
-                     f"要在「{rt['group_name']}」开桌讨论「{rt['topic']}」吗?(到 🤝 H2A 处置)"),
-        }
+            proposal = proposal_for_roundtable(ts=_t.time(), **rt)
+            registry.register(proposal)
+            try:
+                await broadcast_proposal(app, proposal)
+            except Exception:
+                pass
+            who = "、".join(rt["participant_names"]) if rt["participant_names"] else "群里的角色"
+            return {
+                "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
+                "crystallized": False, "skill_name": "", "routed": True,
+                "text": (f"想让 {who} 一起讨论 —— 这是开**圆桌**(几个人坐一起),不是交给一个人。"
+                         f"要在「{rt['group_name']}」开桌讨论「{rt['topic']}」吗?(到 🤝 H2A 处置)"),
+            }
 
-    # ② 退回单角色委派(原逻辑,确定性子串匹配)。
-    match = _match_role_for_intent(app, intent)
-    if match is not None:
-        import time as _t
-        from karvyloop.console.proposals import broadcast_proposal
-        from karvyloop.karvy.proposal_registry import proposal_for_route
+        # ② 退回单角色委派(原逻辑,确定性子串匹配)。
+        match = _match_role_for_intent(app, intent)
+        if match is not None:
+            import time as _t
+            from karvyloop.console.proposals import broadcast_proposal
+            from karvyloop.karvy.proposal_registry import proposal_for_route
 
-        proposal = proposal_for_route(ts=_t.time(), requirement=intent, **match)
-        registry.register(proposal)
-        try:
-            await broadcast_proposal(app, proposal)  # 推到 H2A 列
-        except Exception:
-            pass
-        return {
-            "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
-            "crystallized": False, "skill_name": "", "routed": True,
-            "text": (f"这件事属于业务域「{match['domain_name']}」 — "
-                     f"要不要转给「{match['role']}」去做?(到 🤝 H2A 处置)"),
-        }
+            proposal = proposal_for_route(ts=_t.time(), requirement=intent, **match)
+            registry.register(proposal)
+            try:
+                await broadcast_proposal(app, proposal)  # 推到 H2A 列
+            except Exception:
+                pass
+            return {
+                "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
+                "crystallized": False, "skill_name": "", "routed": True,
+                "text": (f"这件事属于业务域「{match['domain_name']}」 — "
+                         f"要不要转给「{match['role']}」去做?(到 🤝 H2A 处置)"),
+            }
 
-    # ③ 模糊指令 LLM 拆解兜底(确定性规则没命中编排时):"去X域找几个人分析Y" 这类
-    #    没点名、没说"圆桌"的模糊话 → LLM 拆出 域+人+方式 → 落到既有 H2A 提案。降级=小卡自己干。
+    # ③ LLM 拆解器兜底(**默认仲裁**,不再被关键词门锁):关键词没命中确定性编排时也给它机会。
+    #    "帮我整理竞品分析" 这类没暗号但该编排的活在这里被 LLM 认出;拆不出/无角色 → None,小卡自己干。
     routed = await _maybe_fuzzy_dispatch(app, intent)
     if routed is not None:
         return routed
-    return None  # 匹配不到 + 拆不出编排 → 小卡自己干(不强行路由)
+    return None  # 拆不出编排 → 小卡自己干(不强行路由)
 
 
 _OPS_KW = (
@@ -1242,6 +1250,8 @@ async def _maybe_fuzzy_dispatch(app, intent: str):
     from karvyloop.karvy.fuzzy_dispatch import build_roster, decompose_dispatch
 
     roster = build_roster(app)
+    if not roster:
+        return None  # 无可编排角色 → 别烧 LLM,小卡自己干(能力护栏,非关键词启发式)
     try:
         with _token_src("fuzzy_dispatch"):
             plan = await decompose_dispatch(intent, roster=roster, gateway=gw,
