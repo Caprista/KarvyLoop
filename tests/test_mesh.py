@@ -95,3 +95,52 @@ def test_cli_devices_lists_this_device(tmp_path, capsys):
     main(["devices", "--label", "test box", "--dir", str(tmp_path)])
     out2 = capsys.readouterr().out
     assert "this device" in out2 and "test box" in out2
+
+
+# ---- 知情删除(Hardy §6.2:能力收窄 → 警告 + 再确认)----
+
+def _seed_two(tmp_path):
+    reg = DeviceRegistry(tmp_path)
+    reg.register(DeviceRecord(device_id="aaaa1111", label="mac",
+                              capabilities=["coding", "camera"], last_seen=1000.0))
+    reg.register(DeviceRecord(device_id="bbbb2222", label="linux",
+                              capabilities=["coding", "shell"], last_seen=1000.0))
+    return reg
+
+
+def test_remove_narrowing_requires_reconfirm(tmp_path, capsys):
+    """删唯一有 camera 的设备:没 --yes → 警告+拒删(设备还在);--yes → 真删。"""
+    from karvyloop.cli.main import main
+    _seed_two(tmp_path)
+    rc = main(["devices", "--remove", "mac", "--dir", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 1 and "camera" in out and "PERMANENTLY" in out       # 风险警告点名失去什么
+    assert DeviceRegistry(tmp_path).get("aaaa1111") is not None        # 没确认 → 没删
+    rc2 = main(["devices", "--remove", "mac", "--yes", "--dir", str(tmp_path)])
+    assert rc2 == 0
+    assert DeviceRegistry(tmp_path).get("aaaa1111") is None            # 再确认 → 真删
+
+
+def test_remove_covered_capability_light_confirm(tmp_path, capsys):
+    """删能力被其它设备全覆盖的(coding 两台都有→删 linux 只失 shell?不,linux 独占 shell)——
+    造一台完全被覆盖的:能力子集 → 轻确认直接删,不要求 --yes。"""
+    from karvyloop.cli.main import main
+    reg = _seed_two(tmp_path)
+    reg.register(DeviceRecord(device_id="cccc3333", label="old-pc",
+                              capabilities=["coding"], last_seen=1000.0))   # coding 被两台覆盖
+    rc = main(["devices", "--remove", "old-pc", "--dir", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 0 and "no capability lost" in out
+    assert DeviceRegistry(tmp_path).get("cccc3333") is None
+
+
+def test_remove_unknown_and_ambiguous(tmp_path, capsys):
+    from karvyloop.cli.main import main
+    reg = DeviceRegistry(tmp_path)
+    reg.register(DeviceRecord(device_id="aaaa1111", capabilities=["x"]))
+    reg.register(DeviceRecord(device_id="aaaa2222", capabilities=["y"]))
+    assert main(["devices", "--remove", "zzzz", "--dir", str(tmp_path)]) == 1   # 没匹配
+    capsys.readouterr()
+    assert main(["devices", "--remove", "aaaa", "--dir", str(tmp_path)]) == 1   # 歧义前缀
+    assert "Ambiguous" in capsys.readouterr().out
+    assert len(DeviceRegistry(tmp_path).list_all()) == 2                        # 都没误删

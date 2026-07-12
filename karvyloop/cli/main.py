@@ -128,6 +128,13 @@ def _build_parser() -> argparse.ArgumentParser:
              "and presence (register this device on run)")
     p_devices.add_argument("--label", type=str, default=None,
                            help="name for THIS device (e.g. \"home Linux\"); reused if omitted")
+    p_devices.add_argument("--remove", type=str, default=None, metavar="TARGET",
+                           help="remove a device from your mesh by fingerprint prefix or label. "
+                                "If removal narrows your capability boundary (that device is the "
+                                "only one providing something), you get a risk warning and must "
+                                "re-confirm with --yes")
+    p_devices.add_argument("--yes", action="store_true",
+                           help="confirm a removal that narrows your capability boundary")
     p_devices.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
     # mesh-sync:跟我的另一台设备同步一次认知/任务(经 relay 交换 MeshLog delta,docs/74)。
     p_msync = sub.add_parser(
@@ -467,6 +474,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_relay_unpair(target=args.target, state_dir=args.dir)
 
     if args.cmd == "devices":
+        if args.remove:
+            from karvyloop.mesh.cli import cmd_devices_remove
+            return cmd_devices_remove(args.remove, yes=args.yes, state_dir=args.dir)
         from karvyloop.mesh.cli import cmd_devices
         return cmd_devices(label=args.label, state_dir=args.dir)
 
