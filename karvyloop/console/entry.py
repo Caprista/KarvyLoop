@@ -577,6 +577,12 @@ def cmd_console(args: argparse.Namespace) -> int:
             app.state.mesh_log_store = _mstore
             attach_memory_emitter(app.state.memory, _mlog, _mstore)
             replay_log_into_memory(app.state.memory, _mlog)
+            # 技能同步(slice3a):本地结晶发事件 + 启动对账把日志里的技能落到本地技能树。
+            from karvyloop.mesh.skill_bridge import attach_skill_emitter, reconcile_skills_from_log
+            _skills_dir = (_Path(_cfgp).parent if _cfgp else (_Path.home() / ".karvyloop")) / "skills"
+            app.state.mesh_skills_dir = _skills_dir
+            attach_skill_emitter(_mlog, _mstore)
+            reconcile_skills_from_log(_mlog, _skills_dir)
         except Exception as _me:  # noqa: BLE001
             logger.warning(f"[karvyloop console] mesh 认知同步接线失败(console 照常起): {_me}")
         conv_mgr = ConversationManager(

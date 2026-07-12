@@ -550,6 +550,13 @@ def crystallize(
         created_ts=created,
     )
     path = write_skill_md(skills_dir / name, skill_md, skills_root=skills_dir)
+    # mesh 同步(docs/74 slice3a):本地结晶 → 发一条技能事件(带完整 SKILL.md),让"A 结晶的
+    # 方法 B 直接有"。defensive:未接 mesh / 非 user scope / 异常 都静默,绝不打断结晶(地基)。
+    try:
+        from karvyloop.mesh.skill_bridge import notify_crystallized
+        notify_crystallized(name, sig, skill_md, scope)
+    except Exception:  # noqa: BLE001
+        pass
     stats = store.get(sig) or UsageStats()
     # SKILL.md frontmatter 写 "user"/"domain";Skill.scope 是 Literal["personal","domain"]。
     # M1 保守:把 "user" 译作 "personal"(域外的都是 personal),保 schema 一致。

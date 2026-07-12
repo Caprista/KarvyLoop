@@ -83,6 +83,14 @@ def api_mesh_sync(req: MeshSyncRequest, request: Request) -> dict[str, Any]:
             apply_belief_events(mem, fresh)
         except Exception:                            # noqa: BLE001 — 回放失败不阻断同步本身
             pass
+    # 技能事件(slice3a):远端结晶的技能落进本地技能树(幂等,同 name 已在跳过)。
+    skills_dir = getattr(request.app.state, "mesh_skills_dir", None)
+    if skills_dir is not None and fresh:
+        try:
+            from karvyloop.mesh.skill_bridge import apply_skill_events
+            apply_skill_events(fresh, skills_dir)
+        except Exception:                            # noqa: BLE001
+            pass
     their_fr = {}
     for d, v in (req.frontier or {}).items():
         try:
