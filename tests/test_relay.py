@@ -649,3 +649,63 @@ async def test_remote_client_end_to_end(relay_server, real_console, tmp_path):
             await asyncio.wait_for(client_task, timeout=5)
         except BaseException:
             client_task.cancel()
+
+
+async def test_remote_proxy_browser_end_to_end(relay_server, real_console, tmp_path):
+    """slice 3b 本地反向代理:httpx 打 localhost 代理端口 → relay(只见密文)→ console → loopback
+    真 API → 回。证浏览器能直接开 localhost:port 用你家 console 跨网(RemoteSession 并发派发器)。"""
+    import httpx
+
+    from karvyloop.relay.client import run_relay_client
+    from karvyloop.relay.pairing import PairingStore
+    from karvyloop.relay.remote import run_remote_proxy
+    pytest.importorskip("cryptography")
+
+    base, relay_app = relay_server
+    console_port, token = real_console
+    store = PairingStore(tmp_path)
+    store.identity()
+    rid = store.rid()
+    code = store.new_code()
+    fp = store.fingerprint()
+
+    stop_console = asyncio.Event()
+    client_task = asyncio.create_task(run_relay_client(
+        base, console_port=console_port, token=token,
+        state_dir=tmp_path, heartbeat_s=5.0, stop=stop_console))
+    proxy_port = _free_port()
+    stop_proxy = asyncio.Event()
+    proxy_task = None
+    try:
+        for _ in range(100):                        # 等 console attach
+            room = relay_app.state.rooms.get(rid)
+            if room is not None and room.console is not None:
+                break
+            await asyncio.sleep(0.1)
+        else:
+            pytest.fail("console 没 attach 上 relay")
+
+        proxy_task = asyncio.create_task(run_remote_proxy(
+            base, rid, fingerprint=fp, code=code, local_port=proxy_port,
+            state_dir=tmp_path / "remote_device", stop=stop_proxy))
+
+        async with httpx.AsyncClient() as c:
+            resp = None
+            for _ in range(100):                    # 等代理 uvicorn 起来
+                try:
+                    resp = await c.get(f"http://127.0.0.1:{proxy_port}/api/update_status", timeout=5)
+                    break
+                except Exception:
+                    await asyncio.sleep(0.1)
+            assert resp is not None, "本地代理没起来"
+            assert resp.status_code == 200, f"代理请求没成功: {resp.status_code}"
+            assert "current" in resp.json()          # 真穿过代理打到了 console
+    finally:
+        stop_proxy.set()
+        stop_console.set()
+        for t in (proxy_task, client_task):
+            if t is not None:
+                try:
+                    await asyncio.wait_for(t, timeout=5)
+                except BaseException:
+                    t.cancel()

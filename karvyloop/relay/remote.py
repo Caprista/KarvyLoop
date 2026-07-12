@@ -46,22 +46,59 @@ def _remote_identity(state_dir=None) -> Tuple[bytes, bytes]:
 
 
 class RemoteSession:
-    """一条到远程 console 的接入会话(经 relay E2E)。`request()` 发一个 HTTP-over-frame 请求。"""
+    """一条到远程 console 的接入会话(经 relay E2E)。**并发安全**:后台收帧循环按 id 派发到
+    per-request future,`request()` 可并发多发(本地代理下浏览器多请求共用一条 ws)。
+
+    纪律:`seal`(seq++)与 `ws.send` 必须原子(外挂 send_lock),否则乱序=对端拒帧。
+    """
 
     def __init__(self, ws, session: "e2e.Session") -> None:
+        import asyncio
         self._ws = ws
         self._sess = session
         self._next_id = 0
+        self._pending: dict = {}                 # id -> Future(resp dict)
+        self._send_lock = asyncio.Lock()
+        self._recv_task = None
+        self._closed = False
+
+    def start(self) -> None:
+        """启动后台收帧派发循环(open_remote_session 建完即调)。"""
+        import asyncio
+        if self._recv_task is None:
+            self._recv_task = asyncio.create_task(self._recv_loop())
+
+    async def _recv_loop(self) -> None:
+        """唯一读 ws 的地方:解密 → 按 id 派发到等待的 future。ws 断 → 所有 pending 失败。"""
+        try:
+            while not self._closed:
+                msg = await self._ws.recv()
+                if not isinstance(msg, bytes) or e2e.frame_type(msg) != e2e.T_DATA:
+                    continue
+                try:
+                    resp = json.loads(self._sess.open(msg).decode("utf-8"))
+                except (e2e.ReplayError, e2e.FrameError):
+                    continue                     # 重放/坏帧:丢弃,绝不二次派发
+                fut = self._pending.pop(resp.get("id"), None)
+                if fut is not None and not fut.done():
+                    fut.set_result(resp)
+        except Exception as exc:                 # noqa: BLE001 — ws 断/关:让所有 pending 醒来报错
+            self._fail_all(exc)
+
+    def _fail_all(self, exc: Exception) -> None:
+        for fut in list(self._pending.values()):
+            if not fut.done():
+                fut.set_exception(ConnectionError(f"relay connection lost: {type(exc).__name__}"))
+        self._pending.clear()
 
     async def request(self, method: str, path: str, *, headers: Optional[dict] = None,
                       body: bytes = b"", timeout: float = 30.0) -> dict:
-        """发一个请求经 E2E 会话 → {status, headers, body(bytes), error}。path 必须以 "/" 开头。
-
-        按 id 关联响应(收到别的 id / 非 DATA / 重放帧都跳过,直到本请求的响应)。
-        """
+        """发一个请求经 E2E 会话 → {status, headers, body(bytes), error}。path 必须以 "/" 开头。"""
         import asyncio
         if not path.startswith("/") or "://" in path:
             raise ValueError("path must start with / and carry no scheme")
+        if self._recv_task is None:              # 没启后台循环 → 单发也自启(CLI 一次性用)
+            self.start()
         self._next_id += 1
         rid = self._next_id
         req: dict = {"id": rid, "method": method.upper(), "path": path}
@@ -69,22 +106,25 @@ class RemoteSession:
             req["headers"] = headers
         if body:
             req["body_b64"] = base64.b64encode(body).decode("ascii")
-        await self._ws.send(self._sess.seal(json.dumps(req).encode("utf-8")))
-        while True:
-            msg = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
-            if not isinstance(msg, bytes) or e2e.frame_type(msg) != e2e.T_DATA:
-                continue
-            try:
-                resp = json.loads(self._sess.open(msg).decode("utf-8"))
-            except (e2e.ReplayError, e2e.FrameError):
-                continue
-            if resp.get("id") != rid:
-                continue
-            b64 = resp.get("body_b64")
-            return {"status": int(resp.get("status", 0)),
-                    "headers": resp.get("headers", {}),
-                    "error": resp.get("error", ""),
-                    "body": base64.b64decode(b64) if b64 else b""}
+        fut = asyncio.get_event_loop().create_future()
+        self._pending[rid] = fut
+        try:
+            async with self._send_lock:          # seal(seq++)+send 原子
+                await self._ws.send(self._sess.seal(json.dumps(req).encode("utf-8")))
+            resp = await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            self._pending.pop(rid, None)
+        b64 = resp.get("body_b64")
+        return {"status": int(resp.get("status", 0)),
+                "headers": resp.get("headers", {}),
+                "error": resp.get("error", ""),
+                "body": base64.b64decode(b64) if b64 else b""}
+
+    async def close(self) -> None:
+        self._closed = True
+        if self._recv_task is not None:
+            self._recv_task.cancel()
+        await self._ws.close()
 
 
 async def open_remote_session(relay_url: str, rid: str, *, fingerprint: str,
@@ -109,7 +149,9 @@ async def open_remote_session(relay_url: str, rid: str, *, fingerprint: str,
         if e2e.frame_type(msg) == e2e.T_ERR:
             raise e2e.HandshakeError(f"rejected by relay/console: {e2e.parse_err(msg)}")
         session = e2e.client_complete(msg, priv, fingerprint)   # 验指纹,防中间人
-        return ws, RemoteSession(ws, session)
+        sess = RemoteSession(ws, session)
+        sess.start()                                            # 启后台收帧派发循环
+        return ws, sess
     except Exception:
         await ws.close()
         raise
@@ -124,20 +166,89 @@ async def run_remote_request(relay_url: str, rid: str, *, fingerprint: str, meth
     try:
         return await sess.request(method, path, body=body)
     finally:
-        await ws.close()
+        await sess.close()
 
 
-def cmd_remote(relay_url: str, rid: str, fingerprint: str, request: str,
-               code: Optional[str] = None, state_dir=None) -> int:
-    """`karvyloop remote --relay … --room … --fingerprint … --request "GET /api/…"`.
+# 转发给远程 console 的请求头白名单(其余不透传;console 侧还会再过一遍)。
+_FWD_HEADERS = ("content-type", "accept", "accept-language")
 
-    接入端一次性请求:证你能从这台机器跨网访问家里的 console。request = "METHOD /path"。
+
+async def run_remote_proxy(relay_url: str, rid: str, *, fingerprint: str, local_port: int,
+                           code: Optional[str] = None, local_host: str = "127.0.0.1",
+                           state_dir=None, stop=None) -> None:
+    """本地反向代理(slice 3b):``localhost:local_port`` 起 HTTP,每个请求经 RemoteSession 转给
+    远程 console,响应回来。**浏览器开 http://localhost:local_port = 你家 console 跨网。**
+
+    复用既有 Starlette+uvicorn(不引新依赖);单条持久 E2E 会话,浏览器并发请求走派发器按 id 关联。
+    v1 不自动重连(ws 断则请求报 502,重启即可)——重连是后续 refinement。
     """
     import asyncio
+
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.responses import Response
+    from starlette.routing import Route
+
+    ws, sess = await open_remote_session(relay_url, rid, fingerprint=fingerprint,
+                                         code=code, state_dir=state_dir)
+
+    async def _proxy(request: "Request") -> "Response":
+        body = await request.body()
+        fwd = {k.lower(): v for k, v in request.headers.items() if k.lower() in _FWD_HEADERS}
+        path = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        try:
+            r = await sess.request(request.method, path, headers=fwd, body=body)
+        except Exception as exc:  # noqa: BLE001 — 会话断/超时:回 502,不泄敏感
+            return Response(f"remote unreachable: {type(exc).__name__}", status_code=502)
+        if r.get("error"):
+            return Response(r["error"], status_code=r.get("status") or 502)
+        ct = (r.get("headers") or {}).get("content-type", "application/octet-stream")
+        return Response(content=r["body"], status_code=r["status"], media_type=ct)
+
+    app = Starlette(routes=[Route("/{path:path}", _proxy,
+                                  methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])])
+    config = uvicorn.Config(app, host=local_host, port=local_port,
+                            log_level="warning", lifespan="off")
+    server = uvicorn.Server(config)
+    if stop is not None:                     # 测试/程序化关停:stop 一置位就让 uvicorn 退
+        async def _watch():
+            await stop.wait()
+            server.should_exit = True
+        asyncio.create_task(_watch())
+    try:
+        await server.serve()
+    finally:
+        await sess.close()
+
+
+def cmd_remote(relay_url: str, rid: str, fingerprint: str, request: Optional[str] = None,
+               port: Optional[int] = None, code: Optional[str] = None, state_dir=None) -> int:
+    """接入端(从另一台机器跨网访问家里 console):
+
+    - ``--port N``  → **本地反向代理**:浏览器开 ``http://localhost:N`` = 你家 console(slice 3b)。
+    - ``--request "GET /api/…"`` → 一次性请求,打印响应(slice 3a,证连通)。
+    """
+    import asyncio
+    import sys
+    if port:                                  # 代理模式:起本地反向代理,直到 Ctrl-C
+        print(f"KarvyLoop remote proxy → open  http://localhost:{port}  in your browser "
+              f"(Ctrl-C to stop). relay={relay_url} room={rid}")
+        try:
+            asyncio.run(run_remote_proxy(relay_url, rid, fingerprint=fingerprint,
+                                         local_port=int(port), code=code, state_dir=state_dir))
+            return 0
+        except KeyboardInterrupt:
+            return 0
+        except e2e.RelayCryptoUnavailable as exc:
+            sys.stderr.write(str(exc) + "\n")
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"remote proxy failed: {type(exc).__name__}: {exc}\n")
+            return 1
     parts = (request or "").strip().split(None, 1)
     if len(parts) != 2 or not parts[1].startswith("/"):
-        import sys
-        sys.stderr.write('--request must be like:  "GET /api/status"\n')
+        sys.stderr.write('need --port N (browser proxy) or --request "GET /api/status"\n')
         return 2
     method, path = parts[0], parts[1]
     try:
