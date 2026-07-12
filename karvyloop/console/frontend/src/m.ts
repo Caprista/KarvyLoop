@@ -117,6 +117,12 @@ function _bubble(role: string, text: string): HTMLElement {
   return el("div", { class: "m-bubble m-bubble-" + role, text });
 }
 
+function _scrollToNode(n: HTMLElement): void {
+  try {
+    if (typeof n.scrollIntoView === "function") n.scrollIntoView({ behavior: "smooth", block: "end" });
+  } catch (e) { /* 无头/老环境无此 API → 不滚,不崩 */ }
+}
+
 async function _sendChat(): Promise<void> {
   const input = document.getElementById("m-chat-input") as HTMLInputElement | null;
   const log = document.getElementById("m-chat-log");
@@ -130,7 +136,9 @@ async function _sendChat(): Promise<void> {
   log.appendChild(_bubble("you", msg));
   const thinking = _bubble("karvy m-thinking", t("m.chat_thinking"));
   log.appendChild(thinking);
-  log.scrollTop = log.scrollHeight;
+  // 真机验收发现:log 在卡片列表下方的文档流里,滚 log 自己没用 —— 要把**页面**滚到气泡,
+  // 否则积压卡多时整段对话发生在屏外,人以为没回。
+  _scrollToNode(thinking);
   try {
     const r = await fetch("/api/intent", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -146,7 +154,8 @@ async function _sendChat(): Promise<void> {
   } finally {
     _chatBusy = false;
     input.disabled = false;
-    log.scrollTop = log.scrollHeight;
+    const last = log.lastElementChild;
+    if (last) _scrollToNode(last as HTMLElement);
     void refresh();                        // drive 可能升了新卡 → 拍板区立即跟上
   }
 }

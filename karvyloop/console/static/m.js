@@ -119,6 +119,12 @@ var KarvyMobileBundle = (function(exports) {
   function _bubble(role, text) {
     return el("div", { class: "m-bubble m-bubble-" + role, text });
   }
+  function _scrollToNode(n) {
+    try {
+      if (typeof n.scrollIntoView === "function") n.scrollIntoView({ behavior: "smooth", block: "end" });
+    } catch (e) {
+    }
+  }
   async function _sendChat() {
     const input = document.getElementById("m-chat-input");
     const log = document.getElementById("m-chat-log");
@@ -132,7 +138,7 @@ var KarvyMobileBundle = (function(exports) {
     log.appendChild(_bubble("you", msg));
     const thinking = _bubble("karvy m-thinking", t("m.chat_thinking"));
     log.appendChild(thinking);
-    log.scrollTop = log.scrollHeight;
+    _scrollToNode(thinking);
     try {
       const r = await fetch("/api/intent", {
         method: "POST",
@@ -149,7 +155,8 @@ var KarvyMobileBundle = (function(exports) {
     } finally {
       _chatBusy = false;
       input.disabled = false;
-      log.scrollTop = log.scrollHeight;
+      const last = log.lastElementChild;
+      if (last) _scrollToNode(last);
       void refresh();
     }
   }
