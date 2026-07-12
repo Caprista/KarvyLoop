@@ -53,10 +53,38 @@ body {
 .m-empty { grid-column: 1 / -1; text-align: center; color: var(--text-2); padding: 56px 20px; font-size: 15px; }
 .m-empty-ico { font-size: 44px; margin-bottom: 10px; }
 .m-toast {
-  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%);
   background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 10px;
   font-size: 14px; z-index: 99;
 }
+/* 聊天:发起入口。气泡区默认收着(开屏=纯拍板台),第一句话才长出来;输入条钉底。 */
+#m-chat-log {
+  display: none; max-width: 1100px; margin: 0 auto; padding: 4px 16px 12px;
+}
+#m-chat-log.on { display: block; }
+.m-bubble {
+  max-width: 86%; padding: 10px 14px; border-radius: 14px; margin-top: 8px;
+  font-size: 15px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  border: 1px solid var(--border); background: var(--card);
+}
+.m-bubble-you { margin-left: auto; background: var(--accent-soft); border-color: var(--accent); width: fit-content; }
+.m-bubble-karvy { margin-right: auto; width: fit-content; }
+.m-thinking { color: var(--text-2); font-style: italic; }
+.m-chat-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 8px;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  background: var(--card); border-top: 1px solid var(--border); z-index: 20;
+}
+#m-chat-input {
+  flex: 1; min-height: 42px; padding: 8px 14px; font-size: 15px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text);
+}
+#m-chat-input:disabled { opacity: .55; }
+#m-chat-send {
+  min-width: 76px; border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+main#m-list { padding-bottom: 86px; }
 </style>
 </head>
 <body>
@@ -66,6 +94,11 @@ body {
     <button id="m-refresh">↻</button>
   </header>
   <main id="m-list"></main>
+  <div id="m-chat-log"></div>
+  <footer class="m-chat-bar">
+    <input id="m-chat-input" type="text" maxlength="4000" enterkeyhint="send">
+    <button id="m-chat-send"></button>
+  </footer>
   <script src="/static/i18n.js"></script>
   <script src="/static/m.js"></script>
 </body>

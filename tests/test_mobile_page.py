@@ -42,9 +42,10 @@ def test_m_page_reuses_existing_contracts_only():
     js = (STATIC / "m.js").read_text(encoding="utf-8")
     assert "/api/proposals/pending" in js
     assert "/api/h2a_decide" in js
+    assert "/api/intent" in js                       # 切片二:聊天条(发起入口)
     hit = re.findall(r'fetch\("(/api/[^"]+)"', js)
-    assert set(hit) <= {"/api/proposals/pending", "/api/h2a_decide"}, \
-        f"手机页只许吃既有两契约,多了: {set(hit)}"
+    assert set(hit) <= {"/api/proposals/pending", "/api/h2a_decide", "/api/intent"}, \
+        f"手机页只许吃既有三契约,多了: {set(hit)}"
 
 
 def test_m_page_low_floor_no_coined_nouns():
@@ -65,3 +66,18 @@ def test_m_decide_wires_to_h2a(monkeypatch):
     r = _client().post("/api/h2a_decide", json={"proposal_id": "nope-0-abc", "decision": "ACCEPT",
                                                 "reason": ""})
     assert r.status_code in (200, 404, 409, 422)     # 依 registry 语义结构化返回,绝不崩
+
+
+def test_m_page_chat_strip_present():
+    """切片二:聊天条(发起入口)—— 输入条+发送键在,i18n 键接上,REST 一来回吃 /api/intent。"""
+    html = (STATIC / "m.html").read_text(encoding="utf-8")
+    assert 'id="m-chat-input"' in html and 'id="m-chat-send"' in html
+    js = (STATIC / "m.js").read_text(encoding="utf-8")
+    assert "m.chat_ph" in js and "m.chat_thinking" in js and "m.chat_failed" in js
+
+
+def test_m_cards_diff_by_proposal_id():
+    """P2 锁:刷新按 proposal_id diff,禁整列重建 —— 另一台设备拍掉卡时,你手指下的卡不挪位。"""
+    js = (STATIC / "m.js").read_text(encoding="utf-8")
+    assert "data-pid" in js
+    assert 'innerHTML = ""' not in js, "整列重建回潮(误点窗口重开)"

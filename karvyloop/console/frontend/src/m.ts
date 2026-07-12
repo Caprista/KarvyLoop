@@ -57,7 +57,7 @@ function _toast(msg: string): void {
 }
 
 function _card(p: any): HTMLElement {
-  const card = el("div", { class: "m-card" });
+  const card = el("div", { class: "m-card", "data-pid": String(p.proposal_id || "") });
   card.appendChild(el("div", { class: "m-card-summary", text: p.summary || "?" }));
   if (p.basis) card.appendChild(el("div", { class: "m-card-basis", text: p.basis }));
   const row = el("div", { class: "m-btn-row" });
@@ -81,16 +81,74 @@ async function refresh(): Promise<void> {
   } catch (e) { /* 掉线 → 保持上一屏,不闪空 */ }
   if (data == null) return;
   const proposals: any[] = data.proposals || [];
-  list.innerHTML = "";
   const badge = document.getElementById("m-count");
   if (badge) badge.textContent = proposals.length ? String(proposals.length) : "";
-  if (!proposals.length) {
+  // 按 proposal_id diff(对抗验收 P2):不再整列重建 —— 另一台设备拍掉一张卡时,
+  // 你手指下的卡不会因列表上移变成别的卡;在场的卡连 DOM 带 busy 态原地保留。
+  const want = new Set(proposals.map((p) => String(p.proposal_id || "")));
+  const have = new Map<string, HTMLElement>();
+  list.querySelectorAll<HTMLElement>(".m-card[data-pid]").forEach((n) => {
+    const pid = n.getAttribute("data-pid") || "";
+    if (want.has(pid)) have.set(pid, n);
+    else n.remove();
+  });
+  const emptyNode = list.querySelector(".m-empty");
+  if (proposals.length && emptyNode) emptyNode.remove();
+  for (const p of proposals) {
+    const pid = String(p.proposal_id || "");
+    if (have.has(pid)) continue;          // 已在场(或本轮已渲染)→ 跳过:同 id 绝不双渲染
+    const card = _card(p);
+    list.appendChild(card);
+    have.set(pid, card);                  // 对抗验收:append 后必登记,防重 id 增殖
+  }
+  if (!proposals.length && !emptyNode) {
     list.appendChild(el("div", { class: "m-empty" },
       el("div", { class: "m-empty-ico", text: "🦫" }),
       el("div", { text: t("m.empty") })));
-    return;
   }
-  for (const p of proposals) list.appendChild(_card(p));
+}
+
+// ---- 聊天条(切片二):手机上的发起入口。REST 一来回(POST /api/intent 同步回 text),
+// 不碰 WS —— 低地板版;回复纯文本气泡(markdown 渲染留后续切片)。单飞互斥,回来顺手刷新卡
+// (drive 可能升了新卡,拍板台和发起入口在同一屏闭环)。
+let _chatBusy = false;
+
+function _bubble(role: string, text: string): HTMLElement {
+  return el("div", { class: "m-bubble m-bubble-" + role, text });
+}
+
+async function _sendChat(): Promise<void> {
+  const input = document.getElementById("m-chat-input") as HTMLInputElement | null;
+  const log = document.getElementById("m-chat-log");
+  if (!input || !log || _chatBusy) return;
+  const msg = input.value.trim();
+  if (!msg) return;
+  _chatBusy = true;
+  input.value = "";
+  input.disabled = true;
+  log.classList.add("on");
+  log.appendChild(_bubble("you", msg));
+  const thinking = _bubble("karvy m-thinking", t("m.chat_thinking"));
+  log.appendChild(thinking);
+  log.scrollTop = log.scrollHeight;
+  try {
+    const r = await fetch("/api/intent", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ intent: msg }),
+    });
+    const d: any = r.ok ? await r.json() : null;
+    thinking.remove();
+    const reply = (d && !d.error && (d.text || "").trim()) ? String(d.text).trim() : t("m.chat_failed");
+    log.appendChild(_bubble("karvy", reply));
+  } catch (e) {
+    thinking.remove();
+    log.appendChild(_bubble("karvy", t("m.net_failed")));
+  } finally {
+    _chatBusy = false;
+    input.disabled = false;
+    log.scrollTop = log.scrollHeight;
+    void refresh();                        // drive 可能升了新卡 → 拍板区立即跟上
+  }
 }
 
 function _startPolling(): void {
@@ -108,6 +166,13 @@ function boot(): void {
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
   const btn = document.getElementById("m-refresh");
   if (btn) { btn.setAttribute("title", t("m.refresh")); btn.addEventListener("click", () => { void refresh(); }); }
+  const cin = document.getElementById("m-chat-input") as HTMLInputElement | null;
+  const csend = document.getElementById("m-chat-send");
+  if (cin) {
+    cin.setAttribute("placeholder", t("m.chat_ph"));
+    cin.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") void _sendChat(); });
+  }
+  if (csend) { csend.textContent = t("m.chat_send"); csend.addEventListener("click", () => { void _sendChat(); }); }
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);

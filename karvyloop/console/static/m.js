@@ -49,7 +49,7 @@ var KarvyMobileBundle = (function(exports) {
     window.setTimeout(() => n.remove(), 2600);
   }
   function _card(p) {
-    const card = el("div", { class: "m-card" });
+    const card = el("div", { class: "m-card", "data-pid": String(p.proposal_id || "") });
     card.appendChild(el("div", { class: "m-card-summary", text: p.summary || "?" }));
     if (p.basis) card.appendChild(el("div", { class: "m-card-basis", text: p.basis }));
     const row = el("div", { class: "m-btn-row" });
@@ -88,19 +88,70 @@ var KarvyMobileBundle = (function(exports) {
     }
     if (data == null) return;
     const proposals = data.proposals || [];
-    list.innerHTML = "";
     const badge = document.getElementById("m-count");
     if (badge) badge.textContent = proposals.length ? String(proposals.length) : "";
-    if (!proposals.length) {
+    const want = new Set(proposals.map((p) => String(p.proposal_id || "")));
+    const have = /* @__PURE__ */ new Map();
+    list.querySelectorAll(".m-card[data-pid]").forEach((n) => {
+      const pid = n.getAttribute("data-pid") || "";
+      if (want.has(pid)) have.set(pid, n);
+      else n.remove();
+    });
+    const emptyNode = list.querySelector(".m-empty");
+    if (proposals.length && emptyNode) emptyNode.remove();
+    for (const p of proposals) {
+      const pid = String(p.proposal_id || "");
+      if (have.has(pid)) continue;
+      const card = _card(p);
+      list.appendChild(card);
+      have.set(pid, card);
+    }
+    if (!proposals.length && !emptyNode) {
       list.appendChild(el(
         "div",
         { class: "m-empty" },
         el("div", { class: "m-empty-ico", text: "🦫" }),
         el("div", { text: t("m.empty") })
       ));
-      return;
     }
-    for (const p of proposals) list.appendChild(_card(p));
+  }
+  let _chatBusy = false;
+  function _bubble(role, text) {
+    return el("div", { class: "m-bubble m-bubble-" + role, text });
+  }
+  async function _sendChat() {
+    const input = document.getElementById("m-chat-input");
+    const log = document.getElementById("m-chat-log");
+    if (!input || !log || _chatBusy) return;
+    const msg = input.value.trim();
+    if (!msg) return;
+    _chatBusy = true;
+    input.value = "";
+    input.disabled = true;
+    log.classList.add("on");
+    log.appendChild(_bubble("you", msg));
+    const thinking = _bubble("karvy m-thinking", t("m.chat_thinking"));
+    log.appendChild(thinking);
+    log.scrollTop = log.scrollHeight;
+    try {
+      const r = await fetch("/api/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent: msg })
+      });
+      const d = r.ok ? await r.json() : null;
+      thinking.remove();
+      const reply = d && !d.error && (d.text || "").trim() ? String(d.text).trim() : t("m.chat_failed");
+      log.appendChild(_bubble("karvy", reply));
+    } catch (e) {
+      thinking.remove();
+      log.appendChild(_bubble("karvy", t("m.net_failed")));
+    } finally {
+      _chatBusy = false;
+      input.disabled = false;
+      log.scrollTop = log.scrollHeight;
+      void refresh();
+    }
   }
   function _startPolling() {
     if (_timer !== null) return;
@@ -121,6 +172,20 @@ var KarvyMobileBundle = (function(exports) {
       btn.setAttribute("title", t("m.refresh"));
       btn.addEventListener("click", () => {
         void refresh();
+      });
+    }
+    const cin = document.getElementById("m-chat-input");
+    const csend = document.getElementById("m-chat-send");
+    if (cin) {
+      cin.setAttribute("placeholder", t("m.chat_ph"));
+      cin.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") void _sendChat();
+      });
+    }
+    if (csend) {
+      csend.textContent = t("m.chat_send");
+      csend.addEventListener("click", () => {
+        void _sendChat();
       });
     }
   }
