@@ -121,6 +121,20 @@ def _build_parser() -> argparse.ArgumentParser:
     p_runpair.add_argument("target", nargs="?", default=None,
                            help="fingerprint or pubkey-hex to revoke; omit to just list paired devices")
     p_runpair.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
+    # remote:接入端 —— 从另一台机器跨网访问你家的 console(连 relay /join,E2E 握手,发一个请求)。
+    p_remote = sub.add_parser(
+        "remote",
+        help="access your home console from ANOTHER machine over the network — connects to the relay, "
+             "does the E2E handshake (verifies fingerprint), sends one request and prints the response")
+    p_remote.add_argument("--relay", type=str, required=True, help="relay url (e.g. wss://relay.example)")
+    p_remote.add_argument("--room", type=str, required=True, help="room id from `relay-pair`")
+    p_remote.add_argument("--fingerprint", type=str, required=True,
+                          help="console key fingerprint from `relay-pair` (verified — mismatch = abort, anti-MITM)")
+    p_remote.add_argument("--code", type=str, default=None,
+                          help="one-time pairing code from `relay-pair` (first time only; paired devices omit)")
+    p_remote.add_argument("--request", type=str, required=True,
+                          help='request to send, like "GET /api/status"')
+    p_remote.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
 
     # 管理面(名词-动词,gh 风格):role / domain / memory / skill / schedule / token。
     # 覆盖既有后端(RoleRegistry / BusinessDomainRegistry / MemoryManager / SkillIndex /
@@ -432,6 +446,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "relay-unpair":
         from karvyloop.relay.pairing import cmd_relay_unpair
         return cmd_relay_unpair(target=args.target, state_dir=args.dir)
+
+    if args.cmd == "remote":
+        from karvyloop.relay.remote import cmd_remote
+        return cmd_remote(relay_url=args.relay, rid=args.room, fingerprint=args.fingerprint,
+                          request=args.request, code=args.code, state_dir=args.dir)
 
     # 管理面(role/domain/memory/skill/schedule/token)—— 名词-动词,命中即返回。
     if args.cmd in ("role", "domain", "memory", "skill", "schedule", "token"):

@@ -600,3 +600,52 @@ class TestScopeEnforcement:
         resp, calls = self._handle(store, pub, "GET")
         assert resp["status"] == 403 and resp["error"] == "revoked_or_unpaired"
         assert calls == []
+
+
+async def test_remote_client_end_to_end(relay_server, real_console, tmp_path):
+    """接入端真客户端(remote.RemoteSession)端到端:remote → relay(只见密文)→ console client
+    → loopback 真 API → 加密回来。证 `karvyloop remote` 真能跨网访问 console(item 1 的方法)。"""
+    import json as _j
+
+    from karvyloop.relay.client import run_relay_client
+    from karvyloop.relay.pairing import PairingStore
+    from karvyloop.relay.remote import open_remote_session
+    pytest.importorskip("cryptography")
+
+    base, relay_app = relay_server
+    console_port, token = real_console
+
+    store = PairingStore(tmp_path)          # console 侧(家)
+    store.identity()
+    rid = store.rid()
+    code = store.new_code()                 # full scope 默认(自有设备)
+    fp = store.fingerprint()
+
+    stop = asyncio.Event()
+    client_task = asyncio.create_task(run_relay_client(
+        base, console_port=console_port, token=token,
+        state_dir=tmp_path, heartbeat_s=5.0, stop=stop))
+    try:
+        for _ in range(100):                # 等 console 出站长连 attach
+            room = relay_app.state.rooms.get(rid)
+            if room is not None and room.console is not None:
+                break
+            await asyncio.sleep(0.1)
+        else:
+            pytest.fail("console relay client 没 attach 上 relay")
+
+        # 真接入端(remote_key 放独立子目录 = 模拟另一台机器)
+        ws, sess = await open_remote_session(
+            base, rid, fingerprint=fp, code=code, state_dir=tmp_path / "remote_device")
+        try:
+            resp = await sess.request("GET", "/api/update_status")
+            assert resp["status"] == 200, f"跨网请求没成功: {resp}"
+            assert "current" in _j.loads(resp["body"].decode())   # 真打到了 console 路由
+        finally:
+            await ws.close()
+    finally:
+        stop.set()
+        try:
+            await asyncio.wait_for(client_task, timeout=5)
+        except BaseException:
+            client_task.cancel()
