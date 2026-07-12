@@ -735,6 +735,22 @@ def build_console_app(
         def index_no_static() -> dict[str, str]:
             return {"error": f"static dir not found: {STATIC_DIR}"}
 
+    if STATIC_DIR.is_dir():
+        @app.get("/m")
+        def mobile_page():
+            """📱 手机拍板页(R1 切片一):一屏=待拍板卡+大按钮,低地板零生造名词。
+            token 门走同一中间件(非本机必带 ?token=,首访落 cookie);语言注入同 index。"""
+            from fastapi.responses import HTMLResponse
+            from karvyloop.i18n import get_locale
+            try:
+                html = (STATIC_DIR / "m.html").read_text(encoding="utf-8")
+                loc = get_locale()
+                html = html.replace('<html lang="en">',
+                                    f'<html lang="{loc}" data-default-lang="{loc}">')
+                return HTMLResponse(html)
+            except Exception:
+                return FileResponse(str(STATIC_DIR / "m.html"))
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}

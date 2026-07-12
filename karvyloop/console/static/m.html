@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KarvyLoop</title>
+<style>
+/* 📱 /m 手机拍板页 —— 动态比例连续布局:一套 grid 随容器宽度流动(minmax auto-fill),
+   折叠屏开合中途实时重排;没有写死的手机/平板两套。低地板:本页零生造名词。 */
+:root {
+  --bg: #faf6ef; --card: #fffdf8; --border: #e8dfd0; --text: #3d3529; --text-2: #8a7f6e;
+  --accent: #4a7c59; --accent-soft: #e6f0e9; --rose: #b0563f; --rose-soft: #f6e7e2;
+  --amber: #a07c2c; --amber-soft: #f5eeda;
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  background: var(--bg); color: var(--text); min-height: 100vh;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.m-header {
+  display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+  border-bottom: 1px solid var(--border); background: var(--card);
+  position: sticky; top: 0; z-index: 10;
+}
+.m-brand { font-weight: 700; font-size: 17px; }
+.m-waiting { margin-left: auto; font-size: 14px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+#m-count { background: var(--rose); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+#m-count:empty { display: none; }
+#m-refresh { border: 1px solid var(--border); background: var(--card); border-radius: 8px;
+  padding: 4px 10px; font-size: 15px; cursor: pointer; }
+#m-list {
+  display: grid; gap: 14px; padding: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
+  max-width: 1100px; margin: 0 auto;
+}
+.m-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px; transition: opacity .3s, transform .3s;
+}
+.m-card-busy { opacity: .55; pointer-events: none; }
+.m-card-done { opacity: 0; transform: translateY(-8px); }
+.m-card-summary { font-size: 16px; line-height: 1.5; font-weight: 600; }
+.m-card-basis { margin-top: 8px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+.m-btn-row { display: flex; gap: 10px; margin-top: 14px; }
+.m-btn {
+  flex: 1; padding: 12px 0; font-size: 15px; font-weight: 600; border-radius: 10px;
+  border: 1px solid var(--border); cursor: pointer; min-height: 46px;   /* 拇指高度 */
+}
+.m-btn-accept { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.m-btn-defer  { background: var(--amber-soft);  color: var(--amber); }
+.m-btn-reject { background: var(--rose-soft);   color: var(--rose); }
+.m-empty { grid-column: 1 / -1; text-align: center; color: var(--text-2); padding: 56px 20px; font-size: 15px; }
+.m-empty-ico { font-size: 44px; margin-bottom: 10px; }
+.m-toast {
+  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+  background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 10px;
+  font-size: 14px; z-index: 99;
+}
+</style>
+</head>
+<body>
+  <header class="m-header">
+    <span class="m-brand">🦫 KarvyLoop</span>
+    <span class="m-waiting"><span id="m-waiting-label"></span><span id="m-count"></span></span>
+    <button id="m-refresh">↻</button>
+  </header>
+  <main id="m-list"></main>
+  <script src="/static/i18n.js"></script>
+  <script src="/static/m.js"></script>
+</body>
+</html>
