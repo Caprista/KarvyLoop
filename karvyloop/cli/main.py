@@ -109,6 +109,9 @@ def _build_parser() -> argparse.ArgumentParser:
              "one-time pairing code (v1 text pairing; QR/browser pairing is P2)")
     p_rpair.add_argument("--relay-url", type=str, default=None,
                          help="relay address to print in the pairing info (e.g. wss://relay.example)")
+    p_rpair.add_argument("--scope", type=str, default="full", choices=["full", "read"],
+                         help="access scope for the paired device: full (your own device, default) "
+                              "or read (share to others: view-only, GET/HEAD/OPTIONS)")
     p_rpair.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
     # relay-unpair:列已配对设备 / 撤销一个(撤销 = 绝对把控权;撤销后该设备免不了码重连)。
     p_runpair = sub.add_parser(
@@ -424,7 +427,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.cmd == "relay-pair":
         from karvyloop.relay.pairing import cmd_relay_pair
-        return cmd_relay_pair(relay_url=args.relay_url, state_dir=args.dir)
+        return cmd_relay_pair(relay_url=args.relay_url, state_dir=args.dir, scope=args.scope)
 
     if args.cmd == "relay-unpair":
         from karvyloop.relay.pairing import cmd_relay_unpair

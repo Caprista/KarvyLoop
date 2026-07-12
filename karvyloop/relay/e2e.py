@@ -179,6 +179,9 @@ class Session:
         self._recv_dir = recv_dir
         self._seq_out = 0       # 下一发 = _seq_out+1
         self._seq_in = 0        # 已收最大 seq;新帧必须 > 它
+        # 对端身份(console 侧 = 连进来的设备公钥;client 侧留空)。授权层据此 per-request
+        # 查 scope + 撤销状态(§9.6 slice 2)。握手后由 console_accept 填。
+        self.peer_pub: bytes = b""
 
     def seal(self, plaintext: bytes) -> bytes:
         """明文 → DATA 帧。超过帧上限直接拒(发送端自己守约,relay 也会拒)。"""
@@ -242,6 +245,7 @@ def console_accept(hello_frame: bytes, console_priv: bytes, console_pub: bytes,
     welcome = _header(T_WELCOME) + console_pub + confirm
     session = Session(send_key=k_s2c, recv_key=k_c2s,
                       send_dir=_NONCE_S2C, recv_dir=_NONCE_C2S)
+    session.peer_pub = client_pub          # 授权层 per-request 查 scope/撤销用(§9.6 slice 2)
     return welcome, session
 
 

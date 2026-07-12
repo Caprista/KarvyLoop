@@ -47,8 +47,15 @@ def _error_json(rid, code: str, status: int = 502) -> bytes:
     return json.dumps({"id": rid, "status": status, "error": code}).encode("utf-8")
 
 
-async def _handle_request(pt: bytes, http, token: str) -> bytes:
-    """解密后的请求明文 → 打本机 loopback console → 响应明文(待加密)。"""
+async def _handle_request(pt: bytes, http, token: str, *, store=None, peer_pub: bytes = b"") -> bytes:
+    """解密后的请求明文 → 打本机 loopback console → 响应明文(待加密)。
+
+    §9.6 slice 2 授权层:**每请求**按对端身份查 scope(回源在线校验)。
+    - 对端已撤销/不在 paired(store.scope_for → None)→ 403 revoked_or_unpaired(撤销即断落到活连接)。
+    - scope=read(分享只读)且方法是改动 → 403 scope_read_only。
+    - scope=full(自有设备)或只读方法 → 照常打 loopback(带主人 token)。零回归:自有设备恒 full。
+    """
+    from karvyloop.relay.pairing import READ_ONLY_METHODS, SCOPE_FULL
     try:
         req = json.loads(pt.decode("utf-8"))
         rid = req.get("id")
@@ -58,6 +65,12 @@ async def _handle_request(pt: bytes, http, token: str) -> bytes:
             return _error_json(rid, "method_not_allowed", 405)
         if not path.startswith("/") or path.startswith("//") or "://" in path:
             return _error_json(rid, "bad_path", 400)
+        # 授权门(回源在线校验):撤销/越 scope 一律拒,绝不打 loopback。
+        scope = store.scope_for(peer_pub.hex()) if (store is not None and peer_pub) else SCOPE_FULL
+        if scope is None:
+            return _error_json(rid, "revoked_or_unpaired", 403)
+        if scope != SCOPE_FULL and method not in READ_ONLY_METHODS:
+            return _error_json(rid, "scope_read_only", 403)
         headers = {"x-karvy-token": token} if token else {}
         for k, v in (req.get("headers") or {}).items():
             if str(k).lower() in _FWD_REQ_HEADERS:
@@ -91,7 +104,9 @@ async def _serve_connection(ws, store, priv: bytes, pub: bytes, *,
             await ws.send(session.seal(plaintext))
 
     async def _run_request(pt: bytes) -> None:
-        await _sealed_send(await _handle_request(pt, http, token))
+        # 对端身份来自握手后的 session(console 侧 = 连进来的设备公钥)→ per-request 查 scope/撤销。
+        peer = session.peer_pub if session is not None else b""
+        await _sealed_send(await _handle_request(pt, http, token, store=store, peer_pub=peer))
 
     async with httpx.AsyncClient(
             base_url=f"http://{console_host}:{console_port}", timeout=60.0) as http:

@@ -529,3 +529,74 @@ class TestPairingRevocation:
         assert main(["relay-unpair", fpr, "--dir", str(tmp_path)]) == 0
         assert "Revoked" in capsys.readouterr().out
         assert PairingStore(tmp_path).list_paired() == []
+
+
+class TestScopeEnforcement:
+    """§9.6 slice 2:per-request scope 强制 + 回源撤销(活连接下一个请求即拒,不必断 WS)。"""
+
+    @pytest.fixture(autouse=True)
+    def _need_crypto(self):
+        pytest.importorskip("cryptography")
+
+    def _paired(self, tmp_path, scope="full"):
+        from karvyloop.relay import e2e
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        code = store.new_code(scope)
+        _priv, pub = e2e.gen_keypair()
+        assert store.verify_and_consume(pub, e2e.pair_mac(code, pub)) is True
+        return store, pub
+
+    def test_scope_for_paired_then_revoked(self, tmp_path):
+        store, pub = self._paired(tmp_path, "read")
+        assert store.scope_for(pub.hex()) == "read"
+        store.revoke(pub.hex())
+        assert store.scope_for(pub.hex()) is None            # 撤销后回源查=None
+
+    def test_new_code_unknown_scope_denies_to_read(self, tmp_path):
+        store, pub = self._paired(tmp_path, "garbage-scope")  # deny-by-default → read
+        assert store.scope_for(pub.hex()) == "read"
+
+    def _handle(self, store, pub, method, path="/api/x"):
+        import asyncio
+        import json as _j
+        from karvyloop.relay.client import _handle_request
+        calls = []
+
+        class _FakeResp:
+            status_code = 200
+            content = b"ok"
+            headers = {"content-type": "text/plain"}
+
+        class _FakeHttp:
+            async def request(self, m, p, headers=None, content=b""):
+                calls.append((m, p))
+                return _FakeResp()
+
+        pt = _j.dumps({"id": 1, "method": method, "path": path}).encode()
+        out = asyncio.run(_handle_request(pt, _FakeHttp(), "owner-token", store=store, peer_pub=pub))
+        return _j.loads(out.decode()), calls
+
+    def test_full_scope_allows_mutating(self, tmp_path):
+        store, pub = self._paired(tmp_path, "full")
+        resp, calls = self._handle(store, pub, "POST")
+        assert resp["status"] == 200 and calls == [("POST", "/api/x")]   # 自有设备放行改动(零回归)
+
+    def test_read_scope_blocks_mutating_never_hits_loopback(self, tmp_path):
+        store, pub = self._paired(tmp_path, "read")
+        resp, calls = self._handle(store, pub, "POST")
+        assert resp["status"] == 403 and resp["error"] == "scope_read_only"
+        assert calls == []                                              # 越 scope 绝不打 loopback
+
+    def test_read_scope_allows_get(self, tmp_path):
+        store, pub = self._paired(tmp_path, "read")
+        resp, calls = self._handle(store, pub, "GET")
+        assert resp["status"] == 200 and calls == [("GET", "/api/x")]
+
+    def test_revoked_peer_denied_on_live_connection(self, tmp_path):
+        """回源撤销:会话进行中撤销 → 下一个请求(哪怕 GET)也 403 revoked,绝不打 loopback。"""
+        store, pub = self._paired(tmp_path, "full")
+        store.revoke(pub.hex())
+        resp, calls = self._handle(store, pub, "GET")
+        assert resp["status"] == 403 and resp["error"] == "revoked_or_unpaired"
+        assert calls == []

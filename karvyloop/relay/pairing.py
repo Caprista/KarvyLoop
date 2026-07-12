@@ -29,6 +29,19 @@ STATE_FILE = "relay.json"
 CODE_TTL_S = 15 * 60          # 一次性配对码有效期
 _CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"   # 去易混字符(0O1IL)
 
+# --- 访问 scope(§9.6 slice 2:授权层最粗一档,方法级)---
+SCOPE_FULL = "full"          # 完整访问(自有设备:所有方法 + 主人 token)
+SCOPE_READ = "read"          # 只读(分享给别人看:仅 GET/HEAD/OPTIONS,不能改)
+_VALID_SCOPES = frozenset({SCOPE_FULL, SCOPE_READ})
+# 只读 scope 放行的方法(其余=改动,只读设备一律拒)。
+READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def normalize_scope(scope: str) -> str:
+    """归一 scope(deny-by-default):已知档原样;未知/空/篡改 → `read`(最不信任,别因笔误发全权)。"""
+    s = (scope or "").strip().lower()
+    return s if s in _VALID_SCOPES else SCOPE_READ
+
 
 def _default_dir() -> Path:
     return Path.home() / ".karvyloop"
@@ -99,14 +112,19 @@ class PairingStore:
         return str(rid)
 
     # --- 一次性配对码 ---
-    def new_code(self) -> str:
-        """生成一枚一次性码(XXXX-XXXX),TTL 15 分钟;顺手清理过期码。"""
+    def new_code(self, scope: str = "full") -> str:
+        """生成一枚一次性码(XXXX-XXXX),TTL 15 分钟;顺手清理过期码。
+
+        scope 绑在码上 → 用此码配对的设备继承该 scope(§9.6 slice 2):
+        `full`=完整访问(自有设备默认);`read`=只读(GET/HEAD/OPTIONS,分享给别人看不能改)。
+        未知 scope **deny-by-default 降到 read**(别因笔误就发全权)。
+        """
         raw = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
         code = f"{raw[:4]}-{raw[4:]}"
         state = self._load()
         codes = [c for c in state.get("codes", [])
                  if time.time() - float(c.get("ts", 0)) < CODE_TTL_S]
-        codes.append({"code": code, "ts": time.time()})
+        codes.append({"code": code, "ts": time.time(), "scope": normalize_scope(scope)})
         state["codes"] = codes
         self._save(state)
         return code
@@ -142,16 +160,32 @@ class PairingStore:
         if matched is not None:
             live.remove(matched)                      # 一次性:首用即焚
             state["codes"] = live
-            # 结构化配对记录(§9.6 授权层地基):记谁、什么 scope、何时配对。
-            # 默认 scope="full"=自有设备完整访问(零回归);share 给他人时传收窄的 scope。
+            # 结构化配对记录(§9.6 授权层):记谁、继承码上的 scope、何时配对。
+            # 码默认 scope=full(自有设备完整访问,零回归);分享码 scope=read 则设备只读。
             state.setdefault("paired", []).append(
-                {"pub": pubhex, "label": "", "scope": "full", "granted_at": now})
+                {"pub": pubhex, "label": "",
+                 "scope": normalize_scope(matched.get("scope", "full")), "granted_at": now})
             self._save(state)
             return True
         if len(live) != len(codes):                   # 只是清了过期码
             state["codes"] = live
             self._save(state)
         return False
+
+    def scope_for(self, pubkey_hex: str) -> Optional[str]:
+        """一个 client 公钥的 scope:paired 且未撤销 → scope 字符串;未 paired/已撤销 → **None**。
+
+        **per-request 调用 = 回源在线校验**(§9.6 slice 2/4):撤销后活连接的下一个请求
+        就查不到 → None → 授权层拒。这是"撤销即断"落到活连接上的机制(不必断 WS)。
+        兼容旧裸 hex 记录(视作 full)。
+        """
+        ph = (pubkey_hex or "").lower()
+        if not ph:
+            return None
+        for e in self._load().get("paired", []):
+            if self._paired_pub(e).lower() == ph:
+                return normalize_scope(e.get("scope", SCOPE_FULL)) if isinstance(e, dict) else SCOPE_FULL
+        return None
 
     # --- 已配对设备:列 + 撤销(§9.6 授权层:撤销 = 绝对把控权)---
     def list_paired(self) -> list:
@@ -208,9 +242,10 @@ class PairingStore:
 
 
 def cmd_relay_pair(relay_url: Optional[str] = None,
-                   state_dir: Optional[str] = None) -> int:
-    """`karvyloop relay-pair`:打印 relay 地址 + 房间号 + 公钥指纹 + 一次性配对码。
+                   state_dir: Optional[str] = None, scope: str = "full") -> int:
+    """`karvyloop relay-pair [--scope full|read]`:打印 relay 地址 + 房间号 + 指纹 + 一次性配对码。
 
+    scope=full(默认)= 自有设备完整访问;scope=read = 分享给别人**只读**(GET/HEAD/OPTIONS,看不能改)。
     v1 = 文本配对(把这四样输进会说 relay E2E 协议的客户端);二维码/浏览器端 JS 解密 = P2。
     """
     store = PairingStore(state_dir)
@@ -220,13 +255,16 @@ def cmd_relay_pair(relay_url: Optional[str] = None,
         sys.stderr.write(str(exc) + "\n")
         return 1
     rid = store.rid()
-    code = store.new_code()
+    scope = normalize_scope(scope)
+    code = store.new_code(scope)
     relay = relay_url or "wss://<your-relay-host>/   (self-host: karvyloop relay-serve)"
+    scope_note = "full access (your own device)" if scope == SCOPE_FULL else "READ-ONLY (share to others: view, not modify)"
     print("KarvyLoop messenger relay — pairing info (v1: text pairing; QR/browser = P2)")
     print(f"  Relay:         {relay}")
     print(f"  Room:          {rid}")
     print(f"  Fingerprint:   {e2e.fingerprint(pub)}")
     print(f"  One-time code: {code}   (expires in {CODE_TTL_S // 60} min, single use)")
+    print(f"  Scope:         {scope} — {scope_note}")
     print("  Start console with:  karvyloop console --relay <relay-url>")
     return 0
 
