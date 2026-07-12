@@ -129,6 +129,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_devices.add_argument("--label", type=str, default=None,
                            help="name for THIS device (e.g. \"home Linux\"); reused if omitted")
     p_devices.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
+    # mesh-sync:跟我的另一台设备同步一次认知/任务(经 relay 交换 MeshLog delta,docs/74)。
+    p_msync = sub.add_parser(
+        "mesh-sync",
+        help="sync cognition/tasks once with one of your own devices over the relay "
+             "(exchange shared-log deltas — what you learned there shows up here)")
+    p_msync.add_argument("--relay", type=str, required=True, help="relay url (e.g. wss://relay.example)")
+    p_msync.add_argument("--peer-room", type=str, required=True, help="the peer device's room id (from its relay-pair)")
+    p_msync.add_argument("--fingerprint", type=str, required=True, help="the peer device's key fingerprint (verified, anti-MITM)")
+    p_msync.add_argument("--code", type=str, default=None, help="peer's one-time pairing code (first time only)")
+    p_msync.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
 
     # remote:接入端 —— 从另一台机器跨网访问你家的 console(连 relay /join,E2E 握手,发一个请求)。
     p_remote = sub.add_parser(
@@ -459,6 +469,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "devices":
         from karvyloop.mesh.cli import cmd_devices
         return cmd_devices(label=args.label, state_dir=args.dir)
+
+    if args.cmd == "mesh-sync":
+        from karvyloop.mesh.sync_client import cmd_mesh_sync
+        return cmd_mesh_sync(relay_url=args.relay, peer_room=args.peer_room,
+                             fingerprint=args.fingerprint, code=args.code, state_dir=args.dir)
 
     if args.cmd == "remote":
         from karvyloop.relay.remote import cmd_remote
