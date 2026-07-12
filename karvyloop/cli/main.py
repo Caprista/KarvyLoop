@@ -110,6 +110,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rpair.add_argument("--relay-url", type=str, default=None,
                          help="relay address to print in the pairing info (e.g. wss://relay.example)")
     p_rpair.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
+    # relay-unpair:列已配对设备 / 撤销一个(撤销 = 绝对把控权;撤销后该设备免不了码重连)。
+    p_runpair = sub.add_parser(
+        "relay-unpair",
+        help="list paired devices, or revoke one by fingerprint/pubkey — a revoked device can no "
+             "longer reconnect without a fresh pairing code (you keep absolute control)")
+    p_runpair.add_argument("target", nargs="?", default=None,
+                           help="fingerprint or pubkey-hex to revoke; omit to just list paired devices")
+    p_runpair.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
 
     # 管理面(名词-动词,gh 风格):role / domain / memory / skill / schedule / token。
     # 覆盖既有后端(RoleRegistry / BusinessDomainRegistry / MemoryManager / SkillIndex /
@@ -417,6 +425,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "relay-pair":
         from karvyloop.relay.pairing import cmd_relay_pair
         return cmd_relay_pair(relay_url=args.relay_url, state_dir=args.dir)
+
+    if args.cmd == "relay-unpair":
+        from karvyloop.relay.pairing import cmd_relay_unpair
+        return cmd_relay_unpair(target=args.target, state_dir=args.dir)
 
     # 管理面(role/domain/memory/skill/schedule/token)—— 名词-动词,命中即返回。
     if args.cmd in ("role", "domain", "memory", "skill", "schedule", "token"):

@@ -450,3 +450,82 @@ def test_relay_pair_prints_pairing_info(tmp_path, capsys):
     assert (tmp_path / "relay.json").exists()
     # 私钥绝不出现在输出里
     assert (tmp_path / "relay_key").read_bytes().hex() not in out
+
+
+class TestPairingRevocation:
+    """§9.6 授权层地基:已配对设备可列、可撤销(撤销=绝对把控权;撤后免不了码重连)。"""
+
+    @pytest.fixture(autouse=True)
+    def _need_crypto(self):
+        pytest.importorskip("cryptography")
+
+    def _pair_device(self, store):
+        """走真验证门配一个设备:new_code → pair_mac → verify_and_consume(码即焚+记结构化)。"""
+        from karvyloop.relay import e2e
+        code = store.new_code()
+        cl_priv, cl_pub = e2e.gen_keypair()
+        mac = e2e.pair_mac(code, cl_pub)
+        assert store.verify_and_consume(cl_pub, mac) is True
+        return cl_pub, e2e.fingerprint(cl_pub)
+
+    def test_pairing_records_structured_and_lists(self, tmp_path):
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        pub, fpr = self._pair_device(store)
+        paired = store.list_paired()
+        assert len(paired) == 1
+        assert paired[0]["pub"] == pub.hex() and paired[0]["fingerprint"] == fpr
+        assert paired[0]["scope"] == "full"          # 自有设备默认完整访问(零回归)
+
+    def test_paired_device_reconnects_without_code(self, tmp_path):
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        pub, _ = self._pair_device(store)
+        assert store.verify_and_consume(pub, b"mac-ignored-when-paired") is True
+
+    def test_revoke_by_fingerprint_blocks_reconnect(self, tmp_path):
+        """撤销(按指纹)→ 不再 paired → 无有效码则免码重连失败(回源即断地基)。"""
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        pub, fpr = self._pair_device(store)
+        assert store.revoke(fpr) is True
+        assert store.list_paired() == []
+        assert store.verify_and_consume(pub, b"stale-mac") is False   # 撤后再连被拒
+
+    def test_revoke_by_pubkey_hex(self, tmp_path):
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        pub, _ = self._pair_device(store)
+        assert store.revoke(pub.hex()) is True and store.list_paired() == []
+
+    def test_revoke_nonexistent_returns_false_no_collateral(self, tmp_path):
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        self._pair_device(store)
+        assert store.revoke("deadbeef-not-real") is False
+        assert len(store.list_paired()) == 1                          # 没误删
+
+    def test_backward_compat_bare_hex_paired_entry(self, tmp_path):
+        """旧格式(paired 裸 hex 字符串)→ list_paired 兼容 + 可撤销(升级不破旧盘)。"""
+        from karvyloop.relay import e2e
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        store.identity()                                             # 建目录+密钥
+        _, cl_pub = e2e.gen_keypair()
+        store._save({"rid": "r0", "codes": [], "paired": [cl_pub.hex()]})   # 手工塞旧格式
+        paired = store.list_paired()
+        assert len(paired) == 1 and paired[0]["pub"] == cl_pub.hex()
+        assert paired[0]["scope"] == "full"
+        assert store.revoke(e2e.fingerprint(cl_pub)) is True
+
+    def test_relay_unpair_cli_lists_and_revokes(self, tmp_path, capsys):
+        """CLI relay-unpair 端到端:无参列设备 / 带指纹撤销。"""
+        from karvyloop.cli.main import main
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        _pub, fpr = self._pair_device(store)
+        assert main(["relay-unpair", "--dir", str(tmp_path)]) == 0
+        assert fpr in capsys.readouterr().out
+        assert main(["relay-unpair", fpr, "--dir", str(tmp_path)]) == 0
+        assert "Revoked" in capsys.readouterr().out
+        assert PairingStore(tmp_path).list_paired() == []

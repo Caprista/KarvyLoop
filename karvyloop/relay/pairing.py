@@ -111,16 +111,25 @@ class PairingStore:
         self._save(state)
         return code
 
+    @staticmethod
+    def _paired_pub(entry) -> str:
+        """一条 paired 记录的公钥 hex —— 兼容旧格式(裸 hex 字符串)与新格式(dict)。"""
+        return entry if isinstance(entry, str) else str((entry or {}).get("pub", ""))
+
+    def _paired_pubs(self, state: dict) -> set:
+        """已配对设备的公钥 hex 集合(去掉已撤销的)。撤销 = 从 paired 移除,不留 tombstone。"""
+        return {self._paired_pub(e) for e in state.get("paired", []) if self._paired_pub(e)}
+
     def verify_and_consume(self, client_pub: bytes, mac: bytes) -> bool:
         """HELLO 验证门(交给 e2e.console_accept 当 verify_pair 回调)。
 
-        - client_pub 已配对 → 直接过(免码重连)。
-        - 否则逐枚未过期一次性码重算 HMAC 比对;命中 → **码即焚** + 记设备为已配对。
+        - client_pub 已配对**且未撤销** → 直接过(免码重连)。撤销过的设备不在 paired 里 → 落到码验证。
+        - 否则逐枚未过期一次性码重算 HMAC 比对;命中 → **码即焚** + 记设备为已配对(结构化记录)。
         """
         import hmac as _hmac
         state = self._load()
         pubhex = client_pub.hex()
-        if pubhex in state.get("paired", []):
+        if pubhex in self._paired_pubs(state):
             return True
         now = time.time()
         codes = state.get("codes", [])
@@ -133,13 +142,69 @@ class PairingStore:
         if matched is not None:
             live.remove(matched)                      # 一次性:首用即焚
             state["codes"] = live
-            state.setdefault("paired", []).append(pubhex)
+            # 结构化配对记录(§9.6 授权层地基):记谁、什么 scope、何时配对。
+            # 默认 scope="full"=自有设备完整访问(零回归);share 给他人时传收窄的 scope。
+            state.setdefault("paired", []).append(
+                {"pub": pubhex, "label": "", "scope": "full", "granted_at": now})
             self._save(state)
             return True
         if len(live) != len(codes):                   # 只是清了过期码
             state["codes"] = live
             self._save(state)
         return False
+
+    # --- 已配对设备:列 + 撤销(§9.6 授权层:撤销 = 绝对把控权)---
+    def list_paired(self) -> list:
+        """列已配对设备(结构化记录 [{pub, fingerprint, label, scope, granted_at}])。
+
+        兼容旧裸 hex 记录(视作 label="" scope="full")。fingerprint 现算,便于用户按指纹撤销。
+        """
+        state = self._load()
+        out = []
+        for e in state.get("paired", []):
+            pubhex = self._paired_pub(e)
+            if not pubhex:
+                continue
+            rec = {"pub": pubhex, "label": "", "scope": "full", "granted_at": 0.0}
+            if isinstance(e, dict):
+                rec.update({k: e[k] for k in ("label", "scope", "granted_at") if k in e})
+            try:
+                rec["fingerprint"] = e2e.fingerprint(bytes.fromhex(pubhex))
+            except Exception:
+                rec["fingerprint"] = ""
+            out.append(rec)
+        return out
+
+    def revoke(self, ident: str) -> bool:
+        """撤销一个已配对设备(按公钥 hex **或** 指纹匹配)→ 它再也免不了码重连(回源即断的地基)。
+
+        撤销即从 paired 移除(不留 tombstone;要恢复得重新配对)。返回是否真撤了一个。
+        **注**:本层堵的是"撤销后**重连**";已在的活连接由 relay/client 断连另行处理(关机即断窗口)。
+        """
+        ident = (ident or "").strip().lower()
+        if not ident:
+            return False
+        state = self._load()
+        paired = state.get("paired", [])
+        kept = []
+        removed = False
+        for e in paired:
+            pubhex = self._paired_pub(e).lower()
+            if not pubhex:
+                continue
+            fpr = ""
+            try:
+                fpr = e2e.fingerprint(bytes.fromhex(pubhex)).lower()
+            except Exception:
+                pass
+            if pubhex == ident or (fpr and fpr == ident):
+                removed = True
+                continue                              # 丢弃 = 撤销
+            kept.append(e)
+        if removed:
+            state["paired"] = kept
+            self._save(state)
+        return removed
 
 
 def cmd_relay_pair(relay_url: Optional[str] = None,
@@ -166,4 +231,30 @@ def cmd_relay_pair(relay_url: Optional[str] = None,
     return 0
 
 
-__all__ = ["PairingStore", "cmd_relay_pair", "CODE_TTL_S"]
+def cmd_relay_unpair(target: Optional[str] = None,
+                     state_dir: Optional[str] = None) -> int:
+    """`karvyloop relay-unpair [target]`:列已配对设备,或按指纹/公钥撤销一个。
+
+    撤销 = 从 paired 移除 → 该设备再也免不了码重连(回源即断的地基;活连接的断连另行处理)。
+    """
+    store = PairingStore(state_dir)
+    paired = store.list_paired()
+    if not target:
+        if not paired:
+            print("No paired devices.")
+            return 0
+        print(f"Paired devices ({len(paired)}):")
+        for r in paired:
+            scope = r.get("scope", "full")
+            label = (" · " + r["label"]) if r.get("label") else ""
+            print(f"  {r.get('fingerprint', '?')}  [scope={scope}]{label}")
+        print("\nRevoke one with:  karvyloop relay-unpair <fingerprint>")
+        return 0
+    if store.revoke(target):
+        print(f"Revoked: {target} — it can no longer reconnect without a fresh pairing code.")
+        return 0
+    print(f"No paired device matched: {target}  (list with: karvyloop relay-unpair)")
+    return 1
+
+
+__all__ = ["PairingStore", "cmd_relay_pair", "cmd_relay_unpair", "CODE_TTL_S"]
