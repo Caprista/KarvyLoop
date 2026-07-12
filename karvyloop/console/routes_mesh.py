@@ -66,12 +66,22 @@ def api_mesh_sync(req: MeshSyncRequest, request: Request) -> dict[str, Any]:
             incoming.append(MeshEvent.from_dict(e))
         except Exception:                            # noqa: BLE001 — 坏事件跳过,不阻塞
             continue
+    fresh = [e for e in incoming if not log.contains(e.event_id)]   # merge 前定格"哪些是新来的"
     added = log.merge(incoming, wall=int(time.time() * 1000))
     store = getattr(request.app.state, "mesh_log_store", None)
     if store is not None and added:
         try:
             store.persist_new(log)
         except Exception:                            # noqa: BLE001 — 持久化失败不阻断同步
+            pass
+    # 真认知落地(docs/74 slice2):新来的 belief 事件幂等回放进本地认知库(store 保主真相,
+    # 经现有写咽喉 mem.write;同 content 已在库跳过,绝不复活/覆盖本地态)。未接 memory → 跳过。
+    mem = getattr(request.app.state, "memory", None)
+    if mem is not None and fresh:
+        try:
+            from karvyloop.mesh.cognition_bridge import apply_belief_events
+            apply_belief_events(mem, fresh)
+        except Exception:                            # noqa: BLE001 — 回放失败不阻断同步本身
             pass
     their_fr = {}
     for d, v in (req.frontier or {}).items():

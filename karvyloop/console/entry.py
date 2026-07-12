@@ -564,6 +564,21 @@ def cmd_console(args: argparse.Namespace) -> int:
             store=BeliefStore(_Path.home() / ".karvyloop" / "beliefs.json"),
             concept_cache=app.state.concept_cache,
         )
+        # mesh 认知同步(docs/74 slice2,outbox 式):写咽喉挂发事件钩子 + 启动对账
+        # (把日志里还不在库的 belief 补回放——覆盖 CLI 离线 mesh-sync 合并的缝)。
+        # 失败不挡 console(mesh 是增益不是地基);未跑过 relay-pair 的设备 device_id 退 "local"。
+        try:
+            from karvyloop.mesh.cognition_bridge import attach_memory_emitter, replay_log_into_memory
+            from karvyloop.mesh.fingerprint import device_fingerprint
+            from karvyloop.mesh.store import MeshLogStore
+            _mstore = MeshLogStore(None)
+            _mlog = _mstore.open_log(device_fingerprint(None).get("device_id") or "local")
+            app.state.mesh_log = _mlog
+            app.state.mesh_log_store = _mstore
+            attach_memory_emitter(app.state.memory, _mlog, _mstore)
+            replay_log_into_memory(app.state.memory, _mlog)
+        except Exception as _me:  # noqa: BLE001
+            logger.warning(f"[karvyloop console] mesh 认知同步接线失败(console 照常起): {_me}")
         conv_mgr = ConversationManager(
             conv_store, trace_index=pump_trace_index, domain_registry=domain_registry,
         )

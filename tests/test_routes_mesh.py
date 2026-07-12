@@ -67,3 +67,23 @@ def test_endpoint_driven_bidirectional_convergence(tmp_path):
     b_ids = {e.event_id for e in b.entries()}
     assert a_ids == b_ids, f"端点同步后未收敛: {a_ids} vs {b_ids}"
     assert len(a_ids) == 2                                       # A 的记忆 + B 的技能,两边都有
+
+
+def test_sync_endpoint_applies_remote_belief_into_memory(tmp_path):
+    """接线点③(影响评估):sync 端点收到远端 belief 事件 → 幂等回放进 app.state.memory
+    (store 保主真相,经现有写咽喉)→ 本设备立刻可召回"A 学的"。"""
+    from karvyloop.cognition.memory import MemoryManager
+    from karvyloop.mesh.cognition_bridge import K_BELIEF
+
+    app = _app(tmp_path)
+    app.state.memory = MemoryManager()
+    ev = MeshEvent(device_id="dev-b", hlc=HLC(1000, 0), kind=K_BELIEF, payload={
+        "content": "B 设备学到的偏好", "provenance": {"source": "t", "origin_device": "dev-b"},
+        "freshness_ts": 1.0, "scope": "personal", "invalid_at": None, "invalid_reason": ""})
+    client = TestClient(app)
+    r = client.post("/api/mesh/sync", json={"frontier": {}, "events": [ev.to_dict()]}).json()
+    assert r["merged"] == 1
+    assert app.state.memory._index.get("B 设备学到的偏好") is not None, "远端认知没落进记忆库"
+    # 再同步同一条 → 日志去重 + 库幂等,不重复
+    r2 = client.post("/api/mesh/sync", json={"frontier": {}, "events": [ev.to_dict()]}).json()
+    assert r2["merged"] == 0

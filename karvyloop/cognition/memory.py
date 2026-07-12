@@ -70,6 +70,10 @@ class MemoryManager:
         # 接了 → recall_block 的种子多一层"语义标签重叠"(同义改写能召回)、
         # supersede 候选筛选带标签;没接/老库无标签 → 纯词面,行为不回归。
         self.concept_cache = concept_cache
+        # mesh 同步(docs/74):写入钩子(outbox 式)—— 本地写成功后发一条 MeshLog 事件,
+        # "A 学的 B 拿到"。None = 未接 mesh(默认,零回归);由 mesh.cognition_bridge 挂。
+        # 钩子异常绝不打断写入(同步是锦上添花,写入是地基)。
+        self.on_write = None
         if store is not None and concept_cache is None:
             # P0③ 断接可见性:持久化形态(store 接了 = 生产样)却没接概念标签缓存 →
             # 语义标签层整体缺席:新条永无标签、同义改写召回退化纯词面、daily 回填
@@ -358,7 +362,13 @@ class MemoryManager:
         # _persist 不自锁 → 这里持锁安全(不重入)。
         with self._lock:
             self._index.put(belief, pinned=pinned)
-            return self._persist(op="write")
+            ok = self._persist(op="write")
+            if self.on_write is not None:
+                try:
+                    self.on_write(belief)   # mesh outbox(docs/74):发同步事件;失败绝不打断写入
+                except Exception:  # noqa: BLE001
+                    logger.warning("[memory] mesh on_write 钩子失败(同步事件没发出,写入本身成功)")
+            return ok
 
     def recall_block(self, query: str, *, scope: str = "personal", limit: int = 8,
                      domain: str = "", include_invalid: bool = False,

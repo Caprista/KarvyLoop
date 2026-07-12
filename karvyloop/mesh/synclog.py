@@ -132,6 +132,10 @@ class MeshLog:
             added += 1
         return added
 
+    def contains(self, event_id: str) -> bool:
+        """这条事件在不在本日志(消费侧判"哪些是新来的"用,别摸私有 _events)。"""
+        return (event_id or "") in self._events
+
     def entries(self) -> List[MeshEvent]:
         return sorted(self._events.values(), key=_order_key)
 
