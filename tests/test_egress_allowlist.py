@@ -32,7 +32,6 @@ from karvyloop.platform.linux.egress_proxy import (
     AllowlistProxy,
     domain_egress_enforceable,
     host_allowed,
-    usernet_backend,
 )
 
 pytestmark = pytest.mark.security   # 安全套件:按域名 egress allowlist / fail-closed 降级
@@ -186,13 +185,39 @@ def test_proxy_socks5_ip_literal_denied(origin_server):
         assert rep[1] == 0x02, rep
 
 
-def test_linux_domain_egress_enforceable_reflects_backend():
-    """域名级可强制性探针 = 是否有免 root 用户态网络栈(pasta/slirp4netns)。
+def test_domain_egress_enforceable_requires_both_backend_and_rootless_netns(monkeypatch):
+    """域名级可强制性 = **两个硬前置都满足**:用户态网络栈 + 免 root 真能建 netns。
 
-    注意:这只是 P1 netns 装配的**前置探针**,不代表现在就在做域名级强制
-    (现阶段 bubblewrap 对 allowlist 非空恒 fail-closed,见下一测试)。
+    只探"pasta/slirp4netns 在不在 PATH"会 false-green —— 现代发行版禁非特权 userns 时,
+    装了网络栈也建不出隔离 netns。回归锁:仅 backend 存在**不够**,userns 建不出 → False。
     """
-    assert domain_egress_enforceable() is (usernet_backend() is not None)
+    import karvyloop.platform.linux.egress_proxy as ep
+
+    # (a) 用户态网络栈缺 → 不可强制(不管 netns 能不能建)
+    monkeypatch.setattr(ep, "usernet_backend", lambda: None)
+    monkeypatch.setattr(ep, "_rootless_netns_works", lambda: True)
+    ep._ENFORCEABLE_CACHE = None
+    assert ep.domain_egress_enforceable() is False
+
+    # (b) 有网络栈但**免 root 建不出 netns**(userns 被禁)→ 仍不可强制(杀 false-green)
+    monkeypatch.setattr(ep, "usernet_backend", lambda: "slirp4netns")
+    monkeypatch.setattr(ep, "_rootless_netns_works", lambda: False)
+    ep._ENFORCEABLE_CACHE = None
+    assert ep.domain_egress_enforceable() is False
+
+    # (c) 两者皆备 → 可强制
+    monkeypatch.setattr(ep, "_rootless_netns_works", lambda: True)
+    ep._ENFORCEABLE_CACHE = None
+    assert ep.domain_egress_enforceable() is True
+
+    ep._ENFORCEABLE_CACHE = None    # 复原缓存,不污染同套件后续用例
+
+
+def test_rootless_netns_probe_is_failsafe_without_unshare(monkeypatch):
+    """`unshare` 不在 PATH(证不出)→ _rootless_netns_works False(fail-safe,不假声称可强制)。"""
+    import karvyloop.platform.linux.egress_proxy as ep
+    monkeypatch.setattr(ep.shutil, "which", lambda name: None)
+    assert ep._rootless_netns_works() is False
 
 
 def test_linux_bwrap_allowlist_is_fail_closed(monkeypatch):

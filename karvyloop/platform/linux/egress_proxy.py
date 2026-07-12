@@ -16,8 +16,11 @@ allowlist 里的域名、其余拒。这需要**域名级**强制,而二元 netn
 **诚实边界(硬要求,安全是地基,宁 fail-closed 不假安全)**:
   - 部件(2)未真机验证前,bubblewrap 对"allowlist 非空"**一律 fail-closed 拒网**;
     **绝不**退回"仅 *_PROXY env"(HTTP_PROXY 可被子进程无视 = 假放行,违背地基纪律)。
-  - domain_egress_enforceable() 只表达"本机有无免 root 用户态网络栈"(部件(2)的前置探测),
-    是给 P1 装配用的探针;**不**代表"现在就在做域名级强制"(现在恒 fail-closed)。
+  - domain_egress_enforceable() 表达"本机能否**真焊出**免 root 域名级强制",两个硬前置都验:
+    (a)有免 root 用户态网络栈(pasta/slirp4netns);(b)**免 root 能真建 user+net 命名空间**
+    ——现代发行版(如 Ubuntu 24.04)常把非特权 userns 禁掉(AppArmor),禁了则装了(a)也建不出
+    隔离 netns。只探(a)会 false-green,故(b)真跑一次 `unshare --user --net` 探。是给 P1 装配
+    用的探针;**不**代表"现在就在做域名级强制"(现在恒 fail-closed)。
   - 代理(部件(1))**默认拒**:未在 allowlist 的 host、格式坏的请求、IP 字面量 → 一律拒。
 
 代理协议:同时支持 **HTTP CONNECT**(https 隧道 / 通用 TCP)与 **SOCKS5**(no-auth,
@@ -31,6 +34,7 @@ from __future__ import annotations
 import shutil
 import socket
 import struct
+import subprocess
 import threading
 from typing import Optional
 
@@ -294,12 +298,49 @@ def usernet_backend() -> Optional[str]:
     return None
 
 
-def domain_egress_enforceable() -> bool:
-    """本机 Linux 能否焊出**域名级**egress 强制(需一个免 root 用户态网络栈)。
+#: domain_egress_enforceable 结果缓存(None=未探;探要 spawn 一次 unshare,别每次重跑)。
+#: 测试可置回 None 重探(见 tests/test_egress_allowlist.py)。
+_ENFORCEABLE_CACHE: Optional[bool] = None
 
+
+def _rootless_netns_works() -> bool:
+    """真探:能否**免 root** 建一个 user+net 命名空间(域名级强制装配的硬前置)。
+
+    只看 pasta/slirp4netns 在不在 PATH **不够** —— 现代发行版(如 Ubuntu 24.04)常把非特权
+    user namespace 禁掉(AppArmor `kernel.apparmor_restrict_unprivileged_userns` / sysctl
+    `kernel.unprivileged_userns_clone=0`),此时装了用户态网络栈也建不出隔离 netns(uid_map
+    permission denied)。这里**真跑一次** `unshare --user --map-root-user --net -- true`:
+    退 0 = 免 root netns 可建。无 unshare / 探不通 / 超时 → False
+    (fail-safe:证不出就**不**声称可强制,不留 false-green)。
+    """
+    unshare = shutil.which("unshare")
+    if not unshare:
+        return False
+    try:
+        r = subprocess.run(
+            [unshare, "--user", "--map-root-user", "--net", "--", "true"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=5,
+        )
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def domain_egress_enforceable() -> bool:
+    """本机 Linux 能否**真焊出**免 root 域名级 egress 强制。两个硬前置都要满足:
+
+      (1) 有免 root 用户态网络栈(pasta/slirp4netns)—— 把隔离 netns 出站转出;
+      (2) 免 root 能真建 user+net 命名空间(`_rootless_netns_works`)—— 禁了非特权 userns
+          则即便有(1)也建不出隔离 netns,装了 slirp4netns 也白搭。
+
+    仅探(1)会 false-green(旧实现的坑)。结果缓存(探一次 spawn 一次 unshare)。
     False → 调用方对"非空 allowlist"必须 fail-closed 拒网(不假放行)。
     """
-    return usernet_backend() is not None
+    global _ENFORCEABLE_CACHE
+    if _ENFORCEABLE_CACHE is None:
+        _ENFORCEABLE_CACHE = usernet_backend() is not None and _rootless_netns_works()
+    return _ENFORCEABLE_CACHE
 
 
 __all__ = [
