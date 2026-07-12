@@ -1579,6 +1579,7 @@
         else if (p === "domains") openDomainsPanel();
         else if (p === "agents") window.KarvyAgentsPanel.open({ refreshPeers });
         else if (p === "external") openExternalPanel();
+        else if (p === "devices") window.KarvyDevicesPanel.open();
         else if (p === "memory") window.KarvyMemoryPanel.open();
         else if (p === "decision_prefs") window.KarvyDecisionPrefs.open();
         else if (p === "skills") window.KarvySkillsPanel.open();

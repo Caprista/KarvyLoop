@@ -90,6 +90,23 @@ def test_i18n_en_zh_key_parity():
     assert not missing_en, f"en 缺 key(zh 孤儿): {missing_en}"
 
 
+# ---- AC8: 面板 bundle 用到的 i18n 键必须双表齐(2026-07-12 对抗验收补盲区)----
+# parity(AC5)对"en/zh 两边都缺"是盲的:bundle 调 t("x") 而两表都没 x → 运行时裸显键名。
+# 这里从每个构建产物里抽 t("…") 字面键,断言 en+zh 都有。动态拼接键(t("a." + s))天然不匹配,不误伤。
+def test_panel_bundles_i18n_keys_exist():
+    js = _read("i18n.js")
+    both = _extract_block(js, "en") & _extract_block(js, "zh")
+    missing: dict[str, set[str]] = {}
+    for p in sorted(STATIC.glob("*.js")):
+        if p.name in ("i18n.js",):
+            continue
+        used = set(re.findall(r'\bt\(\s*"([^"]+)"\s*[,)]', p.read_text(encoding="utf-8")))
+        gap = {k for k in used if "." in k} - both
+        if gap:
+            missing[p.name] = gap
+    assert not missing, f"bundle 用了双表都没有的 i18n 键(运行时裸显键名): {missing}"
+
+
 # ---- AC6: 迁移锁(旧硬编码不再留 app.js)----
 @pytest.mark.parametrize("old", [
     "暂无 domain", "暂无结晶技能", "已结晶", "快脑命中", "慢脑输出",

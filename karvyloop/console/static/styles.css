@@ -2734,3 +2734,11 @@ body.desk-view #mgmt-modal .modal:has(.modal-body.kchat-mode) { height: calc(100
 }
 .kchat-sess:hover .kchat-sess-x { display: inline-block; }
 .kchat-sess .kchat-sess-x:hover { background: #f7e3e6; color: var(--rose, #b8577b); }
+
+
+/* 🖥️ 我的设备面板(devices_panel):能力 chips —— feasibility 输入的用户可见形态 */
+.dev-caps { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.dev-cap {
+  font-size: 11px; color: var(--text); padding: 2px 8px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 9px; line-height: 1.5;
+}

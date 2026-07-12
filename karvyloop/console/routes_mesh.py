@@ -101,4 +101,52 @@ def api_mesh_sync(req: MeshSyncRequest, request: Request) -> dict[str, Any]:
     return {"merged": added, "events": out, "frontier": _frontier_dict(log)}
 
 
+# ---------------------------------------------------------------------------
+# 设备花名册(用户可见面 —— cli.cmd_devices 的 console 半身,同语义)
+# ---------------------------------------------------------------------------
+
+@router.get("/mesh/devices")
+def api_mesh_devices(request: Request) -> dict[str, Any]:
+    """我的设备 mesh:本机自注册(刷新 last_seen)+ 列花名册(能力指纹/在线态/本机标记)。"""
+    from karvyloop.mesh.fingerprint import device_fingerprint
+    from karvyloop.mesh.registry import DeviceRegistry
+    sd = _mesh_state_dir(request.app)
+    reg = DeviceRegistry(sd)
+    fp = device_fingerprint(sd)
+    reg.register_self(fp)                            # 无 relay 身份 → None,不入册(可诚实提示)
+    devs = sorted(reg.list_all(), key=lambda d: (not d.is_self, d.label, d.device_id))
+    out = []
+    for d in devs:
+        rec = d.to_dict()
+        rec["online"] = d.online()
+        out.append(rec)
+    return {"devices": out, "self_id": str(fp.get("device_id") or ""),
+            "has_identity": bool(fp.get("device_id"))}
+
+
+class MeshDeviceRemoveRequest(BaseModel):
+    device_id: str = ""
+    confirm: bool = Field(default=False, description="收窄/删本机时须显式二次确认")
+
+
+@router.post("/mesh/devices/remove")
+def api_mesh_device_remove(req: MeshDeviceRemoveRequest, request: Request) -> dict[str, Any]:
+    """知情删除(docs/74 §6.2,与 cli.cmd_devices_remove 同语义):删前算**能力增量**——
+    该设备独占的能力(其它设备都没有)非空 = 能力边界收窄,或删的是本机 → 必须 confirm=true
+    再动手;否则先回 requires_confirm + 会永久失去什么,让人知情后拍板(H2A)。"""
+    from karvyloop.mesh.registry import DeviceRegistry
+    from karvyloop.mesh.schedule import capability_delta_on_remove
+    reg = DeviceRegistry(_mesh_state_dir(request.app))
+    devs = reg.list_all()
+    dev = next((d for d in devs if d.device_id == (req.device_id or "")), None)
+    if dev is None:
+        return {"ok": False, "reason": "not_found"}
+    lost = sorted(capability_delta_on_remove(dev, devs))
+    if (lost or dev.is_self) and not req.confirm:
+        return {"ok": False, "requires_confirm": True, "narrowed": lost,
+                "is_self": dev.is_self, "label": dev.label or dev.device_id}
+    reg.remove(dev.device_id)
+    return {"ok": True, "removed": True, "narrowed": lost, "is_self": dev.is_self}
+
+
 __all__ = ["router"]

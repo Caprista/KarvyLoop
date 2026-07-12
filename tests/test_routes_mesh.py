@@ -69,6 +69,67 @@ def test_endpoint_driven_bidirectional_convergence(tmp_path):
     assert len(a_ids) == 2                                       # A 的记忆 + B 的技能,两边都有
 
 
+def _seed_devices(tmp_path):
+    """种两台设备:PC(coding+shell)在线 / Phone(camera 独占)离线。"""
+    import time
+    from karvyloop.mesh.registry import DeviceRecord, DeviceRegistry
+    reg = DeviceRegistry(tmp_path)
+    reg.register(DeviceRecord(device_id="pc-1", label="PC", capabilities=["coding", "shell"],
+                              last_seen=time.time()))
+    reg.register(DeviceRecord(device_id="ph-1", label="Phone", capabilities=["camera"]))
+    return reg
+
+
+def test_devices_endpoint_lists_roster_with_presence(tmp_path):
+    """花名册端点:列设备 + 在线态(last_seen 新鲜度);无 relay 身份 → has_identity=False 诚实提示。"""
+    _seed_devices(tmp_path)
+    body = TestClient(_app(tmp_path)).get("/api/mesh/devices").json()
+    assert body["has_identity"] is False            # tmp 目录无 relay 身份 → 本机不入册,不假装
+    by_id = {d["device_id"]: d for d in body["devices"]}
+    assert by_id["pc-1"]["online"] is True and by_id["ph-1"]["online"] is False
+    assert by_id["ph-1"]["capabilities"] == ["camera"]
+
+
+def test_device_remove_narrowing_requires_confirm(tmp_path):
+    """知情删除:camera 只有 Phone 提供 → 不带 confirm 先回"会永久失去 camera",不动手;
+    confirm=true 才真删(docs/74 §6.2 的 H2A)。"""
+    reg = _seed_devices(tmp_path)
+    client = TestClient(_app(tmp_path))
+    r = client.post("/api/mesh/devices/remove", json={"device_id": "ph-1"}).json()
+    assert r["requires_confirm"] is True and r["narrowed"] == ["camera"]
+    assert any(d.device_id == "ph-1" for d in reg.list_all())      # 没确认 → 还在
+    r2 = client.post("/api/mesh/devices/remove", json={"device_id": "ph-1", "confirm": True}).json()
+    assert r2["ok"] is True and r2["narrowed"] == ["camera"]
+    assert not any(d.device_id == "ph-1" for d in reg.list_all())  # 确认 → 删了
+
+
+def test_device_remove_covered_is_direct(tmp_path):
+    """能力被覆盖(第二台 PC 的 coding/shell 是子集)→ 只降资源不降能力 → 无需确认直接删。"""
+    import time
+    from karvyloop.mesh.registry import DeviceRecord
+    reg = _seed_devices(tmp_path)
+    reg.register(DeviceRecord(device_id="pc-2", label="Laptop", capabilities=["coding"],
+                              last_seen=time.time()))
+    r = TestClient(_app(tmp_path)).post("/api/mesh/devices/remove",
+                                        json={"device_id": "pc-2"}).json()
+    assert r["ok"] is True and r["narrowed"] == []
+    assert not any(d.device_id == "pc-2" for d in reg.list_all())
+
+
+def test_devices_endpoint_survives_corrupt_state_file(tmp_path):
+    """devices.json 内层坏形态 → 花名册端点宁空勿 500(对抗验收回归锁)。"""
+    (tmp_path / "devices.json").write_text('{"devices": []}', encoding="utf-8")
+    r = TestClient(_app(tmp_path)).get("/api/mesh/devices")
+    assert r.status_code == 200 and r.json()["devices"] == []
+
+
+def test_device_remove_unknown_is_not_found(tmp_path):
+    _seed_devices(tmp_path)
+    r = TestClient(_app(tmp_path)).post("/api/mesh/devices/remove",
+                                        json={"device_id": "nope"}).json()
+    assert r["ok"] is False and r["reason"] == "not_found"
+
+
 def test_sync_endpoint_applies_remote_belief_into_memory(tmp_path):
     """接线点③(影响评估):sync 端点收到远端 belief 事件 → 幂等回放进 app.state.memory
     (store 保主真相,经现有写咽喉)→ 本设备立刻可召回"A 学的"。"""

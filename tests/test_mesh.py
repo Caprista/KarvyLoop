@@ -144,3 +144,35 @@ def test_remove_unknown_and_ambiguous(tmp_path, capsys):
     assert main(["devices", "--remove", "aaaa", "--dir", str(tmp_path)]) == 1   # 歧义前缀
     assert "Ambiguous" in capsys.readouterr().out
     assert len(DeviceRegistry(tmp_path).list_all()) == 2                        # 都没误删
+
+
+# ---- 对抗验收回归锁(2026-07-12):register_self 合并语义 + 坏形态宁空勿崩 ----
+
+def test_register_self_merge_preserves_label_relay_room(tmp_path):
+    """刷新登记(指纹不带 label/relay/room)绝不抹掉用户起的名和配对信息 —— 
+    对抗验收抓的真伤:开一次设备面板就清空 label/relay_url/room。"""
+    reg = DeviceRegistry(tmp_path)
+    reg.register_self({"device_id": "self-1", "label": "my-desk-pc", "os": "linux"},
+                      relay_url="wss://my.relay", room="room-42")
+    # 再登记:无 label/relay/room(GET 花名册 / devices 不带 --label 的真实形态)
+    reg.register_self({"device_id": "self-1", "os": "linux"})
+    d = reg.get("self-1")
+    assert d.label == "my-desk-pc" and d.relay_url == "wss://my.relay" and d.room == "room-42"
+    # 显式给新值 → 覆盖(改名仍可用)
+    reg.register_self({"device_id": "self-1", "label": "renamed"}, room="room-9")
+    d2 = reg.get("self-1")
+    assert d2.label == "renamed" and d2.room == "room-9" and d2.relay_url == "wss://my.relay"
+
+
+def test_registry_corrupt_inner_shapes_never_raise(tmp_path):
+    """devices.json 内层坏形态(devices=list / 单条=str / last_seen=非数)→ 宁空勿 500。"""
+    reg = DeviceRegistry(tmp_path)
+    p = tmp_path / "devices.json"
+    p.write_text('{"devices": []}', encoding="utf-8")
+    assert reg.list_all() == []                                   # 内层非 dict → 空册
+    p.write_text('{"devices": {"a": "junk"}}', encoding="utf-8")
+    assert reg.list_all()[0].device_id == ""                      # 单条坏 → 安全默认,不炸
+    assert reg.mark_seen("a") is False                            # 坏单条不动手
+    p.write_text('{"devices": {"a": {"device_id": "a", "last_seen": "yesterday"}}}',
+                 encoding="utf-8")
+    assert reg.list_all()[0].last_seen == 0.0                     # 非数 last_seen → 0

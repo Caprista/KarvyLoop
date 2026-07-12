@@ -328,6 +328,9 @@ async function render(body: HTMLElement): Promise<void> {
   _stopPoll();   // 回列表视图必停任何进行中的认领轮询(防泄漏定时器)
   body.innerHTML = "";
   body.appendChild(el("div", { class: "mgmt-hint", text: t("external.intro") }));
+  // 诚实标注(Q3):当前外部子进程网络是二元(全通/全断),域名级白名单尚未真机接线。
+  // 别让用户以为设了 allowlist 就按域名收窄了 —— 源码里的诚实要冒泡到用户面。
+  body.appendChild(el("div", { class: "mgmt-hint ext-net-note", text: t("external.net_mode_note") }));
   // ＋添加外部 runtime:认领码配对握手(反向接入)。点它 → 建壳发码 → 弹复制指令 + 等待接入。
   const addBtn = el("button", { class: "mgmt-add-btn ext-add-btn", text: t("external.add_btn") });
   addBtn.addEventListener("click", () => { _startAddFlow(body); });
