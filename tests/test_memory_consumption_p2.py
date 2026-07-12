@@ -136,3 +136,92 @@ def test_recall_without_as_of_is_current():
     assert r["as_of"] is None
     assert "当前事实" in r["block"]
     assert "过时事实" not in r["block"]
+
+
+# ---- 记忆主权三件套(2026-07-12 Hardy:账本不翻到人眼前=不存在):pin / 编辑=账本式取代 ----
+
+def test_pin_toggle_reflected_in_listing():
+    mem = MemoryManager()
+    mem.write(_b("我偏好直接沟通", time.time()))
+    c = _client_with(mem)
+    assert c.get("/api/memory").json()["beliefs"][0]["pinned"] is False
+    r = c.post("/api/memory/pin", json={"content": "我偏好直接沟通", "pinned": True}).json()
+    assert r["ok"] is True and r["pinned"] is True
+    assert c.get("/api/memory").json()["beliefs"][0]["pinned"] is True     # 列表带出 pin 态
+    c.post("/api/memory/pin", json={"content": "我偏好直接沟通", "pinned": False})
+    assert c.get("/api/memory").json()["beliefs"][0]["pinned"] is False    # 解锁生效
+
+
+def test_pin_unknown_content_is_not_found():
+    r = _client_with(MemoryManager()).post(
+        "/api/memory/pin", json={"content": "没这条", "pinned": True}).json()
+    assert r["ok"] is False and r["reason"] == "not_found"
+
+
+def test_edit_supersedes_old_into_archaeology_layer():
+    """编辑=取代不是篡改:新条生效(source=user_edit),旧条进考古层且解析出取代者。"""
+    mem = MemoryManager()
+    mem.write(_b("我在旧公司", time.time()))
+    c = _client_with(mem)
+    r = c.post("/api/memory/edit",
+               json={"content": "我在旧公司", "new_content": "我在 A 公司"}).json()
+    assert r["ok"] is True and r["written"] is True
+    live = c.get("/api/memory").json()["beliefs"]
+    assert [b["content"] for b in live] == ["我在 A 公司"]                  # 旧条不在默认列表
+    assert live[0]["source"] == "user_edit"
+    arch = [b for b in c.get("/api/memory?include_invalid=1").json()["beliefs"]
+            if b["content"] == "我在旧公司"]
+    assert arch and arch[0]["invalid_at"] is not None
+    assert arch[0]["superseded_by"] == "我在 A 公司"                        # 考古层"被『…』取代"可解析
+
+
+def test_edit_carries_pin_and_guards():
+    mem = MemoryManager()
+    mem.write(_b("吃素", time.time()))
+    mem.write(_b("喝茶", time.time()))
+    c = _client_with(mem)
+    c.post("/api/memory/pin", json={"content": "吃素", "pinned": True})
+    c.post("/api/memory/edit", json={"content": "吃素", "new_content": "现在吃肉了"})
+    by = {b["content"]: b for b in c.get("/api/memory").json()["beliefs"]}
+    assert by["现在吃肉了"]["pinned"] is True                               # pin 态随内容迁移
+    # 守卫:改成已存在的内容 → 拒(别静默造重复);没这条 → not_found;原样 → no-op
+    assert c.post("/api/memory/edit", json={"content": "现在吃肉了", "new_content": "喝茶"}
+                  ).json()["reason"] == "exists"
+    assert c.post("/api/memory/edit", json={"content": "没这条", "new_content": "x"}
+                  ).json()["reason"] == "not_found"
+    assert c.post("/api/memory/edit", json={"content": "喝茶", "new_content": "喝茶"}
+                  ).json().get("unchanged") is True
+
+def test_edit_of_invalidated_belief_is_rejected():
+    """死条不编辑(对抗验收#2c):防复活矛盾对 + 防覆盖原失效审计痕。"""
+    mem = MemoryManager()
+    mem.write(_b("OldCo", time.time()))
+    c = _client_with(mem)
+    c.post("/api/memory/edit", json={"content": "OldCo", "new_content": "NewCo"})
+    r = c.post("/api/memory/edit", json={"content": "OldCo", "new_content": "GhostCo"}).json()
+    assert r["ok"] is False and r["reason"] == "invalidated"
+    live = [b["content"] for b in c.get("/api/memory").json()["beliefs"]]
+    assert live == ["NewCo"]                                    # 没有 GhostCo 复活矛盾对
+    arch = [b for b in c.get("/api/memory?include_invalid=1").json()["beliefs"]
+            if b["content"] == "OldCo"]
+    assert arch[0]["superseded_by"] == "NewCo"                  # 原审计痕未被覆盖
+
+
+def test_edit_emits_mesh_event_despite_inherited_stamp():
+    """对抗验收#4:生产路径挂 mesh 发射器时,edit 的新条必须真发事件(旧 provenance 的
+    origin_device 戳要剥掉,否则回声抑制误判回放 → 新内容静默不出设备)。"""
+    from karvyloop.mesh.cognition_bridge import K_BELIEF, attach_memory_emitter
+    from karvyloop.mesh.synclog import MeshLog
+
+    mem = MemoryManager()
+    log = MeshLog("dev-a")
+    attach_memory_emitter(mem, log)
+    mem.write(_b("cat likes fish", time.time()))                # 经钩子:已盖 origin_device
+    before = len([e for e in log.entries() if e.kind == K_BELIEF])
+    r = _client_with(mem).post("/api/memory/edit",
+                               json={"content": "cat likes fish",
+                                     "new_content": "cat likes tuna"}).json()
+    assert r["ok"] is True
+    evs = [e for e in log.entries() if e.kind == K_BELIEF]
+    assert len(evs) == before + 1, "编辑的新内容没发 mesh 事件(静默不出设备)"
+    assert evs[-1].payload["content"] == "cat likes tuna"

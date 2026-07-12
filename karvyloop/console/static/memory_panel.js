@@ -1156,13 +1156,54 @@ var KarvyMemoryPanelBundle = (function(exports) {
         searchOf: (b) => (b.title || "") + " " + (b.content || "") + " " + _memKind(b.kind),
         renderItem: (b) => {
           const title = (b.title || "").trim();
+          const actions = el("div", { class: "dpref-actions mem-item-actions" });
+          actions.appendChild(el("button", {
+            class: "dpref-edit mem-pin-btn" + (b.pinned ? " on" : ""),
+            text: b.pinned ? t("mem.unpin") : t("mem.pin"),
+            title: t("mem.pin_title"),
+            onclick: async () => {
+              const res = await _postJSON("/api/memory/pin", { content: b.content, pinned: !b.pinned });
+              if (!(res.ok && res.data && res.data.ok)) {
+                window.alert(t("mem.pin_failed", { reason: res.data && res.data.reason || res.status }));
+                return;
+              }
+              await renderMemoryPanel();
+            }
+          }));
+          actions.appendChild(el("button", {
+            class: "dpref-edit",
+            text: t("mem.edit"),
+            title: t("mem.edit_title"),
+            onclick: async () => {
+              const next = window.prompt(t("mem.edit_prompt"), b.content);
+              if (next == null) return;
+              const trimmed = next.trim();
+              if (!trimmed || trimmed === b.content) return;
+              const res = await _postJSON("/api/memory/edit", { content: b.content, new_content: trimmed });
+              if (!(res.ok && res.data && res.data.ok)) {
+                const reason = res.data && res.data.reason || res.status;
+                window.alert(reason === "exists" ? t("mem.edit_exists") : t("mem.edit_failed", { reason }));
+                return;
+              }
+              await renderMemoryPanel();
+            }
+          }));
+          actions.appendChild(el("button", {
+            class: "mc-del",
+            text: t("mgmt.delete"),
+            onclick: async () => {
+              if (!window.confirm(t("mem.del_confirm", { c: (title || b.content).slice(0, 40) }))) return;
+              await _postJSON("/api/memory/remove", { content: b.content });
+              await renderMemoryPanel();
+            }
+          }));
           return el(
             "div",
             { class: "mgmt-card" },
             el(
               "div",
               { class: "mc-main" },
-              el("div", { class: "mc-name", text: title || b.content }),
+              el("div", { class: "mc-name", text: (b.pinned ? "📌 " : "") + (title || b.content) }),
               title ? el("div", { class: "mc-meta", text: b.content }) : null,
               el(
                 "div",
@@ -1175,15 +1216,7 @@ var KarvyMemoryPanelBundle = (function(exports) {
               )
             ),
             // Q6 读写审计薄版:被召回几次·最近何时
-            el("button", {
-              class: "mc-del",
-              text: t("mgmt.delete"),
-              onclick: async () => {
-                if (!window.confirm(t("mem.del_confirm", { c: (title || b.content).slice(0, 40) }))) return;
-                await _postJSON("/api/memory/remove", { content: b.content });
-                await renderMemoryPanel();
-              }
-            })
+            actions
           );
         }
       }));

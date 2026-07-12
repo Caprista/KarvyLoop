@@ -363,6 +363,7 @@ def api_memory_list(request: Request, include_invalid: int = 0) -> dict[str, Any
         row = {
             "content": b.content, "title": b.provenance.get("title", ""),
             "kind": b.provenance.get("kind", "?"),
+            "pinned": mem.index.is_pinned(b),
             "source": b.provenance.get("source", "?"),
             "source_ref": b.provenance.get("source_ref", ""),   # 列表/详情卡显示真实来源(链接/文件)
             # Q2 出处回链:对话蒸馏产物带产生它的会话 id → 面板"对话沉淀"可点回;老数据降级 ""
@@ -472,6 +473,73 @@ def api_memory_remove(req: MemoryRemoveRequest, request: Request) -> dict[str, A
         return {"ok": False, "reason": "memory 未接"}
     n = mem.remove_by_content({req.content})
     return {"ok": n > 0, "removed": n}
+
+
+class MemoryPinRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+    pinned: bool = True
+
+
+@router.post("/memory/pin")
+def api_memory_pin(req: MemoryPinRequest, request: Request) -> dict[str, Any]:
+    """📌 pin/unpin 一条知识(记忆主权面板)。pin = 防自动整理归档(distill 归档尊重 pin);
+    你亲手锁定的,系统不背着你收走。"""
+    mem = getattr(request.app.state, "memory", None)
+    if mem is None:
+        return {"ok": False, "reason": "memory 未接"}
+    # key 口径:先原串后 strip(库里可能存着带空白的 content;remove 用原串,这里对齐)
+    c = req.content if mem.index.get(req.content) is not None else req.content.strip()
+    if mem.index.get(c) is None:
+        return {"ok": False, "reason": "not_found"}
+    mem.set_pinned(c, req.pinned)
+    return {"ok": True, "pinned": bool(req.pinned)}
+
+
+class MemoryEditRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+    new_content: str = Field(..., min_length=1, max_length=2000)
+
+
+@router.post("/memory/edit")
+def api_memory_edit(req: MemoryEditRequest, request: Request) -> dict[str, Any]:
+    """✏️ 编辑一条知识 = **账本式取代**,不是原地改(失效不删的账本语义):
+
+    新内容作为新 Belief 写入(source=user_edit,经写咽喉 → mesh 同步照走),旧条打
+    invalid_at 进考古层;失效理由对齐 conflict.py 的 superseded 格式 → 考古层自动
+    显示"被『新内容』取代"。pin 态随内容迁移。旧=新 → no-op;新内容已存在 → 拒
+    (别静默造重复,让人先看见那条)。"""
+    mem = getattr(request.app.state, "memory", None)
+    if mem is None:
+        return {"ok": False, "reason": "memory 未接"}
+    old_c = req.content if mem.index.get(req.content) is not None else req.content.strip()
+    new_c = req.new_content.strip()
+    if not new_c or new_c == old_c:
+        return {"ok": True, "unchanged": True}
+    old = mem.index.get(old_c)
+    if old is None:
+        return {"ok": False, "reason": "not_found"}
+    if getattr(old, "invalid_at", None) is not None:
+        # 死条不编辑(对抗验收#2c):否则复活出矛盾对 + 覆盖它原有的失效审计痕。
+        # 要改考古层里的旧事,编辑当前活着的那条;翻案是另一个显式动作,不借编辑走后门。
+        return {"ok": False, "reason": "invalidated"}
+    if mem.index.get(new_c) is not None:
+        return {"ok": False, "reason": "exists"}
+    import time as _time
+    from karvyloop.schemas.cognition import Belief
+    now = _time.time()
+    prov = dict(old.provenance or {})
+    # mesh 戳必须剥掉(对抗验收#4):这是本设备的新写不是远端回放——拷贝旧 provenance 会带上
+    # origin_device,写咽喉的回声抑制误判成回放**跳过发事件**,编辑的新内容就静默不出设备了。
+    # sync_id 同剥("同 content 同 id"不变量由钩子按新内容重算)。
+    prov.pop("origin_device", None)
+    prov.pop("sync_id", None)
+    prov.update({"source": "user_edit", "ts": now})
+    was_pinned = mem.index.is_pinned(old)
+    nb = Belief(content=new_c, provenance=prov, freshness_ts=now, scope=old.scope)
+    written = mem.write(nb, pinned=was_pinned)
+    mem.invalidate(old, reason=f"superseded(user-edit) by newer belief [user_edit]: {new_c}",
+                   now=now)
+    return {"ok": bool(written), "written": bool(written)}
 
 
 class ConsolidateApplyRequest(BaseModel):

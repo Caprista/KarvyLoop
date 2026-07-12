@@ -73,6 +73,14 @@ class MemoryIndex:
         with self._lock:
             return belief.content in self._pinned
 
+    def set_pinned(self, belief: Belief, pinned: bool) -> None:
+        """改一条已有 Belief 的 pin 态(pin=防归档/防自动失效;持久化由 manager 负责)。"""
+        with self._lock:
+            if pinned:
+                self._pinned.add(belief.content)
+            else:
+                self._pinned.discard(belief.content)
+
     def all(self, scope: str) -> list[Belief]:
         with self._lock:
             return [b for b in self._by_id.values() if b.scope == scope]

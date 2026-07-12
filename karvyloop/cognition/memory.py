@@ -160,6 +160,20 @@ class MemoryManager:
             belief.invalid_reason = (reason or "").strip()[:300]
             return self._persist(op="invalidate")
 
+    def set_pinned(self, content: str, pinned: bool) -> bool:
+        """改一条已有 Belief 的 pin 态 + 落盘(记忆主权面板:📌 锁定防归档/防自动失效)。
+
+        按 content 精确找(index 单 key 即 content);找不到 → False(面板报"没这条")。
+        落盘失败语义同 invalidate(内存态已改 + 标脏,flush_usage 自愈)。
+        """
+        with self._lock:
+            # key 口径:先原串后 strip(index 单 key=content 原串;库里可能存过带空白的)
+            b = self._index.get(content) or self._index.get((content or "").strip())
+            if b is None:
+                return False
+            self._index.set_pinned(b, pinned)
+            return self._persist(op="set_pinned")
+
     def flush_usage(self) -> bool:
         """把召回使用信号(last_recalled_ts/recall_count)批量落盘(daily 慢侧调;
         热路径 recall_block 只改内存置脏标,绝不在每次召回写盘)。无脏 → noop True。
