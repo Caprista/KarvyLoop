@@ -121,6 +121,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_runpair.add_argument("target", nargs="?", default=None,
                            help="fingerprint or pubkey-hex to revoke; omit to just list paired devices")
     p_runpair.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
+    # devices:同主人设备 mesh 花名册(docs/74 第一刀)—— 我有哪些设备、各自什么能力、在线态。
+    p_devices = sub.add_parser(
+        "devices",
+        help="list your same-owner device mesh — what devices you have, their capabilities, "
+             "and presence (register this device on run)")
+    p_devices.add_argument("--label", type=str, default=None,
+                           help="name for THIS device (e.g. \"home Linux\"); reused if omitted")
+    p_devices.add_argument("--dir", type=str, default=None, help=argparse.SUPPRESS)  # state dir override(测试注入)
+
     # remote:接入端 —— 从另一台机器跨网访问你家的 console(连 relay /join,E2E 握手,发一个请求)。
     p_remote = sub.add_parser(
         "remote",
@@ -446,6 +455,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "relay-unpair":
         from karvyloop.relay.pairing import cmd_relay_unpair
         return cmd_relay_unpair(target=args.target, state_dir=args.dir)
+
+    if args.cmd == "devices":
+        from karvyloop.mesh.cli import cmd_devices
+        return cmd_devices(label=args.label, state_dir=args.dir)
 
     if args.cmd == "remote":
         from karvyloop.relay.remote import cmd_remote
