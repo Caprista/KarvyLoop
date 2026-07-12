@@ -18,6 +18,7 @@ from karvyloop.mesh.registry import DeviceRecord, DeviceRegistry
 from karvyloop.mesh.schedule import (
     capability_delta_on_remove, feasible, feasible_devices, scheduled_task_at_risk,
 )
+from karvyloop.mesh.store import MeshLogStore
 from karvyloop.mesh.synclog import HLC, MeshEvent, MeshLog
 from karvyloop.mesh.tasks import (
     TaskState, claim_task, claimable_for, complete_task, heartbeat_task,
@@ -28,4 +29,4 @@ __all__ = ["device_fingerprint", "DeviceRecord", "DeviceRegistry",
            "HLC", "MeshEvent", "MeshLog",
            "feasible", "feasible_devices", "capability_delta_on_remove", "scheduled_task_at_risk",
            "TaskState", "offer_task", "claim_task", "heartbeat_task", "complete_task",
-           "materialize_tasks", "claimable_for"]
+           "materialize_tasks", "claimable_for", "MeshLogStore"]
