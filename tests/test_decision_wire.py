@@ -301,3 +301,33 @@ async def test_contradiction_keeps_confirmed_downgraded():
     prefs = _prefs_in(mem)
     assert len(prefs) == 1                                   # confirmed 不删
     assert prefs[0].provenance["strength"] == pytest.approx(0.5)   # 0.8-0.3 降但留
+
+
+# ---- 确定性复现地板(2026-07-12 j3 追根:资格门不全押 LLM explicit 标志) ----
+
+
+@pytest.mark.asyncio
+async def test_implicit_same_reason_batch_promotes_first_batch():
+    """三条同理由拍板 = 三次复现,哪怕 LLM 把 explicit 标成 false(模型抖动)也该当批结晶
+    —— 复现证据用词面重叠从样本里确定性数出来,不靠模型标志。"""
+    mem = MemoryManager()
+    gw = _StubGateway('[{"content":"动生产前必须先备份","kind":"constraint","explicit":false}]')
+    app = _FakeApp(gateway=gw, mem=mem)
+    for i, reason in enumerate(["没备份不许动生产,先备份", "动生产前必须先备份", "先备份再动生产,底线"]):
+        observe_decision(app, DecisionSample(decision="REJECT", context=f"运维提案{i}",
+                                             reason=reason, ts=float(i)))
+    # 补足批量(无关样本,理由与候选零重叠 → 不计入该候选的支持数)
+    for s in _decisions(max(0, DECISION_BATCH - 3)):
+        observe_decision(app, s)
+    written = await maybe_crystallize_decisions(app)
+    assert written == 1, "同批三条同理由复现没结晶(explicit=false 时地板失效)"
+    assert _count_prefs(mem) == 1
+
+
+def test_evidence_support_counts_only_overlapping_gists():
+    from karvyloop.console.decision_wire import _evidence_support
+    ev = [{"gist": "没备份不许动生产,先备份"}, {"gist": "动生产前必须先备份"},
+          {"gist": "输出请用表格"}, {"gist": ""}, "not-a-dict"]
+    assert _evidence_support("动生产前必须先备份", ev) == 2   # 只数词面背书的两条
+    assert _evidence_support("", ev) == 0
+    assert _evidence_support("完全无关的候选主题", ev) == 0

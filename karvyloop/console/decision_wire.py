@@ -242,6 +242,21 @@ async def maybe_crystallize_decisions(app: Any) -> int:
     return written
 
 
+def _evidence_support(content: str, evidence: Optional[list]) -> int:
+    """一条候选被本批多少条样本背书(gist 与候选内容词面重叠 ≥2 命中;共用全仓唯一
+    词面打分 relevance.overlap_score,无向量无 LLM)。≥2 防单 bigram 巧合误伤;
+    overlap 过滤天然做归因 —— 同批混多个话题时,各候选只数自己的支持样本。"""
+    from karvyloop.context.relevance import overlap_score
+    if not content:
+        return 0
+    n = 0
+    for e in (evidence or []):
+        gist = (e.get("gist") or "") if isinstance(e, dict) else ""
+        if gist and overlap_score(content, gist) >= 2:
+            n += 1
+    return n
+
+
 async def crystallize_candidates(app: Any, candidates: list, *, ctx_domain: str = "",
                                  ctx_role: str = "", evidence: Optional[list] = None,
                                  now: Optional[float] = None,
@@ -289,7 +304,12 @@ async def crystallize_candidates(app: Any, candidates: list, *, ctx_domain: str 
         if c.get("explicit"):
             support = 1
         else:
-            recur[key] = recur.get(key, 0) + 1
+            # 确定性复现地板(2026-07-12 j3 追根):"连拍同理由"的复现证据在 LLM 把同批样本
+            # 合并成一条候选时丢了计数,资格门若全押 LLM 的 explicit 标志,模型一抖(标 false)
+            # 楔子进料口就随机断流。补:候选被本批多少条样本词面背书(共用 relevance.overlap_score,
+            # 零 LLM)就计多少次观察 —— 3 条同理由拍板 = 3 次复现,不管它们装在几个批里。
+            within = _evidence_support(c.get("content", ""), evidence)
+            recur[key] = recur.get(key, 0) + max(1, within)
             support = recur[key]
         # P1 LLM 归因:scope=domain 且本批有统一域 → 限定该域/角色;否则全局
         use_domain = ctx_domain if (c.get("scope") == "domain" and ctx_domain) else ""
