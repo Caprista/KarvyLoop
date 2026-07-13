@@ -1102,6 +1102,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     if (_clockTimer) { window.clearInterval(_clockTimer); _clockTimer = 0; }
     const wrap = document.getElementById("desk-focus");
     if (wrap) wrap.remove();
+    document.body.classList.remove("desk-has-pending");   // leave 清痕:C 位切换类一并撤
   }
 
   // ---- 待处理任务项(极简条目,不是完整卡):读现有 #h2a-list / #task-board DOM,轻量列出 ----
@@ -1130,6 +1131,10 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     const box = document.getElementById("desk-pending");
     if (!box) return;
     const items = collectPending();
+    // 工作台 C 位切换(Hardy 2026-07-13):有 ⚖ 卡等拍 → 待拍板当主角、时钟让位(CSS 两态);
+    // 拍完 → 时钟拿回 C 位。类挂 body,与壁纸/视图类同一挂点,leave 清痕一并撤。
+    const _decisions = items.filter((it) => it.icon === "⚖").length;
+    document.body.classList.toggle("desk-has-pending", _decisions > 0);
     box.textContent = "";
     if (!items.length) {
       const empty = document.createElement("div");
@@ -1140,7 +1145,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     }
     const head = document.createElement("div");
     head.className = "desk-pending-head";
-    head.textContent = t("desk.pending_head");
+    head.textContent = t("desk.pending_head") + (_decisions > 1 ? " · " + _decisions : "");
     box.appendChild(head);
     items.slice(0, PENDING_CAP).forEach((it) => {
       const row = document.createElement("button");

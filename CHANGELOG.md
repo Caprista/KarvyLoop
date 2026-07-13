@@ -33,7 +33,28 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   switches crossfade via the native View Transitions API where available. Every animation
   respects `prefers-reduced-motion` via a global kill-switch.
 
+### Added
+- **Scan-to-connect QR for your phone.** The My Devices panel now shows a QR code —
+  scan it on your home Wi-Fi and the decision deck (`/m`) opens on your phone straight
+  away, access token included (token rotates every restart; come back and rescan).
+  The QR endpoint is management-plane local-only: a session coming in over the relay
+  tunnel gets a 403 and never sees the LAN token (a stolen phone can't mint new
+  entrances), locked by a no-leak regression test. QR is generated locally in the
+  bundle — the link never leaves your machine.
+- **The desk gives center stage to your call.** On the desktop view, when decision
+  cards are waiting, "Waiting on you · N" becomes the desk's focal point and the big
+  clock steps aside; decide them all and the clock takes the stage back.
+
 ### Fixed
+- **Pending decision cards no longer vanish from the chat.** A full chat-history
+  re-render (e.g. when boot's state and history fetches raced) rebuilt the log and
+  silently wiped the inline decision cards still waiting for your call — the exact
+  anti-pattern this product exists to kill. Undecided cards are now lifted out before
+  the rebuild and re-attached after.
+- **Icon-button tooltips no longer clip at window edges.** Long tooltip text now wraps
+  (max-width) instead of running as one endless line, and tooltips on the chat
+  toolbar's left-edge buttons anchor to the button's left edge instead of centering
+  past the window boundary.
 - **Structured output silently lost when the model answers through the tool envelope.**
   With constrained decoding on Anthropic-dialect endpoints, the JSON payload arrives as
   forced-tool input — not as text. Five collectors (decision-preference extraction and

@@ -545,10 +545,15 @@ html, body {
 .icon-btn[data-tip] { position: relative; }
 .icon-btn[data-tip]:hover::after {
   content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  white-space: nowrap; padding: 5px 10px; border-radius: var(--r-sm); z-index: 40;
+  /* 长文案换行不拖一条线(nowrap 长句必越界);短文案 max-content 仍一行 */
+  white-space: normal; width: max-content; max-width: min(300px, 72vw); text-align: left; line-height: 1.45;
+  padding: 5px 10px; border-radius: var(--r-sm); z-index: 40;
   background: var(--text-1); color: var(--bg); font-size: var(--fs-12); font-weight: 500;
   box-shadow: var(--shadow-md); pointer-events: none;
 }
+/* 窗口左缘的聊天工具钮:气泡居中会越过窗口左缘被裁(Hardy 实拍「开新对话」半截)→ 锚左 */
+.chat-toolbar .chat-tool-btn[data-tip]:hover::after,
+.chat-toolbar .icon-btn[data-tip]:hover::after { left: 0; transform: none; }
 /* 发送:实心胶囊,清新奶咖 + 轻投影,真正的主操作 */
 .chat-panel-main .chat-send-btn {
   padding: 8px 22px; border-radius: 999px; font-weight: 600;
@@ -2925,6 +2930,10 @@ body.desk-view #mgmt-modal .modal:has(.modal-body.kchat-mode) { height: calc(100
 .dcard-highvalue { border-color: color-mix(in oklab, var(--hv) 58%, var(--border)); box-shadow: var(--shadow-md); }
 .dcard-hv-badge, .dcard-pref-hv .dcard-pref-text { color: var(--hv); }
 .dcard-hv-badge { background: var(--hv-soft); border: 1px solid var(--hv-line); border-radius: 999px; padding: 2px 9px; }
+
+/* 📱 设备面板扫码直达:QR 永远白底(扫码器要对比度,和主题无关) */
+.devices-qr { background: #fff; padding: 10px; border-radius: var(--r-md); width: fit-content; margin: 6px 0; }
+.devices-qr svg { display: block; width: 180px; height: 180px; }
 
 /* 总闸:系统减弱动效 = 一票全关(覆盖本文件全部动画与过渡,含历史遗留) */
 @media (prefers-reduced-motion: reduce) {

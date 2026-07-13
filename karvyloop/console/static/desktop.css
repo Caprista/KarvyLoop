@@ -1010,6 +1010,27 @@ body.desk-view .desk-pending {
 body.desk-view .desk-pending { display: none; }
 /* 聊天窗最小化进 dock = 桌面转待命面板:待办速览回来供扫一眼(此时无聊天窗遮挡,与大时钟干净纵列)。 */
 body.desk-view:has(#chat-modal.desk-min) .desk-pending { display: flex; }
+
+/* ============================================================================
+   工作台 C 位切换(Hardy 2026-07-13 拍):有卡等拍 → 「待你拍板」当主角、大时间让位缩小;
+   拍完(0 张)→ 时钟拿回 C 位。只换主次不加零件;时钟让位只在待办真显示时生效
+   (聊天窗开着时待办本来就藏,时钟保持大 —— 别出现"缩了却没人补位"的空洞)。
+   ========================================================================= */
+body.desk-view.desk-has-pending:has(#chat-modal.desk-min) .desk-clock {
+  font-size: clamp(30px, 3.2vw, 46px);
+  opacity: 0.85;
+}
+body.desk-view.desk-has-pending:has(#chat-modal.desk-min) .desk-pending {
+  max-width: min(680px, 72vw);
+}
+body.desk-view.desk-has-pending:has(#chat-modal.desk-min) .desk-pending-head {
+  font-size: var(--fs-18);
+  font-weight: 700;
+}
+body.desk-view.desk-has-pending:has(#chat-modal.desk-min) .desk-pending-row {
+  font-size: var(--fs-14);
+  padding: 9px 16px;
+}
 body.desk-view .desk-pending-head {
   font-size: var(--fs-12);
   font-weight: 700;

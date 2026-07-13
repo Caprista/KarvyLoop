@@ -2472,6 +2472,11 @@
       return;
     }
     const log = document.getElementById("chat-log");
+    // S3 保卡:整块重建会把"还没拍的 inline 决策卡"冲掉(boot 时 state 快照与历史两个
+    // 请求赛跑,历史后到即吃卡 —— 决策卡静默消失=决策 loop 反模式)。重建前摘下未终态
+    // 的卡,重建后接回尾部;已拍的终态卡不保(历史里有回执,不重复)。
+    const _keepCards = Array.from(
+      log.querySelectorAll(".chat-line[data-proposal-id]:not([data-decided])"));
     // 简单 diff:行数变了就重渲整个 log(500 条 cap,可接受)
     log.innerHTML = "";
     for (const e of lines) {
@@ -2485,6 +2490,7 @@
         log.appendChild(line);
       }
     }
+    _keepCards.forEach((n) => log.appendChild(n));   // 未拍的卡接回(等你拍板的东西绝不静默消失)
     log.scrollTop = log.scrollHeight;
   }
 

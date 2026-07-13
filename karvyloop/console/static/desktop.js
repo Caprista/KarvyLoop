@@ -1192,6 +1192,7 @@
       }
       const wrap = document.getElementById("desk-focus");
       if (wrap) wrap.remove();
+      document.body.classList.remove("desk-has-pending");
     }
     const PENDING_CAP = 4;
     function collectPending() {
@@ -1215,6 +1216,8 @@
       const box = document.getElementById("desk-pending");
       if (!box) return;
       const items = collectPending();
+      const _decisions = items.filter((it) => it.icon === "⚖").length;
+      document.body.classList.toggle("desk-has-pending", _decisions > 0);
       box.textContent = "";
       if (!items.length) {
         const empty = document.createElement("div");
@@ -1225,7 +1228,7 @@
       }
       const head = document.createElement("div");
       head.className = "desk-pending-head";
-      head.textContent = t("desk.pending_head");
+      head.textContent = t("desk.pending_head") + (_decisions > 1 ? " · " + _decisions : "");
       box.appendChild(head);
       items.slice(0, PENDING_CAP).forEach((it) => {
         const row = document.createElement("button");

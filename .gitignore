@@ -38,3 +38,4 @@ karvyloop/console/frontend/scripts/e2e_vectors.json
 # 第三方设计 skill(本地工具,不入公开仓)
 .agents/
 .claude/skills/
+skills-lock.json
