@@ -130,91 +130,48 @@ function _deviceCard(d: DeviceRec, host: HTMLElement): HTMLElement {
   return card;
 }
 
-function _guideBoxes(host: HTMLElement): void {
-  // ➕ 添加一台设备(真实 CLI 命令 —— 与 karvyloop devices/relay-pair/mesh-sync 一字不差)
-  const add = el("div", { class: "ext-onboarding" });
-  add.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.guide.title") }));
-  add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_install") }));
-  add.appendChild(_copyRow("devices.guide.cmd_install_label", "pip install karvyloop && karvyloop console"));
-  add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_label") }));
-  add.appendChild(_copyRow("devices.guide.cmd_label_label", 'karvyloop devices --label "my-desk-pc"'));
-  add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_lan") }));
-  add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_xnet") }));
-  add.appendChild(_copyRow("devices.guide.cmd_sync_label",
-    "karvyloop mesh-sync --relay wss://<relay> --peer-room <room> --fingerprint <fp> --code <one-time-code>"));
-  // ➕ 一次性邀请出码(Hardy:「我也没看到一次性授权秘钥呀」——此前码只活在 CLI 里,
-  // 面板只给占位符模板 = 缺口)。点一下 → /api/pair/issue 签真码 → 给**填好真值**的
-  // 完整命令(15 分钟过期、首用即焚;再点 = 新签一枚)。管理动作:经隧道 403(端点侧锁)。
-  const inviteBtn = el("button", { class: "mgmt-add-btn", text: t("devices.invite.btn") });
-  const inviteOut = el("div");
-  inviteBtn.addEventListener("click", async () => {
-    inviteOut.textContent = "";
-    const r = await _postJSON("/api/pair/issue", {});
-    const d = (r && r.data) || null;
-    if (!(d && d.ok)) {
-      const i18nAny = (window as unknown as { KarvyI18n: { tBackend?: (s: string) => string } }).KarvyI18n;
-      const reason = (d && d.reason) || t("devices.invite.fail");
-      inviteOut.appendChild(el("div", { class: "mgmt-hint ext-boundary",
-        text: (i18nAny.tBackend ? i18nAny.tBackend(reason) : reason) }));
-      return;
-    }
-    const cmd = "karvyloop mesh-sync --relay " + d.relay + " --peer-room " + d.room +
-      " --fingerprint " + d.fingerprint + " --code " + d.code;
-    inviteOut.appendChild(_copyRow("devices.invite.cmd_label", cmd));
-    inviteOut.appendChild(el("div", { class: "mgmt-hint", text: t("devices.invite.hint") }));
-  });
-  add.appendChild(inviteBtn);
-  add.appendChild(inviteOut);
-  host.appendChild(add);
+// ============================================================================
+// 场景化引导(Hardy 2026-07-13:引导按**用户场景**分,别按机制堆;手机不造轮子——
+// 长远手机=装 APP 入 mesh 同等待遇,网页只是过渡形态)。场景只有两个:
+//   📱 手机远程访问(现阶段:扫码开网页 → 点🌐出门可用)
+//   💻 新电脑加入 mesh(装 runtime → 凭一次性邀请入列;三平台同一条命令,给分 OS 提示)
+// 高级:自建中转(BYO relay)。room/指纹这类机制词只出现在生成的命令里,不糊用户脸上。
+// ============================================================================
 
-  // 🧭 离家怎么访问(诚实:跨网打开网页尚未建成,能做的是经 relay 的同步/单次请求)
-  const away = el("div", { class: "ext-onboarding" });
-  away.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.remote.title") }));
-  away.appendChild(el("div", { class: "mgmt-hint", text: t("devices.remote.lan") }));
-  away.appendChild(el("div", { class: "mgmt-hint", text: t("devices.remote.away") }));
-  away.appendChild(_copyRow("devices.remote.cmd_relay_label", "karvyloop relay-serve --port 8767"));
-  away.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.remote.honest") }));
-  host.appendChild(away);
-}
-
-// 📱 手机扫码直达:二维码 = 带本次运行 token 的 /m 链接(第一次连接的零摩擦入口)。
-// 端点管理权=本地(经隧道 403,见 routes_pair);token 重启即刷新 —— 手机忘了链接
-// 随时回这里重扫(Hardy 拍过:授权管理界面要能再次显示二维码)。QR 由 qrcode-generator
-// (MIT,打进 bundle)本地生成,链接绝不外发。
-async function _qrSection(host: HTMLElement): Promise<void> {
+// 📱 场景一:手机远程访问。二维码 = 带本次运行 token 的移动页链接(在家第一次扫);
+// 端点管理权=本地(经隧道 403);token 重启即刷新,忘了链接回这里重扫(Hardy 拍过)。
+// QR 本地生成(qrcode-generator,MIT,打进 bundle),链接绝不外发。
+async function _phoneScene(host: HTMLElement): Promise<void> {
   const box = el("div", { class: "ext-onboarding" });
-  box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.qr.title") }));
+  box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.scene.phone.title") }));
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.scene.phone.sub") }));
   let data: any = null;
   try {
     data = await _getJSON("/api/access_url");
   } catch (e) { /* 后端不可达 → 空态 */ }
   if (!(data && data.ok)) {
     box.appendChild(el("div", { class: "mgmt-hint", text: (data && data.reason) || t("devices.qr.fail") }));
-    host.appendChild(box);
-    return;
-  }
-  if (!data.m) {
+  } else if (!data.m) {
     box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.local_only") }));
-    host.appendChild(box);
-    return;
+  } else {
+    const qr = qrcode(0, "M");
+    qr.addData(String(data.m));
+    qr.make();
+    const holder = el("div", { class: "devices-qr" });
+    holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });   // 自产 SVG,非模型文本
+    box.appendChild(holder);
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.hint") }));
+    box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
   }
-  const qr = qrcode(0, "M");
-  qr.addData(String(data.m));
-  qr.make();
-  const holder = el("div", { class: "devices-qr" });
-  holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });   // 自产 SVG,非模型文本
-  box.appendChild(holder);
-  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.hint") }));
-  box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
+  await _pairedInto(box, host);
+  box.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.scene.phone.roadmap") }));
   host.appendChild(box);
 }
 
-// 📱 已授权的远程设备(配对身份切片,docs/74):手机在 /m 点「出门也能用」配对后出现在这;
-// 这里是**管理面**(只在本机/局域网可操作,经隧道的请求打不到)——一键吊销 = 那台设备
-// 下一个请求就被拒(回源在线校验),丢手机回家点一下即可。
-async function _pairedSection(host: HTMLElement): Promise<void> {
-  const box = el("div", { class: "ext-onboarding" });
-  box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.paired.title") }));
+// 已授权的手机列表(配对身份切片,docs/74)——挂在手机场景里,不再单开一块。
+// 管理面只在本机/局域网可操作;一键吊销 = 那台设备下一个请求就被拒(回源在线校验)。
+async function _pairedInto(box: HTMLElement, host: HTMLElement): Promise<void> {
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.title") }));
   let data: any = null;
   try {
     data = await _getJSON("/api/pair/devices");
@@ -222,7 +179,6 @@ async function _pairedSection(host: HTMLElement): Promise<void> {
   const paired: any[] = (data && data.devices) || [];
   if (!paired.length) {
     box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.empty") }));
-    host.appendChild(box);
     return;
   }
   const list = el("div", { class: "mgmt-list" });
@@ -246,7 +202,53 @@ async function _pairedSection(host: HTMLElement): Promise<void> {
   }
   box.appendChild(list);
   box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.how") }));
+}
+
+// 💻 场景二:新电脑加入 mesh(两步)。①装 runtime:三平台同一条命令(跨平台三平台同发,
+// 差异只在"终端在哪/怎么先有 Python",按 OS 各给一句);②签一次性邀请 → 新设备任何网络执行
+// (经 relay 回家握手,15 分钟过期首用即焚;管理动作经隧道 403)。
+function _pcScene(host: HTMLElement): void {
+  const box = el("div", { class: "ext-onboarding" });
+  box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.scene.pc.title") }));
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.scene.pc.step1") }));
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.os.win") }));
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.os.mac") }));
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.os.linux") }));
+  box.appendChild(_copyRow("devices.guide.cmd_install_label", "pip install karvyloop && karvyloop console"));
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.scene.pc.step2") }));
+  const inviteBtn = el("button", { class: "mgmt-add-btn", text: t("devices.invite.btn") });
+  const inviteOut = el("div");
+  inviteBtn.addEventListener("click", async () => {
+    inviteOut.textContent = "";
+    const r = await _postJSON("/api/pair/issue", {});
+    const d = (r && r.data) || null;
+    if (!(d && d.ok)) {
+      const i18nAny = (window as unknown as { KarvyI18n: { tBackend?: (s: string) => string } }).KarvyI18n;
+      const reason = (d && d.reason) || t("devices.invite.fail");
+      inviteOut.appendChild(el("div", { class: "mgmt-hint ext-boundary",
+        text: (i18nAny.tBackend ? i18nAny.tBackend(reason) : reason) }));
+      return;
+    }
+    const cmd = "karvyloop mesh-sync --relay " + d.relay + " --peer-room " + d.room +
+      " --fingerprint " + d.fingerprint + " --code " + d.code;
+    inviteOut.appendChild(_copyRow("devices.invite.cmd_label", cmd));
+    inviteOut.appendChild(el("div", { class: "mgmt-hint", text: t("devices.invite.hint") }));
+  });
+  box.appendChild(inviteBtn);
+  box.appendChild(inviteOut);
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_label") }));
+  box.appendChild(_copyRow("devices.guide.cmd_label_label", 'karvyloop devices --label "my-desk-pc"'));
   host.appendChild(box);
+}
+
+// 🧭 高级:自建中转(BYO relay,开源不绑死我们的服务器)
+function _advancedScene(host: HTMLElement): void {
+  const away = el("div", { class: "ext-onboarding" });
+  away.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.remote.title") }));
+  away.appendChild(el("div", { class: "mgmt-hint", text: t("devices.remote.away") }));
+  away.appendChild(_copyRow("devices.remote.cmd_relay_label", "karvyloop relay-serve --port 8767"));
+  away.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.remote.honest") }));
+  host.appendChild(away);
 }
 
 async function render(body: HTMLElement): Promise<void> {
@@ -269,9 +271,9 @@ async function render(body: HTMLElement): Promise<void> {
     for (const d of devices) list.appendChild(_deviceCard(d, body));
     body.appendChild(list);
   }
-  await _qrSection(body);
-  await _pairedSection(body);
-  _guideBoxes(body);
+  await _phoneScene(body);
+  _pcScene(body);
+  _advancedScene(body);
 }
 
 async function open(): Promise<void> {

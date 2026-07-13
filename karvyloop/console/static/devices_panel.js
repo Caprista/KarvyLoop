@@ -1740,52 +1740,10 @@ var KarvyDevicesPanelBundle = (function(exports) {
     card.appendChild(actions);
     return card;
   }
-  function _guideBoxes(host) {
-    const add = el("div", { class: "ext-onboarding" });
-    add.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.guide.title") }));
-    add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_install") }));
-    add.appendChild(_copyRow("devices.guide.cmd_install_label", "pip install karvyloop && karvyloop console"));
-    add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_label") }));
-    add.appendChild(_copyRow("devices.guide.cmd_label_label", 'karvyloop devices --label "my-desk-pc"'));
-    add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_lan") }));
-    add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_xnet") }));
-    add.appendChild(_copyRow(
-      "devices.guide.cmd_sync_label",
-      "karvyloop mesh-sync --relay wss://<relay> --peer-room <room> --fingerprint <fp> --code <one-time-code>"
-    ));
-    const inviteBtn = el("button", { class: "mgmt-add-btn", text: t("devices.invite.btn") });
-    const inviteOut = el("div");
-    inviteBtn.addEventListener("click", async () => {
-      inviteOut.textContent = "";
-      const r = await _postJSON("/api/pair/issue", {});
-      const d = r && r.data || null;
-      if (!(d && d.ok)) {
-        const i18nAny = window.KarvyI18n;
-        const reason = d && d.reason || t("devices.invite.fail");
-        inviteOut.appendChild(el("div", {
-          class: "mgmt-hint ext-boundary",
-          text: i18nAny.tBackend ? i18nAny.tBackend(reason) : reason
-        }));
-        return;
-      }
-      const cmd = "karvyloop mesh-sync --relay " + d.relay + " --peer-room " + d.room + " --fingerprint " + d.fingerprint + " --code " + d.code;
-      inviteOut.appendChild(_copyRow("devices.invite.cmd_label", cmd));
-      inviteOut.appendChild(el("div", { class: "mgmt-hint", text: t("devices.invite.hint") }));
-    });
-    add.appendChild(inviteBtn);
-    add.appendChild(inviteOut);
-    host.appendChild(add);
-    const away = el("div", { class: "ext-onboarding" });
-    away.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.remote.title") }));
-    away.appendChild(el("div", { class: "mgmt-hint", text: t("devices.remote.lan") }));
-    away.appendChild(el("div", { class: "mgmt-hint", text: t("devices.remote.away") }));
-    away.appendChild(_copyRow("devices.remote.cmd_relay_label", "karvyloop relay-serve --port 8767"));
-    away.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.remote.honest") }));
-    host.appendChild(away);
-  }
-  async function _qrSection(host) {
+  async function _phoneScene(host) {
     const box = el("div", { class: "ext-onboarding" });
-    box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.qr.title") }));
+    box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.scene.phone.title") }));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.scene.phone.sub") }));
     let data = null;
     try {
       data = await _getJSON("/api/access_url");
@@ -1793,27 +1751,24 @@ var KarvyDevicesPanelBundle = (function(exports) {
     }
     if (!(data && data.ok)) {
       box.appendChild(el("div", { class: "mgmt-hint", text: data && data.reason || t("devices.qr.fail") }));
-      host.appendChild(box);
-      return;
-    }
-    if (!data.m) {
+    } else if (!data.m) {
       box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.local_only") }));
-      host.appendChild(box);
-      return;
+    } else {
+      const qr = qrcode(0, "M");
+      qr.addData(String(data.m));
+      qr.make();
+      const holder = el("div", { class: "devices-qr" });
+      holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+      box.appendChild(holder);
+      box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.hint") }));
+      box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
     }
-    const qr = qrcode(0, "M");
-    qr.addData(String(data.m));
-    qr.make();
-    const holder = el("div", { class: "devices-qr" });
-    holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
-    box.appendChild(holder);
-    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.hint") }));
-    box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
+    await _pairedInto(box, host);
+    box.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.scene.phone.roadmap") }));
     host.appendChild(box);
   }
-  async function _pairedSection(host) {
-    const box = el("div", { class: "ext-onboarding" });
-    box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.paired.title") }));
+  async function _pairedInto(box, host) {
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.title") }));
     let data = null;
     try {
       data = await _getJSON("/api/pair/devices");
@@ -1822,7 +1777,6 @@ var KarvyDevicesPanelBundle = (function(exports) {
     const paired = data && data.devices || [];
     if (!paired.length) {
       box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.empty") }));
-      host.appendChild(box);
       return;
     }
     const list = el("div", { class: "mgmt-list" });
@@ -1861,7 +1815,48 @@ var KarvyDevicesPanelBundle = (function(exports) {
     }
     box.appendChild(list);
     box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.how") }));
+  }
+  function _pcScene(host) {
+    const box = el("div", { class: "ext-onboarding" });
+    box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.scene.pc.title") }));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.scene.pc.step1") }));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.os.win") }));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.os.mac") }));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.os.linux") }));
+    box.appendChild(_copyRow("devices.guide.cmd_install_label", "pip install karvyloop && karvyloop console"));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.scene.pc.step2") }));
+    const inviteBtn = el("button", { class: "mgmt-add-btn", text: t("devices.invite.btn") });
+    const inviteOut = el("div");
+    inviteBtn.addEventListener("click", async () => {
+      inviteOut.textContent = "";
+      const r = await _postJSON("/api/pair/issue", {});
+      const d = r && r.data || null;
+      if (!(d && d.ok)) {
+        const i18nAny = window.KarvyI18n;
+        const reason = d && d.reason || t("devices.invite.fail");
+        inviteOut.appendChild(el("div", {
+          class: "mgmt-hint ext-boundary",
+          text: i18nAny.tBackend ? i18nAny.tBackend(reason) : reason
+        }));
+        return;
+      }
+      const cmd = "karvyloop mesh-sync --relay " + d.relay + " --peer-room " + d.room + " --fingerprint " + d.fingerprint + " --code " + d.code;
+      inviteOut.appendChild(_copyRow("devices.invite.cmd_label", cmd));
+      inviteOut.appendChild(el("div", { class: "mgmt-hint", text: t("devices.invite.hint") }));
+    });
+    box.appendChild(inviteBtn);
+    box.appendChild(inviteOut);
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_label") }));
+    box.appendChild(_copyRow("devices.guide.cmd_label_label", 'karvyloop devices --label "my-desk-pc"'));
     host.appendChild(box);
+  }
+  function _advancedScene(host) {
+    const away = el("div", { class: "ext-onboarding" });
+    away.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.remote.title") }));
+    away.appendChild(el("div", { class: "mgmt-hint", text: t("devices.remote.away") }));
+    away.appendChild(_copyRow("devices.remote.cmd_relay_label", "karvyloop relay-serve --port 8767"));
+    away.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.remote.honest") }));
+    host.appendChild(away);
   }
   async function render(body) {
     body.innerHTML = "";
@@ -1883,9 +1878,9 @@ var KarvyDevicesPanelBundle = (function(exports) {
       for (const d of devices) list.appendChild(_deviceCard(d, body));
       body.appendChild(list);
     }
-    await _qrSection(body);
-    await _pairedSection(body);
-    _guideBoxes(body);
+    await _phoneScene(body);
+    _pcScene(body);
+    _advancedScene(body);
   }
   async function open() {
     openMgmtModal(t("devices.title"));
