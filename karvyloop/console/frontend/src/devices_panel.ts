@@ -142,6 +142,29 @@ function _guideBoxes(host: HTMLElement): void {
   add.appendChild(el("div", { class: "mgmt-hint", text: t("devices.guide.step_xnet") }));
   add.appendChild(_copyRow("devices.guide.cmd_sync_label",
     "karvyloop mesh-sync --relay wss://<relay> --peer-room <room> --fingerprint <fp> --code <one-time-code>"));
+  // ➕ 一次性邀请出码(Hardy:「我也没看到一次性授权秘钥呀」——此前码只活在 CLI 里,
+  // 面板只给占位符模板 = 缺口)。点一下 → /api/pair/issue 签真码 → 给**填好真值**的
+  // 完整命令(15 分钟过期、首用即焚;再点 = 新签一枚)。管理动作:经隧道 403(端点侧锁)。
+  const inviteBtn = el("button", { class: "mgmt-add-btn", text: t("devices.invite.btn") });
+  const inviteOut = el("div");
+  inviteBtn.addEventListener("click", async () => {
+    inviteOut.textContent = "";
+    const r = await _postJSON("/api/pair/issue", {});
+    const d = (r && r.data) || null;
+    if (!(d && d.ok)) {
+      const i18nAny = (window as unknown as { KarvyI18n: { tBackend?: (s: string) => string } }).KarvyI18n;
+      const reason = (d && d.reason) || t("devices.invite.fail");
+      inviteOut.appendChild(el("div", { class: "mgmt-hint ext-boundary",
+        text: (i18nAny.tBackend ? i18nAny.tBackend(reason) : reason) }));
+      return;
+    }
+    const cmd = "karvyloop mesh-sync --relay " + d.relay + " --peer-room " + d.room +
+      " --fingerprint " + d.fingerprint + " --code " + d.code;
+    inviteOut.appendChild(_copyRow("devices.invite.cmd_label", cmd));
+    inviteOut.appendChild(el("div", { class: "mgmt-hint", text: t("devices.invite.hint") }));
+  });
+  add.appendChild(inviteBtn);
+  add.appendChild(inviteOut);
   host.appendChild(add);
 
   // 🧭 离家怎么访问(诚实:跨网打开网页尚未建成,能做的是经 relay 的同步/单次请求)

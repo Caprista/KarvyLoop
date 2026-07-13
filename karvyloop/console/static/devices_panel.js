@@ -1753,6 +1753,27 @@ var KarvyDevicesPanelBundle = (function(exports) {
       "devices.guide.cmd_sync_label",
       "karvyloop mesh-sync --relay wss://<relay> --peer-room <room> --fingerprint <fp> --code <one-time-code>"
     ));
+    const inviteBtn = el("button", { class: "mgmt-add-btn", text: t("devices.invite.btn") });
+    const inviteOut = el("div");
+    inviteBtn.addEventListener("click", async () => {
+      inviteOut.textContent = "";
+      const r = await _postJSON("/api/pair/issue", {});
+      const d = r && r.data || null;
+      if (!(d && d.ok)) {
+        const i18nAny = window.KarvyI18n;
+        const reason = d && d.reason || t("devices.invite.fail");
+        inviteOut.appendChild(el("div", {
+          class: "mgmt-hint ext-boundary",
+          text: i18nAny.tBackend ? i18nAny.tBackend(reason) : reason
+        }));
+        return;
+      }
+      const cmd = "karvyloop mesh-sync --relay " + d.relay + " --peer-room " + d.room + " --fingerprint " + d.fingerprint + " --code " + d.code;
+      inviteOut.appendChild(_copyRow("devices.invite.cmd_label", cmd));
+      inviteOut.appendChild(el("div", { class: "mgmt-hint", text: t("devices.invite.hint") }));
+    });
+    add.appendChild(inviteBtn);
+    add.appendChild(inviteOut);
     host.appendChild(add);
     const away = el("div", { class: "ext-onboarding" });
     away.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.remote.title") }));
