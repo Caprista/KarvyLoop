@@ -655,7 +655,13 @@ def cmd_console(args: argparse.Namespace) -> int:
     # loopback(下面这台 uvicorn),复用全部既有中间件 + token 门(深度防御:loopback 免
     # token 也照带)。收尾照 email_channel_task 先例:uvicorn 退出后 stop() 收线程。
     relay_handle = None
+    # BYO-server(docs/74):relay 地址 = 配置不是代码。CLI --relay 优先,缺省读 config.yaml
+    # 的 `relay:`(设一次永久生效);源码永无硬编码 relay 域名。配对邀请从这个运行时地址生成。
     relay_url = getattr(args, "relay", None)
+    if not relay_url:
+        from karvyloop.config_relay import read_relay
+        relay_url = read_relay(config_path)
+    app.state.relay_url = relay_url or ""      # /api/pair/issue 出邀请用(空=未挂 relay,诚实报)
     if relay_url:
         try:
             from karvyloop.relay.client import start_relay_client_thread

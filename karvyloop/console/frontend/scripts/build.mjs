@@ -35,6 +35,8 @@ const MODULES = [
   { entry: "src/desktop.ts", name: "KarvyDesktopBundle", file: "desktop.js" },
   { entry: "src/workflow_canvas.ts", name: "KarvyWorkflowCanvasBundle", file: "workflow_canvas.js" },
   { entry: "src/m.ts", name: "KarvyMobileBundle", file: "m.js" },
+  { entry: "src/e2e.ts", name: "KarvyE2EBundle", file: "e2e.js" },
+  { entry: "src/tunnel.ts", name: "KarvyTunnelBundle", file: "tunnel.js" },
 ];
 
 for (const m of MODULES) {

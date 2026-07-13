@@ -72,6 +72,11 @@ async def _handle_request(pt: bytes, http, token: str, *, store=None, peer_pub: 
         if scope != SCOPE_FULL and method not in READ_ONLY_METHODS:
             return _error_json(rid, "scope_read_only", 403)
         headers = {"x-karvy-token": token} if token else {}
+        # 特权分离标(docs/74 配对切片):经隧道的请求一律打此标,授权管理端点(/api/pair/*)
+        # 见标即拒 —— 远程面(哪怕 full scope)永远够不到"颁发/吊销授权"这类管理权。
+        # 防伪:此标由本函数(console 侧咽喉)注入;远端自带的头只透传 _FWD_REQ_HEADERS 三样,
+        # 伪造不进来;LAN 侧攻击者自己加此标只会**降**自己的权(安全方向)。
+        headers["x-karvy-via-relay"] = "1"
         for k, v in (req.get("headers") or {}).items():
             if str(k).lower() in _FWD_REQ_HEADERS:
                 headers[str(k).lower()] = str(v)

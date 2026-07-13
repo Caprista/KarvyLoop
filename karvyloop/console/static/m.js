@@ -18,11 +18,43 @@ var KarvyMobileBundle = (function(exports) {
     return e;
   }
   let _timer = null;
+  const TN = () => globalThis.KarvyTunnel || null;
+  let _tunnel = null;
+  async function _viaTunnel() {
+    const api = TN();
+    if (!api) return null;
+    const id = api.loadIdentity();
+    if (!id) return null;
+    if (_tunnel && _tunnel.connected) return _tunnel;
+    const tn = new api.Tunnel(id);
+    try {
+      await tn.connect(null);
+      _tunnel = tn;
+      _remoteChip(true);
+      return tn;
+    } catch (e) {
+      return null;
+    }
+  }
+  function _remoteChip(on) {
+    const chip = document.getElementById("m-remote-chip");
+    if (chip) chip.style.display = on ? "" : "none";
+  }
+  async function kfetch(path, init) {
+    try {
+      const r = await fetch(path, init);
+      return r;
+    } catch (e) {
+      const tn = await _viaTunnel();
+      if (!tn) throw e;
+      return tn.tunnelFetch(path, init);
+    }
+  }
   async function _decide(p, decision, card) {
     if (card.classList.contains("m-card-busy")) return;
     card.classList.add("m-card-busy");
     try {
-      const r = await fetch("/api/h2a_decide", {
+      const r = await kfetch("/api/h2a_decide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ proposal_id: p.proposal_id, decision, reason: "" })
@@ -82,7 +114,7 @@ var KarvyMobileBundle = (function(exports) {
     if (!list) return;
     let data = null;
     try {
-      const r = await fetch("/api/proposals/pending");
+      const r = await kfetch("/api/proposals/pending");
       if (r.ok) data = await r.json();
     } catch (e) {
     }
@@ -140,7 +172,7 @@ var KarvyMobileBundle = (function(exports) {
     log.appendChild(thinking);
     _scrollToNode(thinking);
     try {
-      const r = await fetch("/api/intent", {
+      const r = await kfetch("/api/intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ intent: msg })
@@ -179,6 +211,40 @@ var KarvyMobileBundle = (function(exports) {
       btn.setAttribute("title", t("m.refresh"));
       btn.addEventListener("click", () => {
         void refresh();
+      });
+    }
+    const rbtn = document.getElementById("m-remote");
+    if (rbtn) {
+      const api = TN();
+      const paired = !!(api && api.loadIdentity());
+      rbtn.setAttribute("title", paired ? t("m.remote_on_title") : t("m.remote_setup_title"));
+      rbtn.classList.toggle("on", paired);
+      rbtn.addEventListener("click", async () => {
+        const a = TN();
+        if (!a) return;
+        const cur = a.loadIdentity();
+        if (cur) {
+          if (window.confirm(t("m.remote_off_confirm"))) {
+            a.clearIdentity();
+            rbtn.classList.remove("on");
+            _remoteChip(false);
+            _toast(t("m.remote_off_done"));
+          }
+          return;
+        }
+        try {
+          const r = await fetch("/api/pair/issue", { method: "POST" });
+          const d = await r.json();
+          if (!d || !d.ok) {
+            _toast(d && d.reason || t("m.remote_fail"));
+            return;
+          }
+          await a.pairAndSave(d.relay, d.room, d.fingerprint, d.code);
+          rbtn.classList.add("on");
+          _toast(t("m.remote_on_done"));
+        } catch (e) {
+          _toast(t("m.remote_fail"));
+        }
       });
     }
     const cin = document.getElementById("m-chat-input");

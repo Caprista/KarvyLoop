@@ -33,3 +33,4 @@ karvyloop/sample_data/_*
 
 # 测试产物(Playwright 截图等):按需生成给人工看,不入库(随每次跑变、占体积)
 tests/_artifacts/
+karvyloop/console/frontend/scripts/e2e_vectors.json

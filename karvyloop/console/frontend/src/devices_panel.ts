@@ -152,6 +152,46 @@ function _guideBoxes(host: HTMLElement): void {
   host.appendChild(away);
 }
 
+// 📱 已授权的远程设备(配对身份切片,docs/74):手机在 /m 点「出门也能用」配对后出现在这;
+// 这里是**管理面**(只在本机/局域网可操作,经隧道的请求打不到)——一键吊销 = 那台设备
+// 下一个请求就被拒(回源在线校验),丢手机回家点一下即可。
+async function _pairedSection(host: HTMLElement): Promise<void> {
+  const box = el("div", { class: "ext-onboarding" });
+  box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.paired.title") }));
+  let data: any = null;
+  try {
+    data = await _getJSON("/api/pair/devices");
+  } catch (e) { /* 后端不可达 → 空态 */ }
+  const paired: any[] = (data && data.devices) || [];
+  if (!paired.length) {
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.empty") }));
+    host.appendChild(box);
+    return;
+  }
+  const list = el("div", { class: "mgmt-list" });
+  for (const p of paired) {
+    const when = p.granted_at ? new Date(p.granted_at * 1000).toLocaleDateString() : "";
+    const card = el("div", { class: "mgmt-card" },
+      el("div", { class: "mc-main" },
+        el("div", { class: "mc-name", text: "📱 " + (p.label || p.fingerprint || "?") }),
+        el("div", { class: "mc-meta" },
+          el("span", { class: "mc-tag", text: p.scope === "read" ? t("devices.paired.scope_read") : t("devices.paired.scope_full") }),
+          when ? " · " + t("devices.paired.granted", { d: when }) : "")),
+      el("button", { class: "mc-del", text: t("devices.paired.revoke"),
+        onclick: async () => {
+          if (!window.confirm(t("devices.paired.revoke_confirm", { f: p.fingerprint }))) return;
+          const r = await _postJSON("/api/pair/revoke", { ident: p.fingerprint });
+          if (!(r && r.ok && r.data && r.data.ok)) { window.alert(t("devices.paired.revoke_failed")); return; }
+          const body = host.closest("#mgmt-body") as HTMLElement | null;
+          if (body) void render(body);
+        } }));
+    list.appendChild(card);
+  }
+  box.appendChild(list);
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.how") }));
+  host.appendChild(box);
+}
+
 async function render(body: HTMLElement): Promise<void> {
   body.innerHTML = "";
   body.appendChild(el("div", { class: "mgmt-hint", text: t("devices.intro") }));
@@ -172,6 +212,7 @@ async function render(body: HTMLElement): Promise<void> {
     for (const d of devices) list.appendChild(_deviceCard(d, body));
     body.appendChild(list);
   }
+  await _pairedSection(body);
   _guideBoxes(body);
 }
 

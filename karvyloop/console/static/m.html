@@ -27,8 +27,10 @@ body {
 .m-waiting { margin-left: auto; font-size: 14px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
 #m-count { background: var(--rose); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
 #m-count:empty { display: none; }
-#m-refresh { border: 1px solid var(--border); background: var(--card); border-radius: 8px;
+#m-refresh, #m-remote { border: 1px solid var(--border); background: var(--card); border-radius: 8px;
   padding: 4px 10px; font-size: 15px; cursor: pointer; }
+#m-remote.on { border-color: var(--accent); background: var(--accent-soft); }
+#m-remote-chip { font-size: 13px; }
 #m-list {
   display: grid; gap: 14px; padding: 16px;
   grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
@@ -90,7 +92,9 @@ main#m-list { padding-bottom: 86px; }
 <body>
   <header class="m-header">
     <span class="m-brand">🦫 KarvyLoop</span>
+    <span id="m-remote-chip" style="display:none" title="">🔗</span>
     <span class="m-waiting"><span id="m-waiting-label"></span><span id="m-count"></span></span>
+    <button id="m-remote">🌐</button>
     <button id="m-refresh">↻</button>
   </header>
   <main id="m-list"></main>
@@ -100,6 +104,8 @@ main#m-list { padding-bottom: 86px; }
     <button id="m-chat-send"></button>
   </footer>
   <script src="/static/i18n.js"></script>
+  <script src="/static/e2e.js"></script>
+  <script src="/static/tunnel.js"></script>
   <script src="/static/m.js"></script>
 </body>
 </html>

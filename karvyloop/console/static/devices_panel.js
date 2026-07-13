@@ -134,6 +134,58 @@ var KarvyDevicesPanelBundle = (function(exports) {
     away.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.remote.honest") }));
     host.appendChild(away);
   }
+  async function _pairedSection(host) {
+    const box = el("div", { class: "ext-onboarding" });
+    box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.paired.title") }));
+    let data = null;
+    try {
+      data = await _getJSON("/api/pair/devices");
+    } catch (e) {
+    }
+    const paired = data && data.devices || [];
+    if (!paired.length) {
+      box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.empty") }));
+      host.appendChild(box);
+      return;
+    }
+    const list = el("div", { class: "mgmt-list" });
+    for (const p of paired) {
+      const when = p.granted_at ? new Date(p.granted_at * 1e3).toLocaleDateString() : "";
+      const card = el(
+        "div",
+        { class: "mgmt-card" },
+        el(
+          "div",
+          { class: "mc-main" },
+          el("div", { class: "mc-name", text: "📱 " + (p.label || p.fingerprint || "?") }),
+          el(
+            "div",
+            { class: "mc-meta" },
+            el("span", { class: "mc-tag", text: p.scope === "read" ? t("devices.paired.scope_read") : t("devices.paired.scope_full") }),
+            when ? " · " + t("devices.paired.granted", { d: when }) : ""
+          )
+        ),
+        el("button", {
+          class: "mc-del",
+          text: t("devices.paired.revoke"),
+          onclick: async () => {
+            if (!window.confirm(t("devices.paired.revoke_confirm", { f: p.fingerprint }))) return;
+            const r = await _postJSON("/api/pair/revoke", { ident: p.fingerprint });
+            if (!(r && r.ok && r.data && r.data.ok)) {
+              window.alert(t("devices.paired.revoke_failed"));
+              return;
+            }
+            const body = host.closest("#mgmt-body");
+            if (body) void render(body);
+          }
+        })
+      );
+      list.appendChild(card);
+    }
+    box.appendChild(list);
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.how") }));
+    host.appendChild(box);
+  }
   async function render(body) {
     body.innerHTML = "";
     body.appendChild(el("div", { class: "mgmt-hint", text: t("devices.intro") }));
@@ -154,6 +206,7 @@ var KarvyDevicesPanelBundle = (function(exports) {
       for (const d of devices) list.appendChild(_deviceCard(d, body));
       body.appendChild(list);
     }
+    await _pairedSection(body);
     _guideBoxes(body);
   }
   async function open() {

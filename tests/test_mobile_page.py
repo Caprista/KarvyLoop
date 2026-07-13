@@ -43,9 +43,11 @@ def test_m_page_reuses_existing_contracts_only():
     assert "/api/proposals/pending" in js
     assert "/api/h2a_decide" in js
     assert "/api/intent" in js                       # 切片二:聊天条(发起入口)
+    assert "/api/pair/issue" in js                   # 配对切片:「出门也能用」按钮(管理动作,只直连)
     hit = re.findall(r'fetch\("(/api/[^"]+)"', js)
-    assert set(hit) <= {"/api/proposals/pending", "/api/h2a_decide", "/api/intent"}, \
-        f"手机页只许吃既有三契约,多了: {set(hit)}"
+    assert set(hit) <= {"/api/proposals/pending", "/api/h2a_decide", "/api/intent",
+                        "/api/pair/issue"}, \
+        f"手机页契约锁:只许这四条,多了: {set(hit)}"
 
 
 def test_m_page_low_floor_no_coined_nouns():
@@ -55,10 +57,22 @@ def test_m_page_low_floor_no_coined_nouns():
     # i18n 键里的 m.* 用户可见串(en+zh 两表)也不许带这些词根
     i18n = (STATIC / "i18n.js").read_text(encoding="utf-8")
     m_lines = "\n".join(ln for ln in i18n.splitlines() if '"m.' in ln)
+    # 覆盖 m.* 与 devices.paired.*(配对切片的用户可见新串,对抗验收点名补齐)
+    paired_lines = "\n".join(ln for ln in i18n.splitlines() if '"devices.paired.' in ln)
     for banned in ("H2A", "atom", "Atom", "L0", "L4", "crystalli", "结晶", "原子"):
         assert banned not in html, f"m.html 出现生造名词: {banned}"
         assert banned not in m_lines, f"手机页 i18n 串出现生造名词: {banned}"
+        assert banned not in paired_lines, f"配对面板 i18n 串出现生造名词: {banned}"
     assert "KarvyMobile" in js                       # 全局契约在
+
+
+def test_m_html_script_load_order():
+    """脚本加载序锁(对抗验收点名):tunnel.js 依赖 KarvyE2E、m.js 依赖 KarvyTunnel →
+    次序必须 i18n → e2e → tunnel → m,错序=远程/隧道功能开机静默失效。"""
+    html = (STATIC / "m.html").read_text(encoding="utf-8")
+    order = [html.find(f"/static/{f}") for f in ("i18n.js", "e2e.js", "tunnel.js", "m.js")]
+    assert all(p >= 0 for p in order), "四个 bundle 必须都在 m.html 里"
+    assert order == sorted(order), f"脚本序错(须 i18n<e2e<tunnel<m): {order}"
 
 
 def test_m_decide_wires_to_h2a(monkeypatch):

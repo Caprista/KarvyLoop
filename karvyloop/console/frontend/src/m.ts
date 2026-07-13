@@ -26,12 +26,62 @@ function el(tag: string, attrs?: Record<string, unknown> | null, ...children: (N
 
 let _timer: number | null = null;
 
+// ---- 出门也能用(配对切片):直连失败 → 经 relay 隧道回家(E2E,relay 只见密文)。 ----
+// 依赖 e2e.js + tunnel.js(m.html 脚本序先于本文件);没配对过 → kfetch 行为=裸 fetch,零回归。
+interface TunnelApi {
+  loadIdentity: () => { fingerprint: string } | null;
+  clearIdentity: () => void;
+  pairAndSave: (relay: string, room: string, fp: string, code: string) => Promise<unknown>;
+  Tunnel: new (id: unknown) => {
+    connected: boolean;
+    connect: (code?: string | null) => Promise<void>;
+    tunnelFetch: (path: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+      Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string> }>;
+  };
+}
+const TN = (): TunnelApi | null =>
+  (globalThis as unknown as { KarvyTunnel?: TunnelApi }).KarvyTunnel || null;
+let _tunnel: InstanceType<TunnelApi["Tunnel"]> | null = null;
+
+async function _viaTunnel(): Promise<InstanceType<TunnelApi["Tunnel"]> | null> {
+  const api = TN();
+  if (!api) return null;
+  const id = api.loadIdentity();
+  if (!id) return null;                                   // 没开通过"出门也能用"
+  if (_tunnel && _tunnel.connected) return _tunnel;
+  const tn = new api.Tunnel(id);
+  try {
+    await tn.connect(null);                               // 已配对设备免码重连
+    _tunnel = tn;
+    _remoteChip(true);
+    return tn;
+  } catch (e) { return null; }
+}
+
+function _remoteChip(on: boolean): void {
+  const chip = document.getElementById("m-remote-chip");
+  if (chip) chip.style.display = on ? "" : "none";
+}
+
+/** fetch 或隧道:直连(在家/局域网)优先;网络不可达且已配对 → 经 relay 回家。 */
+async function kfetch(path: string, init?: { method?: string; headers?: Record<string, string>; body?: string }):
+    Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> {
+  try {
+    const r = await fetch(path, init);
+    return r as unknown as { ok: boolean; status: number; json: () => Promise<unknown> };
+  } catch (e) {
+    const tn = await _viaTunnel();
+    if (!tn) throw e;
+    return tn.tunnelFetch(path, init);
+  }
+}
+
 async function _decide(p: any, decision: string, card: HTMLElement): Promise<void> {
   // 互斥按卡不按全局(对抗验收 P3):A 卡在飞时点 B 卡照常生效;同卡连点仍只发一次。
   if (card.classList.contains("m-card-busy")) return;
   card.classList.add("m-card-busy");
   try {
-    const r = await fetch("/api/h2a_decide", {
+    const r = await kfetch("/api/h2a_decide", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ proposal_id: p.proposal_id, decision, reason: "" }),
     });
@@ -76,7 +126,7 @@ async function refresh(): Promise<void> {
   if (!list) return;
   let data: any = null;
   try {
-    const r = await fetch("/api/proposals/pending");
+    const r = await kfetch("/api/proposals/pending");
     if (r.ok) data = await r.json();
   } catch (e) { /* 掉线 → 保持上一屏,不闪空 */ }
   if (data == null) return;
@@ -140,7 +190,7 @@ async function _sendChat(): Promise<void> {
   // 否则积压卡多时整段对话发生在屏外,人以为没回。
   _scrollToNode(thinking);
   try {
-    const r = await fetch("/api/intent", {
+    const r = await kfetch("/api/intent", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ intent: msg }),
     });
@@ -175,6 +225,39 @@ function boot(): void {
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
   const btn = document.getElementById("m-refresh");
   if (btn) { btn.setAttribute("title", t("m.refresh")); btn.addEventListener("click", () => { void refresh(); }); }
+  // 「出门也能用」:在家(直连可达)时点一下 → 后台签一次性邀请 → 手机自己完成配对并存密钥
+  // (密钥只进 localStorage,永不进 URL)。之后出门,kfetch 直连失败自动走隧道回家。
+  const rbtn = document.getElementById("m-remote");
+  if (rbtn) {
+    const api = TN();
+    const paired = !!(api && api.loadIdentity());
+    rbtn.setAttribute("title", paired ? t("m.remote_on_title") : t("m.remote_setup_title"));
+    rbtn.classList.toggle("on", paired);
+    rbtn.addEventListener("click", async () => {
+      const a = TN();
+      if (!a) return;
+      const cur = a.loadIdentity();
+      if (cur) {                                        // 已开通 → 问要不要解除(本机忘记密钥)
+        if (window.confirm(t("m.remote_off_confirm"))) {
+          a.clearIdentity();
+          rbtn.classList.remove("on");
+          _remoteChip(false);
+          _toast(t("m.remote_off_done"));
+        }
+        return;
+      }
+      try {
+        const r = await fetch("/api/pair/issue", { method: "POST" });   // 管理动作:只直连,不走隧道
+        const d: any = await r.json();
+        if (!d || !d.ok) { _toast((d && d.reason) || t("m.remote_fail")); return; }
+        await a.pairAndSave(d.relay, d.room, d.fingerprint, d.code);    // 握手成功=码已消费
+        rbtn.classList.add("on");
+        _toast(t("m.remote_on_done"));
+      } catch (e) {
+        _toast(t("m.remote_fail"));
+      }
+    });
+  }
   const cin = document.getElementById("m-chat-input") as HTMLInputElement | null;
   const csend = document.getElementById("m-chat-send");
   if (cin) {
