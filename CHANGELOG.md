@@ -11,6 +11,60 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.7.13] — 2026-07-13
+
+_A big one: your KarvyLoop is no longer tied to one machine or one desk. Your
+devices become one mesh, your phone reaches home from anywhere, your memory is
+yours to lock and rewrite, and a decision card is now something you can question
+before you decide._
+
+### Added
+- **Your devices are one KarvyLoop (same-owner device mesh).** Register your machines
+  into a roster (`karvyloop devices`), each advertising a capability fingerprint, and
+  what you learn on one flows to the others over one shared, causally-ordered log (HLC,
+  not vector clocks): **crystallized skills** and **memory beliefs** sync between devices
+  (outbox on the write choke + idempotent replay — never resurrects a belief you
+  invalidated), and a **decentralized task board** (lease/claim + reclaim-on-death) means
+  losing a device loses the *machine* a job runs on, never the job. A **My Devices** panel
+  surfaces the roster with capability chips, an online light, and informed-consent removal
+  (it warns before you delete a device that provides a capability no other device has).
+- **Reach your home console from anywhere (away-from-home).** Your phone on cellular, a
+  café network — a phone and a home machine both behind NATs meet at *your own* public
+  relay (`karvyloop relay-serve`; blind-forwarding, sees only ciphertext). Pair a device
+  once, from the `/m` phone page, and it gets its own key — end-to-end encrypted (X25519 +
+  ChaCha20-Poly1305), the browser tunneling the app home over the relay. Pairing is a
+  one-time code, never a raw token in a URL or QR; management (issue/list/**revoke**) is
+  local-only — a stolen phone can use the surface but can never mint access or revoke
+  another device. The relay is **bring-your-own-server**: its address is config
+  (`relay:` in config.yaml), never hardcoded, with a one-command setup script and a
+  self-host guide.
+- **A phone page that does one thing well (`/m`).** Open it on your phone: the decisions
+  waiting on you, three thumb buttons, and a chat strip to start work — a fluid layout
+  that reflows from phone to foldable to tablet, no coined jargon on the first screen.
+- **Ask about a decision before you decide.** A decision card now has an opt-in "💬 Ask
+  about this" — question Karvy about *this* card ("why now?", "what if I decline?") and it
+  answers grounded only in that card's own evidence, staying neutral (it won't argue you
+  toward accept). The two-button fast path is untouched; asking never touches the decision.
+- **Your memory is yours to lock and rewrite.** In the knowledge library you can now **pin**
+  a belief (never auto-archived) and **edit** it as a ledger-style supersede — the new
+  version becomes active, the old one moves to the history layer with an auditable "edited
+  by you" trail. Nothing is silently rewritten.
+
+### Changed
+- **The README leads with the story, not the category.** First screen is now the 40th-run
+  value curve and three contrarian bets, not "another agent runtime."
+- **Honest egress + honest away-from-home labels.** Domain-level network egress is positioned
+  as an opt-in enhancement — the default binary fail-closed floor is the honest, universal
+  guarantee; nothing bypassable is ever labeled "enforced."
+
+### Fixed
+- **LAN boot no longer hangs on a busy instance.** Decision cards load lazily — an instance
+  with dozens of backed-up cards opens fast instead of firing every card's LLM at once.
+- **The keyword gate no longer locks out orchestration.** Karvy can decompose and route a
+  no-keyword task instead of falling through to a literal reply.
+- **Preference crystallization has a deterministic floor.** "You keep deciding X the same
+  way" is counted from the evidence, not gated solely on an LLM flag that can wobble.
+
 ### Added
 - **Bring your own AI runtime into the driver's seat (M1).** You can now attach an external
   headless-CLI AI runtime as a channel citizen, @-dispatch a task to it, and get its real reply
