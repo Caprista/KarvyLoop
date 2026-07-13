@@ -304,15 +304,15 @@ async def compile_decisions(samples: list[DecisionSample], *, gateway: Any,
     # 的 complete 签名不认 response_schema kwarg → 捕 TypeError 剥掉重调(与网关内部降级同纪律)。
     msgs = [{"role": "user", "content": material}]
     sp = SystemPrompt(static=[DECISION_PREF_SYSTEM])
+    from karvyloop.gateway.structured import harvest_structured
     with token_source("decision_pref"):   # 决策偏好抽取(楔子进料口):此前无标 → 记 unknown(P0-9)
         try:
             stream = gateway.complete(msgs, [], ref, system=sp,
                                       response_schema=_DECISION_PREFS_SCHEMA)
         except TypeError:
             stream = gateway.complete(msgs, [], ref, system=sp)
-        async for ev in stream:
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        # 约束解码正身可能走工具入参不走正文(anthropic 方言强制 tool-use)→ 统一收割
+        out = await harvest_structured(stream)
     return parse_decision_prefs(out)
 
 
@@ -533,14 +533,14 @@ async def reconcile_decisions(samples: list[DecisionSample], *, existing: list[s
     schema = _RECONCILE_SCHEMA if existing else _DECISION_PREFS_SCHEMA
     msgs = [{"role": "user", "content": material}]
     sp = SystemPrompt(static=[system])
+    from karvyloop.gateway.structured import harvest_structured
     with token_source("decision_pref"):   # 矛盾调和(同抽取,楔子进料口):P0-9
         try:
             stream = gateway.complete(msgs, [], ref, system=sp, response_schema=schema)
         except TypeError:
             stream = gateway.complete(msgs, [], ref, system=sp)
-        async for ev in stream:
-            if type(ev).__name__ == "TextDelta":
-                out += getattr(ev, "text", "")
+        # j3 逮到的缝:端点循 tool_choice 时 JSON 在 ToolUseStop.input,只收 TextDelta=空
+        out = await harvest_structured(stream)
     return parse_reconcile(out)
 
 

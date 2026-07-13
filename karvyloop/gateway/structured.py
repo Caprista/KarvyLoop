@@ -102,9 +102,43 @@ def anthropic_structured_tool(schema: dict, *, name: str = "structured_output") 
     return tool, {"type": "tool", "name": name}
 
 
+async def harvest_structured(stream: Any) -> str:
+    """收结构化输出流 → 原始文本(供上层严格解析;宁空勿毒纪律一字不动)。
+
+    为什么必须有它(2026-07-13 j3 真模型逮到的缝):anthropic 方言的约束解码 =
+    强制 tool-use(上方 anthropic_structured_tool),**JSON 走工具入参、不走正文**;
+    只收 TextDelta 的调用方会把正身整个漏掉 → 空串 → 上层宁空勿毒返 [] → 静默零产出。
+    有的端点对 tool_choice 时循时不循 → 同一调用时红时绿,更隐蔽。
+
+    收法:TextDelta 累计正文;ToolUseStop.input 是约束解码的正身,**优先**(它才是
+    schema-合法保证的那份;array schema 的入参可能被 adapter 解成 list,一并容忍)。
+    调用方都是"tools=[] + 强制输出工具"的形状 → 流里唯一可能的工具就是
+    structured_output,不需要按名过滤(带真工具的 executor 路径不用本函数)。
+    只负责"别把正身丢了",不做校验(校验归上层 parse_*)。
+    """
+    import json
+    text = ""
+    payload: Any = None
+    async for ev in stream:
+        tn = type(ev).__name__
+        if tn == "TextDelta":
+            text += getattr(ev, "text", "") or ""
+        elif tn == "ToolUseStop":
+            inp = getattr(ev, "input", None)
+            if inp:   # 空 dict/None = 没正身,别覆盖
+                payload = inp
+    if payload is not None:
+        try:
+            return json.dumps(payload, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return text
+    return text
+
+
 __all__ = [
     "supports_structured",
     "normalize_json_schema",
     "openai_response_format",
     "anthropic_structured_tool",
+    "harvest_structured",
 ]

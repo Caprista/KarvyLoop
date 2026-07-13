@@ -223,6 +223,53 @@ async def test_compile_decisions_empty_samples():
     assert await compile_decisions([], gateway=gw, model_ref="") == []
 
 
+class _ToolEnvelopeGateway:
+    """anthropic 方言约束解码桩:正身走 ToolUseStop.input(强制 tool-use),正文零 TextDelta。
+
+    复现 2026-07-13 j3 真模型逮到的缝:端点循 tool_choice 时 JSON 在工具入参里,
+    只收 TextDelta 的收流循环 → 空串 → 宁空勿毒返 [] → 结晶静默归零(时红时绿最隐蔽)。
+    复现证据:把 compile/reconcile 里的 harvest_structured 换回"只收 TextDelta"循环,
+    本测试立刻红(out 空)。
+    """
+    def __init__(self, payload) -> None:
+        self._payload = payload
+
+    def resolve_model(self, scope):
+        return "stub/model"
+
+    async def complete(self, messages, tools, ref, *, system=None, response_schema=None):
+        class ToolUseStart:
+            id = "t1"
+            name = "structured_output"
+
+        class ToolUseStop:
+            def __init__(self, input):
+                self.id = "t1"
+                self.input = input
+        yield ToolUseStart()
+        yield ToolUseStop(self._payload)
+
+
+@pytest.mark.asyncio
+async def test_compile_decisions_harvests_tool_envelope():
+    """约束解码正身在工具入参(array schema → list 入参)也必须收到,不许静默归零。"""
+    gw = _ToolEnvelopeGateway([{"content": "碰生产先写测试", "kind": "constraint", "explicit": True}])
+    samples = [DecisionSample(decision="REJECT", context="直接上线", reason="没测试", ts=1.0)]
+    out = await compile_decisions(samples, gateway=gw, model_ref="")
+    assert len(out) == 1 and out[0]["content"] == "碰生产先写测试"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_harvests_tool_envelope_object():
+    """协调器形态(object {"new","contradicts"})走工具信封也必须收到。"""
+    gw = _ToolEnvelopeGateway({"new": [{"content": "上生产先备份", "kind": "constraint", "explicit": True}],
+                               "contradicts": []})
+    samples = [DecisionSample(decision="REJECT", context="直接 drop 表", reason="先备份", ts=1.0)]
+    new_c, contradicts = await reconcile_decisions(samples, existing=["旧偏好"], gateway=gw, model_ref="")
+    assert len(new_c) == 1 and new_c[0]["content"] == "上生产先备份"
+    assert contradicts == []
+
+
 # ---- 约束解码底层:schema 透传 + 不支持时优雅降级(决策画像投毒风险最高)----
 
 

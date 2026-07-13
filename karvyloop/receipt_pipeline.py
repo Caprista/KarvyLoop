@@ -77,19 +77,18 @@ async def reconcile_from_ocr(ocr_text: str, *, gateway, model_ref: str = "") -> 
     from karvyloop.gateway.system import SystemPrompt
     sp = SystemPrompt(static=[_EXTRACT_SYSTEM])
     msgs = [{"role": "user", "content": [{"type": "text", "text": ocr_text or ""}]}]
-    buf: list[str] = []
+    from karvyloop.gateway.structured import harvest_structured
     try:
         try:
             agen = gateway.complete(msgs, [], model_ref, system=sp, response_schema=RECEIPT_SCHEMA)
         except TypeError:                       # 老 gateway 不支持 response_schema → 无约束兜底
             agen = gateway.complete(msgs, [], model_ref, system=sp)
-        async for ev in agen:
-            if isinstance(ev, TextDelta):
-                buf.append(ev.text)
+        # 约束解码正身可能在工具入参(anthropic 方言强制 tool-use)→ 统一收割
+        raw = await harvest_structured(agen)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"抽取调用失败:{type(e).__name__}: {e}"}
     try:
-        data = _strict_json("".join(buf))
+        data = _strict_json(raw)
         if not isinstance(data, dict):
             raise ValueError("不是 JSON 对象")
     except Exception as e:  # noqa: BLE001

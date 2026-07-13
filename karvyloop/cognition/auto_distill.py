@@ -207,13 +207,13 @@ async def distill_turns_with_decisions(
     # response_schema kwarg → 捕 TypeError 剥掉重调(与网关内部降级同纪律),请求照发不崩。
     msgs = [{"role": "user", "content": material}]
     sp = SystemPrompt(static=[DISTILL_COMBINED_SYSTEM])
+    from karvyloop.gateway.structured import harvest_structured
     try:
         stream = gateway.complete(msgs, [], ref, system=sp, response_schema=_COMBINED_SCHEMA)
     except TypeError:
         stream = gateway.complete(msgs, [], ref, system=sp)
-    async for ev in stream:
-        if type(ev).__name__ == "TextDelta":
-            out += getattr(ev, "text", "")
+    # 约束解码正身可能在工具入参(anthropic 方言)→ 统一收割,别把正身丢了
+    out += await harvest_structured(stream)
     facts, decisions = parse_combined(out)
     written: list = []
     for f in facts:
