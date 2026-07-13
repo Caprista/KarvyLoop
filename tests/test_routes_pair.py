@@ -89,6 +89,38 @@ def test_relay_client_choke_injects_via_relay_marker():
     assert '_FWD_REQ_HEADERS = ("content-type", "accept", "accept-language")' in src
 
 
+def test_access_url_returns_qr_targets(monkeypatch):
+    """📱 扫码入口取码端点:runtime 在 → 给带 token 的 console/m 双链接(QR 渲染源)。"""
+    import karvyloop.console.routes_pair as rp_mod  # noqa: F401  (确认模块可导入)
+    import karvyloop.console.access as access
+    monkeypatch.setattr(access, "read_runtime",
+                        lambda: {"host": "0.0.0.0", "port": 8766, "token": "FAKE-TOKEN-DO-NOT-LEAK"})
+    monkeypatch.setattr(access, "_lan_ip", lambda: "192.168.1.5")
+    r = _client().get("/api/access_url").json()
+    assert r["ok"] is True
+    assert r["console"] == "http://192.168.1.5:8766/?token=FAKE-TOKEN-DO-NOT-LEAK"
+    assert r["m"] == "http://192.168.1.5:8766/m?token=FAKE-TOKEN-DO-NOT-LEAK"
+
+
+def test_access_url_local_only_binding_is_honest(monkeypatch):
+    """绑 localhost → remote 为空 + local_only 标(前端引导改绑 0.0.0.0,不出坏码)。"""
+    import karvyloop.console.access as access
+    monkeypatch.setattr(access, "read_runtime",
+                        lambda: {"host": "127.0.0.1", "port": 8766, "token": "FAKE-DO-NOT-LEAK"})
+    r = _client().get("/api/access_url").json()
+    assert r["ok"] is True and r["m"] == "" and r["local_only"] is True
+
+
+def test_access_url_rejects_via_relay(monkeypatch):
+    """管理权=本地:经隧道的请求拿不到 LAN 令牌(偷来的手机造不出新入口)。"""
+    import karvyloop.console.access as access
+    monkeypatch.setattr(access, "read_runtime",
+                        lambda: {"host": "0.0.0.0", "port": 8766, "token": "FAKE-DO-NOT-LEAK"})
+    r = _client().get("/api/access_url", headers={"x-karvy-via-relay": "1"}).json()
+    assert r["ok"] is False
+    assert "FAKE" not in str(r)   # 防泄露断言:拒绝响应里绝不带 token
+
+
 def test_config_relay_roundtrip(tmp_path):
     from karvyloop.config_relay import read_relay, write_relay
     cfg = tmp_path / "config.yaml"

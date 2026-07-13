@@ -67,6 +67,27 @@ def api_pair_devices(request: Request) -> dict[str, Any]:
         return {"ok": False, "reason": f"{type(e).__name__}", "devices": []}
 
 
+@router.get("/access_url")
+def api_access_url(request: Request) -> dict[str, Any]:
+    """取本机 console 的跨设备访问链接(供设备面板渲染**手机扫码二维码**)。
+
+    返回 {console: 带token主页, m: 带token拍板台}(绑 localhost 时 remote 为空 → 前端给
+    "改绑 0.0.0.0"的引导)。安全口径:调用方能打到这个端点 = 已过 token 门(本机免密/
+    LAN 已带 token),回同一枚 token 不是提权;**经隧道 403**(管理权=本地,偷来的手机
+    经 relay 永远拿不到 LAN 令牌)。token 每次重启即刷新,截图泄露窗口有限。
+    """
+    if _via_relay(request):
+        return {"ok": False, "reason": _MGMT_LOCAL_ONLY}
+    from karvyloop.console.access import access_urls, read_runtime
+    rt = read_runtime()
+    if not rt:
+        return {"ok": False, "reason": "console 运行时信息不在(~/.karvyloop/console.runtime.json)——重启 console 再试。"}
+    urls = access_urls(str(rt.get("host", "127.0.0.1")), int(rt.get("port", 8766)), str(rt.get("token", "")))
+    remote = urls.get("remote", "")
+    m_url = remote.replace("/?token=", "/m?token=") if remote else ""
+    return {"ok": True, "console": remote, "m": m_url, "local_only": not remote}
+
+
 class PairRevokeRequest(BaseModel):
     ident: str = Field(..., min_length=4, max_length=128)   # 指纹或公钥 hex
 

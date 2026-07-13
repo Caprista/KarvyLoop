@@ -7,6 +7,8 @@
  * ＋添加设备引导(真实 CLI 命令,可复制)＋离家远端访问指引(诚实标注:跨网开网页尚未建成)。
  * 暴露 window.KarvyDevicesPanel.open()。
  */
+import qrcode from "qrcode-generator";
+
 type Attrs = Record<string, unknown>;
 type Child = Node | string | null | undefined;
 interface Dom {
@@ -152,6 +154,38 @@ function _guideBoxes(host: HTMLElement): void {
   host.appendChild(away);
 }
 
+// 📱 手机扫码直达:二维码 = 带本次运行 token 的 /m 链接(第一次连接的零摩擦入口)。
+// 端点管理权=本地(经隧道 403,见 routes_pair);token 重启即刷新 —— 手机忘了链接
+// 随时回这里重扫(Hardy 拍过:授权管理界面要能再次显示二维码)。QR 由 qrcode-generator
+// (MIT,打进 bundle)本地生成,链接绝不外发。
+async function _qrSection(host: HTMLElement): Promise<void> {
+  const box = el("div", { class: "ext-onboarding" });
+  box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.qr.title") }));
+  let data: any = null;
+  try {
+    data = await _getJSON("/api/access_url");
+  } catch (e) { /* 后端不可达 → 空态 */ }
+  if (!(data && data.ok)) {
+    box.appendChild(el("div", { class: "mgmt-hint", text: (data && data.reason) || t("devices.qr.fail") }));
+    host.appendChild(box);
+    return;
+  }
+  if (!data.m) {
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.local_only") }));
+    host.appendChild(box);
+    return;
+  }
+  const qr = qrcode(0, "M");
+  qr.addData(String(data.m));
+  qr.make();
+  const holder = el("div", { class: "devices-qr" });
+  holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });   // 自产 SVG,非模型文本
+  box.appendChild(holder);
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.hint") }));
+  box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
+  host.appendChild(box);
+}
+
 // 📱 已授权的远程设备(配对身份切片,docs/74):手机在 /m 点「出门也能用」配对后出现在这;
 // 这里是**管理面**(只在本机/局域网可操作,经隧道的请求打不到)——一键吊销 = 那台设备
 // 下一个请求就被拒(回源在线校验),丢手机回家点一下即可。
@@ -212,6 +246,7 @@ async function render(body: HTMLElement): Promise<void> {
     for (const d of devices) list.appendChild(_deviceCard(d, body));
     body.appendChild(list);
   }
+  await _qrSection(body);
   await _pairedSection(body);
   _guideBoxes(body);
 }
