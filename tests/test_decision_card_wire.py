@@ -12,6 +12,8 @@ import pathlib
 import sys
 import types
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -288,3 +290,84 @@ def test_endpoint_pending_empty_when_no_registry():
     app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
     r = TestClient(app).get("/api/proposals/pending").json()
     assert r["proposals"] == []
+
+
+# ==== 可追问决策卡(docs/77):追问锚卡证据 / 中立不推 ACCEPT / 不碰拍板 ====
+
+class _AskGateway:
+    """记录喂给模型的 prompt + system(验证追问锚在卡证据 + 守中立不变量)。"""
+    def __init__(self, reply: str) -> None:
+        self._reply = reply
+        self.seen_prompt = ""
+        self.seen_system = ""
+
+    def resolve_model(self, scope):
+        return "stub/model"
+
+    async def complete(self, messages, tools, ref, *, system=None, response_schema=None):
+        self.seen_prompt = messages[0]["content"] if messages else ""
+        self.seen_system = " ".join(getattr(system, "static", []) or []) if system else ""
+
+        class TextDelta:
+            def __init__(self, text): self.text = text
+        yield TextDelta(self._reply)
+
+
+def _app_ask(proposal, gw, memory=None):
+    reg = PendingProposalRegistry()
+    reg.register(proposal)
+    app = types.SimpleNamespace(state=types.SimpleNamespace(
+        proposal_registry=reg, main_loop=None, memory=memory,
+        runtime_kwargs={"gateway": gw, "model_ref": ""}))
+    return app, proposal.proposal_id, reg
+
+
+@pytest.mark.asyncio
+async def test_ask_answers_and_grounds_in_card_evidence():
+    from karvyloop.console.decision_card_wire import decision_card_ask
+    gw = _AskGateway("这张卡只动了文案,风险低。")
+    p = _proposal(summary="部署到预发环境", basis="改动只动了文案,风险低")
+    app, pid, _reg = _app_ask(p, gw)
+    r = await decision_card_ask(app, proposal_id=pid, question="风险大吗?", transcript=[])
+    assert r["ok"] is True and "文案" in r["reply"]
+    # 锚证据:卡的摘要+依据+用户问句真进了喂模型的 prompt(答案锚在卡上,不许超出)
+    assert "部署到预发环境" in gw.seen_prompt
+    assert "改动只动了文案" in gw.seen_prompt
+    assert "风险大吗" in gw.seen_prompt
+
+
+@pytest.mark.asyncio
+async def test_ask_system_prompt_holds_neutrality_invariants():
+    """不变量①③:system prompt 明令不许编卡外事实 + 中立不推 ACCEPT。"""
+    from karvyloop.console.decision_card_wire import decision_card_ask
+    gw = _AskGateway("ok")
+    p = _proposal()
+    app, pid, _reg = _app_ask(p, gw)
+    await decision_card_ask(app, proposal_id=pid, question="为什么?", transcript=[])
+    assert "绝不编造" in gw.seen_system
+    assert "不要劝他批准" in gw.seen_system
+
+
+@pytest.mark.asyncio
+async def test_ask_does_not_touch_the_pending_decision():
+    """不变量②:追问纯追问,绝不拍板 —— 提案仍挂在 registry(问责单点在 h2a_decide)。"""
+    from karvyloop.console.decision_card_wire import decision_card_ask
+    gw = _AskGateway("答")
+    p = _proposal()
+    app, pid, reg = _app_ask(p, gw)
+    await decision_card_ask(app, proposal_id=pid, question="拒了会怎样?", transcript=[])
+    assert reg.get(pid) is not None                      # 追问后提案照样待决,没被决掉
+
+
+@pytest.mark.asyncio
+async def test_ask_degrades_honestly():
+    from karvyloop.console.decision_card_wire import decision_card_ask
+    gw = _AskGateway("x")
+    p = _proposal()
+    app, pid, _reg = _app_ask(p, gw)
+    assert (await decision_card_ask(app, proposal_id=pid, question="  ", transcript=[]))["reason"] == "empty"
+    assert (await decision_card_ask(app, proposal_id="nope-x", question="q", transcript=[]))["reason"] == "not_found"
+    # 无 gateway → 诚实报,不 500
+    app.state.runtime_kwargs = {"gateway": None}
+    r = await decision_card_ask(app, proposal_id=pid, question="q", transcript=[])
+    assert r["ok"] is False

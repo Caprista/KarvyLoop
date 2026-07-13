@@ -43,6 +43,28 @@ def test_knowledge_distill_labels_source():
     assert "unknown" not in gw.seen
 
 
+def test_decision_ask_labels_source():
+    """可追问决策卡(docs/77):追问也是用户面 LLM 路径,必须标 decision_ask
+    (否则 by_source 看不到追问在烧;对抗验收点名的可选加固,补掉不留欠账)。"""
+    import types
+
+    from karvyloop.console.decision_card_wire import decision_card_ask
+    from karvyloop.karvy.atoms import Proposal
+    from karvyloop.karvy.proposal_registry import PendingProposalRegistry
+    gw = _RecordingGateway()
+    reg = PendingProposalRegistry()
+    reg.register(Proposal(summary="部署预发", options=("ACCEPT", "DEFER", "REJECT"),
+                          strength=0.9, evidence_refs=(), habit_id=0, model_ref="x/y",
+                          ts=0.0, kind="run_task", payload={}, basis="低风险"))
+    pid = next(iter(reg.pending())).proposal_id
+    app = types.SimpleNamespace(state=types.SimpleNamespace(
+        proposal_registry=reg, memory=None,
+        runtime_kwargs={"gateway": gw, "model_ref": ""}))
+    asyncio.run(decision_card_ask(app, proposal_id=pid, question="风险大吗?", transcript=[]))
+    assert gw.seen == ["decision_ask"]
+    assert "unknown" not in gw.seen
+
+
 def test_decision_pref_extraction_labels_source():
     from karvyloop.crystallize.decision_pref import (
         DecisionSample, compile_decisions, reconcile_decisions,

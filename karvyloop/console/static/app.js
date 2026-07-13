@@ -637,9 +637,58 @@
           basisIn.addEventListener("input", () => { judgeState.basis = basisIn.value; });
           box.appendChild(basisIn);
         }
+        // 💬 追问(docs/77 可追问决策卡):opt-in,不挡两键快路径。就这张卡问小卡,答案锚卡证据、
+        // 中立不推 ACCEPT(后端 system prompt 守)。追问后仍是同一张卡的同一个拍板口(问责单点)。
+        box.appendChild(_dcardAsk(proposalId));
         container.appendChild(box);
       })
       .catch(() => {});   // 拉卡失败不挡拍板(降级到老提案卡)
+  }
+
+  // 决策卡的追问区:折叠入口 → 展开输入 + 问答气泡。单飞互斥;失败诚实提示。
+  function _dcardAsk(proposalId) {
+    const wrap = el("div", { class: "dcard-ask" });
+    const toggle = el("button", { class: "dcard-ask-toggle", text: t("dcard.ask_toggle") });
+    const panel = el("div", { class: "dcard-ask-panel hidden" });
+    const log = el("div", { class: "dcard-ask-log" });
+    const inp = el("input", { class: "dcard-ask-input", type: "text", maxlength: "1000" });
+    inp.placeholder = t("dcard.ask_ph");
+    const send = el("button", { class: "dcard-ask-send", text: t("dcard.ask_send") });
+    const transcript = [];
+    let busy = false;
+    const ask = async () => {
+      const q = inp.value.trim();
+      if (!q || busy) return;
+      busy = true; inp.value = ""; inp.disabled = true;
+      log.appendChild(el("div", { class: "dcard-ask-you", text: q }));
+      transcript.push({ who: "user", text: q });
+      const thinking = el("div", { class: "dcard-ask-karvy dcard-ask-thinking", text: t("dcard.ask_thinking") });
+      log.appendChild(thinking); log.scrollTop = log.scrollHeight;
+      try {
+        const res = await _postJSON("/api/decision_card/ask", { proposal_id: proposalId, question: q, transcript: transcript.slice(0, -1) });
+        thinking.remove();
+        const reply = (res && res.ok && res.data && res.data.ok && (res.data.reply || "").trim())
+          ? String(res.data.reply).trim() : t("dcard.ask_failed");
+        log.appendChild(el("div", { class: "dcard-ask-karvy", text: reply }));
+        transcript.push({ who: "karvy", text: reply });
+      } catch (e) {
+        thinking.remove();
+        log.appendChild(el("div", { class: "dcard-ask-karvy", text: t("dcard.ask_failed") }));
+      } finally {
+        busy = false; inp.disabled = false; log.scrollTop = log.scrollHeight;
+      }
+    };
+    toggle.addEventListener("click", () => {
+      panel.classList.toggle("hidden");
+      if (!panel.classList.contains("hidden")) setTimeout(() => inp.focus(), 30);
+    });
+    send.addEventListener("click", () => { void ask(); });
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") void ask(); });
+    panel.appendChild(log);
+    panel.appendChild(el("div", { class: "dcard-ask-bar" }, inp, send));
+    wrap.appendChild(toggle);
+    wrap.appendChild(panel);
+    return wrap;
   }
 
   // 一条判定依据行:✓/✗ + 文本 + 认/改/删。改/删 → engaged + 记进 judgeState.edited。

@@ -266,6 +266,20 @@ def api_decision_card_judge(req: DecisionCardJudgeRequest, request: Request) -> 
                       basis=req.basis)
 
 
+class DecisionCardAskRequest(BaseModel):
+    proposal_id: str = Field(..., min_length=1, max_length=128)
+    question: str = Field(..., min_length=1, max_length=1000)
+    transcript: list[dict] = Field(default_factory=list)   # [{who,text}] 此前追问(客户端维护)
+
+
+@router.post("/decision_card/ask")
+async def api_decision_card_ask(req: DecisionCardAskRequest, request: Request) -> dict[str, Any]:
+    """就一张决策卡追问(docs/77 可追问决策卡):答案锚卡证据、中立不推 ACCEPT、不碰拍板(问责单点)。"""
+    from karvyloop.console.decision_card_wire import decision_card_ask
+    return await decision_card_ask(request.app, proposal_id=req.proposal_id,
+                                   question=req.question, transcript=list(req.transcript))
+
+
 # ---- /api/propose (9.0d:IntentAnalyst boot 触发 + 推 h2a_proposal) ----
 
 @router.post("/propose")

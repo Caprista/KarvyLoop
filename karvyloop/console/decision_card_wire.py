@@ -9,9 +9,12 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from karvyloop.cognition.decision_card import SurfaceTracker, build_decision_card
+
+logger = logging.getLogger(__name__)
 
 
 def _verify_store(app: Any):
@@ -176,6 +179,57 @@ def build_card_for_proposal(app: Any, proposal_id: str) -> Optional[dict]:
     # Cut 2 违背即拦:对召回到的标准跑守线(放在最后 —— 会把 high_value/needs_recheck 升上去)
     _attach_violations(app, d, aligned, problem, approach, payload)
     return d
+
+
+async def decision_card_ask(app: Any, *, proposal_id: str, question: str,
+                            transcript: Optional[list] = None) -> dict:
+    """就**一张决策卡**追问(docs/77:可追问决策卡,复用认知摄入的 distill chat 形状)。
+
+    三不变量(守死,否则追问变毒):
+    ① **答案锚在这张卡的证据**(要做什么/依据/你以前的相关标准)—— system prompt 明令"卡上没有的
+       别编,老实说不确定";证据只喂卡自身字段,不给模型别的料 → 追问答不出卡外的事实。
+    ② 快路径不变:本端点纯追问,**不碰拍板**;ACCEPT/DEFER/REJECT 仍走 /api/h2a_decide(问责单点)。
+    ③ **中立不推 ACCEPT**:system prompt 明令"帮他判断、别劝批准"——防追问沦为"劝你盖章的软通道"
+       (Buçinca 过度依赖陷阱最锋利处)。
+    """
+    reg = getattr(app.state, "proposal_registry", None)
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    q = (question or "").strip()
+    if not q:
+        return {"ok": False, "reason": "empty"}
+    if reg is None or gw is None:
+        return {"ok": False, "reason": "未接 registry/gateway(--no-llm?)"}
+    p = reg.get(proposal_id)
+    if p is None:
+        return {"ok": False, "reason": "not_found"}
+    summary = getattr(p, "summary", "") or ""
+    basis = getattr(p, "basis", "") or ""
+    payload = getattr(p, "payload", {}) or {}
+    aligned, _omitted = _recall_aligned_prefs(app, payload)   # 确定性召回,无 LLM
+    prefs_txt = "\n".join(f"- {a.get('content', '')}" for a in aligned) or "(无相关标准)"
+    convo = "\n".join(f"{x.get('who', '?')}: {x.get('text', '')}"
+                      for x in (transcript or [])[-12:] if isinstance(x, dict))
+    sysp = ("你是小卡。用户正在决定要不要批准这张决策卡(可 同意/稍后/拒绝)。**只依据下面这张卡的"
+            "证据回答**(要做什么、为什么、他以前定的相关标准);卡上没有的事实,老实说\"卡上没写\"或"
+            "\"我不确定\",**绝不编造**。你是帮他判断,**保持中立、不要劝他批准**。简洁、对话式、说日常话。")
+    usr = (f"[要做什么]\n{summary}\n\n[为什么提这个 / 依据]\n{basis}\n\n"
+           f"[你以前定的相关标准]\n{prefs_txt}\n\n[此前追问]\n{convo}\n\n[用户这句]\n{q}")
+    out = ""
+    try:
+        from karvyloop.gateway import ResolveScope
+        from karvyloop.gateway.system import SystemPrompt
+        from karvyloop.llm.token_ledger import token_source
+        ref = gw.resolve_model(ResolveScope(atom_model=rk.get("model_ref") or None))
+        with token_source("decision_ask"):
+            async for ev in gw.complete([{"role": "user", "content": usr}], [], ref,
+                                        system=SystemPrompt(static=[sysp])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
+    except Exception as e:   # noqa: BLE001 — 追问失败不致命,诚实短错误
+        logger.warning(f"[decision_ask] 失败: {type(e).__name__}")
+        return {"ok": False, "reason": "llm_failed"}
+    return {"ok": True, "reply": out.strip() or "(没接上,再问一次?)"}
 
 
 def _tracker(app: Any) -> SurfaceTracker:

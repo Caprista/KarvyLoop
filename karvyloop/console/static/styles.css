@@ -1324,6 +1324,35 @@ html, body {
 .dcard-basis::placeholder { color: var(--text-dim); }
 .dcard-basis:focus { outline: none; border-color: var(--accent); }
 
+/* 💬 决策卡追问(docs/77):折叠入口 + 问答面。opt-in,不抢两键快路径的视觉。 */
+.dcard-ask { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+.dcard-ask-toggle {
+  border: none; background: transparent; cursor: pointer; padding: 2px 4px;
+  font-size: 12px; color: var(--text-2); border-radius: 5px;
+}
+.dcard-ask-toggle:hover { color: var(--accent); background: var(--surface); }
+.dcard-ask-panel { margin-top: 6px; }
+.dcard-ask-panel.hidden { display: none; }
+.dcard-ask-log { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.dcard-ask-you, .dcard-ask-karvy {
+  font-size: 12px; line-height: 1.5; padding: 6px 9px; border-radius: 9px;
+  white-space: pre-wrap; word-break: break-word; max-width: 92%;
+}
+.dcard-ask-you { align-self: flex-end; background: var(--accent-soft); border: 1px solid var(--accent); }
+.dcard-ask-karvy { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); }
+.dcard-ask-thinking { color: var(--text-dim); font-style: italic; }
+.dcard-ask-bar { display: flex; gap: 6px; }
+.dcard-ask-input {
+  flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+}
+.dcard-ask-input:focus { outline: none; border-color: var(--accent); }
+.dcard-ask-input:disabled { opacity: .6; }
+.dcard-ask-send {
+  border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  border-radius: 6px; font-size: 12px; padding: 0 12px; cursor: pointer;
+}
+
 /* === 语言切换器 === */
 .lang-switcher { display: inline-flex; gap: 4px; }
 .lang-switcher .lang-btn {
