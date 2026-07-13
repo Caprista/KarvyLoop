@@ -11,6 +11,39 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Changed
+- **A new face: deep-emerald dark theme, designed against "AI-generated look" defaults.**
+  The console, desktop view and `/m` phone page move from the warm-cream palette to a
+  near-black → dark-emerald surface ladder (blue-leaning, with depth — not one flat black),
+  one restrained blue-green signal accent (spent on primary CTAs, focus and status dots —
+  budgeted, never glowing), hairline borders instead of glow for depth, and semantic colors
+  pulled apart from the brand hue (success = classic green, warnings = amber,
+  danger = **rose** — pure red reads cheap on a green system). High-stakes decision cards
+  now carry a **fluorescent-yellow marker** reserved for exactly one meaning: "this hits
+  one of your hard standards." Dark is the default; a full light mirror ships behind a
+  one-click **theme toggle** in the top bar (persisted, no flash on load). The design
+  system (tokens, motion discipline, anti-default rules) is documented in
+  [docs/DESIGN.md](docs/DESIGN.md).
+- **Micro-motion system: the UI now moves because something happened.** A unified motion
+  vocabulary (150/240/320ms tokens, ease-out, transform/opacity only): buttons lift on
+  hover and settle on press; live chat messages rise in (history re-renders don't replay);
+  the **decision card's arrival is the one orchestrated moment** — a 320ms entrance plus a
+  single, never-looping focus pulse, played only the first time a card appears; modals fade
+  and rise; the token meter pops once when the number actually changes; chat ⇄ desk view
+  switches crossfade via the native View Transitions API where available. Every animation
+  respects `prefers-reduced-motion` via a global kill-switch.
+
+### Fixed
+- **Structured output silently lost when the model answers through the tool envelope.**
+  With constrained decoding on Anthropic-dialect endpoints, the JSON payload arrives as
+  forced-tool input — not as text. Five collectors (decision-preference extraction and
+  reconciliation — the crystallization intake, conversation distill, knowledge ingest,
+  receipt extraction) only harvested text deltas, so whenever the endpoint honored the
+  forced tool choice the result parsed as empty and the pipeline yielded zero, quietly
+  and intermittently. All five now harvest through one shared collector that prefers the
+  schema-guaranteed tool payload and falls back to text (locked by envelope-stub
+  regression tests + the real-model pressure test).
+
 ## [2026.7.13] — 2026-07-13
 
 _A big one: your KarvyLoop is no longer tied to one machine or one desk. Your

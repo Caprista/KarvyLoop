@@ -20,7 +20,13 @@ var KarvyTokensBundle = (function(exports) {
     let s = "💰 " + _fmtTok(totalTok) + " tok";
     if (cost != null) s += " · ¥" + (cost * 7).toFixed(2);
     if (model) s += " · " + model;
-    meter.textContent = totalTok ? s : "💰 —";
+    const next = totalTok ? s : "💰 —";
+    if (meter.textContent && meter.textContent !== "💰 —" && meter.textContent !== next) {
+      meter.classList.remove("bump");
+      void meter.offsetWidth;
+      meter.classList.add("bump");
+    }
+    meter.textContent = next;
   }
   function _tokTable(rows, keyCol) {
     if (!rows.length) return el("div", { class: "muted", text: t("tokens.none") });

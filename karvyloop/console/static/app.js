@@ -561,7 +561,11 @@
         judgeState.highValue = !!c.high_value;
         judgeState.hvStandard = c.high_value_standard || "";
         judgeState.needsRecheck = !!c.needs_recheck;
-        const box = el("div", { class: "dcard" + (c.high_value ? " dcard-highvalue" : "") });
+        // 登场编排 = 全站唯一的大动作:只给**第一次**出现的卡(重渲染不重放,不打断在读的人)
+        if (!window._dcardSeen) window._dcardSeen = new Set();
+        const _fresh = !window._dcardSeen.has(proposalId);
+        window._dcardSeen.add(proposalId);
+        const box = el("div", { class: "dcard" + (c.high_value ? " dcard-highvalue" : "") + (_fresh ? " dcard-in" : "") });
         // Cut 2 违背即拦:踩了你定的标准 → 拍板**之前**最显眼处标红(带回执,可核"它替我把关")
         const violations = c.violations || [];
         violations.forEach((v) => {
@@ -2442,14 +2446,14 @@
     const follow = isNearBottom(log);
     // 系统提示不是"说话人":做成居中淡提示,不挂 [system] 的 speaker tag(Hardy:[system] 是啥?)
     if (role === "system") {
-      const notice = el("div", { class: "chat-notice" });
+      const notice = el("div", { class: "chat-notice live" });   // live=真实追加才升入;历史重建不动
       if (window.KarvyRender) KarvyRender.appendMarkdown(notice, text || "");
       else notice.appendChild(document.createTextNode(text || ""));
       log.appendChild(notice);
       if (follow) log.scrollTop = log.scrollHeight;
       return notice;   // 返回节点:旅程收官要对「方法复用回执」聚光(调用方多数忽略)
     }
-    const line = el("div", { class: "chat-line " + role },
+    const line = el("div", { class: "chat-line live " + role },
       el("span", { class: "role", text: _roleLabel(role) }));
     // 9.4:正文走 markdown + 消毒(KarvyRender);缺库回退裸文本。
     // agent 正文过 tB:后端静态整句(共创等)在 en 界面查 BACKEND_ZH_EN 整句/前缀译;
@@ -2923,7 +2927,10 @@
   function _setView(mode) {
     if (mode !== "desk") mode = "chat";   // 只有两个家:chat|desk(board 已退位成放大态,不再是档位)
     try { localStorage.setItem("karvyloop_view", mode); } catch (e) {}
-    _applyView(mode);
+    // 对话⇄桌面用 View Transitions 原生 crossfade(渐进增强:不支持/减弱动效则瞬切)
+    const _reduced = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (document.startViewTransition && !_reduced) document.startViewTransition(() => _applyView(mode));
+    else _applyView(mode);
   }
 
   // ============ rail ⛶ 放大(docs/59 方案A):四象限临时全屏,复用 body.board-view 的 2×2 CSS ============
@@ -3874,6 +3881,14 @@
     const optDesk = document.getElementById("view-opt-desk");
     if (optChat) optChat.addEventListener("click", () => _setView("chat"));
     if (optDesk) optDesk.addEventListener("click", () => _setView("desk"));
+    // 主题切换:dark 默认;防闪预应用在 index.html <head>(CSS 前),这里只管点按轮换+记忆
+    const themeBtn = document.getElementById("theme-toggle");
+    if (themeBtn) themeBtn.addEventListener("click", () => {
+      const root = document.documentElement;
+      const next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("karvyloop_theme", next); } catch (e) {}
+    });
     // rail ⛶:四象限临时放大(点 ⛶/✕ 或 Esc 回对话;临时态不写 karvyloop_view)
     const zoomBtn = document.getElementById("rail-zoom-btn");
     if (zoomBtn) zoomBtn.addEventListener("click", () => _setBoardZoom(!_boardZoomed()));

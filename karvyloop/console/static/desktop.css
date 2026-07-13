@@ -5,12 +5,19 @@
  * (同特异性,后来者赢),styles.css 本体一行不动 → 对话/看板两视图像素级不变。 */
 
 :root {
-  /* ==== desktop shell tokens(docs/51 §2.1)==== */
-  --desk-bg: #efe6d8;                              /* 桌面底:比 --bg 深半档的暖沙色 */
-  --note-yellow: #fbf0c9;                          /* 便签底(⚖ 用主题奶咖底以示地位) */
+  /* ==== desktop shell tokens(docs/51 §2.1;2026-07-13 随深墨绿系换皮,dark 默认)==== */
+  --desk-bg: #081010;                              /* 桌面底:比 --bg 抬半档的深墨底 */
+  --note-yellow: #201B10;                          /* 便签底:暗琥珀纸(⚖ 地位不变) */
+  --note-line: #46391C;
+  --win-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);   /* 聚焦窗口阴影,比 --shadow-lg 重一档 */
+  --dock-bg: color-mix(in srgb, var(--bg-elev-1) 84%, transparent);  /* dock 毛玻璃底 */
+}
+:root[data-theme="light"] {
+  --desk-bg: #E7EEE9;                              /* teal 调浅桌面(原暖沙色退役) */
+  --note-yellow: #fbf0c9;
   --note-line: #e6d391;
-  --win-shadow: 0 18px 50px rgba(142, 95, 60, 0.22);  /* 聚焦窗口阴影,比 --shadow-lg 重一档 */
-  --dock-bg: rgba(255, 255, 255, 0.82);            /* dock 毛玻璃底 */
+  --win-shadow: 0 18px 50px rgba(16, 55, 45, 0.20);
+  --dock-bg: rgba(255, 255, 255, 0.82);
 }
 
 /* ============================================================================
@@ -41,12 +48,12 @@ body.desk-view.desk-wall-day .cockpit {
   background: var(--desk-bg) url("/static/assets/wallpaper-day.jpg") center / cover no-repeat;
 }
 body.desk-view.desk-wall-night .cockpit {
-  background: #23222b url("/static/assets/wallpaper-night.jpg") center / cover no-repeat;
+  background: var(--bg) url("/static/assets/wallpaper-night.jpg") center / cover no-repeat;
 }
 /* 壁纸下的半透部件提不透明度 + 轻毛玻璃(便签本身是实底,不用动) */
 body.desk-view.desk-wall-day .desk-station,
 body.desk-view.desk-wall-night .desk-station {
-  background: rgba(255, 255, 255, 0.84);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
@@ -54,7 +61,7 @@ body.desk-view.desk-wall-day .desk-workcard,
 body.desk-view.desk-wall-night .desk-workcard,
 body.desk-view.desk-wall-day .desk-recent-knowledge .desk-recent-item,
 body.desk-view.desk-wall-night .desk-recent-knowledge .desk-recent-item {
-  background: rgba(255, 255, 255, 0.93);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
 }
 /* 夜图偏深:直接写在壁纸上的小标题换亮字 + 落影(不动壁纸本身) */
 body.desk-view.desk-wall-night .desk-recent-knowledge .desk-recent-head {
@@ -98,8 +105,8 @@ body.desk-view .cockpit-col::after {
   transform: translateX(-50%);
   width: 66px;
   height: 10px;
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid rgba(42, 33, 24, 0.05);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
   border-top: none;
   border-radius: 0 0 4px 4px;
   pointer-events: none;
@@ -454,7 +461,7 @@ body.desk-view .desk-dock [data-tip]:hover::after {
   padding: 5px 10px;
   border-radius: var(--r-sm);
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg);
   font-size: var(--fs-12);
   font-weight: 500;
   box-shadow: var(--shadow-md);
@@ -704,7 +711,7 @@ body.desk-view .desk-station {
   padding: 8px 8px 5px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.6);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
   cursor: pointer;
   transition: transform 120ms var(--ease-out);
 }
@@ -729,7 +736,7 @@ body.desk-view .desk-station .station-light {
   border-radius: 50%;
   background: var(--border-strong);
 }
-body.desk-view .desk-station.is-busy { border-color: var(--teal-line); background: rgba(255, 255, 255, 0.85); }
+body.desk-view .desk-station.is-busy { border-color: var(--teal-line); background: color-mix(in srgb, var(--surface) 88%, transparent); }
 body.desk-view .desk-station.is-busy .station-light {
   background: var(--teal);
   box-shadow: 0 0 6px 1px var(--teal-soft), 0 0 0 3px var(--teal-soft);
@@ -749,7 +756,7 @@ body.desk-view .desk-station[data-tip]:hover::after {
   padding: 5px 10px;
   border-radius: var(--r-sm);
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg);
   font-size: var(--fs-12);
   box-shadow: var(--shadow-md);
   pointer-events: none;
@@ -825,7 +832,7 @@ body.desk-view .desk-signed-note[data-tip]:hover::after {
   padding: 4px 9px;
   border-radius: var(--r-sm);
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg);
   font-size: var(--fs-12);
   pointer-events: none;
 }
@@ -844,7 +851,7 @@ body.desk-view .desk-workcards {
 body.desk-view .desk-workcards.hidden { display: none; }
 body.desk-view .desk-workcard {
   padding: 6px 10px 7px;
-  background: rgba(255, 255, 255, 0.85);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow-md);
@@ -868,7 +875,7 @@ body.desk-view .desk-workcard .work-chip {
   padding: 1px 7px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
   font-size: var(--fs-12);
   color: var(--text-dim);
 }
@@ -901,7 +908,7 @@ body.desk-view .desk-recent-knowledge .desk-recent-head {
 body.desk-view .desk-recent-knowledge .desk-recent-item {
   text-align: left;
   padding: 7px 10px;
-  background: rgba(255, 255, 255, 0.88);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow-md);
@@ -924,7 +931,7 @@ body.desk-view .desk-memento {
   top: 18px;
   transform: none;
   padding: 8px 14px 10px;
-  background: linear-gradient(160deg, var(--note-yellow, #fff6da), rgba(255, 255, 255, 0.92));
+  background: linear-gradient(160deg, var(--note-yellow, #fff6da), color-mix(in srgb, var(--surface) 92%, transparent));
   border: 1px solid var(--note-line, var(--border));
   border-radius: 12px;
   box-shadow: 0 10px 22px rgba(142, 95, 60, 0.18);
@@ -952,7 +959,7 @@ body.desk-view .desk-memento .desk-memento-chip {
   padding: 2px 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface);
   font-size: var(--fs-12);
   color: var(--text-1);
 }
@@ -1027,13 +1034,13 @@ body.desk-view .desk-pending-row {
   padding: 5px 12px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
   cursor: pointer;
   transition: transform 100ms var(--ease-out), background 100ms var(--ease-out);
 }
-body.desk-view .desk-pending-row:hover { transform: translateY(-1px); background: rgba(255, 255, 255, 0.92); }
+body.desk-view .desk-pending-row:hover { transform: translateY(-1px); background: color-mix(in srgb, var(--surface) 94%, transparent); }
 body.desk-view .desk-pending-row:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 body.desk-view .desk-pending-row .desk-pending-ico { font-size: 13px; line-height: 1; }
 body.desk-view .desk-pending-row .desk-pending-txt {
@@ -1059,7 +1066,7 @@ body.desk-view .desk-pending [data-tip]:hover::after {
   padding: 4px 9px;
   border-radius: var(--r-sm);
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg);
   font-size: var(--fs-12);
   white-space: nowrap;
   pointer-events: none;

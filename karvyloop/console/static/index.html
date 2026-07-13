@@ -4,6 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>KarvyLoop Console</title>
+  <meta name="theme-color" content="#060B0B" />
+  <script>
+    /* 主题防闪:CSS 加载前先应用记忆的主题(dark 为默认,不落盘不加属性) */
+    (function () {
+      try {
+        var t = localStorage.getItem("karvyloop_theme");
+        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { /* 无 localStorage(隐私模式)→ 默认 dark */ }
+    })();
+  </script>
   <link rel="icon" type="image/png" href="/static/assets/karvyloop-logo-64.png" />
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/vendor/highlight-github.min.css" />
@@ -54,6 +64,7 @@
         <button class="tour-replay" id="journey-replay" data-i18n-title="journey.replay.title">🎬</button>
         <!-- 随包演示实例(小林/Lin):看一个用了一周的"满级号",只读浏览(demo_panel.js) -->
         <button class="tour-replay" id="demo-open" data-i18n-title="demo.entry.title">👀</button>
+        <button class="theme-toggle" id="theme-toggle" data-i18n-title="theme.title">◐</button>
         <span class="lang-switcher" id="lang-switcher"></span>
       </div>
     </header>

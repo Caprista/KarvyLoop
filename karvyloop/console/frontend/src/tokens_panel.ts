@@ -34,7 +34,14 @@ async function pollMeter(): Promise<void> {
   let s = "💰 " + _fmtTok(totalTok) + " tok";
   if (cost != null) s += " · ¥" + (cost * 7).toFixed(2);   // 粗略 USD→¥(P1 真汇率)
   if (model) s += " · " + model;
-  meter.textContent = totalTok ? s : "💰 —";
+  const next = totalTok ? s : "💰 —";
+  // 微动效:数值真变了才 pop 一下(状态变化驱动;初次填充不 pop,reduced-motion 由 CSS 总闸关)
+  if (meter.textContent && meter.textContent !== "💰 —" && meter.textContent !== next) {
+    meter.classList.remove("bump");
+    void (meter as HTMLElement).offsetWidth;   // 重启动画
+    meter.classList.add("bump");
+  }
+  meter.textContent = next;
 }
 
 function _tokTable(rows: any[], keyCol: string): HTMLElement {

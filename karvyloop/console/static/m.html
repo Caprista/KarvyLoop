@@ -3,14 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#060B0B" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ECF1F0" media="(prefers-color-scheme: light)">
 <title>KarvyLoop</title>
 <style>
 /* 📱 /m 手机拍板页 —— 动态比例连续布局:一套 grid 随容器宽度流动(minmax auto-fill),
    折叠屏开合中途实时重排;没有写死的手机/平板两套。低地板:本页零生造名词。 */
 :root {
-  --bg: #faf6ef; --card: #fffdf8; --border: #e8dfd0; --text: #3d3529; --text-2: #8a7f6e;
-  --accent: #4a7c59; --accent-soft: #e6f0e9; --rose: #b0563f; --rose-soft: #f6e7e2;
-  --amber: #a07c2c; --amber-soft: #f5eeda;
+  /* 深墨绿系(docs/DESIGN.md;dark 默认,系统浅色偏好走镜像) */
+  --bg: #060B0B; --card: #0E1C1A; --border: #1B2B29; --text: #E5EDEB; --text-2: #93A7A2;
+  --accent: #27D3A5; --accent-soft: rgba(39,211,165,0.13); --rose: #E0487F; --rose-soft: rgba(224,72,127,0.13);
+  --amber: #D9A441; --amber-soft: rgba(217,164,65,0.12); --on-accent: #06110D;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ECF1F0; --card: #FFFFFF; --border: #D9E4E1; --text: #12211E; --text-2: #465954;
+    --accent: #0E9E77; --accent-soft: rgba(14,158,119,0.10); --rose: #C43268; --rose-soft: rgba(196,50,104,0.10);
+    --amber: #B07E1E; --amber-soft: rgba(176,126,30,0.10); --on-accent: #FFFFFF;
+  }
 }
 * { box-sizing: border-box; margin: 0; }
 body {
@@ -26,6 +36,7 @@ body {
 .m-brand { font-weight: 700; font-size: 17px; }
 .m-waiting { margin-left: auto; font-size: 14px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
 #m-count { background: var(--rose); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+/* 玫红计数上白字两主题都够对比;accent 实底按钮走 --on-accent(暗主题绿亮须压深字) */
 #m-count:empty { display: none; }
 #m-refresh, #m-remote { border: 1px solid var(--border); background: var(--card); border-radius: 8px;
   padding: 4px 10px; font-size: 15px; cursor: pointer; }
@@ -48,7 +59,9 @@ body {
 .m-btn {
   flex: 1; padding: 12px 0; font-size: 15px; font-weight: 600; border-radius: 10px;
   border: 1px solid var(--border); cursor: pointer; min-height: 46px;   /* 拇指高度 */
+  transition: transform 150ms cubic-bezier(0.4,0,0.2,1);
 }
+.m-btn:active { transform: scale(.97); }   /* 拇指按下的确认感 */
 .m-btn-accept { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .m-btn-defer  { background: var(--amber-soft);  color: var(--amber); }
 .m-btn-reject { background: var(--rose-soft);   color: var(--rose); }
@@ -58,6 +71,11 @@ body {
   position: fixed; bottom: 88px; left: 50%; transform: translateX(-50%);
   background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 10px;
   font-size: 14px; z-index: 99;
+  animation: m-rise 240ms cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes m-rise { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
 }
 /* 聊天:发起入口。气泡区默认收着(开屏=纯拍板台),第一句话才长出来;输入条钉底。 */
 #m-chat-log {
@@ -83,7 +101,7 @@ body {
 }
 #m-chat-input:disabled { opacity: .55; }
 #m-chat-send {
-  min-width: 76px; border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  min-width: 76px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent);
   border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer;
 }
 main#m-list { padding-bottom: 86px; }
