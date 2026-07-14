@@ -159,8 +159,8 @@ class Proposal:
         habit_id: 关联的 habit id(可选;0 表示未关联)
         model_ref: 凝出用的 model
         ts: 生成时间
-        kind: 建议类型(docs/30 PR-1:crystallize_skill / run_task / set_preference /
-              route_to_role / resolve_conflict)— 决定 ACCEPT 怎么兑现;默认
+        kind: 建议类型(docs/30 PR-1:crystallize_skill / run_task /
+              route_to_role / resolve_conflict …)— 决定 ACCEPT 怎么兑现;默认
               crystallize_skill(9.0c 老 Proposal 全是"沉淀技能"语义,向后兼容)
         payload: 兑现所需数据(按 kind 不同:sig / intent / Address / 冲突项…)
         proposal_id: 稳定 id(docs/30 PR-2:ACCEPT 凭此查回原 Proposal)。留空则

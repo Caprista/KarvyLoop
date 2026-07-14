@@ -1124,7 +1124,7 @@
   // ch4 预判:主动建议按 kind 分流。**显式映射 + fail-safe 默认进【拍板】**:真决策(需你判断
   // + 可拒 + 带依据)进决策列;只有**习惯预判**(proactive 用 KIND_RUN_TASK,小卡从习惯猜你想做)
   // 进【你可能想做】。旧实现用"决策 kind 白名单",任何新 kind(merge_knowledge / merge_atoms /
-  // confirm_result / crystallize_skill / set_preference / confirm_decision_pref / infeasible_report)
+  // confirm_result / crystallize_skill / confirm_decision_pref / infeasible_report)
   // 都被误丢进预判列 —— 无拒绝按钮、丢 payload。改成"预判白名单",新 kind 一律进决策列。
   const _PREDICT_KINDS = ["run_task"];
   // opts.replay = 状态回放(boot fetch 存量卡),非新卡事件 —— 透传给 renderProposal,

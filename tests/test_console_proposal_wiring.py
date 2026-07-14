@@ -40,9 +40,10 @@ def test_crystallize_handler_acks():
 def test_unregistered_kind_honest_no_handler():
     handlers = build_proposal_handlers(app=None)
     reg = PendingProposalRegistry()
-    # set_preference 仍是"兑现子系统未建、有意不注册"的 kind(run_task 已在 loop-2c 注册)
+    # spend_budget_alert = "有意不注册 handler"的 kind(纯提醒卡,无副作用兑现;
+    # 原标本 set_preference 已落葬 docs/79——被 §11 决策偏好取代)
     p = Proposal(summary="x", options=(), strength=0.5, evidence_refs=(), habit_id=0,
-                 model_ref="m", ts=1.0, kind="set_preference")  # 未注册
+                 model_ref="m", ts=1.0, kind="spend_budget_alert")  # 未注册
     reg.register(p)
     res = reg.decide(p.proposal_id, "ACCEPT", handlers=handlers)
     assert not res.ok and "no handler" in res.detail  # 诚实,不假装

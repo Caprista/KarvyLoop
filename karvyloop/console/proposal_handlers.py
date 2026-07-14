@@ -8,8 +8,9 @@
 - `route_to_role`(9.4-门2 执行-role 流):ACCEPT → 让目标业务 role 在其域 value.md 治理下
   执行需求(in-process drive;P1 走真 A2A envelope/inbox)。
 - `resolve_conflict`(闭环审计断③补):ACCEPT → 决议入台账+Trace(域内自动禁用未建,回执如实说)。
-- `set_preference`:兑现子系统未建 → 不注册;registry 对无 handler 的 ACCEPT 诚实回执
+- `spend_budget_alert`:纯提醒卡,**有意不注册**;registry 对无 handler 的 ACCEPT 诚实回执
   且**卡保留待决**,不假装(docs/30 §5.1 + 断③通用防御)。
+  (旧例 set_preference 已落葬 docs/79:被 docs/02 §11 决策偏好楔子取代。)
 """
 from __future__ import annotations
 

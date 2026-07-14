@@ -212,7 +212,7 @@ def test_h2a_kind_routing_contract():
     # 每个后端决策 kind 都不在预判白名单 → 自动进决策列(含曾漏的 merge_knowledge)
     decision_kinds = set(ALL_KINDS) - {KIND_RUN_TASK}
     for k in ("merge_knowledge", "merge_atoms", "confirm_result",
-              "crystallize_skill", "set_preference", "confirm_decision_pref",
+              "crystallize_skill", "confirm_decision_pref",
               "infeasible_report", "route_to_role", "roundtable", "resolve_conflict", "ops_fix"):
         assert k in decision_kinds, f"后端 ALL_KINDS 缺 {k}(契约漂移)"
         assert k not in predict_kinds, f"{k} 是决策 kind,不该在预判列"

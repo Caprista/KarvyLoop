@@ -15,7 +15,6 @@
 kind → 兑现(docs/30 §3,0.1.0 先 crystallize_skill / route_to_role / resolve_conflict):
   crystallize_skill  → 调结晶写技能库
   run_task           → drive 执行(走对应 role/慢脑)
-  set_preference     → 写习惯/偏好层
   route_to_role      → courier 转达给目标 role
   resolve_conflict   → 按用户选择处置(禁用/改/忽略)— 接 docs/31 D4
 """
@@ -38,7 +37,9 @@ AGING_THRESHOLD_S = 48 * 3600
 # ---- kind 常量(docs/30 PR-1)----
 KIND_CRYSTALLIZE_SKILL = "crystallize_skill"
 KIND_RUN_TASK = "run_task"
-KIND_SET_PREFERENCE = "set_preference"
+# set_preference 已落葬(docs/79 M2.0 旧规划整批落葬,Hardy 2026-07-14 拍):
+# "写习惯/偏好层"方向被 docs/02 §11 决策偏好楔子(confirm_decision_pref)取代,
+# 常量挂了一年无 handler 无发射点 = 死账。
 KIND_ROUTE_TO_ROLE = "route_to_role"
 KIND_ROUNDTABLE = "roundtable"  # 私聊小卡说"让几个角色开圆桌讨论X" → 编排意图:在群里拉多人圆桌(非单点委派)
 KIND_RESOLVE_CONFLICT = "resolve_conflict"
@@ -58,7 +59,6 @@ KIND_SPEND_BUDGET_ALERT = "spend_budget_alert"
 ALL_KINDS = (
     KIND_CRYSTALLIZE_SKILL,
     KIND_RUN_TASK,
-    KIND_SET_PREFERENCE,
     KIND_ROUTE_TO_ROLE,
     KIND_ROUNDTABLE,
     KIND_RESOLVE_CONFLICT,
@@ -740,7 +740,6 @@ __all__ = [
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",
-    "KIND_SET_PREFERENCE",
     "KIND_ROUTE_TO_ROLE",
     "KIND_ROUNDTABLE",
     "KIND_RESOLVE_CONFLICT",
