@@ -355,3 +355,46 @@ async def test_appcontainer_third_party_net_grant_still_fail_closed(tmp_path):
     with pytest.raises(PermissionError) as ei:
         await sb.exec([sys.executable, "-c", "print(1)"], token=tok, cwd=str(tmp_path), timeout_s=20)
     assert "net" in str(ei.value)
+
+
+# ---- sh DLL 初始化即死(0xC0000142)→ 按失败签名换 cmd 重跑(J22 实捕:MSYS sh 在
+# 受限令牌下起不来,resolve_argv 只兜"sh 不存在",盲区=存在但跑不动 → run_command 全灭) ----
+
+def test_cmd_shell_fallback_shape():
+    from karvyloop.platform.win import restricted as R
+    assert R._cmd_shell_fallback(["sh", "-c", "echo hi"]) == ["cmd", "/d", "/s", "/c", "echo hi"]
+    assert R._cmd_shell_fallback(["bash", "-c", "x", "extra"]) == ["cmd", "/d", "/s", "/c", "x", "extra"]
+    assert R._cmd_shell_fallback(["python", "-V"]) is None      # 只兜 shell 形态
+    assert R._cmd_shell_fallback(["sh", "script.sh"]) is None   # 非 -c 形态不兜
+
+
+def test_sh_dll_init_failed_retries_with_cmd(monkeypatch):
+    """exit=0xC0000142 且头是 sh/bash → 换 cmd 重跑一次;其余退出码零行为漂移。"""
+    import asyncio
+    from karvyloop.platform.win import restricted as R
+    from karvyloop.sandbox.exec_result import ExecResult
+    from karvyloop.schemas import CapabilityToken
+
+    calls = []
+
+    def fake_run(argv, *a, **k):
+        calls.append(list(argv))
+        if argv[0] in ("sh", "bash"):
+            return ExecResult(stdout=b"", stderr=b"", exit_code=0xC0000142)
+        return ExecResult(stdout=b"hi", stderr=b"", exit_code=0)
+
+    sb = R.RestrictedTokenSandbox.__new__(R.RestrictedTokenSandbox)
+    sb.job_memory_bytes = 1 << 20
+    sb.active_process_limit = 2
+    monkeypatch.setattr(R, "_run_restricted", fake_run)
+    monkeypatch.setattr(R.RestrictedTokenSandbox, "available", staticmethod(lambda: True))
+    monkeypatch.setattr(R.RestrictedTokenSandbox, "appcontainer_available", staticmethod(lambda: False))
+    monkeypatch.setattr(R, "resolve_argv", lambda a: a)   # 保持 sh 头,直击兜底路径
+    tok = CapabilityToken(task_id="t", grants=(), expiry=9_999_999_999.0)
+    r = asyncio.run(sb.exec(["sh", "-c", "echo hi"], token=tok, cwd="."))
+    assert r.exit_code == 0 and r.stdout == b"hi"
+    assert calls[0][0] == "sh" and calls[1][:4] == ["cmd", "/d", "/s", "/c"]
+
+    calls.clear()
+    r2 = asyncio.run(sb.exec(["python", "-V"], token=tok, cwd="."))  # 非 shell 头:死了也不兜
+    assert len(calls) == 1

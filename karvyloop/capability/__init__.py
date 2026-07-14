@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from .broker import check, classify, derive_min_capabilities
 from .decision import Allow, Ask, Decision, Deny, Passthrough, authorize
-from .pathnorm import is_within_workspace
+from .pathnorm import is_within_workspace, resolve_in_workspace
 from .policy import (
     DEFAULT_TOOL_REQUIREMENTS,
     Mode,
@@ -26,7 +26,7 @@ __all__ = [
     # decision
     "authorize", "Decision", "Allow", "Ask", "Deny", "Passthrough",
     # pathnorm
-    "is_within_workspace",
+    "is_within_workspace", "resolve_in_workspace",
     # policy
     "Mode", "Verdict", "Rule", "PermissionContext", "Prompter",
     "DEFAULT_TOOL_REQUIREMENTS", "required_mode",

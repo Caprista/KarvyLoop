@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from karvyloop.capability import is_within_workspace
+from karvyloop.capability import is_within_workspace, resolve_in_workspace
 from karvyloop.schemas import CapabilityToken
 
 from ..filestate import FileState
@@ -40,7 +40,9 @@ class ReadTool:
         return True  # read 只读,always safe
 
     async def __call__(self, inp: dict) -> CodingResult:
-        path = inp.get("file_path", "")
+        # 相对路径按 workspace 解析:path_allowed 的检查就是按 workspace 拼接判定的,
+        # 真实 IO 必须锚定同一基准 —— 否则相对 file_path 过检后按进程 CWD 读写(写穿仓根实捕)。
+        path = resolve_in_workspace(inp.get("file_path", ""), self.workspace_root)
         from karvyloop.capability.fs_grants import note_denied, path_allowed
         if not path or not path_allowed(path, "read", workspace_root=self.workspace_root):
             # 授权台账:工作区外且未授权 → 记"想要"(console 会升 H2A 授权卡),这次仍拒

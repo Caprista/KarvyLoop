@@ -686,6 +686,18 @@ if _IS_WIN:
                     pass
 
 
+# STATUS_DLL_INIT_FAILED:受限令牌下 MSYS 运行时(cygheap 共享区)初始化失败的标志退出码。
+# GetExitCodeProcess 给无符号 DWORD;留有符号形态兜跨层转换。
+_DLL_INIT_FAILED_CODES = frozenset({0xC0000142, -1073741502})
+
+
+def _cmd_shell_fallback(argv: list[str]) -> Optional[list[str]]:
+    """`sh|bash -c <cmd>` → `cmd /d /s /c <cmd>`(仅此形态;其余返回 None 不兜)。"""
+    if len(argv) >= 3 and argv[0] in ("sh", "bash") and argv[1] == "-c":
+        return ["cmd", "/d", "/s", "/c", argv[2]] + argv[3:]
+    return None
+
+
 def _appc_interp_dirs(argv: list[str]) -> list[str]:
     """AppContainer 下需授 ALL-APP-PACKAGES 只读的解释器/DLL 目录(否则 LowBox 里 python.exe
     起不来:0xC0000135 DLL_NOT_FOUND)。
@@ -825,10 +837,22 @@ class RestrictedTokenSandbox:
         last: Optional[BaseException] = None
         for _ in range(2):
             try:
-                return await asyncio.to_thread(
+                res = await asyncio.to_thread(
                     _run_restricted, argv, cwd, stdin, timeout_s, max_output_bytes,
                     rw, self.job_memory_bytes, self.active_process_limit, ro,
                     net_isolated, appc_ro)
+                # MSYS 系 sh/bash 在受限令牌下常 DLL 初始化即死(0xC0000142):
+                # resolve_argv 只在 sh **不存在**时换壳,盲区=存在但起不来 → run_command
+                # 全灭,coding 旅程被判 infra_dead(J22 实捕)。按失败签名诚实换 cmd 重跑
+                # 一次(语义有差异,好过整类能力沉默失效);非此签名原样返回,零行为漂移。
+                if res.exit_code in _DLL_INIT_FAILED_CODES:
+                    fb = _cmd_shell_fallback(argv)
+                    if fb is not None:
+                        res = await asyncio.to_thread(
+                            _run_restricted, fb, cwd, stdin, timeout_s, max_output_bytes,
+                            rw, self.job_memory_bytes, self.active_process_limit, ro,
+                            net_isolated, appc_ro)
+                return res
             except OSError as e:
                 if not getattr(e, "transient_spawn", False):
                     raise

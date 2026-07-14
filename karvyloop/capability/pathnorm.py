@@ -66,6 +66,29 @@ def _combine(root: str, path: str) -> str:
     return root.rstrip("/") + "/" + path
 
 
+def resolve_in_workspace(path: str, root: str) -> str:
+    """把相对 path 解析成 root 之下的绝对路径(绝对路径原样返回)。
+
+    is_within_workspace 对相对路径按 root 拼接做判定(见 _combine)——凡据此放行的
+    相对路径,真实 IO(open/makedirs)也必须锚定同一基准。若检查按 root、落盘按进程
+    CWD,就是"检查一个路径、操作另一个路径":相对 file_path 通过工作区检查后写进
+    进程 CWD(2026-07 实捕:真模型 coding 任务把产物写进 pytest 启动目录=源码仓根)。
+
+    绝对路径判定与 _combine 同源:`/` 开头(POSIX/Windows 盘根)、os.path.isabs、
+    或 `<letter>:` Windows 盘符形态 → 原样返回,交给 is_within_workspace 判界。
+    """
+    if not path:
+        return path
+    if path.startswith("/") or os.path.isabs(path):
+        return path
+    if len(path) >= 2 and path[1] == ":" and path[0].isalpha():
+        return path
+    # normpath 统一分隔符(Windows root=反斜杠 + 模型给的相对路径=正斜杠会拼出
+    # 混合分隔符,被 is_within_workspace 的防逃逸规则拒掉)。纯词法,不触盘;
+    # 越界(../)由调用方随后的 is_within_workspace 检查兜住。
+    return os.path.normpath(os.path.join(root, path))
+
+
 def is_within_workspace(path: str, root: str) -> bool:
     """path 是否落在 root 之内。词法判定 → 存在性 symlink 加固。
 

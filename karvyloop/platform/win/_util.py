@@ -16,7 +16,7 @@ import os
 import shutil
 import sys
 
-from karvyloop.capability import is_within_workspace
+from karvyloop.capability import is_within_workspace, resolve_in_workspace
 from karvyloop.schemas import CapabilityToken
 
 #: registry/skill_exec.run_skill_script 走 token_for_skill(task_id 默认值)签发的 token。
@@ -69,8 +69,11 @@ def token_gated_write(path: str, content: bytes, token: CapabilityToken) -> None
         if g.resource.startswith("fs:") and (not g.ops or "write" in g.ops):
             root = g.resource[3:]
             if is_within_workspace(path, root):
-                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-                with open(path, "wb") as f:
+                # 检查把相对 path 按 root 拼接判定 → 落盘锚定同一 root;
+                # 否则 open(相对路径) 按进程 CWD 落盘 = 写穿 grant 界(仓根实捕)。
+                target = resolve_in_workspace(path, root)
+                os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+                with open(target, "wb") as f:
                     f.write(content)
                 return
     raise PermissionError(f"token 未覆盖写 {path}")
@@ -81,7 +84,8 @@ def token_gated_read(path: str, token: CapabilityToken) -> bytes:
         if g.resource.startswith("fs:"):
             root = g.resource[3:]
             if is_within_workspace(path, root):
-                with open(path, "rb") as f:
+                # 与写同理:读也锚定检查用的 root,不按进程 CWD 解析相对路径
+                with open(resolve_in_workspace(path, root), "rb") as f:
                     return f.read()
     raise PermissionError(f"token 未覆盖读 {path}")
 

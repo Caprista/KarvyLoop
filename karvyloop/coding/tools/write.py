@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from karvyloop.capability import is_within_workspace
+from karvyloop.capability import is_within_workspace, resolve_in_workspace
 from karvyloop.schemas import CapabilityToken
 
 from ..filestate import CHANGED_SINCE_READ, READ_REQUIRED, FileState, ReadBeforeWriteError
@@ -41,7 +41,10 @@ class WriteTool:
         return False  # 写永远非并发安全
 
     async def __call__(self, inp: dict) -> CodingResult:
-        path = inp.get("file_path", "")
+        # 相对路径按 workspace 解析:path_allowed 的检查就是按 workspace 拼接判定的,
+        # 落盘(makedirs/sandbox.write_file)必须锚定同一基准 —— 否则相对 file_path
+        # 过检后按进程 CWD 落盘(2026-07 实捕:真模型产物写进 pytest 启动目录=仓根)。
+        path = resolve_in_workspace(inp.get("file_path", ""), self.workspace_root)
         from karvyloop.capability.fs_grants import note_denied, path_allowed
         if not path or not path_allowed(path, "write", workspace_root=self.workspace_root):
             if path:

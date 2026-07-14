@@ -28,7 +28,7 @@ import asyncio
 import os
 import shutil
 
-from karvyloop.capability import is_within_workspace
+from karvyloop.capability import is_within_workspace, resolve_in_workspace
 from karvyloop.sandbox.exec_result import ExecResult
 from karvyloop.sandbox.mounts import has_net, mounts_from_token, net_allowlist_of
 from karvyloop.schemas import CapabilityToken
@@ -147,8 +147,11 @@ class SeatbeltSandbox:
             if g.resource.startswith("fs:") and (not g.ops or "write" in g.ops):
                 root = g.resource[3:]
                 if is_within_workspace(path, root):
-                    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-                    with open(path, "wb") as f:
+                    # 检查把相对 path 按 root 拼接判定 → 落盘锚定同一 root;
+                    # 否则 open(相对路径) 按进程 CWD 落盘 = 写穿 grant 界。
+                    target = resolve_in_workspace(path, root)
+                    os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+                    with open(target, "wb") as f:
                         f.write(content)
                     return
         raise PermissionError(f"token 未覆盖写 {path}")
@@ -158,6 +161,6 @@ class SeatbeltSandbox:
             if g.resource.startswith("fs:"):
                 root = g.resource[3:]
                 if is_within_workspace(path, root):
-                    with open(path, "rb") as f:
+                    with open(resolve_in_workspace(path, root), "rb") as f:
                         return f.read()
         raise PermissionError(f"token 未覆盖读 {path}")

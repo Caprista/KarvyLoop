@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from karvyloop.capability import is_within_workspace
+from karvyloop.capability import is_within_workspace, resolve_in_workspace
 from karvyloop.schemas import CapabilityToken
 
 from ..filestate import FileState, ReadBeforeWriteError
@@ -39,7 +39,8 @@ class EditTool:
         return False  # 写
 
     async def __call__(self, inp: dict) -> CodingResult:
-        path = inp.get("file_path", "")
+        # 相对路径按 workspace 解析(与 read/write 同基准纪律,防按进程 CWD 读写)
+        path = resolve_in_workspace(inp.get("file_path", ""), self.workspace_root)
         from karvyloop.capability.fs_grants import note_denied, path_allowed
         if not path or not path_allowed(path, "write", workspace_root=self.workspace_root):
             if path:
