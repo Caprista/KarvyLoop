@@ -203,12 +203,23 @@ var KarvyDomainsPanelBundle = (function(exports) {
     body.appendChild(el("div", { class: "mgmt-section-title", text: t("domain.or_from_scratch") }));
     _renderCreateForm(body, roles, activeDoms);
   }
+  function _skeleton() {
+    const box = el("div", { class: "mgmt-skel" });
+    for (let i = 0; i < 3; i++) box.appendChild(el("div", { class: "mgmt-skel-row" }));
+    return box;
+  }
   async function renderDomainsPanel() {
     const body = mgmtBody();
     if (!body) return;
     body.innerHTML = "";
-    const data = await _getJSON("/api/domains");
-    const rolesData = await _getJSON("/api/roles");
+    body.appendChild(_skeleton());
+    const [data, rolesData, peersData] = await Promise.all([
+      _getJSON("/api/domains"),
+      // P0 审计:专用列表(含归档,带 value/成员)
+      _getJSON("/api/roles"),
+      _getJSON("/api/peers")
+    ]);
+    body.innerHTML = "";
     const roles = rolesData && rolesData.roles || [];
     const doms = data && data.domains || [];
     const activeDoms = doms.filter((d) => d.lifecycle !== "archived");
@@ -217,7 +228,6 @@ var KarvyDomainsPanelBundle = (function(exports) {
       return;
     }
     {
-      const peersData = await _getJSON("/api/peers");
       const allPeers = peersData && peersData.peers || [];
       const membersByDom = {};
       for (const p of allPeers) {

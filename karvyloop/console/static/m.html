@@ -3,23 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#060B0B" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#ECF1F0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#142420" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F2F7F3" media="(prefers-color-scheme: light)">
 <title>KarvyLoop</title>
 <style>
 /* 📱 /m 手机拍板页 —— 动态比例连续布局:一套 grid 随容器宽度流动(minmax auto-fill),
    折叠屏开合中途实时重排;没有写死的手机/平板两套。低地板:本页零生造名词。 */
 :root {
-  /* 深墨绿系(docs/DESIGN.md;dark 默认,系统浅色偏好走镜像) */
-  --bg: #060B0B; --card: #0E1C1A; --border: #1B2B29; --text: #E5EDEB; --text-2: #93A7A2;
-  --accent: #27D3A5; --accent-soft: rgba(39,211,165,0.13); --rose: #E0487F; --rose-soft: rgba(224,72,127,0.13);
-  --amber: #D9A441; --amber-soft: rgba(217,164,65,0.12); --on-accent: #06110D;
+  /* 晨绿系(docs/DESIGN.md;light 默认,系统深色偏好走苔原夜镜像) */
+  --bg: #F2F7F3; --card: #FFFFFF; --border: #D7E4D9; --text: #1C2B22; --text-2: #4C5F53;
+  --accent: #0E8A50; --accent-soft: rgba(14,138,80,0.10); --rose: #C2325F; --rose-soft: rgba(194,50,95,0.10);
+  --amber: #A9761C; --amber-soft: rgba(169,118,28,0.12); --on-accent: #FFFFFF;
 }
-@media (prefers-color-scheme: light) {
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg: #ECF1F0; --card: #FFFFFF; --border: #D9E4E1; --text: #12211E; --text-2: #465954;
-    --accent: #0E9E77; --accent-soft: rgba(14,158,119,0.10); --rose: #C43268; --rose-soft: rgba(196,50,104,0.10);
-    --amber: #B07E1E; --amber-soft: rgba(176,126,30,0.10); --on-accent: #FFFFFF;
+    --bg: #142420; --card: #223B34; --border: #3F6157; --text: #EAF2EE; --text-2: #AFC5BF;
+    --accent: #2BD693; --accent-soft: rgba(43,214,147,0.14); --rose: #E0548A; --rose-soft: rgba(224,84,138,0.14);
+    --amber: #DBA94A; --amber-soft: rgba(219,169,74,0.13); --on-accent: #0A1712;
   }
 }
 * { box-sizing: border-box; margin: 0; }

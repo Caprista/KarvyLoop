@@ -152,6 +152,8 @@
     } else if (msg.type === "h2a_proposal") {
       // ch4 预判:小卡主动建议按 kind 分流 —— 真决策(派活/解冲突)→【要我拍什么板】;
       // 其余(习惯预判"你可能想做",含 crystallize_skill/run_task)→【你可能想做】预判列。
+      // 手动求建议的回执:payload=null 表示"小卡看过、暂时没有"(只发给点的人)→ 按钮如实说
+      _proposeSettled(!!msg.payload);
       _routeProposal(msg.payload);
     } else if (msg.type === "h2a_envelope") {
       console.log("[h2a] envelope", msg.payload);
@@ -168,11 +170,14 @@
       _finalizeInlineCards(pid, null);   // S3:聊天流里的同卡同步转终态(本端拍的已终态,幂等跳过)
       const list = document.getElementById("h2a-list");
       if (list) {
-        _removeCardById(list, pid);
+        _removeCardById(list, pid, true);   // P0-2:拍板后的卡动画退场(非幂等重推)
         if (msg.payload && msg.payload.report_card) _renderReportCard(list, msg.payload.report_card);
-        if (_countCards("h2a-list", "h2a-empty") === 0) {
-          list.innerHTML = '<div class="h2a-empty">' + t("h2a.handled") + '</div>';
-        }
+        // 退场动画 160ms 后再判空回填(动画中的节点还在 DOM,立刻数会把空态吞掉)
+        setTimeout(() => {
+          if (_countCards("h2a-list", "h2a-empty") === 0) {
+            list.innerHTML = '<div class="h2a-empty">' + t("h2a.handled") + '</div>';
+          }
+        }, 200);
       }
       updatePulse();   // step5:拍板清空 → 刷脉搏
       pollSnapshot();
@@ -309,7 +314,10 @@
     if (ev.type === "text_delta" && ev.text) {
       const box = _ensureLiveStream(); if (!box) return;
       const follow = log ? isNearBottom(log) : false;
-      box.textContent += ev.text;             // 逐字追加(纯文本=安全;终态再 markdown+高亮)
+      // 微动效 P0-1:逐 chunk 物化(150ms 浮现,"正在对我说"而不是打印机);顺手修隐患:
+      // 旧 textContent += 是 setter,会把已插入的 live-tool/💭 子节点整个吞掉。
+      // 仍是纯文本节点(el text= 走 textContent)= 安全;终态照旧整体换 markdown 权威版。
+      box.appendChild(el("span", { class: "stream-chunk", text: ev.text }));
       if (follow && log) log.scrollTop = log.scrollHeight;
     } else if (ev.type === "tool_call") {
       const box = _ensureLiveStream(); if (!box) return;
@@ -535,7 +543,8 @@
       }
       list.innerHTML = "";
       items.forEach((d) => {
-        const row = el("div", { class: "recent-row" });
+        const row = _markIn("recent", (d.ts || "") + "|" + (d.kind || "") + "|" + (d.decision || ""),
+          el("div", { class: "recent-row" }));
         row.appendChild(el("span", { class: "recent-badge recent-" + (d.decision || "").toLowerCase(),
           text: _DECISION_BADGE[d.decision] || "·" }));
         row.appendChild(el("span", { class: "recent-summary", text: d.summary || d.proposal_id || "" }));
@@ -783,10 +792,21 @@
       if (ch.classList && ch.classList.contains(emptyClass)) list.removeChild(ch);
     });
   }
-  function _removeCardById(list, proposalId) {
+  const _MOTION_REDUCED = window.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : { matches: true };
+  // 微动效 P0-2:卡被处置的退场(160ms 淡出+微降)——拍板的因果被看见,不是凭空蒸发。
+  // 幂等重推(_placeCard 同 id 换新)走瞬删(animate 不传),否则新旧两张短暂同屏。
+  function _removeCardById(list, proposalId, animate) {
     if (!list || !proposalId) return;
     Array.from(list.children).forEach((ch) => {
-      if (ch.getAttribute && ch.getAttribute("data-proposal-id") === String(proposalId)) list.removeChild(ch);
+      if (!(ch.getAttribute && ch.getAttribute("data-proposal-id") === String(proposalId))) return;
+      if (animate && !_MOTION_REDUCED.matches && ch.animate) {
+        ch.animate([{ opacity: 1, transform: "none" },
+                    { opacity: 0, transform: "translateY(-4px) scale(.98)" }],
+          { duration: 160, easing: "cubic-bezier(0.4,0,1,1)" }).finished
+          .catch(() => {}).finally(() => ch.remove());
+      } else {
+        list.removeChild(ch);
+      }
     });
   }
   function _placeCard(list, proposalId, card) {
@@ -1086,8 +1106,18 @@
       line.querySelectorAll(".h2a-buttons, .h2a-reason, .h2a-edit-wrap, .dcard-basis, .dcard-crit-btns")
         .forEach((n) => n.remove());
       const wrap = line.querySelector(".chat-h2a-card") || line;
-      wrap.appendChild(el("div", { class: "chat-h2a-done",
-        text: (_DECISION_BADGE[decision] || "✔") + " " + t(_DECISION_DONE_KEY[decision] || "h2a.done_generic") }));
+      // 微动效 P0-2:ACCEPT 的终态戳带手签对勾(SVG 笔画 360ms 画出来 —— 签字落笔的瞬间;
+      // 自产 SVG 非模型文本;emoji 当 UI 图标退位)。拒绝/稍后只升入不庆祝。
+      const done = el("div", { class: "chat-h2a-done" });
+      if (decision === "ACCEPT") {
+        done.innerHTML = '<svg class="kv-check" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
+          '<path d="M2.5 8.5 L6.5 12 L13.5 4" fill="none" stroke="var(--success)" stroke-width="2" ' +
+          'stroke-linecap="round" stroke-linejoin="round"/></svg> ';
+        done.appendChild(document.createTextNode(t(_DECISION_DONE_KEY[decision])));
+      } else {
+        done.textContent = (_DECISION_BADGE[decision] || "✔") + " " + t(_DECISION_DONE_KEY[decision] || "h2a.done_generic");
+      }
+      wrap.appendChild(done);
     });
   }
 
@@ -1561,8 +1591,40 @@
     }
   }
 
-  // 主动问小卡"现在有啥建议"(WS propose;失败回退 POST /api/propose)
+  // 主动问小卡"现在有啥建议"(WS propose;失败回退 POST /api/propose)。
+  // Hardy 实拍("点下去能干什么?"):点了必有下文 —— 按钮转入"小卡在看…",
+  // 有建议 → 出卡;没建议 → 按钮原地如实说"暂时没有"(服务端 null 回执只发点的人)。
+  let _proposeWaiting = false;
+  let _proposeTimer = 0;
+  function _proposeBusy(on) {
+    _proposeWaiting = on;
+    if (_proposeTimer) { clearTimeout(_proposeTimer); _proposeTimer = 0; }
+    const pb = document.getElementById("propose-btn");
+    if (pb) {
+      if (on) { if (!pb.dataset.label) pb.dataset.label = pb.textContent; pb.textContent = t("propose.busy"); }
+      else if (pb.dataset.label) { pb.textContent = pb.dataset.label; delete pb.dataset.label; }
+    }
+    [pb, document.getElementById("predict-refresh-btn")].forEach((b) => {
+      if (b) { b.disabled = on; b.classList.toggle("is-waiting", on); }
+    });
+  }
+  // 求建议的回执落地:gotCard=true 出了卡(静默恢复);false=小卡看过但没有 → 按钮如实说
+  function _proposeSettled(gotCard) {
+    const waited = _proposeWaiting;
+    _proposeBusy(false);
+    if (gotCard || !waited) return;
+    const pb = document.getElementById("propose-btn");
+    if (!pb || pb.dataset.none) return;
+    pb.dataset.none = "1";
+    const orig = pb.textContent;
+    pb.textContent = t("propose.none");
+    setTimeout(() => { pb.textContent = orig; delete pb.dataset.none; }, 2800);
+  }
   async function requestProposal() {
+    if (_proposeWaiting) return;                 // 已在看,别叠加
+    _proposeBusy(true);
+    // 兜底:回执丢了(断线等)也 30s 自愈,不留残废按钮
+    _proposeTimer = setTimeout(() => { _proposeTimer = 0; _proposeBusy(false); }, 30000);
     const sent = sendWS("propose", {});
     if (!sent) {
       try {
@@ -1570,9 +1632,13 @@
         if (r.ok) {
           const body = await r.json();
           _routeProposal(body.proposal);   // ch4 预判:按 kind 分流到拍板/预判
+          _proposeSettled(!!body.proposal);
+        } else {
+          _proposeSettled(false);
         }
       } catch (e) {
         console.warn("[propose] failed", e);
+        _proposeSettled(false);
       }
     }
   }
@@ -1642,10 +1708,18 @@
     if (close) close.addEventListener("click", closeMgmtModal);
     const overlay = document.getElementById("mgmt-modal");
     if (overlay) overlay.addEventListener("click", (e) => { if (e.target === overlay) closeMgmtModal(); });
+    let _lastPanel = "";
     document.querySelectorAll(".nav-item[data-panel]").forEach((btn) => {
       if (btn.disabled) return;
       btn.addEventListener("click", () => {
         const p = btn.getAttribute("data-panel");
+        // 微动效 P0-7:换面板才做 150ms 定向入场(同面板重开/内部重渲不动;不用 VT——
+        // 全页快照会把背后正在流式的聊天冻一帧,class 法零副作用)
+        const _mb = document.getElementById("mgmt-body");
+        if (_mb && _lastPanel !== p) {
+          _lastPanel = p;
+          _mb.classList.remove("panel-swap"); void _mb.offsetWidth; _mb.classList.add("panel-swap");
+        }
         if (p === "atoms") window.KarvyAtomsPanel.open();
         else if (p === "roles") openRolesPanel();
         else if (p === "domains") openDomainsPanel();
@@ -2357,13 +2431,15 @@
       if (follow) log.scrollTop = log.scrollHeight;
     }
     if (payload.crystallized && payload.skill_name) {
-      pushChatLine("system", t("drive.crystallized", { skill: payload.skill_name }));
+      const _nc = pushChatLine("system", t("drive.crystallized", { skill: payload.skill_name }));
+      if (_nc && _nc.classList) _nc.classList.add("notice-crystal");   // P0-3:结晶回执的一秒余温
     }
     // 召回回执(Cut1 可见化):skill_name 来自后端真 recall 命中(drive 的 RecallHit),
     // 不是前端编的 —— stable 命中走 drive.fast_hit,dynamic 命中走 drive.method_reuse(方法重跑)。
     if (!payload.error && payload.skill_name && !payload.crystallized) {
-      pushChatLine("system", t(payload.fast_brain_hit ? "drive.fast_hit" : "drive.method_reuse",
+      const _nr = pushChatLine("system", t(payload.fast_brain_hit ? "drive.fast_hit" : "drive.method_reuse",
         { skill: payload.skill_name }));
+      if (_nr && _nr.classList) _nr.classList.add("notice-crystal");   // P0-3:「越用越像你」的可感知一秒
     }
     // 「第一个 10 分钟」旅程:等的演示任务回来了 → 推进状态机(非旅程消息不动)
     _journeyOnDriveDone(payload);
@@ -2583,6 +2659,14 @@
     } catch (e) { pushChatLine("system", "⚠ " + e.message); }
   }
   // ch4:任务分两象限 —— 跑完的进【流进来的料】,跑着的进【谁在忙】(干完即撤)
+  // 微动效 P0-5:轮询整块重建的列表,只给**首次出现**的卡入场(每次重渲都播=群魔乱舞,明禁)
+  const _seenCards = { board: new Set(), busy: new Set(), recent: new Set() };
+  function _markIn(setName, key, node) {
+    const s = _seenCards[setName];
+    if (key && s && !s.has(String(key))) { s.add(String(key)); node.classList.add("card-in"); }
+    return node;
+  }
+
   function renderTaskBoard(tasks) {
     const board = document.getElementById("task-board");   // 料 = 已出结果
     const busy = document.getElementById("busy-list");     // 谁在忙 = running
@@ -2595,7 +2679,7 @@
         // S4 空态引导:跟小卡说句话,料就会流进来(指向聊天)
         emp.appendChild(_emptyAction("empty.task_board_act", () => openChatModal()));
         board.appendChild(emp);
-      } else done.forEach((tk) => board.appendChild(_taskCard(tk)));
+      } else done.forEach((tk) => board.appendChild(_markIn("board", tk.id, _taskCard(tk))));
     }
     if (busy) {
       busy.innerHTML = "";
@@ -2605,7 +2689,7 @@
           el("div", { text: t("empty.busy_guide") }),
           el("button", { class: "busy-guide-btn", text: t("empty.busy_guide_btn"),
             onClick: () => openDomainsPanel() })));
-      } else running.forEach((tk) => busy.appendChild(_taskCard(tk)));
+      } else running.forEach((tk) => busy.appendChild(_markIn("busy", tk.id, _taskCard(tk))));
     }
     updatePulse();
     _updateDockYield();   // S1:料区有内容 → 卡皮巴拉自动让位
@@ -2629,6 +2713,14 @@
     if (running > 0 || pending > 0) pulse.textContent = t("cockpit.pulse_topline", { running: running, pending: pending });
     else if (ran > 0) pulse.textContent = t("cockpit.pulse_ran", { ran: ran });
     else pulse.textContent = t("cockpit.pulse_idle");
+    // 拍板权重(Hardy):有卡 → 决策列点亮 + 列头计数徽章;拍完 → 回安静主位
+    const dcol = document.querySelector(".col-decide");
+    if (dcol) dcol.classList.toggle("has-pending", pending > 0);
+    const badge = document.getElementById("decide-count");
+    if (badge) {
+      if (pending > 0) { badge.textContent = String(pending); badge.hidden = false; }
+      else badge.hidden = true;
+    }
   }
   async function pollKnowledge() {
     const data = await _getJSON("/api/memory");
@@ -2946,14 +3038,23 @@
   function _setBoardZoom(on) {
     on = !!on && !document.body.classList.contains("desk-view") && !_isMobile();
     if (on !== _boardZoomed()) {
-      document.body.classList.toggle("board-view", on);
-      const m = document.getElementById("chat-modal");
-      if (m) {
-        if (_chatDocked()) m.classList.remove("hidden");   // 回对话:聊天回中央常驻
-        else m.classList.add("hidden");                    // 放大态:聊天起始收起(FAB/入口再弹)
-      }
-      document.body.classList.remove("chat-open");
-      _updateDockYield();
+      const _apply = () => {
+        document.body.classList.toggle("board-view", on);
+        const m = document.getElementById("chat-modal");
+        if (m) {
+          if (_chatDocked()) m.classList.remove("hidden");   // 回对话:聊天回中央常驻
+          else m.classList.add("hidden");                    // 放大态:聊天起始收起(FAB/入口再弹)
+        }
+        document.body.classList.remove("chat-open");
+        _updateDockYield();
+      };
+      // 微动效 P0-6:rail⛶ 放大走 View Transitions —— 四象限列带 view-transition-name,
+      // 从 rail 位置连续变形到 2×2 大格("同一个东西换姿势"的空间连续性),不是瞬间重排。
+      // ⛶→✕ 的按钮态必须在 _apply **里面**刷(VT 把变更推迟到回调,外面同步读=读到旧态)
+      const _applyAndSync = () => { _apply(); _updateZoomBtn(); };
+      if (document.startViewTransition && !_MOTION_REDUCED.matches) document.startViewTransition(_applyAndSync);
+      else _applyAndSync();
+      return;
     }
     _updateZoomBtn();
   }
@@ -3887,11 +3988,11 @@
     const optDesk = document.getElementById("view-opt-desk");
     if (optChat) optChat.addEventListener("click", () => _setView("chat"));
     if (optDesk) optDesk.addEventListener("click", () => _setView("desk"));
-    // 主题切换:dark 默认;防闪预应用在 index.html <head>(CSS 前),这里只管点按轮换+记忆
+    // 主题切换:light(晨绿)默认;防闪预应用在 index.html <head>(CSS 前),这里只管点按轮换+记忆
     const themeBtn = document.getElementById("theme-toggle");
     if (themeBtn) themeBtn.addEventListener("click", () => {
       const root = document.documentElement;
-      const next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);
       try { localStorage.setItem("karvyloop_theme", next); } catch (e) {}
     });

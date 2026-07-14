@@ -115,11 +115,16 @@ def test_desk_soul_in_real_browser(console_url):
         }""")
         assert carry["state"] == "carry", f"叼卡小演员应进 carry 态,实际 {carry}"
         assert carry["card"] != "none", f"carry 态应真显示小白卡 overlay,实际 {carry}"
-        # 到位:小演员撤掉、⚖ 便签闪(真 transition,transitionend/2s 兜底双保险)
+        # 到位:小演员撤掉、**看得见的锚点**收卡一跳(真 transition,transitionend/2s 兜底双保险)。
+        # 折起态便签全藏 → 剧场终点=右上看板缩略卡(fold-ping);便签显形时才闪 note-alert
+        # (Hardy 实拍:旧剧场朝隐形便签的 (0,0) rect 走,小卡飘过半空"要去哪里?")
         page.wait_for_selector("#desk-carry-actor", state="detached", timeout=4000)
-        assert page.evaluate(
-            "document.querySelector('.col-decide').classList.contains('note-alert')"
-        ), "小卡到位后 ⚖ 便签应闪(note-alert)"
+        assert page.evaluate("""() => {
+            const fold = document.getElementById('desk-board-fold');
+            const note = document.querySelector('.col-decide');
+            return (fold && fold.classList.contains('fold-ping'))
+                || (note && note.classList.contains('note-alert'));
+        }"""), "小卡到位后可见锚点应有到达反馈(看板缩略卡 fold-ping / 显形便签 note-alert)"
 
         # 3) task_status done(契约形状)→ 署名便签浮出
         page.evaluate("""window.KarvyDesktop._soul.handle({type: 'task_status', payload: {
@@ -239,13 +244,17 @@ def test_desk_boot_replay_mascot_stays_home(console_url):
             "!document.getElementById('desk-karvy-pixel').classList.contains('is-away')"
         ), "吉祥物应稳在右下窝里"
 
-        # 真新卡到来(app.js 收 WS h2a_proposal 调的同一钩子,不带 replay)→ 剧场照演
+        # 真新卡到来(app.js 收 WS h2a_proposal 调的同一钩子,不带 replay)→ 剧场照演,
+        # 终点=看得见的锚点(折起态便签全藏 → 看板缩略卡收卡一跳;不再朝隐形便签走空路)
         page.evaluate("window.KarvyDesktop.notifyH2A()")
         page.wait_for_selector("#desk-carry-actor", state="attached", timeout=3000)
         page.wait_for_selector("#desk-carry-actor", state="detached", timeout=4000)
-        assert page.evaluate(
-            "document.querySelector('.col-decide').classList.contains('note-alert')"
-        ), "真新卡到位后 ⚖ 应闪(叼卡剧场不许修没)"
+        assert page.evaluate("""() => {
+            const fold = document.getElementById('desk-board-fold');
+            const note = document.querySelector('.col-decide');
+            return (fold && fold.classList.contains('fold-ping'))
+                || (note && note.classList.contains('note-alert'));
+        }"""), "真新卡到位后可见锚点应有到达反馈(叼卡剧场不许修没)"
         browser.close()
     assert errors == [], f"真浏览器 console 必须 0 error,实际: {errors}"
 

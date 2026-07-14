@@ -105,7 +105,9 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     el.dataset.deskX = String(Math.round(x));
     el.dataset.deskY = String(Math.round(y));
     // rotate 走 CSS 变量(便签轻微贴纸旋转),和拖拽 translate 合成一条 transform
-    el.style.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0) rotate(var(--desk-tilt, 0deg))";
+    // 微动效 P0-9:scale 走注册型 CSS 变量(--desk-lift)——每帧重写 transform 字符串时,
+    // 变量自身仍可 150ms 插值 → 拾起/落下平滑;直接在 transform 上挂 transition 会跟手抖。
+    el.style.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0) rotate(var(--desk-tilt, 0deg)) scale(var(--desk-lift, 1))";
   }
   // clamp 到桌面画布内:标题栏至少 48×32 可见;恢复时也走这里(防换分辨率丢窗)
   function clampPos(el: HTMLElement, x: number, y: number): Pos {
@@ -169,6 +171,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
       const p = getPos(el); ox = p.x; oy = p.y; nx = ox; ny = oy;
       try { if (handle.setPointerCapture) handle.setPointerCapture(e.pointerId); } catch { /* jsdom 等无指针捕获 */ }
       handle.classList.add("dragging");
+      el.classList.add("desk-dragging");   // P0-9:拾起手感(lift/tilt/影子)挂在被拖元素上
     });
     handle.addEventListener("pointermove", (e: PointerEvent) => {
       if (!dragging) return;
@@ -188,6 +191,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
       dragging = false;
       try { if (handle.releasePointerCapture) handle.releasePointerCapture(e.pointerId); } catch { /* 同上 */ }
       handle.classList.remove("dragging");
+      el.classList.remove("desk-dragging");   // P0-9:落下(150ms 归位)
       if (raf && typeof cancelAnimationFrame === "function") { cancelAnimationFrame(raf); raf = 0; }
       if (moved) {
         applyPos(el, nx, ny);
@@ -896,6 +900,9 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     if (!fab || !cv) return false;
     const from = fab.getBoundingClientRect();
     const to = note.getBoundingClientRect();
+    // 隐形/未布局的目的地(rect≈0)不走:否则 dx/dy 指向 (0,0),小卡叼着卡飘过半空
+    // 走向一个看不见的目标(Hardy 实拍:"它要去哪里?它要干啥?")
+    if (!(from.width > 0 && to.width > 1 && to.height > 1)) return false;
     _carrying = true;
     _mascotBusy = true;
     const actor = document.createElement("div");
@@ -944,16 +951,36 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     updateBoardBadge();
     const note = document.querySelector<HTMLElement>(".cockpit-grid .col-decide");
     if (!note) return;
-    // 便签**不再自动展开/持久化展开**:收起态下 note-alert 边框呼吸仍能 fail-loud 吸睛(推回决策舱)
-    focusEl(note);                                           // 置顶(便签与窗口同一 z 空间)
-    const pos = clampPos(note, getPos(note).x, getPos(note).y);
-    applyPos(note, pos.x, pos.y);                            // 永远保证在视口内
+    const _visible = (e: HTMLElement | null): boolean => {
+      if (!e) return false;
+      const r = e.getBoundingClientRect();
+      return r.width > 1 && r.height > 1;
+    };
+    const noteShown = _visible(note);
+    if (noteShown) {
+      // 便签**不再自动展开/持久化展开**:收起态下 note-alert 边框呼吸仍能 fail-loud 吸睛(推回决策舱)
+      focusEl(note);                                         // 置顶(便签与窗口同一 z 空间)
+      const pos = clampPos(note, getPos(note).x, getPos(note).y);
+      applyPos(note, pos.x, pos.y);                          // 永远保证在视口内
+    }
     if (opts && opts.replay) return;                         // 快照回放:到此为止(无剧场)
+    // 剧场目的地必须**用户看得见**:便签显形 → 便签;空旷模式便签藏着 → 右上「看板」
+    // 缩略卡(角标涨的地方,新卡真正落进去的入口)。都看不见 → 只冒泡,不走空路
+    // (Hardy 实拍:小卡朝隐形便签的 (0,0) rect 走,飘过半空——"它要去哪里?")。
+    const fold = document.getElementById("desk-board-fold");
+    const anchor = noteShown ? note : (_visible(fold) ? fold : null);
     const flash = () => {
-      note.classList.remove("note-alert");
-      void note.offsetWidth;                                 // 重触发动画
-      note.classList.add("note-alert");
-      setTimeout(() => note.classList.remove("note-alert"), 2800);
+      if (anchor === note) {
+        note.classList.remove("note-alert");
+        void note.offsetWidth;                               // 重触发动画
+        note.classList.add("note-alert");
+        setTimeout(() => note.classList.remove("note-alert"), 2800);
+      } else if (anchor && fold) {
+        fold.classList.remove("fold-ping");                  // 看板缩略卡收卡一跳(单次)
+        void fold.offsetWidth;
+        fold.classList.add("fold-ping");
+        setTimeout(() => fold.classList.remove("fold-ping"), 1200);
+      }
       const bubble = document.getElementById("karvy-bubble");  // 卡皮巴拉冒泡
       if (bubble) {
         const dots = bubble.querySelector(".karvy-bubble-dots");
@@ -962,8 +989,8 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
         setTimeout(() => bubble.classList.add("hidden"), 6000);
       }
     };
-    // P1.5:先叼卡走过去,到位再闪;播不了(reduced-motion/无替身)→ 直接闪(0 回归)
-    if (!playCarry(note, flash)) flash();
+    // P1.5:先叼卡走过去,到位再闪;播不了(reduced-motion/无替身/目的地隐形)→ 直接闪(0 回归)
+    if (!anchor || !playCarry(anchor, flash)) flash();
   }
 
   // ---- 日/夜壁纸(Hardy 出图,1920×1079):按**客户端本地时间**自动切 ----

@@ -181,7 +181,7 @@
     function applyPos(el, x, y) {
       el.dataset.deskX = String(Math.round(x));
       el.dataset.deskY = String(Math.round(y));
-      el.style.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0) rotate(var(--desk-tilt, 0deg))";
+      el.style.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0) rotate(var(--desk-tilt, 0deg)) scale(var(--desk-lift, 1))";
     }
     function clampPos(el, x, y) {
       const desk = deskEl();
@@ -243,6 +243,7 @@
         } catch {
         }
         handle.classList.add("dragging");
+        el.classList.add("desk-dragging");
       });
       handle.addEventListener("pointermove", (e) => {
         if (!dragging) return;
@@ -269,6 +270,7 @@
         } catch {
         }
         handle.classList.remove("dragging");
+        el.classList.remove("desk-dragging");
         if (raf && typeof cancelAnimationFrame === "function") {
           cancelAnimationFrame(raf);
           raf = 0;
@@ -974,6 +976,7 @@
       if (!fab || !cv) return false;
       const from = fab.getBoundingClientRect();
       const to = note.getBoundingClientRect();
+      if (!(from.width > 0 && to.width > 1 && to.height > 1)) return false;
       _carrying = true;
       _mascotBusy = true;
       const actor = document.createElement("div");
@@ -1018,15 +1021,32 @@
       updateBoardBadge();
       const note = document.querySelector(".cockpit-grid .col-decide");
       if (!note) return;
-      focusEl(note);
-      const pos = clampPos(note, getPos(note).x, getPos(note).y);
-      applyPos(note, pos.x, pos.y);
+      const _visible = (e) => {
+        if (!e) return false;
+        const r = e.getBoundingClientRect();
+        return r.width > 1 && r.height > 1;
+      };
+      const noteShown = _visible(note);
+      if (noteShown) {
+        focusEl(note);
+        const pos = clampPos(note, getPos(note).x, getPos(note).y);
+        applyPos(note, pos.x, pos.y);
+      }
       if (opts && opts.replay) return;
+      const fold = document.getElementById("desk-board-fold");
+      const anchor = noteShown ? note : _visible(fold) ? fold : null;
       const flash = () => {
-        note.classList.remove("note-alert");
-        void note.offsetWidth;
-        note.classList.add("note-alert");
-        setTimeout(() => note.classList.remove("note-alert"), 2800);
+        if (anchor === note) {
+          note.classList.remove("note-alert");
+          void note.offsetWidth;
+          note.classList.add("note-alert");
+          setTimeout(() => note.classList.remove("note-alert"), 2800);
+        } else if (anchor && fold) {
+          fold.classList.remove("fold-ping");
+          void fold.offsetWidth;
+          fold.classList.add("fold-ping");
+          setTimeout(() => fold.classList.remove("fold-ping"), 1200);
+        }
         const bubble = document.getElementById("karvy-bubble");
         if (bubble) {
           const dots = bubble.querySelector(".karvy-bubble-dots");
@@ -1035,7 +1055,7 @@
           setTimeout(() => bubble.classList.add("hidden"), 6e3);
         }
       };
-      if (!playCarry(note, flash)) flash();
+      if (!anchor || !playCarry(anchor, flash)) flash();
     }
     const WALL_LS_KEY = "karvyloop_desk_wall.v1";
     const WALL_MODES = ["auto", "day", "night", "off"];

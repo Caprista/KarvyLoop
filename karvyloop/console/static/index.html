@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>KarvyLoop Console</title>
-  <meta name="theme-color" content="#060B0B" />
+  <meta name="theme-color" content="#F2F7F3" />
   <script>
     /* 主题防闪:CSS 加载前先应用记忆的主题(dark 为默认,不落盘不加属性) */
     (function () {
@@ -189,7 +189,7 @@
       <!-- 四象限:对话视图=右侧 rail 竖排(⚖永远第一→🔄→📥→🔮);⛶=临时放大成 2×2 全屏(Esc/✕ 回对话) -->
       <div class="cockpit-grid">
         <section class="cockpit-col col-decide">
-          <h2 class="col-head"><span data-i18n="cockpit.decide">⚖ 要我拍什么板</span>
+          <h2 class="col-head"><span><span data-i18n="cockpit.decide">⚖ 要我拍什么板</span><span id="decide-count" class="decide-count" hidden></span></span>
             <span class="col-acts">
               <button id="propose-btn" class="col-act" data-i18n="btn.propose" data-i18n-title="btn.propose.title">🔮</button>
               <button id="rail-zoom-btn" class="col-act" data-i18n-title="rail.zoom.title" aria-label="zoom quadrants">⛶</button>

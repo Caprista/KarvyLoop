@@ -203,10 +203,24 @@ async function _renderEmptyGuide(body: HTMLElement, roles: any[], activeDoms: an
   _renderCreateForm(body, roles, activeDoms);
 }
 
+// 载入骨架:数据没回来前弹窗绝不"空黑等待"(Hardy 实拍:服务端忙时面板像卡死)。
+// 载入态脉动 = 状态指示不是装饰,数据到即整体替换;reduced-motion 下静止。
+function _skeleton(): HTMLElement {
+  const box = el("div", { class: "mgmt-skel" });
+  for (let i = 0; i < 3; i++) box.appendChild(el("div", { class: "mgmt-skel-row" }));
+  return box;
+}
+
 async function renderDomainsPanel(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
-  const data = await _getJSON("/api/domains");      // P0 审计:专用列表(含归档,带 value/成员)
-  const rolesData = await _getJSON("/api/roles");
+  body.appendChild(_skeleton());
+  // 三个 GET 并行(原来串行三趟,忙时等待×3);peers 只有非空态用,但预取代价极小
+  const [data, rolesData, peersData] = await Promise.all([
+    _getJSON("/api/domains"),      // P0 审计:专用列表(含归档,带 value/成员)
+    _getJSON("/api/roles"),
+    _getJSON("/api/peers"),
+  ]);
+  body.innerHTML = "";
   const roles = (rolesData && rolesData.roles) || [];
   const doms = (data && data.domains) || [];
   const activeDoms = doms.filter((d: any) => d.lifecycle !== "archived");
@@ -221,7 +235,6 @@ async function renderDomainsPanel(): Promise<void> {
   // 组织架构树(Hardy):① 看清 业务域 ⊃ 子业务域 的归属层级;② 看清每个域下有哪些角色;
   // ③ 点角色 = 私聊该 agent(openPeerChat → 进左栏私聊区)。成员复用 /api/peers,层级用 parent_id。
   {
-    const peersData = await _getJSON("/api/peers");
     const allPeers = (peersData && peersData.peers) || [];
     const membersByDom: Record<string, any[]> = {};
     for (const p of allPeers) {

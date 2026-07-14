@@ -227,7 +227,8 @@ def test_h2a_multicard_no_overwrite():
     # renderProposal / renderPredict 结尾用 _placeCard(键控追加),不再 list.appendChild(card)
     assert js.count("_placeCard(list,") >= 2
     # h2a_envelope 只撤刚拍的卡(带 proposal_id),不整列 innerHTML=""
-    assert "_removeCardById(list, pid)" in js
+    # (第三参 true = 微动效 P0-2 的动画退场;契约点在"按 id 撤单卡",不在参数个数)
+    assert "_removeCardById(list, pid, true)" in js
 
 
 # ---- @ 多人回应(fanout)的重开渲染仍在(@多人新路由到 workflow,旧记录仍可重开)----

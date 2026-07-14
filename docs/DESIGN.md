@@ -4,7 +4,25 @@
 > theme-aware. Components consume tokens; never hardcode a color, radius, duration.
 > Authority for craft rules: the anti-slop bans below are **refuse-and-rewrite**.
 
-## Direction (2026-07-13, v2 — Hardy's four corrections applied)
+## Direction v3 (2026-07-14 — "green is the only anchor")
+
+Hardy released every constraint except one: **green stays the identity; everything
+else follows what looks best.** After two dark iterations both read as oppressive
+(the root cause was darkness itself, not which dark), the call:
+
+**Light-first "Morning Green" (晨绿)** — mint-tinted paper (`#F2F7F3`), white cards,
+deep forest ink text (`#1C2B22`), one emerald action color (`#0E8A50`, deep enough
+to carry white text). A workbench you read and decide in all day breathes in light.
+The warm capybara pops naturally on a light field. Dark demotes to a one-click
+night mirror — **moss night** (`#142420` → `#223B34` ladder, the airiest of the dark
+candidates), never the near-black again. High-stakes marker: light uses deep
+chartreuse `#7FA000` (fluorescent yellow fails on paper); dark keeps `#DFFF45`.
+Semantic separations unchanged (success=teal, warning=amber, danger=rose,
+green budget <10%, hairlines over glow). Full token tables live in `styles.css`
+`:root` (light) and `[data-theme="dark"]` (moss) — styles.css is the source of
+truth for values from v3 on; the v2 tables below are historical.
+
+## Direction (2026-07-13, v2 — Hardy's four corrections applied) 〔superseded by v3〕
 
 **Deep near-black + dark-emerald base (deeper, blue-shifted), one restrained
 blue-green signal accent, hairline borders instead of glow.** The capybara mark

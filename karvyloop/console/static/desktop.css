@@ -5,19 +5,19 @@
  * (同特异性,后来者赢),styles.css 本体一行不动 → 对话/看板两视图像素级不变。 */
 
 :root {
-  /* ==== desktop shell tokens(docs/51 §2.1;2026-07-13 随深墨绿系换皮,dark 默认)==== */
-  --desk-bg: #081010;                              /* 桌面底:比 --bg 抬半档的深墨底 */
-  --note-yellow: #201B10;                          /* 便签底:暗琥珀纸(⚖ 地位不变) */
-  --note-line: #46391C;
-  --win-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);   /* 聚焦窗口阴影,比 --shadow-lg 重一档 */
-  --dock-bg: color-mix(in srgb, var(--bg-elev-1) 84%, transparent);  /* dock 毛玻璃底 */
+  /* ==== desktop shell tokens(docs/51 §2.1;2026-07-14 晨绿大调,light 默认)==== */
+  --desk-bg: #E5EEE7;                              /* 桌面底:比 --bg 深半档的薄荷绿 */
+  --note-yellow: #FBF0C9;                          /* 便签底:暖纸(⚖ 地位不变) */
+  --note-line: #E6D391;
+  --win-shadow: 0 18px 50px rgba(20, 50, 35, 0.20);  /* 聚焦窗口阴影,比 --shadow-lg 重一档 */
+  --dock-bg: rgba(255, 255, 255, 0.84);            /* dock 毛玻璃底 */
 }
-:root[data-theme="light"] {
-  --desk-bg: #E7EEE9;                              /* teal 调浅桌面(原暖沙色退役) */
-  --note-yellow: #fbf0c9;
-  --note-line: #e6d391;
-  --win-shadow: 0 18px 50px rgba(16, 55, 45, 0.20);
-  --dock-bg: rgba(255, 255, 255, 0.82);
+:root[data-theme="dark"] {
+  --desk-bg: #11201B;                              /* 苔原夜桌面 */
+  --note-yellow: #3A3524;                          /* 暗琥珀纸 */
+  --note-line: #5E5330;
+  --win-shadow: 0 18px 50px rgba(0, 0, 0, 0.50);
+  --dock-bg: color-mix(in srgb, var(--bg-elev-1) 86%, transparent);
 }
 
 /* ============================================================================
@@ -233,6 +233,18 @@ body.desk-view .desk-board-fold-badge {
   display: inline-flex; align-items: center; justify-content: center;
 }
 body.desk-view.desk-wall-night .desk-board-fold-hint { color: #e8ddce; }
+
+/* 小卡叼卡送达看板缩略卡:单次一跳(收下了)。空旷模式便签藏着时,剧场终点=这张卡 */
+body.desk-view .desk-board-fold.fold-ping { animation: desk-fold-ping 0.9s var(--ease-out) 1; }
+@keyframes desk-fold-ping {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.06); }
+  60% { transform: scale(0.99); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.desk-view .desk-board-fold.fold-ping { animation: none; }
+}
 
 /* ⚖ 新决策卡到达:边框玫红呼吸 2 次(fail-loud 推回决策舱,docs/51 §4.2) */
 body.desk-view .cockpit-col.note-alert {
