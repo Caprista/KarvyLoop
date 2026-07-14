@@ -383,6 +383,15 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 知识概念标签:补 {bres['tagged']} 条")
                         except Exception as ie:
                             _maintenance_item_failed(app, "belief_tags_tick", ie)
+                        # 兵法回流(docs/78):域角色经验里可泛化的 → LLM 判+脱敏改写 → denylist →
+                        # 攒批出卡(ACCEPT 才升镜像)。池指纹 watermark + 冷却,同 knowledge_tick 纪律。
+                        try:
+                            from karvyloop.console.promotion_tick import maybe_promotion_tick
+                            pres = await maybe_promotion_tick(app)
+                            if pres:
+                                logger.info(f"[karvyloop console] 兵法回流:升 {pres} 张升层建议卡")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "promotion_tick", ie)
                         # 反向标签护栏③:同义标签收敛进别名表(标签是派生数据,可自动合并;
                         # 审计=别名表 via/ts + Trace tag_merged。watermark=词表指纹,零变零 LLM)
                         try:

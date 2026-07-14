@@ -174,6 +174,18 @@ class MemoryManager:
             self._index.set_pinned(b, pinned)
             return self._persist(op="set_pinned")
 
+    def mark_promoted(self, content: str, promoted_key: str) -> bool:
+        """兵法回流(docs/78 §3.6):源条打 `provenance.promoted_to` 幂等标记——
+        已升过的经验不再进升层候选。形态同 set_pinned(按 content 找、内存改+落盘)。"""
+        with self._lock:
+            b = self._index.get(content) or self._index.get((content or "").strip())
+            if b is None:
+                return False
+            prov = dict(b.provenance or {})
+            prov["promoted_to"] = str(promoted_key)
+            b.provenance = prov
+            return self._persist(op="mark_promoted")
+
     def flush_usage(self) -> bool:
         """把召回使用信号(last_recalled_ts/recall_count)批量落盘(daily 慢侧调;
         热路径 recall_block 只改内存置脏标,绝不在每次召回写盘)。无脏 → noop True。
@@ -431,6 +443,13 @@ class MemoryManager:
             bd = (b.provenance.get("applies") or {}).get("domain", "") if b.provenance else ""
             if bd and bd != domain:
                 continue   # 域私有认知:只在本域召回(跨域不漏)
+            # docs/78 §3.6 谓词②:角色经验/镜像兵法归**经验通道**(roles/experience.py 分层注入),
+            # 不进通用召回当噪音(否则升层的兵法会漏进私聊/别的角色的上下文;域内经验也会和
+            # experience_block 双份注入)。只挡 role_experience 源 —— decision_pref 等其他带
+            # applies.role 的形态不受影响(开工前实核过 applies 分布,审稿注兑现)。
+            if (b.provenance or {}).get("source") == "role_experience" and \
+               ((b.provenance or {}).get("applies") or {}).get("role"):
+                continue
             _seen.add(id(b))
             beliefs.append(b)
         if not beliefs:

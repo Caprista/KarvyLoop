@@ -272,15 +272,17 @@ async def sediment_experience(sig: TaskOutcomeSignal, *, mem: Any, gateway: Any,
 
 
 def _experience_applies(b: Belief, *, domain: str, role: str) -> bool:
-    """一条经验是否属于当前(域,角色)。**跨域隔离**:域和角色都必须匹配。
+    """一条经验是否属于当前(域,角色)。**跨域隔离 + 镜像兵法**(docs/78 §3.6 谓词①):
 
-    role-experience 的 applies.domain/applies.role **必带**(make_experience_belief 保证);
-    只有两者都等于当前 (domain, role) 才浮出 —— A 域角色经验不进 B 域,同域别的角色也不串。
+    - 域私有经验(applies.domain 非空):域和角色都必须匹配 —— A 域经验绝不进 B 域;
+    - **镜像兵法**(applies.domain 空 = 升层产物):同角色在**任何**域都浮出 ——
+      角色带着"你的一般方法"跨域干活,这正是回流的全部意义;
+    - role 永远必须相等(兵法锁角色,跨角色共享是另一个升层判定,不搭车)。
     """
     if not (domain and role):
         return False   # 无域或无角色情境 → 不召角色经验(通用层不掺角色私有经验)
     ap = b.provenance.get("applies") or {}
-    return ap.get("domain", "") == domain and ap.get("role", "") == role
+    return ap.get("domain", "") in ("", domain) and ap.get("role", "") == role
 
 
 def recall_role_experiences(beliefs: list[Belief], *, query: str = "", domain: str = "",
@@ -318,7 +320,10 @@ def experience_block(beliefs: list[Belief], *, query: str = "", domain: str = ""
     lines = [f"【你(「{role}」)在本域积累的经验(这些是经验偏置,不是硬规则;最终仍按人设/治理来)】"]
     for b in shown:
         k = label.get(b.provenance.get("kind", ""), "经验")
-        lines.append(f"- [{k}] {b.content}")
+        # 分层展示(docs/78 §3.6):镜像兵法(升层产物,无 domain)标"通用" —— 你的一般方法 vs 本域学的
+        _ap = b.provenance.get("applies") or {}
+        tag = f"{k}·通用" if not _ap.get("domain") else k
+        lines.append(f"- [{tag}] {b.content}")
     dropped = len(exps) - len(shown)
     if dropped > 0:
         lines.append(f"(还有 {dropped} 条本域经验未展开,已按与本次相关性挑了最相关的)")
