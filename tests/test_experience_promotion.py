@@ -45,6 +45,43 @@ def _seed_domain_exp(mem, content, *, domain="装修", role="监理", ts=OLD, re
     return got
 
 
+# ---- 谓词③:对外白名单刀(docs/78 §4.3 J6:对外能用上、且只多不漏)----
+
+def _seed_source(mem, content, source, *, applies=None, ts=OLD):
+    b = Belief(content=content, freshness_ts=ts, scope="personal",
+               provenance={"source": source, "ts": ts,
+                           **({"applies": applies} if applies else {})})
+    assert mem.write(b)
+    return b
+
+
+def test_external_audience_whitelist_knife(tmp_path):
+    """audience=external:只放被访角色的升层兵法;个人事实/决策画像/圆桌/未知源全拒。"""
+    mem = _mem(tmp_path)
+    mem.write(make_promoted_belief("先审后交总是对的", "method",
+                                   role="监理", origin_domain="装修",
+                                   origin_key="k1", now=OLD))
+    mem.write(make_promoted_belief("先审设计稿的三个要点", "method",
+                                   role="设计师", origin_domain="装修",
+                                   origin_key="k2", now=OLD))       # 别的角色的兵法:不出
+    _seed_source(mem, "用户住址是幸福路1号 DO-NOT-LEAK", "conversation")
+    _seed_source(mem, "报销单先审票据 DO-NOT-LEAK", "material")
+    _seed_source(mem, "动生产前先审备份,底线 DO-NOT-LEAK", "decision_pref")
+    _seed_source(mem, "圆桌结论:先审预算再审排期 DO-NOT-LEAK", "roundtable")
+    _seed_source(mem, "某导入源的审务偏好 DO-NOT-LEAK", "mystery_import")  # 未知源:deny-by-default
+
+    ext = mem.recall_block("先审", scope="personal", limit=20,
+                           audience="external", audience_role="监理")
+    assert "先审后交总是对的" in ext, "对外视野应含被访角色的升层兵法(只多不漏的'多')"
+    assert "DO-NOT-LEAK" not in ext, f"个人事实/画像/圆桌/未知源漏出了对外面: {ext!r}"
+    assert "先审设计稿的三个要点" not in ext, "别的角色的兵法不该出现在被访角色的对外视野"
+
+    # 内部调用(不带标)行为一字不变:个人事实照常召回,兵法仍归经验通道(谓词②)
+    inner = mem.recall_block("先审", scope="personal", limit=20)
+    assert "幸福路1号" in inner
+    assert "先审后交总是对的" not in inner
+
+
 # ---- 谓词① :镜像兵法跨域可用,域私有仍隔离 ----
 
 def test_mirror_experience_recalled_across_domains(tmp_path):

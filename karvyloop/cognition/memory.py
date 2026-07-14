@@ -399,7 +399,8 @@ class MemoryManager:
     def recall_block(self, query: str, *, scope: str = "personal", limit: int = 8,
                      domain: str = "", include_invalid: bool = False,
                      as_of: Optional[float] = None,
-                     explain_sink: Optional[list] = None) -> str:
+                     explain_sink: Optional[list] = None,
+                     audience: str = "", audience_role: str = "") -> str:
         """**同步**召回(只读 index)→ 围栏块,供 drive 前注入上下文(token 纪律:封顶 limit 条)。
 
         简化打分:query 词与 belief.content 的字符重叠命中加分,平手按 freshness 新的优先。
@@ -422,6 +423,14 @@ class MemoryManager:
         {content_preview(80 字截断,不塞全文), provenance_ts, source, belief_key,
         surface_terms, concept_tags, via_spread, hops, score} —— 供 drive 路径把"这次回答
         垫了哪几条记忆、每条为什么被想起"回给前端。None(默认)= 行为一字不变。
+
+        **`audience="external"` 对外白名单刀(docs/78 §4.3)**:外部经我们咽喉访问镜像角色时,
+        共享层内按 provenance.source 白名单再收一刀——**只放** `role_experience` 且
+        `applies.role == audience_role`(= 升层兵法,§3.6 形态);conversation/material
+        (个人生活事实)、decision_pref(决策画像=护城河核心)、roundtable(l0 结论)以及
+        **一切白名单不认识的 source 一律拒**(deny-by-default,同 capability"未声明→最严")。
+        内部调用不带标(默认 "")= 行为一字不变,零回归;audience 标记的注入点在我们咽喉
+        (外部接入唯一入口),判据是来源合法性不是请求自称。
         """
         # 去重 by id(b):index.all 因双 key 可能返回同一对象两次(同 _persist 的坑)
         beliefs, _seen = [], set()
@@ -443,12 +452,22 @@ class MemoryManager:
             bd = (b.provenance.get("applies") or {}).get("domain", "") if b.provenance else ""
             if bd and bd != domain:
                 continue   # 域私有认知:只在本域召回(跨域不漏)
+            # docs/78 §4.3 谓词③(对外白名单刀):audience=external 时共享层 deny-by-default——
+            # **只放**升层兵法(source==role_experience 且 applies.role==被访角色);个人生活
+            # 事实/决策画像/圆桌结论/未知 source 一律不出门。放行的兵法不再被谓词②挡
+            # (谓词②管"内部通用召回别混经验通道",对外恰恰只出这一层)。
+            if audience == "external":
+                prov = b.provenance or {}
+                ap = prov.get("applies") or {}
+                if not (str(prov.get("source") or "") == "role_experience"
+                        and ap.get("role") and str(ap.get("role")) == audience_role):
+                    continue
             # docs/78 §3.6 谓词②:角色经验/镜像兵法归**经验通道**(roles/experience.py 分层注入),
             # 不进通用召回当噪音(否则升层的兵法会漏进私聊/别的角色的上下文;域内经验也会和
             # experience_block 双份注入)。只挡 role_experience 源 —— decision_pref 等其他带
             # applies.role 的形态不受影响(开工前实核过 applies 分布,审稿注兑现)。
-            if (b.provenance or {}).get("source") == "role_experience" and \
-               ((b.provenance or {}).get("applies") or {}).get("role"):
+            elif (b.provenance or {}).get("source") == "role_experience" and \
+                    ((b.provenance or {}).get("applies") or {}).get("role"):
                 continue
             _seen.add(id(b))
             beliefs.append(b)
