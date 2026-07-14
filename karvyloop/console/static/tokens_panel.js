@@ -17,16 +17,31 @@ var KarvyTokensBundle = (function(exports) {
     const byModel = data && data.by_model || [];
     const model = byModel.length ? byModel[0].model || "?" : "";
     const cost = tot.cost_usd != null ? tot.cost_usd : null;
-    let s = "💰 " + _fmtTok(totalTok) + " tok";
-    if (cost != null) s += " · ¥" + (cost * 7).toFixed(2);
-    if (model) s += " · " + model;
-    const next = totalTok ? s : "💰 —";
-    if (meter.textContent && meter.textContent !== "💰 —" && meter.textContent !== next) {
-      meter.classList.remove("bump");
-      void meter.offsetWidth;
-      meter.classList.add("bump");
+    if (!totalTok) {
+      meter.textContent = "💰 —";
+      return;
     }
-    meter.textContent = next;
+    const num = _fmtTok(totalTok);
+    let tail = " tok";
+    if (cost != null) tail += " · ¥" + (cost * 7).toFixed(2);
+    if (model) tail += " · " + model;
+    if (meter.textContent === "💰 " + num + tail) return;
+    const prevNum = meter.getAttribute("data-tok") || "";
+    const reduced = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    meter.textContent = "";
+    meter.append("💰 ");
+    const wrap = el("span", { class: "kv-ticker" });
+    const cur = el("span", { text: num });
+    wrap.appendChild(cur);
+    if (prevNum && prevNum !== num && !reduced) {
+      cur.classList.add("kv-tick-in");
+      const old = el("span", { class: "kv-tick-out", text: prevNum, "aria-hidden": "true" });
+      old.addEventListener("animationend", () => old.remove());
+      wrap.appendChild(old);
+    }
+    meter.appendChild(wrap);
+    meter.append(tail);
+    meter.setAttribute("data-tok", num);
   }
   function _tokTable(rows, keyCol) {
     if (!rows.length) return el("div", { class: "muted", text: t("tokens.none") });

@@ -601,7 +601,7 @@ html, body {
   transition: background var(--dur) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 .chat-panel-main .chat-send-btn:hover { background: var(--accent-deep); }
-.chat-panel-main .chat-send-btn:active { transform: translateY(1px); }
+.chat-panel-main .chat-send-btn:active { transform: translateY(1px) scale(.97); }   /* P1-5 按压 */
 .chat-panel-main .chat-send-btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
 
 /* === 顶栏 === */
@@ -3092,3 +3092,69 @@ body.desk-view .desk-dragging {
 
 /* P1-1 前置:token 表数字等宽(跳数不抖宽;完整 ticker 排 P1) */
 .token-meter { font-variant-numeric: tabular-nums; }
+
+/* ============================================================================
+   微动效 P1 七项(2026-07-14;纪律同 P0:只 transform/opacity(色彩过渡获批)、
+   动 = 状态变化、无 idle 装饰、时长/缓动全走 token;上方 reduced-motion 总闸一票全关)
+   ========================================================================= */
+
+/* P1-1 token 表数字 ticker:数值真变了才动 —— 旧数字上滑淡出、新数字下入
+   (tokens_panel.ts 挂 .kv-tick-in / 幽灵 .kv-tick-out;接棒 P0 的整体 .bump 占位,
+   .token-meter.bump 规则保留但 TS 不再挂它 —— 一次变化只配一个动作) */
+.kv-ticker { position: relative; display: inline-block; }
+.kv-ticker .kv-tick-out { position: absolute; left: 0; top: 0; pointer-events: none; }
+.kv-tick-in { animation: kv-tick-in var(--dur) var(--ease-out) backwards; }
+.kv-tick-out { animation: kv-tick-out var(--dur) var(--ease-in) forwards; }
+@keyframes kv-tick-in { from { opacity: 0; transform: translateY(-0.4em); } to { opacity: 1; transform: none; } }
+@keyframes kv-tick-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-0.4em); } }
+
+/* P1-2 脉搏 crossfade:文案真换了才交叉淡化(新旧两层叠在同一格,旧淡出新淡入;
+   同字不动、不整段闪重绘。app.js updatePulse 挂 .pulse-swap-in/.pulse-swap-out) */
+#pulse-text { display: inline-grid; grid-template-columns: minmax(0, 1fr); align-items: center; }
+#pulse-text > span {
+  grid-area: 1 / 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;   /* 继承 chip 的截断语义 */
+}
+.pulse-swap-in { animation: kv-fade var(--dur) var(--ease-out) backwards; }
+.pulse-swap-out { animation: kv-fade-out var(--dur) var(--ease-in) forwards; pointer-events: none; }
+@keyframes kv-fade-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* P1-3 品位 shake:REJECT 拍下那刻卡片轻微横移抖一次(<300ms,单次)——"收到你的品位信号"。
+   transform-only;reduced-motion 显式无(不止 1ms 降级,直接不抖) */
+.h2a-card.kv-reject-shake { animation: kv-shake 240ms var(--ease-out) 1; }
+@keyframes kv-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  55% { transform: translateX(3px); }
+  80% { transform: translateX(-1px); }
+}
+@media (prefers-reduced-motion: reduce) { .h2a-card.kv-reject-shake { animation: none; } }
+
+/* P1-4 顶栏统计 chips:数值**增长**才轻 bump 一次(1→1.06→1;首次填充/持平/回落不动。
+   app.js renderStats 挂 .stat-bump;chips 是 flex item,transform 直接生效) */
+.topbar-stats .stat-bump { animation: kv-bump var(--dur) var(--ease-out) 1; }
+@keyframes kv-bump { 0% { transform: scale(1); } 45% { transform: scale(1.06); } 100% { transform: scale(1); } }
+
+/* P1-5 发送钮:按压 scale(.97)(上方 :active 处)+ 发送**成功**后一次轻微回弹
+   (app.js 挂 .kv-sent;成功/庆祝时刻 → 获批用 --ease-swift;无任何 loading 转圈) */
+.chat-send-btn.kv-sent { animation: kv-sent 300ms var(--ease-swift) 1; }
+@keyframes kv-sent { 0% { transform: scale(.97); } 55% { transform: scale(1.04); } 100% { transform: scale(1); } }
+
+/* P1-6 live-thinking「…」三点相位呼吸:绑"正在推理"这个进行中状态(同 kv-caret/骨架屏
+   例外,非 idle 装饰);元素随流式草稿终态整体移除即停。reduced-motion 总闸压成静止。 */
+.live-thinking .kv-dots span { display: inline-block; animation: kv-dot-breathe 1.2s ease-in-out infinite; }
+.live-thinking .kv-dots span:nth-child(2) { animation-delay: 0.2s; }
+.live-thinking .kv-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes kv-dot-breathe { 0%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+
+/* P1-7 执行后回报卡到场:fade+rise + 一次 accent 描边淡入再放掉(700ms;同决策卡到场
+   家族但更轻 —— 无 scale、无 10px ping,不抢决策卡的主角地位) */
+.report-card.report-in {
+  animation: kv-rise var(--dur) var(--ease-out) backwards,
+             kv-edge 700ms var(--ease-out) 1;
+}
+@keyframes kv-edge {
+  0% { box-shadow: 0 0 0 1px transparent; }
+  35% { box-shadow: 0 0 0 1px var(--accent-line); }
+  100% { box-shadow: 0 0 0 1px transparent; }
+}

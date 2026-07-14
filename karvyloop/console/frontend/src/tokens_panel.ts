@@ -31,17 +31,30 @@ async function pollMeter(): Promise<void> {
   const byModel = (data && data.by_model) || [];
   const model = byModel.length ? (byModel[0].model || "?") : "";
   const cost = tot.cost_usd != null ? tot.cost_usd : null;
-  let s = "💰 " + _fmtTok(totalTok) + " tok";
-  if (cost != null) s += " · ¥" + (cost * 7).toFixed(2);   // 粗略 USD→¥(P1 真汇率)
-  if (model) s += " · " + model;
-  const next = totalTok ? s : "💰 —";
-  // 微动效:数值真变了才 pop 一下(状态变化驱动;初次填充不 pop,reduced-motion 由 CSS 总闸关)
-  if (meter.textContent && meter.textContent !== "💰 —" && meter.textContent !== next) {
-    meter.classList.remove("bump");
-    void (meter as HTMLElement).offsetWidth;   // 重启动画
-    meter.classList.add("bump");
+  if (!totalTok) { meter.textContent = "💰 —"; return; }
+  const num = _fmtTok(totalTok);
+  let tail = " tok";
+  if (cost != null) tail += " · ¥" + (cost * 7).toFixed(2);   // 粗略 USD→¥(P1 真汇率)
+  if (model) tail += " · " + model;
+  if (meter.textContent === "💰 " + num + tail) return;   // 没变不重建(更不动画)
+  // 微动效 P1-1 数字 ticker:数值真变了才动 —— 旧数字上滑淡出、新数字下入(transform/opacity;
+  // 初次填充不动;reduced-motion 静态换字降级)。接棒 P0 的整体 .bump pop(占位退役,一次变化一个动作)。
+  const prevNum = meter.getAttribute("data-tok") || "";
+  const reduced = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  meter.textContent = "";
+  meter.append("💰 ");
+  const wrap = el("span", { class: "kv-ticker" });
+  const cur = el("span", { text: num });
+  wrap.appendChild(cur);
+  if (prevNum && prevNum !== num && !reduced) {
+    cur.classList.add("kv-tick-in");
+    const old = el("span", { class: "kv-tick-out", text: prevNum, "aria-hidden": "true" });
+    old.addEventListener("animationend", () => old.remove());
+    wrap.appendChild(old);
   }
-  meter.textContent = next;
+  meter.appendChild(wrap);
+  meter.append(tail);
+  meter.setAttribute("data-tok", num);
 }
 
 function _tokTable(rows: any[], keyCol: string): HTMLElement {

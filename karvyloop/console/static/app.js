@@ -327,7 +327,12 @@
       // P4:推理中 → 草稿里显一次"💭 思考中…"(完整推理在终态折叠卡);不逐字铺(太吵)
       const box = _ensureLiveStream(); if (!box) return;
       if (!box.querySelector(".live-thinking")) {
-        box.appendChild(el("div", { class: "live-thinking", text: t("render.thinking_live") }));
+        // 微动效 P1-6:文案里的静态「…」换成三点相位呼吸(进行中状态指示,同骨架屏例外;
+        // 元素随流式草稿终态整体移除即停,绝无 idle 循环)。i18n 文案本身不动,只剥尾部省略号。
+        box.appendChild(el("div", { class: "live-thinking" },
+          t("render.thinking_live").replace(/(\.{3}|…)\s*$/, ""),
+          el("span", { class: "kv-dots", "aria-hidden": "true" },
+            el("span", { text: "." }), el("span", { text: "." }), el("span", { text: "." }))));
         if (log) log.scrollTop = log.scrollHeight;
       }
     }
@@ -747,7 +752,9 @@
   // 执行后回报卡(只读):你 ACCEPT 的活跑完独立验收后,把"它到底验过没"翻成卡。
   // grounded ✓ 的自然产地;✓ 只来自真验收(非 inconclusive),没验过老实标"未核验"。
   function _renderReportCard(container, c) {
-    const box = el("div", { class: "dcard report-card" });
+    // 微动效 P1-7:回报卡到场 = kv-rise + 一次 accent 描边淡入(report-in,只在 envelope
+    // 追加这一次挂;比决策卡 dcard-in 轻 —— 无 scale/无 ping,不抢主角)
+    const box = el("div", { class: "dcard report-card report-in" });
     box.appendChild(el("div", { class: "report-card-head", text: t("report.title") }));
     box.appendChild(el("div", { class: "dcard-resolvable dcard-" + c.resolvable,
       text: t("dcard.resolvable." + c.resolvable) }));
@@ -1049,6 +1056,13 @@
         if (judgeState.highValue &&
             !window.confirm(t("dcard.hv_confirm", { standard: judgeState.hvStandard || "" }))) return;
         if (judgeState.needsRecheck && !window.confirm(t("dcard.surrender_confirm"))) return;
+      }
+      // 微动效 P1-3 品位 shake:REJECT 拍下那刻本卡轻微横移抖一次(<300ms 单次,
+      // "收到你的品位信号");reduced-motion 时 CSS 显式 animation:none = 直接无。
+      if (decision === "REJECT") {
+        card.classList.remove("kv-reject-shake");
+        void card.offsetWidth;   // 重启动画(同卡连点不哑)
+        card.classList.add("kv-reject-shake");
       }
       // 回喂判断(engaged + 改/删的依据)→ 反投降计数;再走既有 K5 拍板路径(不动)。
       _judgeDecisionCard(proposalId, decision, judgeState).then(() => {
@@ -1841,15 +1855,27 @@
     }
   }
 
+  // 微动效 P1-4:统计 chip 数值**增长**才轻 bump 一次(首次填充/持平/回落不动;
+  // prev 记在 data-v 上,2s 轮询同值不触发;reduced-motion 由 CSS 总闸关)
+  function _setStatChip(id, num, display, label) {
+    const n = document.getElementById(id);
+    if (!n) return;
+    const raw = n.getAttribute("data-v");
+    const prev = raw === null ? NaN : Number(raw);   // 首次 = NaN → 任何比较都 false(Number(null) 是 0,别踩)
+    n.innerHTML = `<b>${display}</b> ${label}`;
+    n.setAttribute("data-v", String(num));
+    if (Number(num) > prev) {
+      n.classList.remove("stat-bump");
+      void n.offsetWidth;   // 重启动画
+      n.classList.add("stat-bump");
+    }
+  }
   function renderStats(s) {
     // 顶栏仪表盘:紧凑、值在前(slow/restored 细节收进 token 弹窗,顶栏只留三个核心)
     const pct = (s.fast_brain_hit_rate * 100).toFixed(0);
-    document.getElementById("stat-drives").innerHTML =
-      `<b>${s.drive_calls}</b> ${t("stat.drives")}`;
-    document.getElementById("stat-fast-brain").innerHTML =
-      `<b>${pct}%</b> ${t("stat.fast_brain")}`;
-    document.getElementById("stat-crystallized").innerHTML =
-      `<b>${s.crystallizations}</b> ${t("stat.skills")}`;
+    _setStatChip("stat-drives", s.drive_calls, s.drive_calls, t("stat.drives"));
+    _setStatChip("stat-fast-brain", pct, pct + "%", t("stat.fast_brain"));
+    _setStatChip("stat-crystallized", s.crystallizations, s.crystallizations, t("stat.skills"));
   }
 
   // ============ ch4 圆桌:小卡兼主持,围绕主题多轮收敛(你只跟主持沟通)============
@@ -2703,6 +2729,22 @@
     if (!c) return 0;
     return Array.from(c.children).filter((ch) => !ch.classList.contains(emptyClass)).length;
   }
+  // 微动效 P1-2:脉搏文案换字才交叉淡化(新旧两层叠同格,旧淡出新淡入;同字直接跳过,
+  // 不整段闪重绘)。首次填充/reduced-motion 静态换字(降级);层由 CSS #pulse-text>span 叠。
+  function _setPulseText(pulse, next) {
+    const prev = pulse.getAttribute("data-pulse") || "";
+    if (prev === next) return;                     // 没变不重建(更不动画)
+    pulse.setAttribute("data-pulse", next);
+    pulse.textContent = "";
+    const cur = el("span", { text: next });
+    pulse.appendChild(cur);
+    if (prev && !_MOTION_REDUCED.matches) {
+      cur.classList.add("pulse-swap-in");
+      const old = el("span", { class: "pulse-swap-out", text: prev, "aria-hidden": "true" });
+      old.addEventListener("animationend", () => old.remove());
+      pulse.appendChild(old);
+    }
+  }
   function updatePulse() {
     const pulse = document.getElementById("pulse-text");
     if (!pulse) return;
@@ -2710,9 +2752,9 @@
     const pending = _countCards("h2a-list", "h2a-empty");
     // 顶栏主位让给"有没有任务在跑 / 有没有卡等拍板"(朋友调研;数据源=谁在忙/拍板两列现成)
     const running = _countCards("busy-list", "empty-state");
-    if (running > 0 || pending > 0) pulse.textContent = t("cockpit.pulse_topline", { running: running, pending: pending });
-    else if (ran > 0) pulse.textContent = t("cockpit.pulse_ran", { ran: ran });
-    else pulse.textContent = t("cockpit.pulse_idle");
+    if (running > 0 || pending > 0) _setPulseText(pulse, t("cockpit.pulse_topline", { running: running, pending: pending }));
+    else if (ran > 0) _setPulseText(pulse, t("cockpit.pulse_ran", { ran: ran }));
+    else _setPulseText(pulse, t("cockpit.pulse_idle"));
     // 拍板权重(Hardy):有卡 → 决策列点亮 + 列头计数徽章;拍完 → 回安静主位
     const dcol = document.querySelector(".col-decide");
     if (dcol) dcol.classList.toggle("has-pending", pending > 0);
@@ -3163,6 +3205,16 @@
 
   // ============ Intent submit (form) ============
 
+  // 微动效 P1-5:发送**成功**那刻按钮一次轻微回弹(kv-sent,单次;失败不庆祝,
+  // 无任何 loading 转圈;reduced-motion 由 CSS 总闸关)。按压 scale(.97) 在 CSS :active。
+  function _sendBtnCelebrate() {
+    const b = document.getElementById("chat-send");
+    if (!b) return;
+    b.classList.remove("kv-sent");
+    void b.offsetWidth;   // 重启动画
+    b.classList.add("kv-sent");
+  }
+
   // 发送一条聊天(表单提交按钮 + Enter 都走这里)。从 contenteditable 读文本 + 被 @ 的角色。
   async function _submitChat() {
     const { text, mentions } = _readChatInput();
@@ -3195,6 +3247,7 @@
         const res = r.ok ? await r.json() : null;
         if (!res || !res.ok) { pushChatLine("system", "⚠ " + ((res && res.reason) || t("chat.http_error", { status: r.status }))); }
         else {
+          _sendBtnCelebrate();   // P1-5:真送达才回弹
           _chatSpeaker = "";
           pushChatLine("agent", res.reply || "");
           if (res.started) {            // 小卡判定聊清了 → 自己开始,渲讨论结果
@@ -3228,8 +3281,10 @@
         if (!r.ok) { pushChatLine("system", t("chat.http_error", { status: r.status })); }
         else {
           const res = await r.json();
-          if (res.ok) _renderWorkflowPlan(res.plan, sendText, res.matched, mentions);   // 弹可编辑步骤表(命中则提议复用)
-          else pushChatLine("system", "⚠ " + (tB(res.reason) || "plan failed"));
+          if (res.ok) {
+            _sendBtnCelebrate();   // P1-5:真送达才回弹
+            _renderWorkflowPlan(res.plan, sendText, res.matched, mentions);   // 弹可编辑步骤表(命中则提议复用)
+          } else pushChatLine("system", "⚠ " + (tB(res.reason) || "plan failed"));
         }
       } catch (e) { clearBusy(); pushChatLine("system", "⚠ " + e.message); }
       if (send) send.disabled = false;
@@ -3241,6 +3296,7 @@
     const mentionDomain = mentions[0] ? mentions[0].domain_id : "";
     const _attach = _manifest.length ? { q: _qText, items: _manifest } : null;
     const sent = sendWS("intent", { intent: sendText, mention: mention, mention_domain: mentionDomain, images: _imgs, attachments: _attach });
+    if (sent) _sendBtnCelebrate();   // P1-5:WS 真送出才回弹
     if (!sent) {
       try {
         const r = await fetch("/api/intent", {
@@ -3250,6 +3306,7 @@
         });
         if (r.ok) {
           const payload = await r.json();
+          _sendBtnCelebrate();   // P1-5:HTTP 兜底真送达才回弹
           renderDriveDone(payload);
         } else {
           clearBusy();
