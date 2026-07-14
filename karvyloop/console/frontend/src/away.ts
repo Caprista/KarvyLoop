@@ -139,7 +139,9 @@ async function _doPair(): Promise<void> {
   if (btn) { btn.disabled = true; btn.textContent = t("away.pairing"); }
   try {
     // pairAndSave:生成密钥对 → 一次性码握手(码即焚)→ 存身份进本 origin 的 localStorage。
-    await TN().pairAndSave(bundle.relay, bundle.room, bundle.fingerprint, bundle.code);
+    // 返回的隧道**已连上**(占了 relay 房间的 client 位)——必须复用它,绝不能 showDeck 再
+    // 新建一条连同一房间:relay 一房只允一个 client,第二条撞 room_busy 卡死(真旅程实捕)。
+    _tunnel = await TN().pairAndSave(bundle.relay, bundle.room, bundle.fingerprint, bundle.code);
     showDeck();
   } catch (e) {
     _showPairErr(_classifyErr(e));
@@ -163,7 +165,20 @@ function showDeck(): void {
   root.appendChild(list);
   const rbtn = document.getElementById("aw-refresh");
   if (rbtn) rbtn.addEventListener("click", () => { void refresh(); });
-  void _connectDeck();
+  // 刚配对好的隧道已连上 → 直接复用(别重连同一房间撞 room_busy);否则(免码进入)才新建连。
+  if (_tunnel && _tunnel.connected) { _useTunnel(_tunnel); void refresh(); _startPolling(); }
+  else void _connectDeck();
+}
+
+// 把一条已建/新建的隧道接进拍板屏:挂 onstate → chip;调用方负责 refresh + startPolling。
+function _useTunnel(tn: TunnelInst): void {
+  _tunnel = tn;
+  _setChip(tn.connected ? "open" : "connecting");
+  tn.onstate = (s: string) => {
+    if (s === "open") _setChip("open");
+    else if (s === "connecting") _setChip("connecting");
+    else _setChip("closed");                          // "closed" | "error:*"
+  };
 }
 
 function _setChip(state: string): void {
@@ -177,15 +192,10 @@ function _setChip(state: string): void {
 async function _connectDeck(): Promise<void> {
   const id = TN().loadIdentity();
   if (!id) { showPairing(); return; }
-  _setChip("connecting");
-  _tunnel = new (TN().Tunnel)(id);
-  _tunnel.onstate = (s: string) => {
-    if (s === "open") _setChip("open");
-    else if (s === "connecting") _setChip("connecting");
-    else _setChip("closed");                      // "closed" | "error:*"
-  };
+  const tn = new (TN().Tunnel)(id);
+  _useTunnel(tn);
   try {
-    await _tunnel.connect(null);                   // 已配对设备免码重连
+    await tn.connect(null);                         // 已配对设备免码重连
     void refresh();
     _startPolling();
   } catch (e) {
@@ -299,14 +309,9 @@ async function refresh(): Promise<void> {
 async function _reconnect(): Promise<void> {
   const id = TN().loadIdentity();
   if (!id) throw new Error("no identity");
-  _setChip("connecting");
-  _tunnel = new (TN().Tunnel)(id);
-  _tunnel.onstate = (s: string) => {
-    if (s === "open") _setChip("open");
-    else if (s === "connecting") _setChip("connecting");
-    else _setChip("closed");
-  };
-  await _tunnel.connect(null);
+  const tn = new (TN().Tunnel)(id);
+  _useTunnel(tn);
+  await tn.connect(null);
 }
 
 function _startPolling(): void {

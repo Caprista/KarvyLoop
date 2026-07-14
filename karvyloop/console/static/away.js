@@ -123,7 +123,7 @@ var KarvyAwayBundle = (function(exports) {
       btn.textContent = t("away.pairing");
     }
     try {
-      await TN().pairAndSave(bundle.relay, bundle.room, bundle.fingerprint, bundle.code);
+      _tunnel = await TN().pairAndSave(bundle.relay, bundle.room, bundle.fingerprint, bundle.code);
       showDeck();
     } catch (e) {
       _showPairErr(_classifyErr(e));
@@ -153,7 +153,20 @@ var KarvyAwayBundle = (function(exports) {
     if (rbtn) rbtn.addEventListener("click", () => {
       void refresh();
     });
-    void _connectDeck();
+    if (_tunnel && _tunnel.connected) {
+      _useTunnel(_tunnel);
+      void refresh();
+      _startPolling();
+    } else void _connectDeck();
+  }
+  function _useTunnel(tn) {
+    _tunnel = tn;
+    _setChip(tn.connected ? "open" : "connecting");
+    tn.onstate = (s) => {
+      if (s === "open") _setChip("open");
+      else if (s === "connecting") _setChip("connecting");
+      else _setChip("closed");
+    };
   }
   function _setChip(state) {
     const chip = document.getElementById("aw-chip");
@@ -168,15 +181,10 @@ var KarvyAwayBundle = (function(exports) {
       showPairing();
       return;
     }
-    _setChip("connecting");
-    _tunnel = new (TN()).Tunnel(id);
-    _tunnel.onstate = (s) => {
-      if (s === "open") _setChip("open");
-      else if (s === "connecting") _setChip("connecting");
-      else _setChip("closed");
-    };
+    const tn = new (TN()).Tunnel(id);
+    _useTunnel(tn);
     try {
-      await _tunnel.connect(null);
+      await tn.connect(null);
       void refresh();
       _startPolling();
     } catch (e) {
@@ -317,14 +325,9 @@ var KarvyAwayBundle = (function(exports) {
   async function _reconnect() {
     const id = TN().loadIdentity();
     if (!id) throw new Error("no identity");
-    _setChip("connecting");
-    _tunnel = new (TN()).Tunnel(id);
-    _tunnel.onstate = (s) => {
-      if (s === "open") _setChip("open");
-      else if (s === "connecting") _setChip("connecting");
-      else _setChip("closed");
-    };
-    await _tunnel.connect(null);
+    const tn = new (TN()).Tunnel(id);
+    _useTunnel(tn);
+    await tn.connect(null);
   }
   function _startPolling() {
     if (_timer !== null) return;
