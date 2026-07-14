@@ -86,6 +86,46 @@ def test_set_default_and_delete_nondefault(tmp_path):
     assert ok
 
 
+# ---- setup gate 三刀(Hardy 实损:空 key"保存成功"写出空壳还盖配置,重启后全站锁死)----
+
+def test_upsert_new_cloud_provider_blank_key_rejected(tmp_path):
+    """云端 provider 首配空 key = 拒绝写盘("保留原值"只对已有密钥的编辑成立)。"""
+    p = _w(tmp_path)
+    before = p.read_text(encoding="utf-8")
+    ok, reason = cm.upsert_model({"provider": "openai", "model_id": "openai/gpt",
+                                  "api": "openai-completions",
+                                  "base_url": "https://api.openai.com", "api_key": ""}, p)
+    assert not ok and "API Key" in reason
+    assert p.read_text(encoding="utf-8") == before          # 一个字节都没动
+    ok2, _ = cm.upsert_model({"provider": "openai", "model_id": "openai/gpt",
+                              "api": "openai-completions",
+                              "base_url": "https://api.openai.com", "api_key": "****9999"}, p)
+    assert not ok2                                           # 遮罩串也不算首配密钥
+
+
+def test_upsert_local_provider_blank_key_ok(tmp_path):
+    """本地 provider(ollama/localhost)无需真 key,空 key 照常保存(零 key 本地路径不误伤)。"""
+    p = _w(tmp_path)
+    ok, reason = cm.upsert_model({"provider": "ollama", "model_id": "ollama/llama3",
+                                  "api": "openai-completions",
+                                  "base_url": "http://127.0.0.1:11434/v1", "api_key": ""}, p)
+    assert ok, reason
+
+
+def test_save_writes_backup_of_previous_config(tmp_path):
+    """任何写盘前留一代 .bak:一次误保存不再能毁掉唯一的能用配置。"""
+    p = _w(tmp_path)
+    original = p.read_text(encoding="utf-8")
+    ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                             "model_name": "Claude v2", "api": "anthropic-messages",
+                             "api_key": ""}, p)
+    assert ok
+    bak = p.with_suffix(".yaml.bak")
+    assert bak.exists()
+    assert bak.read_text(encoding="utf-8") == original       # .bak = 改动前的上一版
+    assert "Claude v2" in p.read_text(encoding="utf-8")      # 新配置真落了
+
+
 def test_reject_bad_api(tmp_path):
     p = _w(tmp_path)
     ok, reason = cm.upsert_model({"provider": "x", "model_id": "x/y", "api": "bogus"}, p)

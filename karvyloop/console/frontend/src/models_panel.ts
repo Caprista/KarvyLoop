@@ -30,6 +30,10 @@ const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
 const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
 const t = (k: string, vars?: Record<string, unknown>) =>
   (window as unknown as { KarvyI18n: I18n }).KarvyI18n.t(k, vars);
+const tB = (x: unknown): string => {
+  const w = (window as unknown as { KarvyI18n: { tBackend?: (s: unknown) => string } }).KarvyI18n;
+  return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
+};
 
 let _deps: Deps = { pollSnapshot: () => {} };
 let _modelApis = ["anthropic-messages", "openai-completions", "openai-responses", "google-generative-ai", "ollama", "bedrock-converse"];
@@ -289,6 +293,12 @@ function _onbProvider(wrap: HTMLElement, presets: any[], p: any, onDone: () => P
   wrap.appendChild(msg);
 }
 async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Promise<void> | void): Promise<void> {
+  // 云端 provider 空 key 连请求都不发(Hardy 实拍:不填也"保存并验证成功",
+  // 实际写出空壳配置还盖掉原值 —— 后端同有此闸,这里是第一道)
+  if (!p.is_local && !key.trim()) {
+    _setMsg(msg, false, t("onb.key_required"));
+    return;
+  }
   _setMsg(msg, true, t("onb.saving"));
   const r = await _postJSON("/api/model/save", {
     provider: p.id, model_id: p.model_id, model_name: p.model_name || "",
@@ -297,21 +307,23 @@ async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Pro
     context_window: p.context_window || 200000, max_tokens: p.max_tokens || 8192,
   });
   if (!(r.ok && r.data && r.data.ok)) {
-    _setMsg(msg, false, t("mgmt.failed", { err: (r.data && (r.data.reason || r.data.detail)) || r.status }));
+    _setMsg(msg, false, t("mgmt.failed", { err: tB((r.data && (r.data.reason || r.data.detail)) || r.status) }));
     return;
   }
   await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });  // 刚加的设为默认
-  if (r.data.restart_required) {
-    // 闭环审计断②诚实面:fresh 进程(冷启动无 config)没有 gateway/main_loop,保存成功也
-    // 到不了首次对话 —— 大字告知"重启生效",留在引导页(不关模态、不跑必败的 validate)。
-    _setMsg(msg, true, t("onb.saved_restart"));
-    msg.classList.add("onb-restart-big");
-    return;
-  }
-  _setMsg(msg, true, t("onb.validating"));   // 实时校验:坏 key/连不上当场抓
+  // 实时校验:坏 key/连不上**当场抓**。fresh 进程后端会用临时 gateway 真验(不再跳过 ——
+  // 首配恰恰是最需要验证的场景);验完再按 restart_required 给诚实文案。
+  _setMsg(msg, true, t("onb.validating"));
   const v = await _postJSON("/api/model/validate", {});
+  const needRestart = !!(r.data && r.data.restart_required);
   if (v.ok && v.data && v.data.ok) {
-    _setMsg(msg, true, t("onb.ok"));
+    if (needRestart) {
+      // 验证过了才说"重启生效"(不再有"已保存但没验过"的半截话)
+      _setMsg(msg, true, t("onb.saved_restart_verified"));
+      msg.classList.add("onb-restart-big");
+    } else {
+      _setMsg(msg, true, t("onb.ok"));
+    }
   } else {
     // #42 优化②:错误分类学 —— 先给人话(key 坏了/地址错了/没网),原始信息跟在后面
     const cls = (v.data && v.data.error_class) || "";

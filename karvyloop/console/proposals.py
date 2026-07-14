@@ -212,6 +212,17 @@ class ProposalPump:
         self._app = app
         self._analyst = analyst
         self._distill = distill
+        # analyst/distill 是同步 LLM 调用:必须下线程跑,否则整个事件循环(所有 HTTP/WS)
+        # 冻结到 LLM 返回(Hardy 实拍:点一次建议,业务域面板载入"异常久远")。
+        # Lock 保序:analyst 内部状态按旧语义一次只进一个调用。
+        self._work_lock: Optional[Any] = None
+
+    def _lock(self) -> Any:
+        # 惰性建锁:__init__ 可能发生在无事件循环的接线期(entry/CLI)
+        if self._work_lock is None:
+            import asyncio
+            self._work_lock = asyncio.Lock()
+        return self._work_lock
 
     def _run_distill(self) -> None:
         """boot/daily 前先跑 raw→summary 提炼(注入的 callable;幂等由提炼器 watermark 保证)。
@@ -229,21 +240,33 @@ class ProposalPump:
             logger.warning(f"[proposals] raw→summary 提炼失败(analyst 只能看旧摘要): {e}")
 
     async def on_event(self, chunk: Any) -> tuple[Optional[Any], int]:
-        """事件驱动:analyst.on_event → 推。"""
-        proposal = self._analyst.on_event(chunk)
+        """事件驱动:analyst.on_event → 推。(LLM 下线程,不冻事件循环)"""
+        import asyncio
+        async with self._lock():
+            proposal = await asyncio.to_thread(self._analyst.on_event, chunk)
         return await self._maybe_push(proposal)
 
     async def boot(self, recent_n: int = 20) -> tuple[Optional[Any], int]:
-        """启动一次:先 raw→summary 提炼,再 analyst.boot_poll → 推。"""
-        self._run_distill()
-        proposal = self._analyst.boot_poll(recent_n=recent_n)
+        """启动一次:先 raw→summary 提炼,再 analyst.boot_poll → 推。(LLM 下线程)"""
+        import asyncio
+        async with self._lock():
+            proposal = await asyncio.to_thread(self._boot_sync, recent_n)
         return await self._maybe_push(proposal)
 
-    async def daily(self, recent_n: int = 50) -> tuple[Optional[Any], int]:
-        """每天一次:先 raw→summary 提炼,再 analyst.daily_poll → 推。"""
+    def _boot_sync(self, recent_n: int) -> Optional[Any]:
         self._run_distill()
-        proposal = self._analyst.daily_poll(recent_n=recent_n)
+        return self._analyst.boot_poll(recent_n=recent_n)
+
+    async def daily(self, recent_n: int = 50) -> tuple[Optional[Any], int]:
+        """每天一次:先 raw→summary 提炼,再 analyst.daily_poll → 推。(LLM 下线程)"""
+        import asyncio
+        async with self._lock():
+            proposal = await asyncio.to_thread(self._daily_sync, recent_n)
         return await self._maybe_push(proposal)
+
+    def _daily_sync(self, recent_n: int) -> Optional[Any]:
+        self._run_distill()
+        return self._analyst.daily_poll(recent_n=recent_n)
 
     async def _maybe_push(self, proposal: Optional[Any]) -> tuple[Optional[Any], int]:
         if proposal is None:

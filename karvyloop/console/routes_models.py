@@ -118,7 +118,19 @@ async def api_model_validate(request: Request) -> dict[str, Any]:
     rk = getattr(request.app.state, "runtime_kwargs", None) or {}
     gw = rk.get("gateway")
     if gw is None:
-        return {"ok": False, "reason": "no_gateway"}
+        # fresh 进程(冷启动无 config)也要能**真验证**:从刚保存的 config 建临时 gateway
+        # 打一发最小调用 —— 否则引导页"保存并验证"在最需要验证的场景(首配)反而不验,
+        # 坏 key 要等用户重启+首聊才炸(Hardy 实拍拍死的不诚实面)。
+        cfgp = _model_cfg_path(request.app)
+        if not cfgp:
+            return {"ok": False, "reason": "no_gateway"}
+        try:
+            from karvyloop.gateway import GatewayClient
+            from karvyloop.gateway.registry import ModelRegistry
+            gw = GatewayClient(ModelRegistry.load(cfgp))
+        except Exception as e:
+            msg = _scrub_secret(f"{type(e).__name__}: {e}")
+            return {"ok": False, "reason": msg, "error_class": _classify_model_error(msg)}
     try:
         ref = getattr(gw.reg, "default_chat", "") or ""
         if not ref:

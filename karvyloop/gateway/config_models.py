@@ -43,6 +43,14 @@ def _save(cfg: dict, cfg_path=None) -> None:
     p = Path(cfg_path) if cfg_path else _default_path()
     import yaml
     p.parent.mkdir(parents=True, exist_ok=True)
+    # 写前备份(Hardy 实损:一次误保存把能用的 provider 配置盖没了,重启才暴露且无从恢复)。
+    # 单代 .bak 够用:任何一次写坏,上一版永远拿得回;绝不 log 内容(里面是密钥)。
+    if p.exists():
+        try:
+            import shutil
+            shutil.copy2(p, p.with_suffix(".yaml.bak"))
+        except OSError:
+            pass   # 备份失败不挡保存(只是少一层保险)
     p.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
@@ -135,10 +143,19 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
             p["extra_headers"] = clean
         else:
             p.pop("extra_headers", None)
-    # 密钥:留空 / 回传遮罩串 → 保留原值;否则写入
+    # 密钥:留空 / 回传遮罩串 → 保留原值;否则写入。
+    # 但"保留原值"只对**已有密钥的编辑**成立 —— 云端 provider 首配时留空 = 写出一个
+    # 永远跑不通的空壳还占住配置(Hardy 实拍:不填 key 也"保存成功",重启后全站锁死)。
     nk = str(spec.get("api_key", "") or "").strip()
     if nk and not nk.startswith("****"):
         p["api_key"] = nk
+    else:
+        has_existing = bool(str(p.get("api_key") or "").strip())
+        base = str(p.get("base_url") or "").lower()
+        is_local = (pname in ("ollama", "llamacpp", "lmstudio", "vllm-local")
+                    or api == "ollama" or "127.0.0.1" in base or "localhost" in base)
+        if not has_existing and not is_local:
+            return False, "云端模型必须先填 API Key(留空只在编辑已有配置时表示保留原值)"
     p.setdefault("models", [])
     md = {
         "id": mid, "name": str(spec.get("model_name") or mid), "api": api, "role": role,

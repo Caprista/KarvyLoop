@@ -51,6 +51,45 @@ def test_validate_no_gateway():
     assert r["ok"] is False and r["reason"] == "no_gateway"
 
 
+def test_validate_fresh_process_builds_transient_gateway(tmp_path, monkeypatch):
+    """fresh 进程(无 gateway)+ 已有 config → validate 用临时 gateway 真验,不再回 no_gateway。
+
+    Hardy 实拍拍死的不诚实面:首配(最需要验证的场景)以前反而跳过验证。"""
+    import textwrap
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(textwrap.dedent("""
+    models:
+      providers:
+        anthropic:
+          base_url: https://api.anthropic.com
+          api_key: FAKE-DO-NOT-LEAK-abc123
+          models:
+            - id: anthropic/claude
+              name: Claude
+              api: anthropic-messages
+              context_window: 200000
+              max_tokens: 8192
+    agents:
+      defaults:
+        model: anthropic/claude
+    """), encoding="utf-8")
+
+    class _FakeGW:
+        def __init__(self, reg):
+            self.reg = reg
+
+        async def complete(self, messages, tools, ref):
+            yield {"type": "text", "text": "pong"}
+
+    import karvyloop.gateway as gwmod
+    monkeypatch.setattr(gwmod, "GatewayClient", _FakeGW)
+    app = _app()
+    app.state.config_path = str(cfg)
+    r = TestClient(app).post("/api/model/validate").json()
+    assert r["ok"] is True and r["model"] == "anthropic/claude"
+
+
 def test_validate_success_with_fake_gateway():
     app = _app()
 

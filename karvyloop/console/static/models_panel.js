@@ -6,6 +6,10 @@ var KarvyModelsPanelBundle = (function(exports) {
   const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
   const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
+  const tB = (x) => {
+    const w = window.KarvyI18n;
+    return w && w.tBackend ? w.tBackend(x) : String(x == null ? "" : x);
+  };
   let _deps = { pollSnapshot: () => {
   } };
   let _modelApis = ["anthropic-messages", "openai-completions", "openai-responses", "google-generative-ai", "ollama", "bedrock-converse"];
@@ -340,6 +344,10 @@ var KarvyModelsPanelBundle = (function(exports) {
     wrap.appendChild(msg);
   }
   async function _onbSave(p, key, msg, onDone) {
+    if (!p.is_local && !key.trim()) {
+      _setMsg(msg, false, t("onb.key_required"));
+      return;
+    }
     _setMsg(msg, true, t("onb.saving"));
     const r = await _postJSON("/api/model/save", {
       provider: p.id,
@@ -355,19 +363,20 @@ var KarvyModelsPanelBundle = (function(exports) {
       max_tokens: p.max_tokens || 8192
     });
     if (!(r.ok && r.data && r.data.ok)) {
-      _setMsg(msg, false, t("mgmt.failed", { err: r.data && (r.data.reason || r.data.detail) || r.status }));
+      _setMsg(msg, false, t("mgmt.failed", { err: tB(r.data && (r.data.reason || r.data.detail) || r.status) }));
       return;
     }
     await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });
-    if (r.data.restart_required) {
-      _setMsg(msg, true, t("onb.saved_restart"));
-      msg.classList.add("onb-restart-big");
-      return;
-    }
     _setMsg(msg, true, t("onb.validating"));
     const v = await _postJSON("/api/model/validate", {});
+    const needRestart = !!(r.data && r.data.restart_required);
     if (v.ok && v.data && v.data.ok) {
-      _setMsg(msg, true, t("onb.ok"));
+      if (needRestart) {
+        _setMsg(msg, true, t("onb.saved_restart_verified"));
+        msg.classList.add("onb-restart-big");
+      } else {
+        _setMsg(msg, true, t("onb.ok"));
+      }
     } else {
       const cls = v.data && v.data.error_class || "";
       const hintKey = cls === "bad_key" ? "onb.err_bad_key" : cls === "bad_url" ? "onb.err_bad_url" : cls === "unreachable" ? "onb.err_unreachable" : "";
