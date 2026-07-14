@@ -26,20 +26,6 @@ import pytest
 CFG = Path.home() / ".karvyos" / "config.yaml"
 
 
-def _real_runtime():
-    if not CFG.exists():
-        return None
-    from karvyloop.cli._runtime import resolve_runtime
-    rt = resolve_runtime(config_path=CFG)
-    if not (rt.runtime_kwargs or {}).get("gateway"):
-        return None
-    return rt
-
-
-_RT = _real_runtime()
-pytestmark = pytest.mark.skipif(_RT is None, reason="无真模型 config(~/.karvyos/config.yaml)→ CI 跳过")
-
-
 def _tmp_workspace_kwargs(rk: dict, tmp: Path) -> dict:
     """把 runtime_kwargs 的 workspace(连同 fs token 的授权范围)覆盖到 tmp 目录。
 
@@ -58,6 +44,26 @@ def _tmp_workspace_kwargs(rk: dict, tmp: Path) -> dict:
     out["workspace_root"] = str(ws)
     out["token"] = _make_token(str(ws))   # fs 授权范围同步指 tmp,不再覆盖仓根
     return out
+
+
+def _real_runtime():
+    if not CFG.exists():
+        return None
+    from karvyloop.cli._runtime import resolve_runtime
+    rt = resolve_runtime(config_path=CFG)
+    if not (rt.runtime_kwargs or {}).get("gateway"):
+        return None
+    # W1 复发根治(2026-07-13 实捕:analyze.py/quarterly_sales.csv 又写回仓根):
+    # 只在 J22 单点盖 tmp 不够 —— 模块级 _RT 出厂就带 tmp 工作区,所有 J 测试
+    # (含未来新增)默认继承,真模型的任何落盘只进临时目录。J22 自己再覆盖到
+    # 它私有的 tmp 不受影响(_tmp_workspace_kwargs 只动副本)。
+    rt.runtime_kwargs.update(_tmp_workspace_kwargs(
+        rt.runtime_kwargs, Path(tempfile.mkdtemp(prefix="e2e-pressure-"))))
+    return rt
+
+
+_RT = _real_runtime()
+pytestmark = pytest.mark.skipif(_RT is None, reason="无真模型 config(~/.karvyos/config.yaml)→ CI 跳过")
 
 
 @pytest.fixture(scope="module")
