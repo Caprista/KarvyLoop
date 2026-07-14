@@ -268,6 +268,27 @@ def test_execute_plan_rejects_outside_and_tampered(tmp_path):
     assert canary.exists() and (home / "Desktop" / "notes.txt").exists()
 
 
+def test_within_rejects_symlink_escape(tmp_path):
+    """_within 必须按 OS 真路径判(symlink 加固):白名单目录里一个指向外部的符号链接,
+    词法上"在 base 内"、shutil.move 的真实落点却在白名单外 —— 词法判定放行 = 搬穿白名单。"""
+    base = tmp_path / "base"
+    base.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = base / "sneaky"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("本机建不了 symlink(Windows 无 SeCreateSymbolicLinkPrivilege)")
+    # 穿 symlink 的目标:词法在 base 内,真路径在 outside → 必须 False
+    assert bl._within(link / "evil.txt", base) is False
+    assert bl._within(link, base) is False
+    # 0 回归:真在 base 内的照常 True;base 外的照常 False;`..` 照拒
+    assert bl._within(base / "ok.txt", base) is True
+    assert bl._within(outside / "x.txt", base) is False
+    assert bl._within(base / ".." / "outside" / "x.txt", base) is False
+
+
 def test_execute_plan_rejects_dotdot_traversal(tmp_path):
     """`..` 逃逸(词法上"在白名单内"实则越狱)必须被确定性地板拒 —— 不依赖 fs_grants 在不在。"""
     home = _mk_home(tmp_path)

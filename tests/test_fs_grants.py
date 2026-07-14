@@ -95,6 +95,37 @@ def test_capability_chain_sensitive_and_granted_write(tmp_path):
     assert not isinstance(d3, Deny)
 
 
+def test_capability_chain_relative_subject_anchored_to_workspace(tmp_path, monkeypatch):
+    """step8 单锚锁:相对 subject 必须先锚 workspace_root 解析,台账 allows 收到的是
+    workspace 锚定的绝对路径 —— 不是按进程 CWD 解析的另一条路径(同 subject 两个锚 =
+    检查一个路径、放行另一个路径)。"""
+    import os
+    from karvyloop.capability.decision import Allow, authorize
+    from karvyloop.capability.policy import Mode, PermissionContext
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    elsewhere = tmp_path / "cwd-else"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)   # CWD 故意挪到别处:按 CWD 锚就会露馅
+
+    captured: list = []
+
+    class _CapturingStore:
+        def allows(self, path, op="read", **kw):
+            captured.append((path, op))
+            return True
+
+    register_store(_CapturingStore())
+    d = authorize(PermissionContext(tool="write_file", input={"path": "../out/r.md"},
+                                    mode=Mode.WORKSPACE_WRITE, workspace_root=str(ws)))
+    assert isinstance(d, Allow)
+    assert captured, "工作区外路径应落到台账 allows 判定"
+    expect = os.path.normpath(os.path.join(str(ws), "../out/r.md"))
+    assert captured[0] == (expect, "write"), \
+        f"allows 收到 {captured[0][0]},应为 workspace 锚定的 {expect}(不是 CWD 锚定)"
+
+
 def test_read_tool_grant_and_note(tmp_path):
     from karvyloop.coding.tools.read import ReadTool
     from karvyloop.coding.filestate import FileState

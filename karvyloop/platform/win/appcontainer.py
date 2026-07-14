@@ -20,8 +20,8 @@ AppContainer 进程;不持有该 cap 的 AppContainer 进程 → 落到 "Block O
 诚实边界:
   - AppContainer 会额外要求被访问对象(Python 解释器、系统 DLL、临时目录)对
     `ALL APPLICATION PACKAGES`(S-1-15-2-1)可读。Win10/11 系统目录默认已授 —— 一般能跑;
-    个别机器/杀软环境可能起不来。故本层**best-effort**:probe() 真起一个 LowBox `cmd /c exit`
-    探路,不通就让上层回退到"默认拒网 + 授权门"(非内核强制,如实标注)。
+    个别机器/杀软环境可能起不来。故本层只管探测与造令牌:probe 探不通时,上层对第三方
+    技能脚本 **fail-closed 拒跑**(不退回只限写、不限网的受限令牌假装隔离)。
   - 网络门只覆盖**出站 TCP/UDP connect**(WFP CONNECT 层);监听/本地回环等非本层目标(第三方
     脚本要联网外传才是威胁模型重点)。
   - 这是 IPv4+IPv6 出站默认块;不做域名级白名单(那是 P1,需要真配 WFP 过滤器 = 要 admin)。
@@ -108,7 +108,7 @@ if _IS_WIN:
 
         capabilities=0 → 无 internetClient(S-1-15-3-1)→ WFP 默认规则内核拒出站网络。
         NtCreateLowBoxToken 恒返回**主令牌**,可直接喂 CreateProcessAsUser。medium IL 即可,免 admin。
-        失败(NTSTATUS<0)抛 OSError,让调用方回退到纯受限令牌(不假装隔离)。
+        失败(NTSTATUS<0)抛 OSError,fail-loud 上抛(调用方不静默退回无网络门的令牌假装隔离)。
         """
         h_lowbox = _HANDLE()
         status = _ntdll.NtCreateLowBoxToken(
@@ -116,5 +116,5 @@ if _IS_WIN:
             _package_sid(), 0, None, 0, None)
         if status < 0:
             raise OSError(f"NtCreateLowBoxToken 失败(NTSTATUS 0x{status & 0xFFFFFFFF:08X})"
-                          " —— 回退纯受限令牌 + 默认拒网")
+                          " —— 无网 LowBox 造不出来,此次执行不假装隔离")
         return h_lowbox

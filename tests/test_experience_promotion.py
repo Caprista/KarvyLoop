@@ -205,6 +205,22 @@ def test_tick_card_accept_and_watermark(tmp_path):
     assert n2 == 0 and gw.calls == 1
 
 
+def test_tick_scrubs_why_field_on_card(tmp_path):
+    """why(泛化理由)也上卡面 → 同过 denylist:含域词整段丢,content 干净的照升(J 验收 P2)。"""
+    from karvyloop.console.promotion_tick import maybe_promotion_tick
+    app, mem = _tick_app(tmp_path, None)
+    src = _seed_domain_exp(mem, "给X地产的报告要先过李工审")
+    okey = origin_key_for(src.content)
+    gw = _EnvelopeGateway([{"origin_key": okey, "content": "交付前先过一道内部专业审",
+                            "kind": "method", "why": "在装修域反复验证过"}])   # why 泄域词
+    app.state.runtime_kwargs["gateway"] = gw
+    n = asyncio.run(maybe_promotion_tick(app, now=NOW, state_path=tmp_path / "t.json"))
+    assert n == 1
+    card = list(app.state.proposal_registry.pending())[0]
+    assert "内部专业审" in card.basis                       # 干净 content 照升
+    assert "在装修域反复验证过" not in card.basis           # 脏 why 整段被清
+
+
 def test_tick_watermark_skips_unchanged_pool(tmp_path):
     """池没变(比如上轮全判'不泛化')→ 第二轮零 LLM。"""
     from karvyloop.console.promotion_tick import maybe_promotion_tick

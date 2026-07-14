@@ -28,14 +28,16 @@
             出站连接被内核直接拒(免 admin、与用户防火墙配置无关)。这把"没声明网络的第三方
             脚本"从**socket 全通**升级为**内核级默认无网**。
           - AppContainer 起不来的机器(系统 DLL/Python 对 ALL APPLICATION PACKAGES 不可读、
-            杀软干预)→ probe 探不通 → 优雅回退到纯受限令牌(网络非内核强制,如实标注 P2)。
+            杀软干预)→ probe 探不通 → 第三方技能脚本 **fail-closed 拒跑**(“默认断网”承诺
+            落不了地就不跑,与 Tier-4 degraded 对第三方的契约对齐);第一方不受影响
+            (本就不套 AppContainer)。
   超时/截断 UTF-8 边界截断照抄 bubblewrap/seatbelt(与沙箱机制无关)。
   write_file/read_file 纯 token 闸 IO,跨平台同语义。
 
 诚实边界(如实标注,不吹):
-  - 默认拒网**首选 AppContainer 内核门**(WFP 默认规则,真 OS 强制、免 admin);probe 探不通
-    的机器回退到"上层默认拒网 + 授权门",此时网络**非内核强制**(靠第三方默认拒网 + 授网是
-    人的决定收口)—— 回退态如实标 P2,不假装内核挡住了。
+  - 默认拒网走 **AppContainer 内核门**(WFP 默认规则,真 OS 强制、免 admin);probe 探不通
+    的机器对第三方技能脚本 **fail-closed 拒跑** —— 不退回"只限写、不限网"的受限令牌假装
+    隔离(承诺落空且无信号比明拒更糟)。
   - 网络门覆盖**出站 connect**(第三方外传是威胁模型重点);域名级白名单是 P1(需 admin 配 WFP)。
   - 读隔离 v1 放宽(对齐 macOS seatbelt 先例)。
   - 世界可写(DACL 已授 Everyone 写)的既有路径不在拒写范围 —— 用 Everyone 作
@@ -88,6 +90,17 @@ _EGRESS_FAIL_CLOSED = (
     "内核只能全有/全无默认拒出站,按域名过滤需 admin 级 WFP 过滤器(违背免 admin 约束)。"
     "遵守'宁拒不假放行'—— fail-closed 拒跑。需域名级 egress 请在 Linux(pasta/slirp4netns "
     "用户态代理)上运行。"
+)
+
+# 第三方技能脚本的"默认断网"承诺完全依赖 AppContainer(LowBox)内核门;本机探不通时若照跑,
+# 别人的代码就静默落在**只限写、不限网**的受限令牌下 —— 承诺落空且无任何信号。fail-closed,
+# 与 Tier-4 degraded 对第三方技能直接 PermissionError 的既有契约对齐(别人的代码没笼子绝不裸跑)。
+_SKILL_APPC_FAIL_CLOSED = (
+    "第三方技能脚本在 Windows 上的\"默认断网\"依赖 AppContainer(LowBox)内核网络门,"
+    "但本机探测不可用(Python 装在 ALL APPLICATION PACKAGES 读不到的目录 / 杀软干预)—— "
+    "fail-closed 拒跑,不在只限写、不限网的受限令牌下假装隔离。此技能可在 Linux(bubblewrap)"
+    "/ macOS(sandbox-exec)完整沙箱上运行;或在人工确认信任后将其转为第一方(trusted)再执行。"
+    "影响面仅第三方技能脚本;第一方 workspace 执行不受影响。"
 )
 
 # ---------------------------------------------------------------------------
@@ -567,7 +580,7 @@ if _IS_WIN:
             h_tok = _make_write_restricted_token()
             if net_isolated:
                 from .appcontainer import make_lowbox_token
-                h_lowbox = make_lowbox_token(h_tok)   # 失败抛 OSError,上层回退
+                h_lowbox = make_lowbox_token(h_tok)   # 失败抛 OSError,fail-loud 上抛(不静默降门)
             h_job = _make_job(job_memory, proc_limit)
 
             # 4) 管道
@@ -782,8 +795,8 @@ class RestrictedTokenSandbox:
         ① NtCreateLowBoxToken 可造(medium IL,免 admin)② LowBox 进程能起来(Python DLL 对
         ALL APPLICATION PACKAGES 授了只读能起 —— 用真解释器探,不用 cmd,否则会假阳性:cmd 在
         System32 默认可读、但 Python 在用户目录不可读,拿 cmd 探过、真跑 python 却 0xC0000135)。
-        探不通(Python 装在 ALL-APP-PACKAGES 读不到的目录 / 杀软)→ False → exec 回退纯受限令牌
-        + 默认拒网(非内核强制,如实标 P2)。
+        探不通(Python 装在 ALL-APP-PACKAGES 读不到的目录 / 杀软)→ False → exec 对第三方技能
+        脚本 fail-closed 拒跑(不退回只限写、不限网的令牌假装隔离;第一方不受影响)。
         """
         if not _IS_WIN:
             return False
@@ -813,8 +826,8 @@ class RestrictedTokenSandbox:
         # 网络门(先于一切平台调用):
         #   - 带 `net:` grant → fail-closed 拒跑(放行特定网络需 admin 级 WFP 过滤器;不假装放行)。
         #   - 第三方技能脚本(skill-exec token)且无 net 声明 → **默认拒网**:能造 LowBox 就走
-        #     AppContainer 内核门(免 admin),否则回退纯受限令牌(网络非内核强制,靠上层默认
-        #     拒网 + 授权门兜底,如实标 P2)。别人的代码默认无网,不再 socket 全通。
+        #     AppContainer 内核门(免 admin);LowBox 探不通 → **fail-closed 拒跑**(否则三方
+        #     脚本静默跑在只限写、不限网的受限令牌下 =“默认断网”落空且无信号)。
         #   - 第一方 workspace exec(非 skill-exec)保持原行为(不套 AppContainer,避免文件访问
         #     摩擦引回归;第一方 net token 同样 fail-closed)。
         # 按域名 egress allowlist 非空 → Windows 短板:域名级需 admin WFP(违免 admin)→
@@ -827,7 +840,9 @@ class RestrictedTokenSandbox:
             raise RuntimeError(
                 "RestrictedToken 沙箱在本机探测失败(锁定策略/杀软拦截?)—— "
                 "selector 会降级到 DegradedWindowsSandbox,不应直接调到这里")
-        net_isolated = is_skill_exec_token(token) and self.appcontainer_available()
+        net_isolated = is_skill_exec_token(token)
+        if net_isolated and not self.appcontainer_available():
+            raise PermissionError(_SKILL_APPC_FAIL_CLOSED)
         ro, rw = rw_ro_paths_with_grants(token)
         argv = resolve_argv(list(argv))
         # AppContainer 下需给解释器/DLL 目录授 ALL-APP-PACKAGES 只读(否则 LowBox 里 python 起不来)

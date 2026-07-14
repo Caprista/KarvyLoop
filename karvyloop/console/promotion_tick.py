@@ -85,7 +85,7 @@ def _build_card(role: str, domain_id: str, items: list[dict], befores: dict, now
                      + (f"\n  ↳ 为什么泛化:{it['why']}" if it.get("why") else ""))
     basis = (f"「{role}」在域「{domain_id}」的这些经验通过了泛化判定与脱敏改写。"
              f"ACCEPT = 升为该角色的通用兵法(跨域可用;将来对外可见面也只有这一层);"
-             f"REJECT = 这轮不升,域内照用(7 天内不再重提)。升层后删域不再自动撤——"
+             f"REJECT = 这轮不升,域内照用(这批经验没有新变化就不再重提)。升层后删域不再自动撤——"
              f"要撤在记忆面板单条失效。\n\n" + "\n\n".join(lines))
     p = Proposal(
         summary=f"📜 「{role}」有 {len(items)} 条域内经验可升为通用兵法,升吗?",
@@ -204,6 +204,11 @@ async def maybe_promotion_tick(app: Any, *, now: Optional[float] = None,
         state["pool_hash"][key] = ph   # 这版池看过了(判空也算看过;池变了才再看)
         deny = denylist_terms(dom, dom_name)
         clean = [it for it in items if scrub_ok(it["content"], deny)]
+        # why(泛化理由)也上卡面 → 同过 denylist:含域词就整段丢(宁空勿毒,不改写不重试)。
+        # 镜像 belief 只写 content,why 不上升,但卡面若将来走任何对外通道这是现成的缝(J 验收 P2)。
+        for it in clean:
+            if it.get("why") and not scrub_ok(str(it["why"]), deny):
+                it["why"] = ""
         if len(clean) < len(items):
             logger.info(f"[promotion_tick] denylist 拦下 {len(items) - len(clean)} 条含域实体的改写")
         if not clean:

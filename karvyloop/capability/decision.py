@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from .pathnorm import is_within_workspace
+from .pathnorm import is_within_workspace, resolve_in_workspace
 from .policy import Mode, PermissionContext, Rule, Verdict, _norm
 
 
@@ -200,12 +200,16 @@ def authorize(ctx: PermissionContext) -> Decision:
     if ctx.mode >= required_mode(tool):
         # 写动作额外加路径边界校验;工作区外但**授权台账放行过**的路径 → 行(fs_grants)
         if tool in ("write_file", "edit_file") and ctx.workspace_root and subject:
-            if not is_within_workspace(subject, ctx.workspace_root):
+            # 相对 subject 先锚到 workspace_root 解析成绝对:is_within_workspace 按 root 拼、
+            # 台账 allows 却按进程 CWD resolve —— 同一 subject 两个锚,判定与放行看的不是
+            # 同一条路径。块首统一解析,后续判定与 allows 都用同一绝对路径。
+            subject_abs = resolve_in_workspace(subject, ctx.workspace_root)
+            if not is_within_workspace(subject_abs, ctx.workspace_root):
                 from .fs_grants import get_store
                 _st = get_store()
-                if _st is None or not _st.allows(subject, "write"):
+                if _st is None or not _st.allows(subject_abs, "write"):
                     return Deny(
-                        message=f"路径 {subject} 越出工作区 {ctx.workspace_root}",
+                        message=f"路径 {subject_abs} 越出工作区 {ctx.workspace_root}",
                         reason="pathnorm:out_of_workspace",
                     )
         return Allow(reason=f"mode:{ctx.mode.value} >= required:{required_mode(tool).value}")

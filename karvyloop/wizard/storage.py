@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import dataclasses
-import os
 import pathlib
 from typing import Optional
 
@@ -30,9 +29,11 @@ def write_step_file(
     """把 1 个 step 的内容写到 domain/roles/role_id/file_basename。
 
     返回写入的文件路径。
-    base_dir 注入用于测试(避免污染真实工作目录)。
+    base_dir 注入用于测试(避免污染真实数据目录)。
+    默认锚定数据目录 ~/.karvyloop —— 不锚进程 CWD(CWD 是"谁启动的进程在哪"这种
+    偶然事实,按它落盘 = 同一角色写到不可预期的地方)。
     """
-    base = base_dir or pathlib.Path.cwd()
+    base = base_dir or (pathlib.Path.home() / ".karvyloop")
     rd = base / role_dir(domain_id, role_id)
     rd.mkdir(parents=True, exist_ok=True)
     p = rd / file_basename
@@ -56,8 +57,8 @@ def initialize_role_dir(
     role_id: str,
     base_dir: Optional[pathlib.Path] = None,
 ) -> pathlib.Path:
-    """初始化 role 目录(创建空目录,后续 7 步往里写)。"""
-    base = base_dir or pathlib.Path.cwd()
+    """初始化 role 目录(创建空目录,后续 7 步往里写)。默认锚 ~/.karvyloop,同 write_step_file。"""
+    base = base_dir or (pathlib.Path.home() / ".karvyloop")
     rd = base / role_dir(domain_id, role_id)
     rd.mkdir(parents=True, exist_ok=True)
     return rd

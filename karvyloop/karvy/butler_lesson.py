@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
 import time
 from pathlib import Path
@@ -283,13 +284,20 @@ def proposal_for_butler_plan(plan: dict, *, ts: float, mode_from_intake: bool = 
 def _within(path: Path, base: Path) -> bool:
     """path 是否在 base 目录之内。**拒绝任何含 `..` 的路径**:relative_to 是词法判定、
     不归一 `..`(`Desktop/x/../../etc` 词法上"在 Desktop 内"实则逃逸)—— fs_grants.allows
-    会 resolve 后再拦一道,但这层确定性地板不许依赖台账在不在。"""
+    会 resolve 后再拦一道,但这层确定性地板不许依赖台账在不在。
+
+    词法判定之外,双方先过 os.path.realpath 再比(镜像 pathnorm.is_within_workspace 的
+    symlink 加固):shutil.move 按 OS **真路径**动作,白名单目录里一个指向外部的符号链接,
+    词法上"在 base 内"、真实落点却在白名单外 —— 必须按真路径判。path 不存在时 realpath
+    非严格解析:已存在的祖先解 symlink、剩余尾巴词法拼接(即"最近存在祖先"语义)。"""
     if ".." in path.parts or ".." in base.parts:
         return False
     try:
-        path.relative_to(base)
+        real_path = Path(os.path.realpath(path))
+        real_base = Path(os.path.realpath(base))
+        real_path.relative_to(real_base)
         return True
-    except ValueError:
+    except (OSError, ValueError):
         return False
 
 

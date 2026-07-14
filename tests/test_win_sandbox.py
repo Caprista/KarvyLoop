@@ -264,8 +264,15 @@ async def test_tier3_timeout_kills_tree(tmp_path):
 @requires_tier3
 @pytest.mark.asyncio
 async def test_tier3_third_party_skill_runs_sandboxed(tmp_path):
-    """v1 进步:第三方技能脚本(读取自身 script)在 Tier 3 真跑通(读放宽 + 白名单写)。"""
+    """v1 进步:第三方技能脚本(读取自身 script)在 Tier 3 真跑通(读放宽 + 白名单写)。
+
+    新契约:AppContainer 探不通的机器,三方技能 fail-closed 拒跑(有专测锁)—— 此处的
+    "真跑通"样本只在有内核网络门的机器上适用,探不通则 skip。
+    """
+    from karvyloop.platform.win.restricted import RestrictedTokenSandbox
     from karvyloop.registry.skill_exec import run_skill_script
+    if RestrictedTokenSandbox.available() and not RestrictedTokenSandbox.appcontainer_available():
+        pytest.skip("本机 AppContainer 探不通 —— 三方技能 fail-closed 拒跑(新契约),真跑通样本不适用")
     d = tmp_path / "sk" / "demo"; (d / "scripts").mkdir(parents=True)
     (d / "SKILL.md").write_text(
         "---\nname: demo\ndescription: d\nsource: third-party\ntrust: untrusted\nsignature: imp\n---\n# d\n",
@@ -303,14 +310,15 @@ def test_appcontainer_probe_runs(tmp_path):
 async def test_appcontainer_third_party_default_no_net_blocked(tmp_path):
     """第三方 skill-exec token(无 net 声明)→ 默认拒网:AppContainer 可用则出站被内核拒。
 
-    若本机 AppContainer 探不通(个别机器/杀软)→ skip(诚实:此时靠上层默认拒网 + 授权门,
-    非内核强制,是标注的 P2 回退态)。有 AppContainer 时,出站 connect 必失败(WFP 默认规则)。
+    若本机 AppContainer 探不通(个别机器/杀软)→ skip(新契约:此时三方技能 fail-closed
+    拒跑,有专测锁,此处的"内核拒出站"断言不适用)。有 AppContainer 时,出站 connect
+    必失败(WFP 默认规则)。
     """
     from karvyloop.platform.win.restricted import RestrictedTokenSandbox
     if not RestrictedTokenSandbox.available():
         pytest.skip("RestrictedToken 探测不可用")
     if not RestrictedTokenSandbox.appcontainer_available():
-        pytest.skip("本机 AppContainer 探不通 —— 网络门回退非内核强制(P2),此断言不适用")
+        pytest.skip("本机 AppContainer 探不通 —— 三方技能 fail-closed 拒跑(专测锁),此断言不适用")
     sb = RestrictedTokenSandbox(job_memory_bytes=256 << 20, active_process_limit=8)
     tok = _skill_tok(str(tmp_path))   # 第三方、无 net
     # 尝试出站 TCP connect(1.1.1.1:53);AppContainer 无 internetClient → 内核 WFP 拒。
@@ -336,7 +344,7 @@ async def test_appcontainer_third_party_can_still_write_workspace(tmp_path):
     if not RestrictedTokenSandbox.available():
         pytest.skip("RestrictedToken 探测不可用")
     if not RestrictedTokenSandbox.appcontainer_available():
-        pytest.skip("本机 AppContainer 探不通(P2 回退)")
+        pytest.skip("本机 AppContainer 探不通(三方技能 fail-closed 拒跑,写通样本不适用)")
     sb = RestrictedTokenSandbox(job_memory_bytes=256 << 20, active_process_limit=8)
     tok = _skill_tok(str(tmp_path))
     tgt = str(tmp_path / "appc_ok.txt")
@@ -355,6 +363,61 @@ async def test_appcontainer_third_party_net_grant_still_fail_closed(tmp_path):
     with pytest.raises(PermissionError) as ei:
         await sb.exec([sys.executable, "-c", "print(1)"], token=tok, cwd=str(tmp_path), timeout_s=20)
     assert "net" in str(ei.value)
+
+
+def test_skill_exec_without_appcontainer_fail_closed(tmp_path, monkeypatch):
+    """AppContainer 探不通 + 三方 skill-exec token → fail-closed PermissionError。
+
+    旧行为:静默回退到只限写、不限网的受限令牌(“默认断网”落空且无信号)。新契约:
+    拒跑并说清原因,一个子进程都不起(纯逻辑,monkeypatch 桩,跨平台可跑)。
+    """
+    import asyncio
+    from karvyloop.platform.win import restricted as R
+
+    sb = R.RestrictedTokenSandbox.__new__(R.RestrictedTokenSandbox)
+    sb.job_memory_bytes = 1 << 20
+    sb.active_process_limit = 2
+    monkeypatch.setattr(R.RestrictedTokenSandbox, "available", staticmethod(lambda: True))
+    monkeypatch.setattr(R.RestrictedTokenSandbox, "appcontainer_available",
+                        staticmethod(lambda: False))
+    spawned = []
+    # _run_restricted 是 if _IS_WIN 块内符号,非 Windows CI 上不存在 → raising=False
+    # 缺失即创建(本测是跨平台纯逻辑桩测:验 exec 分支,不起真 Windows 进程)。
+    monkeypatch.setattr(R, "_run_restricted", lambda *a, **k: spawned.append(a), raising=False)
+    tok = _skill_tok(str(tmp_path))   # 第三方、无 net
+    with pytest.raises(PermissionError) as ei:
+        asyncio.run(sb.exec(["python", "-c", "print(1)"], token=tok, cwd=str(tmp_path)))
+    msg = str(ei.value)
+    assert "AppContainer" in msg and "fail-closed" in msg and "第三方技能" in msg
+    assert not spawned, "fail-closed 应在起任何子进程之前拦下"
+
+
+def test_skill_exec_with_appcontainer_unchanged(tmp_path, monkeypatch):
+    """AppContainer 可用 → 行为不变:三方技能照跑且 net_isolated=True(LowBox 内核门)。"""
+    import asyncio
+    from karvyloop.platform.win import restricted as R
+    from karvyloop.sandbox.exec_result import ExecResult
+
+    seen = {}
+
+    def fake_run(argv, cwd, stdin, timeout_s, max_output_bytes, rw_paths,
+                 job_memory, proc_limit, ro_paths=None, net_isolated=False,
+                 appc_ro_dirs=None):
+        seen["net_isolated"] = net_isolated
+        return ExecResult(stdout=b"ran", stderr=b"", exit_code=0)
+
+    sb = R.RestrictedTokenSandbox.__new__(R.RestrictedTokenSandbox)
+    sb.job_memory_bytes = 1 << 20
+    sb.active_process_limit = 2
+    monkeypatch.setattr(R.RestrictedTokenSandbox, "available", staticmethod(lambda: True))
+    monkeypatch.setattr(R.RestrictedTokenSandbox, "appcontainer_available",
+                        staticmethod(lambda: True))
+    monkeypatch.setattr(R, "_run_restricted", fake_run, raising=False)  # 非 Win 上缺失即创建
+    monkeypatch.setattr(R, "resolve_argv", lambda a: a)
+    tok = _skill_tok(str(tmp_path))
+    r = asyncio.run(sb.exec(["python", "-c", "print(1)"], token=tok, cwd=str(tmp_path)))
+    assert r.exit_code == 0 and r.stdout == b"ran"
+    assert seen["net_isolated"] is True
 
 
 # ---- sh DLL 初始化即死(0xC0000142)→ 按失败签名换 cmd 重跑(J22 实捕:MSYS sh 在
@@ -386,7 +449,7 @@ def test_sh_dll_init_failed_retries_with_cmd(monkeypatch):
     sb = R.RestrictedTokenSandbox.__new__(R.RestrictedTokenSandbox)
     sb.job_memory_bytes = 1 << 20
     sb.active_process_limit = 2
-    monkeypatch.setattr(R, "_run_restricted", fake_run)
+    monkeypatch.setattr(R, "_run_restricted", fake_run, raising=False)  # 非 Win 上缺失即创建
     monkeypatch.setattr(R.RestrictedTokenSandbox, "available", staticmethod(lambda: True))
     monkeypatch.setattr(R.RestrictedTokenSandbox, "appcontainer_available", staticmethod(lambda: False))
     monkeypatch.setattr(R, "resolve_argv", lambda a: a)   # 保持 sh 头,直击兜底路径
