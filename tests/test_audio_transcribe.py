@@ -225,7 +225,11 @@ def test_real_faster_whisper_smoke(monkeypatch):
     """真引擎吃合成 wav:只验「跑得通、返回 ExtractResult、不装死」,不断言内容
     (正弦音没有人声)。**双门**:装了 [asr] 且 KARVYLOOP_ASR_REAL_TEST=1 才跑 ——
     首次跑要联网下模型,绝不让普通 `pytest` 意外触发几十 MB 下载。"""
-    pytest.importorskip("faster_whisper")
+    # exc_type=ImportError:新版 pytest 对非 ModuleNotFoundError 的导入失败默认重抛;
+    # 但 [asr] 是可选 extra,依赖的 av DLL 可能被机器策略拦(实捕:应用程序控制策略
+    # 阻止 av\audio\frame DLL)—— 装了却载不进 = 环境缺席,与没装同义,诚实跳过。
+    # 双门(env 开关)仍在,不存在掩盖真回归的面。
+    pytest.importorskip("faster_whisper", exc_type=ImportError)
     import os
     if os.environ.get("KARVYLOOP_ASR_REAL_TEST") != "1":
         pytest.skip("真模型冒烟要显式 KARVYLOOP_ASR_REAL_TEST=1(涉及模型下载)")
