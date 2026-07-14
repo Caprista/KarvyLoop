@@ -1763,9 +1763,56 @@ var KarvyDevicesPanelBundle = (function(exports) {
       box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.hint") }));
       box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
     }
+    await _awayPairInto(box);
     await _pairedInto(box, host);
     box.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.scene.phone.roadmap") }));
     host.appendChild(box);
+  }
+  function _b64urlEncode(s) {
+    const bytes = new TextEncoder().encode(s);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+  async function _awayPairInto(box) {
+    const btn = el("button", { class: "mgmt-add-btn", text: t("devices.pair2.btn") });
+    const out = el("div");
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.pair2.hint") }));
+    btn.addEventListener("click", async () => {
+      out.innerHTML = "";
+      let r;
+      try {
+        r = await _postJSON("/api/pair/issue", {});
+      } catch (e) {
+        out.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.pair2.no_relay") }));
+        return;
+      }
+      const d = r && r.data || null;
+      if (!(d && d.ok)) {
+        out.appendChild(el("div", {
+          class: "mgmt-hint ext-boundary",
+          text: d && d.reason || t("devices.pair2.no_relay")
+        }));
+        return;
+      }
+      const link = "karvy-pair:" + _b64urlEncode(JSON.stringify({
+        relay: d.relay,
+        room: d.room,
+        fingerprint: d.fingerprint,
+        code: d.code
+      }));
+      const qr = qrcode(0, "M");
+      qr.addData(link);
+      qr.make();
+      const holder = el("div", { class: "devices-qr" });
+      holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+      out.appendChild(holder);
+      out.appendChild(el("div", { class: "mgmt-hint", text: t("devices.pair2.qr_hint") }));
+      out.appendChild(_copyRow("devices.pair2.copy_label", link));
+      out.appendChild(el("div", { class: "mgmt-hint", text: t("devices.pair2.note") }));
+    });
+    box.appendChild(btn);
+    box.appendChild(out);
   }
   async function _pairedInto(box, host) {
     box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.title") }));

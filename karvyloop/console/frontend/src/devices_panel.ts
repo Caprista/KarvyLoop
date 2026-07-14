@@ -163,9 +163,53 @@ async function _phoneScene(host: HTMLElement): Promise<void> {
     box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.qr.hint") }));
     box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
   }
+  await _awayPairInto(box);
   await _pairedInto(box, host);
   box.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.scene.phone.roadmap") }));
   host.appendChild(box);
+}
+
+// 🌐 karvy.chat 托管接入页(离家在外用任意浏览器打开)的**配对出口**:签一枚一次性邀请,
+// 把 {relay,room,fingerprint,code} 打成 karvy-pair:<base64url> 深链 → 出两个口:QR + 复制。
+// 与上面的 LAN 二维码(同网直连)不同用途,各留各的。relay 没接 → 诚实提示先接 relay。
+// base64url 编码本地做(不外发密钥;code 本身一次性、15 分钟过期)。
+function _b64urlEncode(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function _awayPairInto(box: HTMLElement): Promise<void> {
+  const btn = el("button", { class: "mgmt-add-btn", text: t("devices.pair2.btn") });
+  const out = el("div");
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.pair2.hint") }));
+  btn.addEventListener("click", async () => {
+    out.innerHTML = "";
+    let r: { ok: boolean; status: number; data: any };
+    try {
+      r = await _postJSON("/api/pair/issue", {});
+    } catch (e) { out.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.pair2.no_relay") })); return; }
+    const d = (r && r.data) || null;
+    if (!(d && d.ok)) {                       // 没接 relay / 缺依赖 → 诚实提示(后端 reason 可空)
+      out.appendChild(el("div", { class: "mgmt-hint ext-boundary",
+        text: (d && d.reason) || t("devices.pair2.no_relay") }));
+      return;
+    }
+    const link = "karvy-pair:" + _b64urlEncode(JSON.stringify({
+      relay: d.relay, room: d.room, fingerprint: d.fingerprint, code: d.code }));
+    const qr = qrcode(0, "M");
+    qr.addData(link);
+    qr.make();
+    const holder = el("div", { class: "devices-qr" });
+    holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });   // 自产 SVG
+    out.appendChild(holder);
+    out.appendChild(el("div", { class: "mgmt-hint", text: t("devices.pair2.qr_hint") }));
+    out.appendChild(_copyRow("devices.pair2.copy_label", link));
+    out.appendChild(el("div", { class: "mgmt-hint", text: t("devices.pair2.note") }));
+  });
+  box.appendChild(btn);
+  box.appendChild(out);
 }
 
 // 已授权的手机列表(配对身份切片,docs/74)——挂在手机场景里,不再单开一块。

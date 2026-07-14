@@ -762,6 +762,22 @@ def build_console_app(
             except Exception:
                 return FileResponse(str(STATIC_DIR / "m.html"))
 
+        @app.get("/away")
+        def away_page():
+            """🌅 托管接入页(离家在外用任意浏览器打开)。**production 由 karvy.chat 静态托管**
+            (那是与家里 console 不同源的公网构建产物);这条本地路由只是 dev/test 便利,
+            让本机就能加载同一份 assembled bundle 自验。数据面隧道-only(away.ts),同源与否不影响。"""
+            from fastapi.responses import HTMLResponse
+            from karvyloop.i18n import get_locale
+            try:
+                html = (STATIC_DIR / "away.html").read_text(encoding="utf-8")
+                loc = get_locale()
+                html = html.replace('<html lang="en">',
+                                    f'<html lang="{loc}" data-default-lang="{loc}">')
+                return HTMLResponse(html)
+            except Exception:
+                return FileResponse(str(STATIC_DIR / "away.html"))
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
