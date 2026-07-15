@@ -392,6 +392,21 @@ def test_desk_first_open_default_layout(console_url):
         assert board["n"] == 4, f"摊开 = 一整块看板,4 象限全可见: {board}"
         assert board["overlaps"] == 0, f"整块看板格子间不许重叠: {board}"
         assert board["gridBottom"] <= board["dockTop"], f"看板底不许钻 dock: {board}"
+        # 干净 2×2 + 无切底(Hardy 实拍:col-decide 的 grid-column:1/-1 + rail 的 minmax(600px..)
+        # 泄漏进桌面看板 → 破成 1+2+1 三行、中间大空、你可能想做被切在浮层外滚不到)。
+        shape = page.evaluate("""() => {
+            const cols = [...document.querySelectorAll('.cockpit-col')].filter(c => c.offsetParent !== null);
+            const rects = cols.map(c => c.getBoundingClientRect());
+            const rows = new Set(rects.map(r => Math.round(r.top)));   // 不同 top = 不同行
+            const grid = document.querySelector('.cockpit-grid').getBoundingClientRect();
+            const withinAll = rects.every(r => r.bottom <= grid.bottom + 1);   // 每格底都在看板内(不被切)
+            const decideCol = getComputedStyle(document.querySelector('.col-decide')).gridColumn;
+            return {rows: rows.size, withinAll, decideCol};
+        }""")
+        assert shape["rows"] == 2, f"桌面看板必须是干净 2×2(两行),实际 {shape['rows']} 行: {shape}"
+        assert shape["withinAll"], f"四象限须全落在看板内(你可能想做不许被切): {shape}"
+        assert shape["decideCol"] not in ("1 / -1", "1 / 3"), \
+            f"col-decide 在桌面看板不许跨列(会破 2×2): {shape['decideCol']}"
         page.screenshot(path=os.path.join(_SHOTS_DIR, "01b-board-open.png"))
         page.mouse.click(60, 450)   # 点遮罩空白 = 关(看板外)
         page.wait_for_function("!document.body.classList.contains('desk-board-open')", timeout=3000)

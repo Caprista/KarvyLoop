@@ -174,22 +174,45 @@ body.desk-view.desk-board-open .cockpit-grid {
   width: min(960px, 94vw);
   max-height: calc(100vh - 88px - 96px);   /* 视口:顶 topbar 之下 88 + 底 dock 带 96 留空 */
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  /* 干净 2×2:显式两行等高,压过对话视图 rail 的 minmax(600px..) 泄漏(那是右栏拍板权重用的,
+     漏进桌面看板会把第一行撑到 600px、底下空一大截 + 挤出第三行让"你可能想做"被切,Hardy 实拍)。 */
+  grid-template-rows: 1fr 1fr;
+  gap: 14px;
   z-index: 240;
-  padding: 2px;
-  overflow: auto;
+  /* 定死高度(不是 max-height):两行 1fr 才有可均分的总高;每格再由内边距/gap 让位。
+     视口太矮就取视口可用高、太高封顶 900,别让看板夸张。 */
+  height: min(calc(100vh - 88px - 96px), 900px);
+  /* 背板:让 2×2 读成"一整块看板"而不是几张卡飘在壁纸上(Hardy:背景透明、你借的对吗)。
+     阴影用**小模糊**(不是 0 24px 64px 那种大模糊)——大模糊 blur 在弱 GPU(如 VMware 虚拟机)
+     上首次绘制很贵,会让"点开→面板出现"慢半拍(Hardy 实拍 VM 上打不开=渲染慢;从外网打 VM
+     0.45s 可交互,证明慢在 VM 自己的浏览器渲染,非服务器)。小模糊够撑起"一整块"的层次又便宜。 */
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg, 16px);
+  box-shadow: 0 6px 18px rgba(30, 22, 14, 0.22);
+  overflow: hidden;   /* 高度已算准两行,不再靠外层滚动(内容多由各象限 .col-scroll 内滚) */
 }
+/* col-decide 在桌面看板里**不跨列**(压过 styles.css `.cockpit-grid .col-decide{grid-column:1/-1}`
+   那条给右栏拍板权重的规则——漏进 2×2 会破成 1+2+1 三行)。占一格,accent 底已够突出。 */
+body.desk-view.desk-board-open .cockpit-grid .col-decide { grid-column: auto; }
 /* 象限进网格:退掉绝对定位 + JS 的 translate/tilt,规规矩矩占格子(等高、无胶带、标题非拖柄) */
 body.desk-view.desk-board-open .cockpit-col {
   position: static !important;
   transform: none !important;
   width: auto !important;
   max-width: none;
-  max-height: min(44vh, 430px);
+  /* 填满 1fr 格子(网格已定高)——不再自设 max-height(那会在格子里留空);内容超出交给
+     .col-scroll 内滚。min-height:0 让 grid 子项能真缩到格子高度、把溢出交给内滚而不是撑破。 */
+  max-height: none !important;
+  min-height: 0;
   margin: 0 !important;
   opacity: 1 !important;
   z-index: auto !important;
 }
+/* 象限正文在格子里内滚(标题固定,正文吃剩余高度) */
+body.desk-view.desk-board-open .cockpit-col { display: flex; flex-direction: column; }
+body.desk-view.desk-board-open .cockpit-col .col-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 body.desk-view.desk-board-open .cockpit-col::after { display: none; }
 body.desk-view.desk-board-open .cockpit-col .col-head { cursor: default; }
 /* 摊开时缩略卡 + 待办速览 + 聊天窗全让位(整块看板是唯一焦点,不许聊天窗从遮罩里透出来盖看板) */
@@ -206,7 +229,11 @@ body.desk-view .desk-board-fold {
   position: absolute;
   top: 92px;
   right: 22px;
-  z-index: 210;
+  /* z 必须在便签之上:便签一被点/拖就拿 ++_zTop(从 BASE_Z=220 起涨),会盖住缩略卡吃掉点击。
+     (排查 Hardy "看板打不开" 时顺手发现的**潜伏 bug**——不是他那次的症状(那次是 VM 渲染慢,
+     蒙版都出来了=点中了),但便签盖住缩略卡是真会发生的,一并堵掉。)
+     抬到 9000:高过任何便签(220+)、低于 dock(9500)/driver(10000+)。 */
+  z-index: 9000;
   padding: 12px 16px;
   min-width: 210px;
   background: var(--accent-light);
