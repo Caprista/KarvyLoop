@@ -5,6 +5,10 @@
 ① **任务板·发布侧对账**(mesh_task_board.publish_local_tasks,幂等):本地 running 任务
   上板(offer+自认领)/ 心跳续租(lease/3 节奏)/ 本地终态补 done。先上账再拨号 →
   本轮新事件顺着同一轮同步出门。单机无对端也照写本地日志(成本≈0,后来加入的设备补历史)。
+①b **低频维护 pass**(compaction 记账债):每 COMPACT_EVERY_TICKS 轮(≈天级;启动首轮
+  也跑一次清积压;jsonl 超字节阈值提早触发)→ mesh/compact 删「已 done 任务的陈年心跳」
+  + mesh_task_board.prune_seen_done 清 seen 台账里的已终态 id。单机也跑(心跳膨胀不分
+  单机多机);失败绝不挡同步/探活;跑了的那轮返回值带 `compact` 键(膨胀观测)。
 ② 读花名册,对**非本机、room+relay_url 齐**的每台对端做一次 mesh_sync_with_peer
   (E2E 经 relay,拨它的 mesh 房):
   - 成功 → mark_seen(last_seen 新鲜 → `online()` 真);
@@ -21,11 +25,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Optional
 
-from karvyloop.console.mesh_task_board import publish_local_tasks, scan_takeover_proposals
+from karvyloop.console.mesh_task_board import (
+    prune_seen_done, publish_local_tasks, scan_takeover_proposals,
+)
+from karvyloop.mesh.compact import COMPACT_MAX_BYTES, compact_mesh_log
 from karvyloop.mesh.fingerprint import device_fingerprint
 from karvyloop.mesh.registry import DeviceRegistry
+from karvyloop.mesh.store import MeshLogStore
 from karvyloop.mesh.sync_client import mesh_sync_with_peer
 
 logger = logging.getLogger(__name__)
@@ -33,6 +41,33 @@ logger = logging.getLogger(__name__)
 # 同步/探活间隔〔常数待 Trace 记分布后标定;取 60 < ONLINE_WINDOW_S=90 ≈ 1.5 tick,
 # 一次瞬断(单 tick 失败)不足以把在线对端判离线 —— SWIM suspect 心智〕。
 MESH_TICK_S = 60.0
+
+# 维护 pass 频率〔待 Trace 标定〕:1440 tick × 60s ≈ 天级。首轮(n=0)也跑一次 ——
+# 启动即清上个进程攒下的积压,常重启的用户也不至于永远够不着 1440。
+COMPACT_EVERY_TICKS = 1440
+
+
+def _maintenance_pass(app: Any) -> Optional[dict]:
+    """①b 低频维护:mesh 日志 compaction + seen 台账清 done(记账债只增不减的对账)。
+
+    到期才跑:每 COMPACT_EVERY_TICKS 轮一次(计数器挂 app.state,重启归零 = 首轮再清);
+    没到期但 jsonl 已超 COMPACT_MAX_BYTES(行数阈值的字节代理,stat 一次零读盘)→ 提早跑。
+    跑了返回 {scanned, dropped_heartbeats, seen_pruned};没到期返回 None(tick 返回值不带键)。
+    """
+    sd = getattr(app.state, "mesh_state_dir", None)
+    n = int(getattr(app.state, "_mesh_maintenance_tick", 0))
+    app.state._mesh_maintenance_tick = n + 1
+    due = (n % COMPACT_EVERY_TICKS == 0)
+    if not due:
+        try:
+            due = MeshLogStore(sd).path.stat().st_size >= COMPACT_MAX_BYTES
+        except OSError:
+            due = False                       # 文件还不存在 = 没账可清
+    if not due:
+        return None
+    out = compact_mesh_log(sd)
+    out["seen_pruned"] = prune_seen_done(app)
+    return out
 
 
 async def mesh_tick(app: Any) -> dict:
@@ -47,15 +82,26 @@ async def mesh_tick(app: Any) -> dict:
         raise
     except Exception as e:  # noqa: BLE001
         logger.debug(f"[mesh_tick] 任务板发布对账失败(下轮补账): {e}")
+    # ①b 低频维护 pass(compaction + seen 清理;单机也跑 —— 心跳膨胀不分单机多机)。
+    #    失败绝不挡同步/探活(原文件原样,下轮/明天再来)。跑了才带 compact 键(膨胀观测)。
+    extra: dict = {}
+    try:
+        comp = _maintenance_pass(app)
+        if comp is not None:
+            extra["compact"] = comp
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[mesh_tick] 维护 pass 失败(原子重写保老账,下轮再来): {e}")
     reg = DeviceRegistry(sd)
     peers = [d for d in reg.list_all()
              if not d.is_self and d.device_id and d.room and d.relay_url]
     if not peers:                                       # 单机用户:零流量(本地账已记)
-        return {"peers": 0, "synced": 0, "failed": 0, "tasks": tasks_sum}
+        return {"peers": 0, "synced": 0, "failed": 0, "tasks": tasks_sum, **extra}
     my_id = str(device_fingerprint(sd).get("device_id") or "")
     if not my_id:                                       # 本机还没 relay 身份 → 拨不了,诚实返回
         return {"peers": len(peers), "synced": 0, "failed": 0, "tasks": tasks_sum,
-                "reason": "no_identity"}
+                "reason": "no_identity", **extra}
     my_relay = getattr(app.state, "relay_url", "") or ""
     synced = failed = 0
     for d in peers:
@@ -87,7 +133,7 @@ async def mesh_tick(app: Any) -> dict:
         raise
     except Exception as e:  # noqa: BLE001
         logger.debug(f"[mesh_tick] 接活扫描失败(下轮再来): {e}")
-    return {"peers": len(peers), "synced": synced, "failed": failed, "tasks": tasks_sum}
+    return {"peers": len(peers), "synced": synced, "failed": failed, "tasks": tasks_sum, **extra}
 
 
-__all__ = ["mesh_tick", "MESH_TICK_S"]
+__all__ = ["mesh_tick", "MESH_TICK_S", "COMPACT_EVERY_TICKS"]
