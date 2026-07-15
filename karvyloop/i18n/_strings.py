@@ -334,6 +334,15 @@ _EN = {
     "cli.manage.skill_import_failed": "Skill import failed: {error}",
     "cli.manage.skill_imported": "Imported skill: {name} ({files} files){scripts}",
     "cli.manage.skill_scripts_note": " — contains scripts/ (execution is sandboxed)",
+    # mesh 任务板:跨设备接活 H2A 卡(docs/74 §6.2/§6.3)
+    "mesh.takeover.summary": "A task on your “{device}” device got interrupted: {intent} — pick it up on this one?",
+    "mesh.takeover.basis": (
+        "Task {task_id} was last claimed by your “{device}” device, but its lease expired with no "
+        "heartbeat — that device looks offline mid-run (origin: {source}). ACCEPT = re-run it from scratch "
+        "on this device and record the takeover on your shared task board (other devices then stop offering it). "
+        "REJECT / no decision = nothing happens; any of your devices can still pick it up later."
+    ),
+    "mesh.takeover.receipt": "{detail} (takeover recorded on your shared task board)",
 }
 
 # ---- 中文 ----
@@ -641,6 +650,14 @@ _ZH = {
     "cli.manage.skill_import_failed": "技能导入失败:{error}",
     "cli.manage.skill_imported": "已导入技能:{name}({files} 个文件){scripts}",
     "cli.manage.skill_scripts_note": " —— 含 scripts/(执行走沙箱)",
+    # mesh 任务板:跨设备接活 H2A 卡(docs/74 §6.2/§6.3)
+    "mesh.takeover.summary": "你的「{device}」设备上的任务中断了:{intent} —— 要在这台接着跑吗?",
+    "mesh.takeover.basis": (
+        "任务 {task_id} 最后由你的「{device}」设备认领,但 lease 到期没有心跳续租 —— "
+        "判定它中途离线(来源设备:{source})。ACCEPT = 在本机从头重跑,并在你的共享任务板上"
+        "记下这次接管(其它设备不再重复提醒)。REJECT / 不拍 = 什么都不发生;之后你的任一设备仍可接。"
+    ),
+    "mesh.takeover.receipt": "{detail}(已在你的共享任务板记下这次接管)",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

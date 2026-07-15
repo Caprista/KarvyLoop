@@ -51,6 +51,7 @@ KIND_CONFIRM_RESULT = "confirm_result"  # docs/02 §15.5:人 accept role 结果=
 KIND_MERGE_KNOWLEDGE = "merge_knowledge"  # 知识库自动整理(daily 慢侧):近重复知识点升合并建议卡,ACCEPT 才 apply_belief_merge(先写后删)
 KIND_FS_ACCESS = "fs_access"  # fs_grants:role 碰壁工作区外路径 → 授权卡;ACCEPT=台账放行(敏感路径永不出卡)
 KIND_EXTERNAL_ADOPT = "external_adopt"  # M2(#71 §7.3):外部公民供稿的 H2A 采纳门——ACCEPT 才让 untrusted 产出穿来源边界(升记忆/当结论/并入共享状态);无采纳=只当参考数据。永不自动进记忆、不占决策席、不担责
+KIND_MESH_TAKEOVER = "mesh_takeover"  # docs/74 §6.2/§6.3 mesh 任务板:别机任务 lease 过期(设备掉线没续租)→ 接活卡;ACCEPT = claim 上账 + 本地从头重跑(骑 run_task 语义)+ complete 上账。绝不 auto-execute
 # 花费预算提醒(llm/spend_budget.build_card 产出):**纯提醒卡,无副作用 handler**——
 # 达 75/90/100% 阈值时经 emit_card→broadcast 出一张告警卡,用户 ACCEPT/REJECT 都只关卡(无兑现)。
 # 这里登记 kind 常量让它进 ALL_KINDS(前端/registry 认得它、不当未知 kind);handler 有意不注册。
@@ -70,6 +71,7 @@ ALL_KINDS = (
     KIND_MERGE_KNOWLEDGE,
     KIND_FS_ACCESS,
     KIND_EXTERNAL_ADOPT,
+    KIND_MESH_TAKEOVER,
     KIND_SPEND_BUDGET_ALERT,
 )
 
@@ -750,6 +752,7 @@ __all__ = [
     "KIND_MERGE_KNOWLEDGE",
     "KIND_CONFIRM_RESULT",
     "KIND_EXTERNAL_ADOPT",
+    "KIND_MESH_TAKEOVER",
     "KIND_SPEND_BUDGET_ALERT",
     "ALL_KINDS",
 ]

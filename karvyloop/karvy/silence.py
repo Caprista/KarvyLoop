@@ -139,6 +139,7 @@ HIGH_RISK_KINDS = frozenset({
     "inbox_decision",        # 收件箱"需要拍板":报价/合同/付款类 —— 付款语义,永不自动
     "inbox_reply",           # 收件箱"需要回复":外发(邮件)语义的入口 + 信息送达(静音=漏报杀信任)
     "revise_skill",          # 改写既有 SKILL.md —— 对护城河资产的生产写,与 merge_atoms/confirm_result 同口径
+    "mesh_takeover",         # 跨设备接活重跑(docs/74 §6.3):设备"判死"是 lease 推断不是事实,自动接=双跑风险;产品裁决=H2A 确认才动,永不自动
     # crystallize_skill 留池:纯新增、provisional、可删,非破坏性(与上面的"改/删"不同类)
 })
 

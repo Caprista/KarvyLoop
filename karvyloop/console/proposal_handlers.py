@@ -24,7 +24,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_CONFIRM_DECISION_PREF, KIND_CONFIRM_RESULT, KIND_CRYSTALLIZE_SKILL,
     KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
     KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
-    KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT,
+    KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER,
 )
 
 logger = logging.getLogger(__name__)
@@ -807,6 +807,9 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
     # inbox_pipe(收件箱→决策卡管道):inbox_decision(需拍板,记台账)/ inbox_reply(代拟草稿,存台账+
     # 显示,不代发)。handler 结构上只写本地台账,零外部副作用(未经确认绝不外发是硬规矩)。
     from karvyloop.channels.inbox_pipe import make_inbox_handlers
+    # mesh_takeover(mesh 任务板接活卡,docs/74 §6.2/§6.3):ACCEPT → claim 上账 +
+    # 本地从头重跑(内部骑 _run_task_handler,同一条 Ring-1 语义路径)+ complete 上账。
+    from karvyloop.console.mesh_task_board import make_mesh_takeover_handler
     _inbox = make_inbox_handlers()
     return {
         KIND_COCREATE_FINALIZE: make_cocreate_finalize_handler(app),
@@ -817,6 +820,7 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_ROUTE_TO_ROLE: _route_to_role_handler(app),
         KIND_ROUNDTABLE: _roundtable_handler(app),
         KIND_RUN_TASK: _run_task_handler(app),
+        KIND_MESH_TAKEOVER: make_mesh_takeover_handler(app),     # mesh 接活:claim→重跑→complete
         KIND_CONFIRM_DECISION_PREF: _confirm_decision_pref_handler(app),
         KIND_OPS_FIX: _ops_fix_handler,
         KIND_INFEASIBLE_REPORT: _infeasible_report_handler,

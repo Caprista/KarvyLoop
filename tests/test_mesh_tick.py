@@ -36,11 +36,13 @@ def test_tick_interval_inside_online_window():
 
 
 def test_no_peers_zero_action(tmp_path, monkeypatch):
-    """单机用户:花名册空 / 只有本机 → 零动作零流量(绝不拨号)。"""
+    """单机用户:花名册空 / 只有本机 → 零流量(绝不拨号;任务板本地对账照跑,tasks 键如实带)。"""
     async def _boom(*a, **k):
         raise AssertionError("无对端时不该有任何同步调用")
     monkeypatch.setattr(mt, "mesh_sync_with_peer", _boom)
-    assert asyncio.run(mt.mesh_tick(_app(tmp_path))) == {"peers": 0, "synced": 0, "failed": 0}
+    out = asyncio.run(mt.mesh_tick(_app(tmp_path)))
+    assert {k: v for k, v in out.items() if k != "tasks"} == {"peers": 0, "synced": 0, "failed": 0}
+    assert "tasks" in out   # 任务板对账结果如实带回(单机=本地账,零流量)
     DeviceRegistry(tmp_path).register(DeviceRecord(
         device_id="self-FAKE", is_self=True, room="m" + "b" * 21, relay_url="wss://x"))
     assert asyncio.run(mt.mesh_tick(_app(tmp_path)))["peers"] == 0
@@ -79,7 +81,7 @@ def test_sync_success_marks_seen(tmp_path, monkeypatch):
     monkeypatch.setattr(mt, "mesh_sync_with_peer", _fake_sync)
     monkeypatch.setattr(mt, "device_fingerprint", lambda sd: {"device_id": "self-fp-FAKE"})
     out = asyncio.run(mt.mesh_tick(_app(tmp_path)))
-    assert out == {"peers": 1, "synced": 1, "failed": 0}
+    assert {k: v for k, v in out.items() if k != "tasks"} == {"peers": 1, "synced": 1, "failed": 0}
     # fingerprint=对端 device_id(花名册的 device_id 就是它的 relay 身份指纹,防中间人验它)
     assert calls == [("wss://peer.relay", "m" + "a" * 21, "peer-fp-FAKE-1", "self-fp-FAKE")]
     assert DeviceRegistry(tmp_path).get("peer-fp-FAKE-1").last_seen > 0
@@ -98,7 +100,7 @@ def test_one_peer_failing_does_not_block_others(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(mt, "device_fingerprint", lambda sd: {"device_id": "self-fp-FAKE"})
     with caplog.at_level(logging.DEBUG, logger="karvyloop.console.mesh_tick"):
         out = asyncio.run(mt.mesh_tick(_app(tmp_path)))
-    assert out == {"peers": 2, "synced": 1, "failed": 1}
+    assert {k: v for k, v in out.items() if k != "tasks"} == {"peers": 2, "synced": 1, "failed": 1}
     reg2 = DeviceRegistry(tmp_path)
     assert reg2.get("good-peer-FAKE").last_seen > 0
     assert reg2.get("bad-peer-FAKE").last_seen == 0.0    # 连不上 → last_seen 陈旧,这就是探活
