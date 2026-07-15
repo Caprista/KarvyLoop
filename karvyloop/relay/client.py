@@ -77,6 +77,11 @@ async def _handle_request(pt: bytes, http, token: str, *, store=None, peer_pub: 
         # 防伪:此标由本函数(console 侧咽喉)注入;远端自带的头只透传 _FWD_REQ_HEADERS 三样,
         # 伪造不进来;LAN 侧攻击者自己加此标只会**降**自己的权(安全方向)。
         headers["x-karvy-via-relay"] = "1"
+        # 受众标(docs/78 §4.3 / docs/73 §9.6):非 full scope = 分享给**别人**(不是我自己的设备)→
+        # 打 external 标,console 侧召回据此走白名单刀(deny-by-default 只放被访角色兵法)+ 裸 dump
+        # 端点见标即拒。防伪同 via-relay:此标由本咽喉注入,远端自带的被 _FWD_REQ_HEADERS 白名单挡在外。
+        if scope != SCOPE_FULL:
+            headers["x-karvy-audience"] = "external"
         for k, v in (req.get("headers") or {}).items():
             if str(k).lower() in _FWD_REQ_HEADERS:
                 headers[str(k).lower()] = str(v)

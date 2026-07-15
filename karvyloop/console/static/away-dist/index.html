@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#142420" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F2F7F3" media="(prefers-color-scheme: light)">
+<title>KarvyLoop</title>
+<style>
+/* 🌅 away — 托管接入页(karvy.chat 静态托管):首次配对 → 隧道回家 → 拍板。
+   与 console 永远不同源 → 数据面隧道-only(见 away.ts)。样式独立内联(无共享 m.css,
+   照 m.html 同款自包含),卡片复用 m-* class 与 /m 视觉一致,晨绿主题深浅双镜像。 */
+:root {
+  --bg: #F2F7F3; --card: #FFFFFF; --border: #D7E4D9; --text: #1C2B22; --text-2: #4C5F53;
+  --accent: #0E8A50; --accent-soft: rgba(14,138,80,0.10); --rose: #C2325F; --rose-soft: rgba(194,50,95,0.10);
+  --amber: #A9761C; --amber-soft: rgba(169,118,28,0.12); --on-accent: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #142420; --card: #223B34; --border: #3F6157; --text: #EAF2EE; --text-2: #AFC5BF;
+    --accent: #2BD693; --accent-soft: rgba(43,214,147,0.14); --rose: #E0548A; --rose-soft: rgba(224,84,138,0.14);
+    --amber: #DBA94A; --amber-soft: rgba(219,169,74,0.13); --on-accent: #0A1712;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  background: var(--bg); color: var(--text); min-height: 100vh;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+/* --- 配对屏 --- */
+.aw-pair { max-width: 560px; margin: 0 auto; padding: 40px 22px 60px; display: flex; flex-direction: column; gap: 12px; }
+.aw-brand { font-weight: 700; font-size: 17px; }
+.aw-title { font-size: 22px; line-height: 1.35; margin-top: 6px; }
+.aw-intro { font-size: 15px; line-height: 1.6; color: var(--text-2); }
+.aw-input {
+  width: 100%; min-height: 118px; resize: vertical; padding: 12px 14px; font-size: 14px;
+  line-height: 1.5; border: 1px solid var(--border); border-radius: 12px; background: var(--card);
+  color: var(--text); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+.aw-err { color: var(--rose); font-size: 14px; line-height: 1.55; }
+.aw-btn {
+  padding: 13px 0; font-size: 16px; font-weight: 600; border-radius: 12px; min-height: 48px;
+  border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); cursor: pointer;
+  transition: transform 150ms cubic-bezier(0.4,0,0.2,1);
+}
+.aw-btn:active { transform: scale(.98); }
+.aw-btn:disabled { opacity: .6; cursor: default; }
+.aw-btn-repair { background: var(--card); color: var(--accent); margin-top: 6px; max-width: 220px; }
+.aw-note { font-size: 13px; color: var(--text-2); line-height: 1.5; }
+/* --- 拍板屏(header + 连接 chip + 卡列) --- */
+.aw-header {
+  display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+  border-bottom: 1px solid var(--border); background: var(--card);
+  position: sticky; top: 0; z-index: 10;
+}
+.aw-hbrand { font-weight: 700; font-size: 17px; }
+.aw-chip {
+  font-size: 12px; padding: 2px 9px; border-radius: 10px; border: 1px solid var(--border);
+  color: var(--text-2); background: var(--bg);
+}
+.aw-chip-open { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.aw-chip-closed { color: var(--rose); border-color: var(--rose); background: var(--rose-soft); }
+.aw-waiting { margin-left: auto; font-size: 14px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+#aw-count { background: var(--rose); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+#aw-count:empty { display: none; }
+.aw-icon { border: 1px solid var(--border); background: var(--card); border-radius: 8px;
+  padding: 4px 10px; font-size: 15px; cursor: pointer; color: var(--text); }
+.aw-list {
+  display: grid; gap: 14px; padding: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
+  max-width: 1100px; margin: 0 auto;
+}
+.aw-empty, .aw-offline { grid-column: 1 / -1; text-align: center; color: var(--text-2); padding: 56px 20px; font-size: 15px; }
+.aw-offline { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.aw-empty-ico { font-size: 44px; margin-bottom: 10px; }
+/* --- 卡片(复用 /m 视觉:同 class 名) --- */
+.m-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px; transition: opacity .3s, transform .3s;
+}
+.m-card-busy { opacity: .55; pointer-events: none; }
+.m-card-done { opacity: 0; transform: translateY(-8px); }
+.m-card-summary { font-size: 16px; line-height: 1.5; font-weight: 600; }
+.m-card-basis { margin-top: 8px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+.m-btn-row { display: flex; gap: 10px; margin-top: 14px; }
+.m-btn {
+  flex: 1; padding: 12px 0; font-size: 15px; font-weight: 600; border-radius: 10px;
+  border: 1px solid var(--border); cursor: pointer; min-height: 46px;
+  transition: transform 150ms cubic-bezier(0.4,0,0.2,1);
+}
+.m-btn:active { transform: scale(.97); }
+.m-btn-accept { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.m-btn-defer  { background: var(--amber-soft);  color: var(--amber); }
+.m-btn-reject { background: var(--rose-soft);   color: var(--rose); }
+.m-toast {
+  position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+  background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 10px;
+  font-size: 14px; z-index: 99;
+  animation: m-rise 240ms cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes m-rise { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}
+</style>
+</head>
+<body>
+  <div id="away-root"></div>
+  <script src="./e2e.js" integrity="sha384-/h8THp+nPpSOZqCBLaFUEQhM2IMqUHpETK+otY7O2TLTL2HgXLw8yypoGkdrRYgp" crossorigin="anonymous"></script>
+  <script src="./tunnel.js" integrity="sha384-e21DBfkFFfvH8I8Fx8wSqO8C7Ez2azzuGn+ML8yyjV5R1Bw3LzJ6ab3/t6cGwH/u" crossorigin="anonymous"></script>
+  <script src="./i18n.js" integrity="sha384-rZ25/NsSD1ClGjEqhYYKcg7qd7ZxAG39kqA4B9wxvsgGe/40ZhBUs54zjUfuhRdv" crossorigin="anonymous"></script>
+  <script src="./away.js" integrity="sha384-XR+hFNr/x4si33IpWK8euxcKLGaFPqaAI1iHbCcsUrPmqP2HrWTD4Gjc6xsOvdCu" crossorigin="anonymous"></script>
+</body>
+</html>

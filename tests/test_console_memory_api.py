@@ -62,6 +62,31 @@ def test_ingest_then_list(app_with_memory):
     assert all(b["source"] == "ingest" for b in lst)
 
 
+def test_external_denied_on_raw_dump_endpoints(app_with_memory):
+    """§9.6 对外只读裸 dump 洞:分享方(x-karvy-audience=external)一律 403 ——
+    /memory 与 /memory/recent 绕过召回过滤直吐个人生活事实,audience 刀盖不到,必须直拒。
+    自有设备(无标)照旧 200。"""
+    client = TestClient(app_with_memory)
+    client.post("/api/memory/ingest", json={"material": "我住幸福路一号。"})
+    ext = {"x-karvy-audience": "external"}
+    assert client.get("/api/memory", headers=ext).status_code == 403
+    assert client.get("/api/memory/recent", headers=ext).status_code == 403
+    # 自有设备(不带标)零回归
+    assert client.get("/api/memory").status_code == 200
+    assert client.get("/api/memory/recent").status_code == 200
+
+
+def test_external_recall_deny_by_default(app_with_memory):
+    """/memory/recall 对外走白名单刀:audience=external + audience_role 空(per-channel role
+    绑定未建)→ 共享层 deny-by-default 全拒,block 空;自有设备照旧召回。"""
+    client = TestClient(app_with_memory)
+    client.post("/api/memory/ingest", json={"material": "我叫 Hardy,偏好英文。"})
+    ext = client.get("/api/memory/recall?q=Hardy", headers={"x-karvy-audience": "external"}).json()
+    assert ext["ok"] is True and ext["block"] == ""     # 对外:一条不漏
+    own = client.get("/api/memory/recall?q=Hardy").json()
+    assert own["ok"] is True and "Hardy" in own["block"]  # 自有设备:照常召回(零回归)
+
+
 def test_ingest_no_memory_honest(app_with_memory):
     # 没接 memory → 诚实回执
     app_with_memory.state.memory = None

@@ -570,7 +570,7 @@ class TestScopeEnforcement:
 
         class _FakeHttp:
             async def request(self, m, p, headers=None, content=b""):
-                calls.append((m, p))
+                calls.append((m, p, dict(headers or {})))
                 return _FakeResp()
 
         pt = _j.dumps({"id": 1, "method": method, "path": path}).encode()
@@ -580,7 +580,9 @@ class TestScopeEnforcement:
     def test_full_scope_allows_mutating(self, tmp_path):
         store, pub = self._paired(tmp_path, "full")
         resp, calls = self._handle(store, pub, "POST")
-        assert resp["status"] == 200 and calls == [("POST", "/api/x")]   # 自有设备放行改动(零回归)
+        assert resp["status"] == 200 and [(m, p) for m, p, _ in calls] == [("POST", "/api/x")]
+        # 自有设备(full):不打 external 标(内部零回归)——召回照旧、裸 dump 端点照旧可看自己的库
+        assert "x-karvy-audience" not in calls[0][2]
 
     def test_read_scope_blocks_mutating_never_hits_loopback(self, tmp_path):
         store, pub = self._paired(tmp_path, "read")
@@ -591,7 +593,36 @@ class TestScopeEnforcement:
     def test_read_scope_allows_get(self, tmp_path):
         store, pub = self._paired(tmp_path, "read")
         resp, calls = self._handle(store, pub, "GET")
-        assert resp["status"] == 200 and calls == [("GET", "/api/x")]
+        assert resp["status"] == 200 and [(m, p) for m, p, _ in calls] == [("GET", "/api/x")]
+
+    def test_external_share_get_carries_audience_marker(self, tmp_path):
+        """非 full scope(分享给别人)的 GET → console 侧咽喉注入 x-karvy-audience=external
+        (§9.6:召回走白名单刀 deny-by-default,裸 dump 端点见标即拒)。远端伪造进不来。"""
+        store, pub = self._paired(tmp_path, "read")
+        resp, calls = self._handle(store, pub, "GET")
+        assert resp["status"] == 200
+        assert calls[0][2].get("x-karvy-audience") == "external"
+
+    def test_external_cannot_forge_audience_internal(self, tmp_path):
+        """远端塞 x-karvy-audience=internal 逃刀 → _FWD_REQ_HEADERS 白名单不含它,被丢;
+        咽喉按 scope 重新盖 external(伪造进不来)。"""
+        import asyncio
+        import json as _j
+        from karvyloop.relay.client import _handle_request
+        store, pub = self._paired(tmp_path, "read")
+        captured = {}
+
+        class _FakeResp:
+            status_code = 200; content = b"ok"; headers = {"content-type": "text/plain"}
+
+        class _FakeHttp:
+            async def request(self, m, p, headers=None, content=b""):
+                captured.update(headers or {}); return _FakeResp()
+
+        pt = _j.dumps({"id": 1, "method": "GET", "path": "/api/x",
+                       "headers": {"x-karvy-audience": "internal"}}).encode()
+        asyncio.run(_handle_request(pt, _FakeHttp(), "owner-token", store=store, peer_pub=pub))
+        assert captured.get("x-karvy-audience") == "external"   # 伪造被丢,咽喉重盖
 
     def test_revoked_peer_denied_on_live_connection(self, tmp_path):
         """回源撤销:会话进行中撤销 → 下一个请求(哪怕 GET)也 403 revoked,绝不打 loopback。"""

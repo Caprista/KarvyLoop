@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from karvyloop.llm.token_ledger import token_source as _token_src
@@ -26,6 +26,23 @@ from .distill_engine import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+
+
+def _audience(request: Request) -> str:
+    """本请求的受众:经隧道的**分享方**(非自有设备)由 console 侧咽喉 relay/client.py 注入
+    `x-karvy-audience: external`(docs/78 §4.3 / docs/73 §9.6)。自有设备(full scope)不带此标
+    → 内部零回归。远端伪造进不来:relay/client.py 的 `_FWD_REQ_HEADERS` 白名单不含它,
+    远端自带的一律被丢;方向也安全(远端塞 internal 逃刀被丢,LAN 直打 loopback 自加 external 只会**收紧**自己)。"""
+    return request.headers.get("x-karvy-audience", "").strip().lower()
+
+
+def _deny_external_dump(request: Request) -> None:
+    """裸 dump 端点(整库列/最近沉淀)对外**直接拒**:它们绕过 recall_block 的召回过滤,
+    audience 白名单刀盖不到 —— 外部分享方一个 GET 就能拉走个人生活事实,是护城河数据的对外
+    只读泄露面(docs/73 §9.6 侦察实证)。分享方只该经召回面(带 audience 刀)看被访角色的通用兵法,
+    不该看整库。自有设备不受影响。"""
+    if _audience(request) == "external":
+        raise HTTPException(status_code=403, detail="external_forbidden")
 
 
 # ---- loop step4b:个人知识库(摄入编译 + 列表)----
@@ -349,6 +366,7 @@ def api_memory_list(request: Request, include_invalid: int = 0) -> dict[str, Any
     使用信号(Q6 读写审计薄版):每条带 `recall_count` / `last_recalled_ts`
     (Trace 没记 belief 级召回 → 退用 memory.py 既有这两个使用字段,不硬造)。
     """
+    _deny_external_dump(request)   # 对外只读裸 dump 洞:分享方一律拒(见 _deny_external_dump)
     mem = getattr(request.app.state, "memory", None)
     if mem is None:
         return {"beliefs": []}
@@ -402,7 +420,13 @@ def api_memory_recall(request: Request, q: str = "", as_of: Optional[float] = No
         return {"ok": False, "reason": "缺 q(要召回什么)", "as_of": as_of, "block": ""}
     try:
         lim = max(1, min(int(limit or 8), 50))
-        block = mem.recall_block(query, scope="personal", limit=lim, as_of=as_of)
+        # 对外白名单刀(docs/78 §4.3):分享方 → audience=external,共享层 deny-by-default,
+        # 只放被访角色的升层兵法。audience_role 现无源(per-channel role 绑定未建,§9.6 下批)→
+        # 空 role = 全拒(接上即安全,一条兵法也不漏;绑定建成后同一处填 role 即真放行)。自有设备无标零回归。
+        aud = _audience(request)
+        block = mem.recall_block(query, scope="personal", limit=lim, as_of=as_of,
+                                 audience=("external" if aud == "external" else ""),
+                                 audience_role="")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[memory/recall] 召回失败: {e}")
         return {"ok": False, "reason": f"召回失败: {e}", "as_of": as_of, "block": ""}
@@ -418,6 +442,7 @@ def api_memory_recent(request: Request, limit: int = 20, scope: str = "",
 
     `scope=personal|domain`(空 = 两层都看);`domain=` 给了只看该域的域专属认知。
     """
+    _deny_external_dump(request)   # 对外只读裸 dump 洞:分享方一律拒(见 _deny_external_dump)
     mem = getattr(request.app.state, "memory", None)
     if mem is None:
         return {"items": []}   # --no-llm / 未接线:诚实空,不猜
