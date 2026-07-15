@@ -294,3 +294,11 @@ def test_workflow_distill_frontend_wired():
     i18n = _read("i18n.js")
     for k in ("wf.matched", "wf.replan", "wf.crystallize_q", "wf.crystallize_yes"):
         assert i18n.count(f'"{k}"') == 2, f"i18n {k} 不是 en+zh 各一份"
+
+
+def test_dcard_aligned_pref_kind_uses_i18n():
+    """决策卡「你的标准(预对齐)」的 kind 标签走 i18n(dpref.kind_*,与偏好面板同键),
+    服务端硬编码中文的 kind_label 只作兜底 —— 英文界面不冒中文([约束]→[constraint])。"""
+    js = _read("app.js")
+    assert 'dpref.kind_' in js, "标准行 kind 标签未走 i18n"
+    assert 'p.kind_label || ""' in js, "kind_label 服务端兜底丢了(旧卡兼容)"

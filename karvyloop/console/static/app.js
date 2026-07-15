@@ -632,7 +632,11 @@
           box.appendChild(el("div", { class: "dcard-section-label", text: t("dcard.aligned") }));
           prefs.forEach((p) => {
             const row = el("div", { class: "dcard-pref" + (p.high_value ? " dcard-pref-hv" : "") });
-            row.appendChild(el("span", { class: "dcard-pref-kind", text: "[" + (p.kind_label || "") + "]" }));
+            // kind 标签走 i18n(en/zh 随界面语言;dpref.kind_* 与决策偏好面板同键)——
+            // 服务端 kind_label 是硬编码中文,只作 kind 缺失时的兜底,别让英文界面冒中文
+            const kindKey = "dpref.kind_" + (p.kind || "");
+            const kindLbl = (p.kind && t(kindKey) !== kindKey) ? t(kindKey) : (p.kind_label || "");
+            row.appendChild(el("span", { class: "dcard-pref-kind", text: "[" + kindLbl + "]" }));
             row.appendChild(el("span", { class: "dcard-pref-text", text: p.content || "" }));
             box.appendChild(row);
             // 回执:这条标准从你哪几次拍板来 —— 不是凭空的,可核(答"凭什么信你")
