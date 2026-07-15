@@ -38,7 +38,10 @@ def build(out_dir: pathlib.Path | None = None, static_dir: pathlib.Path | None =
     manifest: list[str] = []
     sri: dict[str, str] = {}
     for name in JS_FILES:
-        data = (static / name).read_bytes()
+        # LF 归一(不是原样 read_bytes):git autocrlf 在 Windows 检出会把 .js 变 CRLF,
+        # 原样哈希 → Windows 与 Linux 产出不同字节 = 构建不可复现(CI Windows 腿实捕)。
+        # 统一 LF 后,哈希/SRI/落盘字节在三平台一致 —— 这才是"可复现构建"的地基。
+        data = (static / name).read_bytes().replace(b"\r\n", b"\n")
         (out / name).write_bytes(data)
         sri[name] = _sri(data)
         manifest.append(f"{hashlib.sha256(data).hexdigest()}  {name}")

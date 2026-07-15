@@ -53,8 +53,11 @@ def test_sri_integrity_locks_real_bytes():
     pairs = re.findall(r'<script src="\./([\w.]+)" integrity="(sha384-[^"]+)"', html)
     assert len(pairs) == len(bab.JS_FILES), f"SRI 脚本标签数不对: {pairs}"
     for name, integ in pairs:
-        real = "sha384-" + base64.b64encode(
-            hashlib.sha384((static / name).read_bytes()).digest()).decode("ascii")
+        # LF 归一后再算(同 build:autocrlf 在 Windows 检出把 .js 变 CRLF,raw 算会与
+        # index.html 里基于 LF 的 integrity 不符 —— CI Windows 腿实捕)。SRI 锁的是**上线的
+        # LF 字节**(bundle 里的 .js 已归一),测试要对同一基准算。
+        data = (static / name).read_bytes().replace(b"\r\n", b"\n")
+        real = "sha384-" + base64.b64encode(hashlib.sha384(data).digest()).decode("ascii")
         assert integ == real, f"{name} 的 SRI 与真字节不符(锁失效)"
 
 
