@@ -4,6 +4,7 @@ from __future__ import annotations
 import pathlib
 import sys
 
+import pytest
 from fastapi.testclient import TestClient
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -67,6 +68,50 @@ def test_endpoint_driven_bidirectional_convergence(tmp_path):
     b_ids = {e.event_id for e in b.entries()}
     assert a_ids == b_ids, f"端点同步后未收敛: {a_ids} vs {b_ids}"
     assert len(a_ids) == 2                                       # A 的记忆 + B 的技能,两边都有
+
+
+# ---- 能力广告互换(docs/74 花名册双录:frontier 带我的 advert / sync 收对端 advert 入册) ----
+
+def test_frontier_includes_advert_honest_without_identity(tmp_path):
+    """frontier 带本机能力广告;tmp 无 relay 身份 → device_id/room 空(诚实缺省不臆造,
+    对端 register_peer 会因 device_id 空丢弃 → 不投毒花名册)。"""
+    app = _app(tmp_path)
+    app.state.relay_url = "wss://my.relay"
+    adv = TestClient(app).get("/api/mesh/frontier").json()["advert"]
+    assert adv["relay_url"] == "wss://my.relay"        # 运行时真值,非硬编码
+    assert adv["device_id"] == "" and adv["room"] == ""
+
+
+def test_frontier_advert_carries_mesh_room_with_identity(tmp_path):
+    """有 relay 身份 → advert 带 device_id(=relay 指纹)+ mesh 房号(对端 ticker 拨回我用)。"""
+    pytest.importorskip("cryptography")
+    from karvyloop.relay.pairing import PairingStore
+    store = PairingStore(tmp_path)
+    store.identity()
+    app = _app(tmp_path)
+    app.state.relay_url = "wss://my.relay"
+    adv = TestClient(app).get("/api/mesh/frontier").json()["advert"]
+    assert adv["device_id"] == store.fingerprint()
+    assert adv["room"] == store.mesh_rid() and adv["room"].startswith("m")
+
+
+def test_sync_endpoint_registers_peer_advert(tmp_path):
+    """sync 收到非空 advert → 对端进我花名册(它主动来同步=它活着);
+    旧客户端不带 advert → 照常同步,不入册不炸(向后兼容)。"""
+    from karvyloop.mesh.registry import DeviceRegistry
+    app = _app(tmp_path)
+    client = TestClient(app)
+    adv = {"device_id": "dev-b", "label": "phone", "os": "linux",
+           "relay_url": "wss://peer.relay", "room": "m" + "b" * 21, "capabilities": ["camera"]}
+    r = client.post("/api/mesh/sync", json={"frontier": {}, "events": [], "advert": adv}).json()
+    assert r["merged"] == 0
+    d = DeviceRegistry(tmp_path).get("dev-b")
+    assert d is not None and d.is_self is False
+    assert d.room == "m" + "b" * 21 and d.relay_url == "wss://peer.relay"
+    assert d.online() is True                          # 刚同步过 = last_seen 新鲜
+    r2 = client.post("/api/mesh/sync", json={"frontier": {}, "events": []})
+    assert r2.status_code == 200
+    assert len(DeviceRegistry(tmp_path).list_all()) == 1
 
 
 def _seed_devices(tmp_path):
@@ -148,3 +193,20 @@ def test_sync_endpoint_applies_remote_belief_into_memory(tmp_path):
     # 再同步同一条 → 日志去重 + 库幂等,不重复
     r2 = client.post("/api/mesh/sync", json={"frontier": {}, "events": [ev.to_dict()]}).json()
     assert r2["merged"] == 0
+
+
+def test_mesh_endpoints_deny_external_audience(tmp_path):
+    """mesh 面对外直接拒(样式同 routes_memory):read-scope 分享方经隧道带
+    `x-karvy-audience: external`(relay/client.py 咽喉注入)→ 四个端点全 403,
+    设备元数据(能力集/os/mesh 房号)/花名册/日志前沿不给外人。自有设备不带标零回归。"""
+    _seed_devices(tmp_path)
+    client = TestClient(_app(tmp_path))
+    hdr = {"x-karvy-audience": "external"}
+    assert client.get("/api/mesh/frontier", headers=hdr).status_code == 403
+    assert client.post("/api/mesh/sync", json={"frontier": {}, "events": []},
+                       headers=hdr).status_code == 403
+    assert client.get("/api/mesh/devices", headers=hdr).status_code == 403
+    assert client.post("/api/mesh/devices/remove", json={"device_id": "x"},
+                       headers=hdr).status_code == 403
+    # 不带标(自有设备)照常
+    assert client.get("/api/mesh/frontier").status_code == 200

@@ -655,6 +655,7 @@ def cmd_console(args: argparse.Namespace) -> int:
     # loopback(下面这台 uvicorn),复用全部既有中间件 + token 门(深度防御:loopback 免
     # token 也照带)。收尾照 email_channel_task 先例:uvicorn 退出后 stop() 收线程。
     relay_handle = None
+    mesh_relay_handle = None
     # BYO-server(docs/74):relay 地址 = 配置不是代码。CLI --relay 优先,缺省读 config.yaml
     # 的 `relay:`(设一次永久生效);源码永无硬编码 relay 域名。配对邀请从这个运行时地址生成。
     relay_url = getattr(args, "relay", None)
@@ -677,6 +678,19 @@ def cmd_console(args: argparse.Namespace) -> int:
             sys.stderr.write(f"[karvyloop console] --relay failed to start: {e}\n")
             sys.stderr.flush()
             return 1
+        # === mesh 房:第二条 relay 长连(docs/74 探活地基)===
+        # 主房 1 console + 1 client:away 浏览器占着 client 位,同主人设备拨进来做 mesh
+        # 同步永远 room_busy。mesh 挂自己的稳定房号(mesh_rid),互不抢坑。
+        # mesh 是增益不是地基:起不来 warning,不挡 console。
+        try:
+            from karvyloop.relay.pairing import PairingStore
+            mesh_relay_handle = start_relay_client_thread(
+                relay_url, console_host="127.0.0.1", console_port=port, token=_token,
+                rid=PairingStore().mesh_rid())
+            app.state.mesh_relay_handle = mesh_relay_handle
+        except Exception as e:
+            logger.warning(
+                f"[karvyloop console] mesh relay client 起不来(设备 mesh 同步停用,console 照常): {e}")
 
     # === 自动开浏览器(非 --no-browser 时,后台 thread 0.5s 后 open)===
     if not no_browser:
@@ -713,6 +727,8 @@ def cmd_console(args: argparse.Namespace) -> int:
         sys.stderr.write(t("console.bind_failed", error=e) + "\n")
         return 1
     finally:
+        if mesh_relay_handle is not None:  # mesh 房收尾(先停增益,再停地基)
+            mesh_relay_handle.stop()
         if relay_handle is not None:      # --relay 收尾:停信使客户端线程(照 email task cancel 先例)
             relay_handle.stop()
     return 0

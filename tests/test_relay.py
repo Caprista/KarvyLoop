@@ -419,6 +419,52 @@ def test_start_relay_client_thread_attaches_and_stops(relay_server, tmp_path):
 
 
 # =====================================================================
+# 3.5 mesh 房(docs/74 探活地基):第二稳定房号 + client rid 覆写
+# =====================================================================
+
+def test_mesh_rid_stable_distinct_and_valid(tmp_path):
+    """mesh_rid:幂等落盘稳定、与主房 rid 不同、过 relay server 的 _RID_RE、存同一 state 文件。"""
+    from karvyloop.relay.pairing import PairingStore
+    from karvyloop.relay.server import _RID_RE
+    store = PairingStore(tmp_path)
+    m = store.mesh_rid()
+    assert m == store.mesh_rid() == PairingStore(tmp_path).mesh_rid()   # 幂等 + 重载稳定
+    assert m != store.rid() and m.startswith("m")
+    assert _RID_RE.match(m), "mesh_rid 必须过 relay server 的房号校验"
+    state = json.loads((tmp_path / "relay.json").read_text(encoding="utf-8"))
+    assert state["mesh_rid"] == m                        # 同一 relay.json,不另开文件
+
+
+def test_run_relay_client_rid_override_builds_attach_url(tmp_path, monkeypatch):
+    """rid 覆写:显式 rid(mesh 房)→ attach 到那个房;缺省 → store.rid()(主房原行为)。不真连网。"""
+    pytest.importorskip("cryptography")
+    import websockets
+
+    from karvyloop.relay.client import run_relay_client
+    from karvyloop.relay.pairing import PairingStore
+
+    store = PairingStore(tmp_path)
+    seen = []
+
+    def _run(rid=None):
+        stop = asyncio.Event()
+
+        def _fake_connect(url, **kw):
+            seen.append(url)
+            stop.set()                       # 记下 url 就收工(单轮,不进退避重连)
+            raise ConnectionError("test: no network")
+        monkeypatch.setattr(websockets, "connect", _fake_connect)
+        asyncio.run(run_relay_client("wss://relay.example", console_port=1,
+                                     token="tok-FAKE-DO-NOT-LEAK",
+                                     state_dir=tmp_path, stop=stop, rid=rid))
+
+    _run(rid=store.mesh_rid())
+    assert seen[-1].endswith(f"/attach?rid={store.mesh_rid()}")
+    _run()                                    # 缺省 = 主房,原行为不破
+    assert seen[-1].endswith(f"/attach?rid={store.rid()}")
+
+
+# =====================================================================
 # 4. CLI 注册 + relay-pair 输出
 # =====================================================================
 

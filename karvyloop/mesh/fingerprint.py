@@ -89,4 +89,26 @@ def device_fingerprint(state_dir=None, *, label: Optional[str] = None,
     }
 
 
-__all__ = ["device_fingerprint"]
+def device_advert(state_dir=None, relay_url: str = "", *,
+                  label: Optional[str] = None) -> dict:
+    """能力广告(docs/74 探活地基)= 能力指纹 + **怎么连到我**(relay_url + mesh 房号)。
+
+    mesh 同步时双方互换 advert → 对端 register_peer 把我登进它的花名册,从此它的
+    ticker 能拨回我(一次同步,双方花名册都齐)。**诚实缺省**:无 relay 身份
+    (device_id 空)→ room 留空、不臆造(对端 register_peer 会因 device_id 空
+    直接丢弃,不投毒花名册);mesh_rid 只在真有身份时才取(避免为广告而生成状态)。
+    """
+    adv = device_fingerprint(state_dir, label=label)
+    adv["relay_url"] = str(relay_url or "")
+    room = ""
+    if adv.get("device_id"):
+        try:
+            from karvyloop.relay.pairing import PairingStore
+            room = PairingStore(state_dir).mesh_rid()
+        except Exception:
+            room = ""            # 状态文件不可写等 → 诚实缺省,不编房号
+    adv["room"] = room
+    return adv
+
+
+__all__ = ["device_fingerprint", "device_advert"]

@@ -18,30 +18,42 @@ from karvyloop.mesh.synclog import HLC, MeshEvent
 
 async def mesh_sync_with_peer(relay_url: str, peer_room: str, *, fingerprint: str,
                               my_device_id: str, code: Optional[str] = None,
-                              state_dir=None) -> dict:
+                              state_dir=None, my_relay_url: Optional[str] = None) -> dict:
     """跟一台对端设备同步一次 MeshLog(经 relay)。返回 {pulled, pushed}。
 
     my_device_id = 本设备身份(它的 MeshLog device_id);peer_room/fingerprint/code = 对端 relay-pair 信息。
+    顺手互换能力广告(docs/74 花名册双录):POST 体带我的 advert(对端把我入册),
+    frontier 响应里对端的 advert 落进我的花名册 + mark_seen —— 一次同步双方花名册都齐。
+    my_relay_url = 我自己的 relay(广告"怎么连回我"用);None → 沿用拨出用的 relay_url
+    (同主人设备共用一台 relay 的常态)。
     """
     from karvyloop.relay.remote import open_remote_session
 
     store = MeshLogStore(state_dir)
     log = store.open_log(my_device_id)
+    try:                                  # 我的能力广告(无 relay 身份 → device_id 空,对端会丢弃)
+        from karvyloop.mesh.fingerprint import device_advert
+        my_advert = device_advert(
+            state_dir, relay_url=(my_relay_url if my_relay_url is not None else relay_url))
+    except Exception:  # noqa: BLE001 — 广告失败不挡同步
+        my_advert = {}
 
     ws, sess = await open_remote_session(relay_url, peer_room, fingerprint=fingerprint,
                                          code=code, state_dir=state_dir)
     try:
-        # ① 拉对端 frontier
+        # ① 拉对端 frontier(+ 它的能力广告)
         r = await sess.request("GET", "/api/mesh/frontier")
         if r.get("status") != 200:
             raise RuntimeError(f"peer frontier failed: {r.get('status')} {r.get('error')}")
-        peer_fr_raw = (json.loads(r["body"].decode("utf-8")) or {}).get("frontier", {})
+        peer_body = json.loads(r["body"].decode("utf-8")) or {}
+        peer_fr_raw = peer_body.get("frontier", {})
         peer_fr = {str(d): HLC.parse(str(v)) for d, v in peer_fr_raw.items()}
 
-        # ② 算我对它的 delta + 我的 frontier,POST /mesh/sync
+        # ② 算我对它的 delta + 我的 frontier + 我的 advert,POST /mesh/sync
         my_delta = [e.to_dict() for e in log.delta(peer_fr)]
         my_fr = {d: str(h) for d, h in log.frontier().items()}
-        body = json.dumps({"frontier": my_fr, "events": my_delta}).encode("utf-8")
+        body = json.dumps({"frontier": my_fr, "events": my_delta,
+                           "advert": my_advert}).encode("utf-8")
         r2 = await sess.request("POST", "/api/mesh/sync",
                                 headers={"content-type": "application/json"}, body=body)
         if r2.get("status") != 200:
@@ -56,6 +68,17 @@ async def mesh_sync_with_peer(relay_url: str, peer_room: str, *, fingerprint: st
                 store.persist_new(log)
             except Exception:  # noqa: BLE001 — 持久化失败不吞掉同步结果
                 pass
+        # ④ 对端入我花名册(双录另一半)。register_peer 宁空勿毒(旧对端无 advert → 丢弃);
+        #    mark_seen 兜底刷新鲜度(探活:成功连到 = 它活着)。失败不吞同步结果。
+        try:
+            from karvyloop.mesh.registry import DeviceRegistry
+            reg = DeviceRegistry(state_dir)
+            reg.register_peer(peer_body.get("advert") or {})
+            peer_id = str(peer_body.get("device_id") or "")
+            if peer_id:
+                reg.mark_seen(peer_id)
+        except Exception:  # noqa: BLE001
+            pass
         return {"pulled": pulled, "pushed": int(resp.get("merged", 0))}
     finally:
         await sess.close()

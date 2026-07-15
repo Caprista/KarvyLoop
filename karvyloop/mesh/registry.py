@@ -130,6 +130,37 @@ class DeviceRegistry:
         self.register(rec)
         return rec
 
+    def register_peer(self, advert: dict, *,
+                      now: Optional[float] = None) -> Optional[DeviceRecord]:
+        """把一台**对端**设备(它的能力广告)登记进花名册(is_self=False,last_seen=now)。
+
+        合并语义照 register_self:label/relay_url/room 新值为空 → 沿用已存的(对端换了
+        名字/房号才覆盖,一次坏广告不抹配对信息)。**宁空勿毒**:非 dict / device_id 空 →
+        直接丢(None);advert 撞上本机记录(is_self=True)→ 绝不覆盖(None)。
+        """
+        if not isinstance(advert, dict):
+            return None
+        did = str(advert.get("device_id") or "")
+        if not did:
+            return None
+        prev = self.get(did)
+        if prev is not None and prev.is_self:
+            return None                    # 对端广告永远碰不了本机记录
+        caps = advert.get("capabilities")
+        rec = DeviceRecord(
+            device_id=did,
+            label=str(advert.get("label") or "") or (prev.label if prev else ""),
+            os=str(advert.get("os") or ""), arch=str(advert.get("arch") or ""),
+            sandbox=str(advert.get("sandbox") or ""),
+            karvyloop=str(advert.get("karvyloop") or ""),
+            relay_url=str(advert.get("relay_url") or "") or (prev.relay_url if prev else ""),
+            room=str(advert.get("room") or "") or (prev.room if prev else ""),
+            last_seen=(time.time() if now is None else now), is_self=False,
+            capabilities=([str(c) for c in caps] if isinstance(caps, list)
+                          else (list(prev.capabilities) if prev else [])))
+        self.register(rec)
+        return rec
+
     def get(self, device_id: str) -> Optional[DeviceRecord]:
         d = self._load().get("devices", {}).get(device_id or "")
         return DeviceRecord.from_dict(d) if d else None

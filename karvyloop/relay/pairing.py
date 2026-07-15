@@ -111,6 +111,22 @@ class PairingStore:
             self._save(state)
         return str(rid)
 
+    def mesh_rid(self) -> str:
+        """mesh 专用**第二**稳定房号(docs/74 探活地基)。
+
+        主房(rid)是 1 console + 1 client:away 浏览器常年占着 client 位,同主人设备
+        拨进来做 mesh 同步永远 room_busy。mesh 走自己的房号 —— console 侧再挂一条
+        relay 长连(entry.py),设备间同步/探活拨这里,与主房互不抢坑。
+        幂等(同一 state 文件键 `mesh_rid`);泄露语义同 rid(只 DoS,无钥匙解不开)。
+        """
+        state = self._load()
+        rid = state.get("mesh_rid")
+        if not rid:
+            rid = "m" + secrets.token_hex(11)     # 23 字符,过 server _RID_RE
+            state["mesh_rid"] = rid
+            self._save(state)
+        return str(rid)
+
     # --- 一次性配对码 ---
     def new_code(self, scope: str = "full") -> str:
         """生成一枚一次性码(XXXX-XXXX),TTL 15 分钟;顺手清理过期码。

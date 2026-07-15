@@ -161,15 +161,20 @@ async def run_relay_client(relay_url: str, *, console_port: int,
                            console_host: str = "127.0.0.1", token: str = "",
                            state_dir=None, heartbeat_s: float = 20.0,
                            max_backoff_s: float = 30.0,
-                           stop: Optional[asyncio.Event] = None) -> None:
-    """console 信使客户端主循环:连 relay → 服务 → 断线退避重连,直到 stop。"""
+                           stop: Optional[asyncio.Event] = None,
+                           rid: Optional[str] = None) -> None:
+    """console 信使客户端主循环:连 relay → 服务 → 断线退避重连,直到 stop。
+
+    rid=None → store.rid()(主房,原行为);显式给 rid(如 store.mesh_rid())→ 挂那个房
+    (docs/74:mesh 同步走第二房,不跟 away 浏览器抢主房唯一的 client 位)。
+    """
     from karvyloop.relay.pairing import PairingStore
     import websockets
 
     stop = stop or asyncio.Event()
     store = PairingStore(state_dir)
     priv, pub = store.identity()        # 缺 cryptography 在这里诚实炸(RelayCryptoUnavailable)
-    rid = store.rid()
+    rid = rid or store.rid()
     url = relay_url.rstrip("/") + f"/attach?rid={rid}"
     backoff = 1.0
     while not stop.is_set():
@@ -209,11 +214,12 @@ class RelayClientHandle:
     """后台线程句柄(照 email_channel_task 先例:console 退出时 stop() 收干净)。"""
 
     def __init__(self, relay_url: str, *, console_port: int, token: str,
-                 console_host: str = "127.0.0.1", state_dir=None) -> None:
+                 console_host: str = "127.0.0.1", state_dir=None,
+                 rid: Optional[str] = None) -> None:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stop: Optional[asyncio.Event] = None
         self._kw = dict(console_port=console_port, token=token,
-                        console_host=console_host, state_dir=state_dir)
+                        console_host=console_host, state_dir=state_dir, rid=rid)
         self._url = relay_url
         self._thread = threading.Thread(
             target=self._run, name="karvyloop-relay-client", daemon=True)
@@ -243,13 +249,13 @@ class RelayClientHandle:
 
 def start_relay_client_thread(relay_url: str, *, console_port: int, token: str,
                               console_host: str = "127.0.0.1",
-                              state_dir=None) -> RelayClientHandle:
+                              state_dir=None, rid: Optional[str] = None) -> RelayClientHandle:
     """entry.py 用:先**急切**验一遍身份(缺 cryptography 当场诚实报错,而不是线程里静默死),
-    再起后台线程。返回句柄,console 退出时调 .stop()。"""
+    再起后台线程。返回句柄,console 退出时调 .stop()。rid=None=主房;显式给=挂那个房(mesh)。"""
     from karvyloop.relay.pairing import PairingStore
     PairingStore(state_dir).identity()   # RelayCryptoUnavailable → 直接抛给调用方
     h = RelayClientHandle(relay_url, console_port=console_port, token=token,
-                          console_host=console_host, state_dir=state_dir)
+                          console_host=console_host, state_dir=state_dir, rid=rid)
     h.start()
     return h
 

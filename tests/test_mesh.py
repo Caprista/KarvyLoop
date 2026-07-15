@@ -146,6 +146,44 @@ def test_remove_unknown_and_ambiguous(tmp_path, capsys):
     assert len(DeviceRegistry(tmp_path).list_all()) == 2                        # 都没误删
 
 
+# ---- register_peer(docs/74 花名册双录:对端能力广告入册)----
+
+def test_register_peer_registers_and_merges(tmp_path):
+    """入册 is_self=False + last_seen=now;合并语义照 register_self:label/relay_url/room
+    新值为空沿用旧值(一次简广告不抹掉已知的连接信息),显式新值覆盖。"""
+    reg = DeviceRegistry(tmp_path)
+    adv = {"device_id": "peer-FAKE-1", "label": "desk", "os": "linux",
+           "relay_url": "wss://peer.relay", "room": "m" + "a" * 21, "capabilities": ["coding"]}
+    rec = reg.register_peer(adv, now=1000.0)
+    assert rec is not None and rec.is_self is False and rec.last_seen == 1000.0
+    reg.register_peer({"device_id": "peer-FAKE-1", "os": "linux"}, now=2000.0)
+    d = reg.get("peer-FAKE-1")
+    assert d.label == "desk" and d.relay_url == "wss://peer.relay" and d.room == "m" + "a" * 21
+    assert d.last_seen == 2000.0 and d.capabilities == ["coding"] and d.is_self is False
+    reg.register_peer({"device_id": "peer-FAKE-1", "room": "m" + "b" * 21}, now=3000.0)
+    assert reg.get("peer-FAKE-1").room == "m" + "b" * 21          # 显式新值 → 覆盖(对端换房可跟)
+
+
+def test_register_peer_never_overwrites_self(tmp_path):
+    """对端广告撞上本机记录(is_self=True)→ 绝不覆盖(否则一条恶意广告能改写我是谁)。"""
+    reg = DeviceRegistry(tmp_path)
+    reg.register_self({"device_id": "me-FAKE", "label": "my-pc"},
+                      relay_url="wss://mine", room="m" + "a" * 21)
+    assert reg.register_peer({"device_id": "me-FAKE", "label": "evil", "room": "hijack-room"}) is None
+    d = reg.get("me-FAKE")
+    assert d.is_self is True and d.label == "my-pc" and d.room == "m" + "a" * 21
+
+
+def test_register_peer_drops_bad_shapes(tmp_path):
+    """宁空勿毒:非 dict / device_id 空 → 直接丢,花名册纹丝不动。"""
+    reg = DeviceRegistry(tmp_path)
+    assert reg.register_peer("junk") is None
+    assert reg.register_peer(None) is None
+    assert reg.register_peer({"label": "no-id"}) is None
+    assert reg.register_peer({"device_id": ""}) is None
+    assert reg.list_all() == []
+
+
 # ---- 对抗验收回归锁(2026-07-12):register_self 合并语义 + 坏形态宁空勿崩 ----
 
 def test_register_self_merge_preserves_label_relay_room(tmp_path):

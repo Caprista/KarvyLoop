@@ -12,12 +12,21 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from karvyloop.mesh.synclog import HLC, MeshEvent
 
 router = APIRouter(prefix="/api")
+
+
+def _deny_external(request: Request) -> None:
+    """mesh 面对外**直接拒**(样式同 routes_memory._deny_external_dump):mesh 是同主人
+    设备间的事;read-scope 分享方经隧道 GET 放行,但设备元数据(能力集/os/mesh 房号)、
+    花名册、日志前沿都不该给外人看。标由 relay/client.py 咽喉注入,远端伪造进不来;
+    自有设备(full scope)不带标 → 零回归。"""
+    if request.headers.get("x-karvy-audience", "").strip().lower() == "external":
+        raise HTTPException(status_code=403, detail="external_forbidden")
 
 
 def _mesh_state_dir(app):
@@ -44,22 +53,45 @@ def _frontier_dict(log) -> dict:
     return {d: str(h) for d, h in log.frontier().items()}
 
 
+def _my_advert(app) -> dict:
+    """本机能力广告(frontier 响应带给对端 → 对端 register_peer,花名册双录的一半)。
+    relay_url 取运行时真值(app.state.relay_url;没挂 relay → 空 = 诚实缺省)。"""
+    try:
+        from karvyloop.mesh.fingerprint import device_advert
+        return device_advert(_mesh_state_dir(app),
+                             relay_url=getattr(app.state, "relay_url", "") or "")
+    except Exception:                                # noqa: BLE001 — 广告失败不阻断同步本身
+        return {}
+
+
 @router.get("/mesh/frontier")
 def api_mesh_frontier(request: Request) -> dict[str, Any]:
-    """本机 MeshLog 前沿(对端据此算它该给我什么、我该给它什么)。"""
+    """本机 MeshLog 前沿(对端据此算它该给我什么、我该给它什么)+ 本机能力广告。"""
+    _deny_external(request)
     log = _mesh_log(request.app)
-    return {"device_id": log.device_id, "frontier": _frontier_dict(log)}
+    return {"device_id": log.device_id, "frontier": _frontier_dict(log),
+            "advert": _my_advert(request.app)}
 
 
 class MeshSyncRequest(BaseModel):
     frontier: dict = Field(default_factory=dict, description="对端已有到哪 device_id -> 'wall.counter'")
     events: list = Field(default_factory=list, description="对端给我的 delta(事件 dict 列表)")
+    advert: dict = Field(default_factory=dict, description="对端的能力广告(空=旧客户端,跳过登记)")
 
 
 @router.post("/mesh/sync")
 def api_mesh_sync(req: MeshSyncRequest, request: Request) -> dict[str, Any]:
     """收对端 delta → 合并 + 持久化 → 回我按对端 frontier 算出的 delta(一来回双向同步)。"""
+    _deny_external(request)
     log = _mesh_log(request.app)
+    # 对端登记(docs/74 花名册双录):它主动来同步 = 它活着 + 它自报怎么连它。
+    # register_peer 自带宁空勿毒(非 dict/缺 device_id 丢弃,绝不覆盖本机记录)。
+    if req.advert:
+        try:
+            from karvyloop.mesh.registry import DeviceRegistry
+            DeviceRegistry(_mesh_state_dir(request.app)).register_peer(req.advert)
+        except Exception:                            # noqa: BLE001 — 登记失败不阻断同步
+            pass
     incoming = []
     for e in (req.events or [])[:20000]:            # 封顶防滥用
         try:
@@ -108,6 +140,7 @@ def api_mesh_sync(req: MeshSyncRequest, request: Request) -> dict[str, Any]:
 @router.get("/mesh/devices")
 def api_mesh_devices(request: Request) -> dict[str, Any]:
     """我的设备 mesh:本机自注册(刷新 last_seen)+ 列花名册(能力指纹/在线态/本机标记)。"""
+    _deny_external(request)
     from karvyloop.mesh.fingerprint import device_fingerprint
     from karvyloop.mesh.registry import DeviceRegistry
     sd = _mesh_state_dir(request.app)
@@ -134,6 +167,7 @@ def api_mesh_device_remove(req: MeshDeviceRemoveRequest, request: Request) -> di
     """知情删除(docs/74 §6.2,与 cli.cmd_devices_remove 同语义):删前算**能力增量**——
     该设备独占的能力(其它设备都没有)非空 = 能力边界收窄,或删的是本机 → 必须 confirm=true
     再动手;否则先回 requires_confirm + 会永久失去什么,让人知情后拍板(H2A)。"""
+    _deny_external(request)
     from karvyloop.mesh.registry import DeviceRegistry
     from karvyloop.mesh.schedule import capability_delta_on_remove
     reg = DeviceRegistry(_mesh_state_dir(request.app))

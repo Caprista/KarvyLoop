@@ -49,7 +49,10 @@ def api_pair_issue(request: Request) -> dict[str, Any]:
     try:
         store = _store()
         code = store.new_code("full")          # 自有设备 = 完整访问(scope 语义见 pairing.py)
+        # mesh_room:同主人设备做 mesh 同步拨的**第二**房(docs/74;主房 client 位被 away
+        # 浏览器占着)。旧客户端不认识多出的字段,无害。
         return {"ok": True, "relay": relay_url, "room": store.rid(),
+                "mesh_room": store.mesh_rid(),
                 "fingerprint": store.fingerprint(), "code": code, "ttl_s": 15 * 60}
     except Exception as e:                      # 缺 cryptography 等:诚实报,不 500
         logger.warning(f"[pair] issue 失败: {type(e).__name__}")

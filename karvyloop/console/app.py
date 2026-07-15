@@ -526,6 +526,31 @@ def build_console_app(
         app.state.inbox_pipe_task = asyncio.create_task(
             _supervised_bg(app, "inbox_pipe", _inbox_pipe_loop))   # 断⑦ supervisor
 
+        # 设备 mesh ticker(docs/74 探活地基):持续同步 + 探活闭环。relay 挂了才起
+        # (mesh 同步走 relay 拨号,没 relay 无从拨;mesh 是增益不是地基)。
+        # 单机用户(花名册无对端)每 tick 零动作零流量;单台对端失败 debug 吞
+        # (连不上=它下线,last_seen 自然变陈 = 探活),绝不 error 刷屏。
+        mesh_tick_task = None
+        if getattr(app.state, "relay_url", ""):
+            from karvyloop.console.mesh_tick import MESH_TICK_S
+
+            async def _mesh_tick_loop() -> None:
+                from karvyloop.console.mesh_tick import mesh_tick
+                while True:
+                    try:
+                        await asyncio.sleep(MESH_TICK_S)
+                        await mesh_tick(app)
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        # 单台失败已在 tick 内 debug 吞;这层只接骨架异常(花名册坏盘等),
+                        # 同样 debug —— 对端不在场是常态,不值一条 warning 刷屏。
+                        logger.debug(f"[karvyloop console] mesh tick 异常(下轮再试): {e}")
+            mesh_tick_task = asyncio.create_task(
+                _supervised_bg(app, "mesh_tick", _mesh_tick_loop))   # 断⑦ supervisor
+            app.state.mesh_tick_task = mesh_tick_task
+            logger.info(f"[karvyloop console] 设备 mesh ticker 已起(间隔 {MESH_TICK_S:g}s)")
+
         # predict 启动兜底:延迟一次 boot_poll(修"第一条建议要等 24h"→ 页签体感永远空)。
         # pump 在(有 LLM)→ 真习惯分析;pump 沉默/未接 → proactive_from_state 确定性兜底
         # (任务看板有失败任务 → 提议重试)。没 WS client 也照样进 proposal_registry 待决表,
@@ -623,6 +648,8 @@ def build_console_app(
         _inbox_task = getattr(app.state, "inbox_pipe_task", None)
         if _inbox_task is not None:
             _inbox_task.cancel()
+        if mesh_tick_task is not None:
+            mesh_tick_task.cancel()
         app.state.ws_clients.clear()
         close_fn = getattr(app.state, "proposal_close", None)
         if callable(close_fn):

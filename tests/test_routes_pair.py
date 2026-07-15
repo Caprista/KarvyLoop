@@ -42,6 +42,18 @@ def test_issue_returns_one_time_invite(monkeypatch, tmp_path):
     assert r2["code"] != r["code"]                     # 每次新签(重出二维码=新鲜邀请)
 
 
+def test_issue_includes_mesh_room(monkeypatch, tmp_path):
+    """配对邀请带 mesh 房(docs/74):新设备既知主房(远程访问)也知 mesh 房(设备间同步拨入,
+    不跟 away 浏览器抢主房 client 位)。稳定房号,重签邀请不变。"""
+    _patch_store(monkeypatch, tmp_path)
+    r = _client().post("/api/pair/issue").json()
+    assert r["ok"] is True
+    assert r["mesh_room"].startswith("m") and len(r["mesh_room"]) >= 8
+    assert r["mesh_room"] != r["room"]                 # 与主房分离,才解 room_busy 抢坑
+    r2 = _client().post("/api/pair/issue").json()
+    assert r2["mesh_room"] == r["mesh_room"]           # 稳定(码一次性,房号持久)
+
+
 def test_issue_without_relay_is_honest(monkeypatch, tmp_path):
     _patch_store(monkeypatch, tmp_path)
     r = _client(relay_url="").post("/api/pair/issue").json()
