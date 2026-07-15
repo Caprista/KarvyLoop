@@ -403,6 +403,48 @@ def test_parse_reconcile_garbage_returns_empty():
     assert parse_reconcile("just prose") == ([], [])
 
 
+# ---- 信封救援:真模型偶发把已抽好的合法偏好多套一层壳,不能被静默丢弃(2026-07-15 j3 flake 根因)----
+# 复现证据:existing=[] 退化成纯抽取时,MiniMax-M3 ~30% 概率返回下面这些**合法完整 JSON**,
+# 但 parse_reconcile 旧逻辑见 dict 无 "new" 键即 data.get("new",[])=[] → 一条真偏好蒸发 → 结晶写 0
+# → j3 断言 written>=1 时红时绿。这些 raw 全是真机捕获(scratchpad repro),不是构造。
+
+def test_parse_reconcile_salvages_item_envelope():
+    """{"item": {..偏好..}} 单键信封 —— 解包出那一条偏好(真机捕获形态)。"""
+    new, con = parse_reconcile(
+        '{"item": {"content": "动生产数据库前必须先完成备份,这是硬底线", '
+        '"kind": "constraint", "explicit": "true", "scope": "global"}}')
+    assert len(new) == 1 and "备份" in new[0]["content"] and con == []
+    assert new[0]["kind"] == "constraint"
+
+
+def test_parse_reconcile_salvages_nested_value_envelope():
+    """{"value": {"item": {..偏好..}}} 双层信封 —— 递归剥壳解包(真机捕获形态)。"""
+    new, con = parse_reconcile(
+        '{"value": {"item": {"content": "对生产库做任何结构变更前必须先完成备份", '
+        '"kind": "constraint", "explicit": "true", "scope": "global"}}}')
+    assert len(new) == 1 and "备份" in new[0]["content"] and con == []
+
+
+def test_parse_reconcile_salvages_toplevel_content_with_junk_key():
+    """{"item": {..}, "content": "..", ..} 顶层带 content 又混了别的壳键 —— 取顶层那条(真机捕获)。"""
+    new, con = parse_reconcile(
+        '{"item": {"content": "对生产数据库执行任何 schema 变更前必须先完成备份", "kind": "constraint"}, '
+        '"content": "生产环境操作的安全底线是先备份再动手", "kind": "standing", "explicit": "true", "scope": "global"}')
+    assert len(new) == 1 and "备份" in new[0]["content"] and con == []
+
+
+def test_parse_reconcile_envelope_still_refuses_contentless():
+    """宁空勿毒不动:壳里没有任何 content 的信封一律丢空,绝不猜内容投毒决策画像。"""
+    assert parse_reconcile('{"item": {"kind": "constraint", "explicit": true}}') == ([], [])
+    assert parse_reconcile('{"wrapper": {"note": "模型碎碎念不是偏好"}}') == ([], [])
+
+
+def test_parse_decision_prefs_unwraps_item_envelope():
+    out = parse_decision_prefs(
+        '{"item": {"content": "移动端优先", "kind": "standing"}}')
+    assert len(out) == 1 and out[0]["content"] == "移动端优先" and out[0]["kind"] == "standing"
+
+
 # ---- P1:confirm(H2A 升 confirmed)纯逻辑 ----
 
 

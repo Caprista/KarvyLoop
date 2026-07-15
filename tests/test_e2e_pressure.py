@@ -134,16 +134,27 @@ def test_j3_decision_crystallization_real_model(app):
     from karvyloop.crystallize.decision_pref import (
         DecisionSample, is_decision_pref, prealign_block, recall_decision_prefs)
 
-    app.state.decision_samples = []
-    for ctx, reason in [
+    samples = [
         ("运维提议直接在生产库删旧表回收空间", "没备份不许动生产,先备份"),
         ("运维提议今晚直接对生产库跑 migration", "动生产前必须先备份"),
         ("运维提议线上直接 drop 没用的索引", "先备份再动生产,底线"),
-    ]:
-        observe_decision(app, DecisionSample(decision="REJECT", context=ctx, reason=reason,
-                                             scope="personal", ts=time.time()))
-    written = asyncio.run(maybe_crystallize_decisions(app))
-    assert written >= 1, "连拒同理由没结晶出任何 Belief（楔子没见血）"
+    ]
+    # best-effort(与 J5/J6/J7/J15… 同款真模型硬化):真模型偶发返回**空 / 无 content 的退化输出**
+    # (实测 ~10%,同源的并发/非确定性抖动)→ 重试几次验"连拒同理由能结晶"。
+    # maybe_crystallize 会消费样本缓冲,故每次重试重新 seed。**断言不放宽**(written>=1 不动):
+    # 3 次真模型全 0 才红 = 结晶真断了。注:信封包壳的**合法**输出({"item":{...}} 等)已在
+    # parse_reconcile 解包救回(2026-07-15 根因修复,test_decision_pref 有确定性回归锁),这里
+    # 只兜"模型真没吐出可用内容"的残余抖动 —— 那是全量里"偶红"的最后一段(单跑必绿因样本小)。
+    written = 0
+    for _ in range(3):
+        app.state.decision_samples = []
+        for ctx, reason in samples:
+            observe_decision(app, DecisionSample(decision="REJECT", context=ctx, reason=reason,
+                                                 scope="personal", ts=time.time()))
+        written = asyncio.run(maybe_crystallize_decisions(app))
+        if written >= 1:
+            break
+    assert written >= 1, "连拒同理由没结晶出任何 Belief（楔子没见血;3 次真模型全 0=结晶真断了）"
 
     prefs = []
     for sc in ("personal", "domain"):

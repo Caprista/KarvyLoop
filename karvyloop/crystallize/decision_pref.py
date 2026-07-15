@@ -220,6 +220,36 @@ def is_decision_pref(b: Belief) -> bool:
 # ---- 解析(镜像 ingest.parse_facts:JSON 严格、宁空勿毒) ----
 
 
+def _coerce_pref_list(data: Any, *, _depth: int = 0) -> list:
+    """把已解析的 JSON 收敛成"偏好对象列表"。真模型偶发把结果**多套一层信封**——实捕
+    MiniMax 返回 {"item":{...}}(单条信封)、{"value":{"item":{...}}}(双层信封)、
+    {"preferences":[...]}(列表信封)。这些是**合法完整 JSON**、只多了层壳,解包 ≠ 抽 prose/
+    猜内容,仍守"宁空勿毒":只认"已知列表键 / 值是含 content 的对象 / 值是列表",壳里没 content 一律丢。
+
+    (2026-07-15 j3 flake 根因:parse_reconcile 见 dict 无 "new" 键就 data.get("new",[])=[] →
+    把一条**已抽好的合法偏好**静默丢弃 → 结晶写 0,时红时绿最隐蔽。)"""
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    for key in ("prefs", "preferences", "items", "data"):
+        if isinstance(data.get(key), list):
+            return data[key]
+    # content 必须是**非空字符串**才算一条偏好(而非仅 truthy):否则 content 是 dict/list 时
+    # 下游 (item.get("content") or "").strip() 会 AttributeError —— 决策画像进料口宁拒勿崩。
+    if isinstance(data.get("content"), str) and data["content"].strip():
+        return [data]   # 顶层就是一条偏好(可能混了别的壳键,解析器只取 content)
+    # 单键信封:{"item": {..}} / {"value": {..}} / {"x": [..]} —— 恰好一个键才解包(不猜多键对象);
+    # 值是 dict 但没 content → 递归再剥一层(双层信封);带深度上限防病态深嵌。
+    if len(data) == 1 and _depth < 4:
+        v = next(iter(data.values()))
+        if isinstance(v, list):
+            return v
+        if isinstance(v, dict):
+            return _coerce_pref_list(v, _depth=_depth + 1)
+    return []
+
+
 def parse_decision_prefs(text: str) -> list[dict]:
     """解析决策编译器输出 → [{"content","kind","explicit"}]。
 
@@ -241,13 +271,7 @@ def parse_decision_prefs(text: str) -> list[dict]:
     data = _loads_tolerant(cleaned)   # 决策画像:解析失败一律拒,绝不 prose 兜底;但容忍并发截断
     if data is None:
         return []
-    if isinstance(data, dict):
-        for key in ("prefs", "preferences", "items", "data"):
-            if isinstance(data.get(key), list):
-                data = data[key]
-                break
-        else:
-            data = [data] if data.get("content") else []
+    data = _coerce_pref_list(data)   # 收敛信封({"item":{..}} 等真模型偶发壳),仍宁空勿毒
     if not isinstance(data, list):
         return []
     out: list[dict] = []
@@ -484,6 +508,11 @@ def parse_reconcile(text: str) -> tuple[list[dict], list[int]]:
         return parse_decision_prefs(json.dumps(data)), []
     if not isinstance(data, dict):
         return [], []
+    # 协调器形态 = {"new":[...],"contradicts":[...]}。但 existing=[] 退化成纯抽取时,真模型常把
+    # 结果直接给成**数组或信封对象**(无 new/contradicts 键)—— 此时别当空,交给 parse_decision_prefs
+    # 统一识别(含单/多层信封解包);否则一条已抽好的合法偏好被 data.get("new",[])=[] 静默丢=写 0。
+    if "new" not in data and "contradicts" not in data:
+        return parse_decision_prefs(json.dumps(data)), []
     new = parse_decision_prefs(json.dumps(data.get("new", [])))
     contradicts: list[int] = []
     for x in (data.get("contradicts") or []):
