@@ -269,6 +269,16 @@ def build_console_app(
                 while True:
                     try:
                         await asyncio.sleep(tick)
+                        # 本机执行任务监控(docs/80 #4 第一环):每次醒都跑(轻量、无 LLM),
+                        # 揪"标 running 却长时间无进展"的疑似中断任务 → 标中断 + 升"要我接着跑吗"卡。
+                        # 放在 idle 判断之前 = 不受 daily 节流影响,停滞任务及时被发现(§0.7 收口)。
+                        try:
+                            from karvyloop.console.task_monitor import run_task_monitor
+                            stalled = await run_task_monitor(app)
+                            if stalled:
+                                logger.info(f"[karvyloop console] 任务监控:{stalled} 条疑似中断 → 升重试卡")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "task_monitor", ie)
                         _ml = getattr(app.state, "main_loop", None)
                         # 看一眼待质量评积压(纯计数、cap 提前停;线程里跑不阻塞 loop)。
                         backlog = 0

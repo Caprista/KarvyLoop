@@ -18,6 +18,43 @@ from .atoms import Proposal
 from .proposal_registry import KIND_RUN_TASK
 
 
+def resume_proposal_for(t: dict, *, now: Optional[float] = None) -> Optional[Proposal]:
+    """给一条失败/中断的任务 dict 造一张"要我重试吗"H2A 卡(run_task);intent 空 → None。
+
+    两个调用方共用一份卡形态(单一真理源):① propose_from_tasks(开机兜底,扫第一条 error);
+    ② task_monitor(持续,监控发现某条 running 陈旧/中断)。source 标区分来源。
+    """
+    intent = (t.get("intent") or "").strip()
+    if not intent:
+        return None
+    short = intent if len(intent) <= 40 else intent[:40] + "…"
+    # ch4 决策依据:说清"何时、谁、发生了什么、为什么提" + 跳转去那条任务看全貌。
+    err = (t.get("result") or t.get("error") or "出错/中断").strip().replace("\n", " ")
+    if len(err) > 80:
+        err = err[:80] + "…"
+    who = t.get("who") or "小卡"
+    basis = (f"「{who}」执行的任务「{short}」状态 = error(出错/中断),没跑完。"
+             f"原因/最后输出:{err}。重试 = 用同样的意图再跑一遍。")
+    return Proposal(
+        summary=f"上次「{short}」没跑完(出错/中断)—— 要我重试吗?",
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=0.8,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=(now if now is not None else time.time()),
+        kind=KIND_RUN_TASK,
+        payload={
+            "intent": intent,
+            "domain_id": t.get("domain_id", "l0"),
+            "role": t.get("role", ""),
+            "source": str(t.get("_resume_source") or "proactive.resume_failed_task"),
+        },
+        basis=basis,
+        context_ref={"kind": "task", "id": t.get("id", "")},  # 工作台据此跳到那条任务窗
+    )
+
+
 def propose_from_tasks(task_registry, *, now: Optional[float] = None) -> Optional[Proposal]:
     """观察任务看板:最近若有失败/中断的任务,提议重试它;否则返 None(沉默)。
 
@@ -31,36 +68,10 @@ def propose_from_tasks(task_registry, *, now: Optional[float] = None) -> Optiona
         return None
     for t in tasks:
         if t.get("status") == "error":
-            intent = (t.get("intent") or "").strip()
-            if not intent:
-                continue
-            short = intent if len(intent) <= 40 else intent[:40] + "…"
-            # ch4 决策依据:说清"何时、谁、发生了什么、为什么提" + 跳转去那条任务看全貌。
-            err = (t.get("result") or t.get("error") or "出错/中断").strip().replace("\n", " ")
-            if len(err) > 80:
-                err = err[:80] + "…"
-            who = t.get("who") or "小卡"
-            basis = (f"「{who}」执行的任务「{short}」状态 = error(出错/中断),没跑完。"
-                     f"原因/最后输出:{err}。重试 = 用同样的意图再跑一遍。")
-            return Proposal(
-                summary=f"上次「{short}」没跑完(出错/中断)—— 要我重试吗?",
-                options=("ACCEPT", "DEFER", "REJECT"),
-                strength=0.8,
-                evidence_refs=(),
-                habit_id=0,
-                model_ref="",
-                ts=(now if now is not None else time.time()),
-                kind=KIND_RUN_TASK,
-                payload={
-                    "intent": intent,
-                    "domain_id": t.get("domain_id", "l0"),
-                    "role": t.get("role", ""),
-                    "source": "proactive.resume_failed_task",
-                },
-                basis=basis,
-                context_ref={"kind": "task", "id": t.get("id", "")},  # 工作台据此跳到那条任务窗
-            )
+            p = resume_proposal_for(t, now=now)
+            if p is not None:
+                return p
     return None
 
 
-__all__ = ["propose_from_tasks"]
+__all__ = ["propose_from_tasks", "resume_proposal_for"]
