@@ -174,6 +174,7 @@
         if (msg.payload && msg.payload.report_card) _renderReportCard(list, msg.payload.report_card);
         // 退场动画 160ms 后再判空回填(动画中的节点还在 DOM,立刻数会把空态吞掉)
         setTimeout(() => {
+          _refreshDecideFilter();   // #6:卡拍掉了 → 重算筛选条(distinct<2 会自动收起 / 选中类拍光则复位)
           if (_countCards("h2a-list", "h2a-empty") === 0) {
             list.innerHTML = '<div class="h2a-empty">' + t("h2a.handled") + '</div>';
           }
@@ -353,6 +354,7 @@
       if (!r.ok) return;
       const data = await r.json();
       (data.proposals || []).forEach((p) => _routeProposal(p, { replay: true }));   // 按 kind 分流(拍板/预判)
+      _refreshDecideFilter();   // #6:开机回放存量卡后一次性算筛选条(多 kind 积压才现身)
     } catch (e) {
       console.warn("[boot] pending proposals failed", e);
     }
@@ -927,6 +929,69 @@
     return n + "B";
   }
 
+  // ── #6 待你拍板列按 kind 客户端筛选(积压多时能只看一类;Hardy 实拍见过"45/61 等你拍板"堆一长条)──
+  // 只做显隐:_placeCard 多卡不覆盖 / 按 proposal_id diff 那套照旧不动,筛选绝不增删 h2a-list 的 DOM。
+  // distinct kind < 2 → 整条筛选条 hidden(没得筛不占地方)。数据源=每张卡的 data-kind。只筛右栏 #h2a-list。
+  let _decideFilter = null;   // null=全部;否则=当前选中的某个 kind 字符串
+  function _kindLabel(kind) {
+    const k = String(kind || "");
+    if (!k) return t("proposal.no_desc");
+    const lbl = t("proposal.kind." + k);
+    if (lbl && lbl !== "proposal.kind." + k) return lbl;   // 有人话标签
+    return k.replace(/_/g, " ");                            // humanize 兜底(别裸显键名 / 别崩)
+  }
+  function _applyDecideFilter() {
+    const list = document.getElementById("h2a-list");
+    if (!list) return;
+    const cards = Array.from(list.querySelectorAll(".h2a-card[data-kind]"));
+    // 当前选中的 kind 已被拍光(全处置了)→ 自动复位全部(否则空列没法回全)
+    if (_decideFilter !== null && !cards.some((c) => c.dataset.kind === _decideFilter)) _decideFilter = null;
+    cards.forEach((c) => {
+      c.style.display = (_decideFilter === null || c.dataset.kind === _decideFilter) ? "" : "none";
+    });
+  }
+  function _refreshDecideFilter() {
+    const bar = document.getElementById("h2a-filter");
+    const list = document.getElementById("h2a-list");
+    if (!bar || !list) return;
+    // 统计每个 kind 的卡数(Map 保插入序=第一次见到该 kind 的顺序)
+    const counts = new Map();
+    Array.from(list.querySelectorAll(".h2a-card[data-kind]")).forEach((c) => {
+      const k = c.dataset.kind || "";
+      if (!k) return;
+      counts.set(k, (counts.get(k) || 0) + 1);
+    });
+    // distinct kind < 2 → 没得筛,整条藏起并复位显隐(从"曾筛过"状态回全)
+    if (counts.size < 2) {
+      _decideFilter = null;
+      bar.hidden = true;
+      bar.textContent = "";
+      _applyDecideFilter();
+      return;
+    }
+    if (_decideFilter !== null && !counts.has(_decideFilter)) _decideFilter = null;   // 选中类已无卡 → 复位
+    let total = 0;
+    counts.forEach((n) => { total += n; });
+    bar.hidden = false;
+    bar.textContent = "";
+    bar.appendChild(el("span", { class: "h2a-filter-label", text: t("proposal.filter_label") }));
+    // 「全部 N」chip
+    bar.appendChild(el("span", {
+      class: "h2a-filter-chip" + (_decideFilter === null ? " active" : ""),
+      text: t("proposal.filter_all") + " " + total,
+      onClick: () => { _decideFilter = null; _applyDecideFilter(); _refreshDecideFilter(); },
+    }));
+    // 每个 kind 一个「标签 · 数量」chip(再点/点全部 → 复位)
+    counts.forEach((n, k) => {
+      bar.appendChild(el("span", {
+        class: "h2a-filter-chip" + (_decideFilter === k ? " active" : ""),
+        text: _kindLabel(k) + " · " + n,
+        onClick: () => { _decideFilter = (_decideFilter === k) ? null : k; _applyDecideFilter(); _refreshDecideFilter(); },
+      }));
+    });
+    _applyDecideFilter();
+  }
+
   function renderProposal(payload, opts) {
     const list = document.getElementById("h2a-list");
     if (!list) return;
@@ -942,12 +1007,14 @@
     // replay(开机回放存量卡)只保"在位可瞟",不演叼卡剧场 —— 事件 vs 快照在 desktop.ts 一处区分
     if (window.KarvyDesktop) window.KarvyDesktop.notifyH2A({ replay: !!(opts && opts.replay) });
     updatePulse();   // step5:拍板数变了 → 刷脉搏
+    _refreshDecideFilter();   // #6:新卡可能引入第 2 个 kind → 筛选条现身 / 让新卡守当前筛选
   }
 
   // 一张 H2A 决策卡的 DOM(docs/46 S3 抽出:右栏列表和聊天流 inline 共用同一套渲染 +
   // 同一个拍板 API;两处各建实例、各自 judgeState,拍任意一张 = 同一条 h2a_decision)。
   function _buildProposalCard(payload) {
     const card = el("div", { class: "h2a-card" });
+    card.setAttribute("data-kind", String(payload.kind || ""));   // #6:按 kind 客户端筛选的数据源
     card.appendChild(el("div", { class: "h2a-summary", text: "💡 " + (payload.summary || t("proposal.no_desc")) }));
     // ch4 #6.1:拍板必须带决策依据(为什么)—— 否则凭啥拍
     if (payload.basis) {

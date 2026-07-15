@@ -231,6 +231,35 @@ def test_h2a_multicard_no_overwrite():
     assert "_removeCardById(list, pid, true)" in js
 
 
+# ---- #6 待你拍板列按 kind 客户端筛选(卡多时能只看一类;只显隐,不动多卡 diff)----
+def test_h2a_decide_filter_wired():
+    js = _read("app.js")
+    # 卡带 kind(筛选数据源)
+    assert 'card.setAttribute("data-kind"' in js, "_buildProposalCard 未给卡挂 data-kind"
+    # 筛选状态机 + 显隐(不增删 DOM)+ humanize 兜底
+    for fn in ("_decideFilter", "_kindLabel", "_refreshDecideFilter", "_applyDecideFilter"):
+        assert fn in js, f"app.js 缺 {fn}"
+    # 筛选走 display 显隐(绝不动 h2a-list 的增删/替换那套多卡 diff)
+    assert ".style.display" in js, "筛选应走 display 显隐,不增删卡 DOM"
+    # 三处触发点:新卡后 / 拍掉后 / 开机回放后 都重算筛选条
+    assert js.count("_refreshDecideFilter()") >= 3, "新卡/拍掉/回放三处都要重算筛选条"
+    # index.html:筛选条容器在 #h2a-list 之前、默认 hidden
+    html = _read("index.html")
+    assert 'id="h2a-filter"' in html, "index.html 缺 #h2a-filter"
+    fi = html.find('id="h2a-filter"'); li = html.find('id="h2a-list"')
+    assert fi != -1 and li != -1 and fi < li, "#h2a-filter 必须在 #h2a-list 之前"
+    # CSS:轻量 chip 条 + active 态
+    css = _read("styles.css")
+    assert ".h2a-filter" in css and ".h2a-filter-chip" in css and ".h2a-filter-chip.active" in css
+    # i18n:kind 人话标签 + 筛选文案,en+zh 各一份(parity 另由 i18n 测锁)
+    i18n = _read("i18n.js")
+    for k in ("proposal.kind.crystallize_skill", "proposal.kind.route_to_role",
+              "proposal.kind.roundtable", "proposal.kind.merge_knowledge",
+              "proposal.kind.confirm_decision_pref", "proposal.kind.ops_fix",
+              "proposal.filter_all", "proposal.filter_label"):
+        assert i18n.count(f'"{k}"') == 2, f"i18n {k} 不是 en+zh 各一份"
+
+
 # ---- @ 多人回应(fanout)的重开渲染仍在(@多人新路由到 workflow,旧记录仍可重开)----
 def test_mention_fanout_reopen_render():
     js = _read("app.js")

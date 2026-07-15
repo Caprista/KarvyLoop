@@ -1262,6 +1262,24 @@ html, body {
 
 /* === H2A proposals === */
 .h2a-empty { color: var(--text-dim); font-size: 12.5px; font-style: italic; }
+/* #6 待拍板列按 kind 筛选:轻量横向 chip 条(晨绿主题变量),窄栏放不下就换行 */
+.h2a-filter {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  margin-bottom: 8px;
+}
+.h2a-filter[hidden] { display: none; }
+.h2a-filter-label { font-size: 11px; color: var(--text-dim); margin-right: 2px; }
+.h2a-filter-chip {
+  padding: 2px 9px; font-size: 11px; line-height: 1.5;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: transparent; color: var(--text-2); cursor: pointer;
+  white-space: nowrap;
+}
+.h2a-filter-chip:hover { border-color: var(--accent); color: var(--text); }
+.h2a-filter-chip.active {
+  background: var(--accent-soft); border-color: var(--accent-line);
+  color: var(--accent-deep); font-weight: 600;
+}
 #propose-btn {
   font-size: 11px;
   padding: 3px 9px;
