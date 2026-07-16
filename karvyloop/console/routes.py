@@ -532,9 +532,18 @@ def api_workflow_crystallize(req: WorkflowCrystallizeRequest, request: Request) 
     if not steps:
         return {"ok": False, "reason": "空 workflow"}
     role_keys = list(dict.fromkeys(s.get("agent_id") for s in steps if s.get("agent_id")))
-    tpl_steps = [{"id": s["id"], "role_key": s.get("agent_id"), "task": s.get("task", ""),
-                  "depends_on": list(s.get("depends_on", []))}
-                 for s in steps if s.get("id") and s.get("agent_id")]
+    # docs/84 载体补强:结晶不再丢 when/inputs/on_fail/max_retries —— 否则带分支/汇聚/容错的
+    # workflow 一结晶就退化成最朴素的线性 DAG,复用(_repoint_template 本就透传)拿不回这些字段。
+    tpl_steps = []
+    for s in steps:
+        if not (s.get("id") and s.get("agent_id")):
+            continue
+        st = {"id": s["id"], "role_key": s.get("agent_id"), "task": s.get("task", ""),
+              "depends_on": list(s.get("depends_on", []))}
+        for k in ("inputs", "when", "on_fail", "max_retries"):
+            if s.get(k) is not None:
+                st[k] = s[k]
+        tpl_steps.append(st)
     tpl = _workflow_store(request.app).save(goal=plan.get("goal", ""), role_keys=role_keys,
                                             steps=tpl_steps, name=req.name)
     return {"ok": True, "template": {"id": tpl["id"], "name": tpl["name"]}}

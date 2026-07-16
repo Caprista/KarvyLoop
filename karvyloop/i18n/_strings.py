@@ -669,6 +669,92 @@ _EN = {
         "Catching up means running it once now — not replaying every missed slot. "
         "If you decline or ignore this, nothing runs, and I won't bring this batch up again."
     ),
+    # ---- system-import 段(docs/84 #3 多 agent 系统导入:plan/apply 用户可见文案)----
+    "system_import.note.no_llm": (
+        "No LLM wired (--no-llm?), so the topology can't be read. You can still import each agent "
+        "one by one through the regular agent import (each will run its own decomposition)."
+    ),
+    "system_import.note.triage_failed": (
+        "The system reader didn't produce a valid structure, so the topology is lost — reported "
+        "honestly, nothing was written. You can import each agent one by one through the regular "
+        "agent import (each will run its own decomposition)."
+    ),
+    "system_import.note.skill_agent": (
+        "“{name}” is essentially a process playbook (a skill), not a “who” — it won't land as a "
+        "role or atoms; import it through the skill library."
+    ),
+    "system_import.note.executor_folded": (
+        "“{name}” is a pure executor — it lands as shared atoms only (no role seat); its pipeline "
+        "step folds into the neighbouring role's step."
+    ),
+    "system_import.note.skills_to_import": (
+        "Recognized embedded skills: {skills}. They were not written anywhere — import them through "
+        "the skill library when you want them."
+    ),
+    "system_import.identity.report_note": (
+        "In the original system, {reporters} reported to this role. KarvyLoop never builds "
+        "role→role accountability — accountability is rewired to you; this role reviews their "
+        "output as a duty, not as their boss."
+    ),
+    "system_import.relocate.supervisor": (
+        "The supervisor's static dispatch power moved up: Karvy plans, you approve — no agent "
+        "holds routing power over another."
+    ),
+    "system_import.task.step_fallback": "Complete your part of this stage (building on upstream output).",
+    "system_import.task.review": "Review “{target}”'s output: is it solid, complete, usable downstream?",
+    "system_import.workflow.name": "{domain} · imported flow",
+    "system_import.seed.topic_fallback": "Kick off a roundtable on the system's goal",
+    "system_import.degrade.topology.why": "The collaboration topology could not be read into a valid structure.",
+    "system_import.degrade.topology.fallback": (
+        "Topology lost (reported honestly). Import agents one by one via the regular agent import."
+    ),
+    "system_import.degrade.dynamic_route.why": (
+        "Dynamic routing (which branch runs is decided at runtime by an agent) — a workflow "
+        "template can't hold a runtime router."
+    ),
+    "system_import.degrade.dynamic_route.fallback": (
+        "Flattened into a static dependency; or skip the template and let Karvy plan this hop "
+        "fresh each run."
+    ),
+    "system_import.degrade.loop.why": "Loops aren't supported in workflow templates (honest P1).",
+    "system_import.degrade.loop.fallback": (
+        "The loop edge was dropped. Alternatives: unroll it as up to 2 explicit rounds when "
+        "editing the template, or run it as a roundtable instead."
+    ),
+    "system_import.degrade.report_chain.why": (
+        "“{src}” reported to “{dst}” in the original system — KarvyLoop never builds role→role "
+        "accountability chains (accountability runs role→you and atom→role only)."
+    ),
+    "system_import.degrade.report_chain.fallback": (
+        "Downgraded to a review step + the duty written into “{dst}”'s identity; accountability "
+        "is rewired to you."
+    ),
+    "system_import.degrade.blackboard.why": (
+        "The system shares a writable blackboard/state between agents — KarvyLoop has no shared "
+        "mutable board."
+    ),
+    "system_import.degrade.blackboard.fallback": (
+        "Upstream output feeds downstream steps (inputs), and durable knowledge goes to the "
+        "domain knowledge base."
+    ),
+    "system_import.degrade.schedule.why": "“{agent}” runs on a schedule ({when}) in the original system.",
+    "system_import.degrade.schedule.fallback": (
+        "Not landed this time (daemon atom + domain routine is phase 2). Recreate it under ⏰ "
+        "Scheduled if you need it now."
+    ),
+    "system_import.apply.missing_registry": "Runtime registries not wired (atom/role/domain registry missing).",
+    "system_import.apply.no_domain_name": "The plan has no domain name — give the landing domain a name first.",
+    "system_import.apply.same_name": (
+        "An active domain named “{name}” already exists — rename the landing domain or archive "
+        "the old one first. Nothing was written."
+    ),
+    "system_import.apply.bad_role_id": "Illegal role id “{role_id}” (letters/digits/underscore/hyphen only). Nothing was written.",
+    "system_import.apply.bad_kind": "Role “{role_id}” has an illegal kind (decision/executor/hybrid/skill). Nothing was written.",
+    "system_import.apply.failed": "Landing failed midway: {error}. Everything created this time was rolled back — no orphans.",
+    "system_import.apply.per_agent_mode": (
+        "This plan is in per-agent fallback mode (topology lost) — there is nothing to land as a "
+        "system. Import each agent via the regular agent import."
+    ),
 }
 
 # ---- 中文 ----
@@ -1257,6 +1343,76 @@ _ZH = {
     "proposal.schedule_catchup.basis": (
         "「{title}」到点时系统没开机,这 {n} 场都没跑成。补跑 = 现在按原意图跑**一次**,"
         "不是把错过的每一场都重放。你拒绝或不理会就不补,这批旧账下次开机也不会再提。"
+    ),
+    # ---- system-import 段(docs/84 #3 多 agent 系统导入:plan/apply 用户可见文案)----
+    "system_import.note.no_llm": (
+        "未接 LLM(--no-llm?),读不了协作拓扑。可以改走常规 agent 导入,把每个 agent 逐个导进来"
+        "(每个会各跑一次拆解)。"
+    ),
+    "system_import.note.triage_failed": (
+        "系统读谱没有产出合法结构,拓扑丢失 —— 如实报,未写入任何东西。"
+        "可以改走常规 agent 导入,把每个 agent 逐个导进来(每个会各跑一次拆解)。"
+    ),
+    "system_import.note.skill_agent": (
+        "「{name}」本质是一段流程剧本(技能),不是「谁」—— 不落角色/原子;请走技能库导入。"
+    ),
+    "system_import.note.executor_folded": (
+        "「{name}」是纯执行体 —— 只落公共原子(不给决策席);它在流水线里的那一步折进相邻角色的步骤。"
+    ),
+    "system_import.note.skills_to_import": (
+        "识别出内含技能:{skills}。本次没有写入 —— 需要时去技能库导入。"
+    ),
+    "system_import.identity.report_note": (
+        "原系统中 {reporters} 向该角色汇报。KarvyLoop 绝不建 role→role 问责链 —— 问责已重接到你;"
+        "该角色以「评审它们的产出」为职务,不是它们的上级。"
+    ),
+    "system_import.relocate.supervisor": (
+        "supervisor 的静态分派权已上移:小卡规划、你拍板 —— 没有任何 agent 对另一个 agent 握有路由权。"
+    ),
+    "system_import.task.step_fallback": "承接上游产出,完成你负责的这一环。",
+    "system_import.task.review": "评审「{target}」的产出:扎实吗?完整吗?下游能直接用吗?",
+    "system_import.workflow.name": "{domain}·导入流程",
+    "system_import.seed.topic_fallback": "围绕系统目标开一场圆桌",
+    "system_import.degrade.topology.why": "协作拓扑没能读成合法结构。",
+    "system_import.degrade.topology.fallback": "拓扑丢失(如实报)。各 agent 可走常规 agent 导入逐个导。",
+    "system_import.degrade.dynamic_route.why": (
+        "动态路由(走哪条分支由某个 agent 运行时现场决定)—— workflow 模板装不下运行时路由器。"
+    ),
+    "system_import.degrade.dynamic_route.fallback": (
+        "已静态化成顺序依赖;或不结晶这一跳,每次由小卡现规划。"
+    ),
+    "system_import.degrade.loop.why": "workflow 模板不支持循环(诚实 P1)。",
+    "system_import.degrade.loop.fallback": (
+        "循环边已丢弃。替代:编辑模板时手工展开成 ≤2 轮显式步骤,或改开圆桌。"
+    ),
+    "system_import.degrade.report_chain.why": (
+        "原系统里「{src}」向「{dst}」汇报 —— KarvyLoop 绝不建 role→role 问责链"
+        "(问责只有 role→你 / atom→role 两种)。"
+    ),
+    "system_import.degrade.report_chain.fallback": (
+        "降级为评审步 + 职务写进「{dst}」的 IDENTITY;问责已重接到你。"
+    ),
+    "system_import.degrade.blackboard.why": (
+        "原系统的 agent 之间共享一块可写黑板/共享状态 —— KarvyLoop 没有共享可写板。"
+    ),
+    "system_import.degrade.blackboard.fallback": (
+        "上游产出直接喂下游步骤(inputs),沉淀性的知识进域知识库。"
+    ),
+    "system_import.degrade.schedule.why": "原系统里「{agent}」定时常驻({when})。",
+    "system_import.degrade.schedule.fallback": (
+        "本次不落(daemon 原子 + 域 Routine 是二期)。现在就要的话,去 ⏰ 定时任务里重建一条。"
+    ),
+    "system_import.apply.missing_registry": "运行时注册表未接线(缺 atom/role/domain registry)。",
+    "system_import.apply.no_domain_name": "plan 里没有域名 —— 先给落地的业务域起个名字。",
+    "system_import.apply.same_name": (
+        "已有同名活跃业务域「{name}」—— 换个名字,或先归档旧的。本次未写入任何东西。"
+    ),
+    "system_import.apply.bad_role_id": "非法角色 id「{role_id}」(只能含字母/数字/下划线/连字符)。本次未写入任何东西。",
+    "system_import.apply.bad_kind": "角色「{role_id}」的判型非法(decision/executor/hybrid/skill 四选一)。本次未写入任何东西。",
+    "system_import.apply.failed": "落地中途失败:{error}。本次新建的已全部回滚 —— 不留孤儿。",
+    "system_import.apply.per_agent_mode": (
+        "这份 plan 是逐个导入的降级模式(拓扑已丢失)—— 没有可作为系统落地的内容。"
+        "请走常规 agent 导入逐个导。"
     ),
 }
 

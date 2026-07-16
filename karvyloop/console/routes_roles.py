@@ -425,6 +425,127 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
     }
 
 
+# ---- docs/84 #3:多 agent 系统导入(两阶段 H2A:plan 零写盘 → 人拍板 → apply 确定性落地)----
+
+class SystemImportPlanRequest(BaseModel):
+    bundle: dict = Field(...)                                    # agents[] + topology(源格式原样)
+    domain_name: str = Field(default="", max_length=64)          # 可选:覆盖落地域名
+
+
+@router.post("/agent/import_system/plan")
+async def api_agent_import_system_plan(req: SystemImportPlanRequest, request: Request) -> dict[str, Any]:
+    """读一个多 agent 系统 bundle → ImportPlan + 降级报告(**零写盘**,IR 不持久化)。
+
+    一次 LLM(SYSTEM_TRIAGE,token_source=agent_import)读懂拓扑 → 确定性翻译成 plan
+    (系统→域/嵌套→子域/流水线+条件+失败策略→workflow 模板/群聊→圆桌种子/supervisor→路由权上移;
+    动态路由/循环/汇报链/黑板/定时 → degradations 逐条如实报,人拍板)。
+    宁空勿毒:TRIAGE 出不来合法 IR → mode="per_agent"(拓扑丢失如实报,各 agent 走单 agent 导入,
+    那条路每个会各跑一次拆解);无 LLM 同理。
+    """
+    from karvyloop.adapter.source import ManifestError, parse_system_bundle
+    from karvyloop.adapter.system_import import system_triage, translate_to_plan
+    try:
+        bundle = parse_system_bundle(req.bundle or {}, source_path="<console-import>")
+    except ManifestError as e:
+        raise HTTPException(status_code=422, detail=f"不是可用的多 agent bundle:{e}")
+
+    app = request.app
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    atom_reg = getattr(app.state, "atom_registry", None)
+
+    def _per_agent_fallback(note_key: str) -> dict[str, Any]:
+        # 拓扑读不出/无 LLM:如实报,指路"逐个当单 agent 导"(/api/agent/import),零写盘。
+        return {
+            "ok": True, "mode": "per_agent", "triaged": False,
+            "note": i18n.t(note_key),
+            "agents": [{"name": m.agent_name, "preview": m.system_prompt[:200]}
+                       for m in bundle.agents],
+            "agents_total": bundle.agents_total,
+            "agents_dropped": list(bundle.agents_dropped),
+            "degradations": [{
+                "element": "topology",
+                "why": i18n.t("system_import.degrade.topology.why"),
+                "fallback": i18n.t("system_import.degrade.topology.fallback"),
+            }],
+        }
+
+    if gw is None:
+        return _per_agent_fallback("system_import.note.no_llm")
+    ir = None
+    try:
+        existing = [a.id for a in atom_reg.list_all()] if atom_reg is not None else []
+        with _token_src("agent_import"):        # 导入读谱的 token 入账本、归 agent_import 源
+            ir = await system_triage(bundle, existing_atom_ids=existing,
+                                     gateway=gw, model_ref=rk.get("model_ref", ""))
+    except Exception as e:  # noqa: BLE001 — 读谱任何异常都降级,不让导入崩
+        logger.warning(f"[import_system/plan] TRIAGE 失败,降级逐个导:{e}")
+    if ir is None:
+        return _per_agent_fallback("system_import.note.triage_failed")
+
+    plan, degradations = translate_to_plan(
+        ir, bundle_name=(req.domain_name or bundle.name).strip())
+    if (req.domain_name or "").strip():
+        plan["domain"]["name"] = req.domain_name.strip()
+    return {
+        "ok": True, "mode": "system", "triaged": True,
+        "plan": plan, "degradations": degradations,
+        "agents_total": bundle.agents_total,
+        "agents_dropped": list(bundle.agents_dropped),
+    }
+
+
+class SystemImportApplyRequest(BaseModel):
+    plan: dict = Field(...)                                      # 人审过的 ImportPlan(判型可改/模板可编)
+    created_by_user: str = Field(default="ch", max_length=64)
+
+
+@router.post("/agent/import_system/apply")
+async def api_agent_import_system_apply(req: SystemImportApplyRequest, request: Request) -> dict[str, Any]:
+    """把人拍过板的 ImportPlan **确定性落地**(零 LLM):原子→角色(自动 seed 尽责契约)→
+    域+子域→WorkflowStore 模板(provenance:import)→圆桌种子(H2A 卡,人拍了才开桌)。
+
+    失败回滚不留孤儿;同名活跃域拒。善后:落完若接了 LLM,顺手跑一次原子库合并**建议**
+    (dry-run,只报簇不动库 —— 合并本身另走 H2A)。
+    """
+    from karvyloop.adapter.system_import import SystemApplyError, apply_system_plan
+    app = request.app
+    if (req.plan or {}).get("mode") == "per_agent":
+        raise HTTPException(status_code=422,
+                            detail=i18n.t("system_import.apply.per_agent_mode"))
+    try:
+        report = apply_system_plan(
+            req.plan or {},
+            atom_registry=getattr(app.state, "atom_registry", None),
+            role_registry=getattr(app.state, "role_registry", None),
+            domain_registry=getattr(app.state, "domain_registry", None),
+            domain_store=getattr(app.state, "domain_store", None),
+            workflow_store=getattr(app.state, "workflow_store", None),
+            proposal_registry=getattr(app.state, "proposal_registry", None),
+            created_by_user=req.created_by_user or "ch")
+    except SystemApplyError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # 善后①:原子库合并建议(批量导入后近重复最多的时刻;dry-run,H2A 才真并)
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    atom_reg = getattr(app.state, "atom_registry", None)
+    report["consolidation_suggestions"] = []
+    if gw is not None and atom_reg is not None and report.get("atoms_created") and len(atom_reg) >= 2:
+        try:
+            from karvyloop.atoms.consolidate import suggest_consolidation
+            with _token_src("agent_import"):
+                report["consolidation_suggestions"] = await suggest_consolidation(
+                    atom_reg.list_all(), gateway=gw, model_ref=rk.get("model_ref", ""))
+        except Exception as e:  # noqa: BLE001 — 建议失败不影响已落地资产
+            logger.warning(f"[import_system/apply] 合并建议失败(资产已落):{e}")
+    # 善后②:识别出的内含技能 → 指路技能库导入(不静默改写,人自己拍)
+    if report.get("skills_recognized"):
+        report["note"] = i18n.t("system_import.note.skills_to_import",
+                                skills=", ".join(report["skills_recognized"][:8]))
+    return report
+
+
 def _detect_domain_skill_conflicts(app, domain, agent: str) -> list[dict[str, Any]]:
     """D4 live:检 (agent, 新域) 下全局技能 × 域治理的冲突,注册 resolve_conflict PROPOSE。
 
