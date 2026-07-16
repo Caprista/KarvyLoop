@@ -56,6 +56,15 @@ def _governance_for(app: Any, payload: dict) -> str:
             value_text = ""
     if value_text:
         if len(value_text) > 1500:
+            # B-5 #9 标定埋点 `governance_truncated`(fail-soft,只在真截时落)
+            try:
+                from karvyloop.cognition.calibration import emit
+                emit("governance_truncated", {
+                    "site": "proposal_handlers._governance_for",
+                    "orig_len": len(value_text), "cap": 1500,
+                    "domain": str(payload.get("domain_id", ""))})
+            except Exception:
+                pass
             value_text = value_text[:1500] + "…"
         return f"{identity}\n必须遵循该域的价值观(value.md):\n{value_text}"
     return identity
@@ -322,6 +331,7 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
                 who=(payload.get("role") or "小卡"),
                 domain_id=payload.get("domain_id", "l0"),
                 role=payload.get("role", ""), intent=intent,
+                proposal_id=(getattr(proposal, "proposal_id", "") or ""),  # docs/85:任务↔提案回链(加性)
             )
         try:
             from karvyloop.runtime.main_loop import forge_slow_brain_factory

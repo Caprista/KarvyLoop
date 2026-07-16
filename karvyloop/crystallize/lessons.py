@@ -98,7 +98,17 @@ async def judge_lesson(material: str, *, gateway, model_ref: str = "") -> str:
         ref = gateway.resolve_model(ResolveScope(atom_model=model_ref or None))
     except Exception:
         ref = model_ref
-    mat, _ = clip_to_tokens(material or "", 1500)
+    mat, _clipped = clip_to_tokens(material or "", 1500)
+    if _clipped:
+        # B-5 #9 标定埋点 `governance_truncated`(1500 帽族;此处帽是 token 量纲,
+        # cap_tokens 区分;fail-soft,只在真截时落)
+        try:
+            from karvyloop.cognition.calibration import emit
+            emit("governance_truncated", {
+                "site": "lessons.judge_lesson",
+                "orig_len": len(material or ""), "cap_tokens": 1500})
+        except Exception:
+            pass
     out = ""
     try:
         with token_source("lesson_distill"):

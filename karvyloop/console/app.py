@@ -393,6 +393,17 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 知识概念标签:补 {bres['tagged']} 条")
                         except Exception as ie:
                             _maintenance_item_failed(app, "belief_tags_tick", ie)
+                        # task_insight(docs/82):非任务认知沉淀 —— Trace 执行事件过零 LLM 信号门
+                        # (纠错/replan 恢复/任务 error→done),一次 LLM 抽"环境事实/纠错经验/
+                        # 顺带观察",复现关后走 mem.write 静默写 provisional(**不弹卡**,透明靠
+                        # 记忆面板来源列)。池指纹 watermark + 信号冷却,同 knowledge_tick 纪律。
+                        try:
+                            from karvyloop.console.insight_tick import task_insight_tick
+                            ires = await task_insight_tick(app)
+                            if ires.get("written"):
+                                logger.info(f"[karvyloop console] 执行洞察:沉淀 {ires['written']} 条(provisional)")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "insight_tick", ie)
                         # 兵法回流(docs/78):域角色经验里可泛化的 → LLM 判+脱敏改写 → denylist →
                         # 攒批出卡(ACCEPT 才升镜像)。池指纹 watermark + 冷却,同 knowledge_tick 纪律。
                         try:
@@ -432,16 +443,33 @@ def build_console_app(
         async def _scheduler_loop() -> None:
             import time as _time
             from karvyloop.console.routes import _scheduler_store, fire_schedule
+            # B-5 #11 标定埋点 `tick_stats`:30s tick 的时长/跳拍分布。**绝不每拍落账**
+            # (2880 条/天灌爆 Trace)—— 聚合每小时一条窗口汇总 + 异常慢拍(≥5s)节流直报,
+            # 策略在 calibration.TickStatsAggregator。fail-soft:装不上/记炸了调度照旧。
+            _tick_stats = None
+            try:
+                from karvyloop.cognition.calibration import TickStatsAggregator
+                _tick_stats = TickStatsAggregator(
+                    interval_s=30.0,
+                    trace=getattr(getattr(app.state, "main_loop", None), "trace", None))
+            except Exception:
+                _tick_stats = None
             last = _time.time()
             while True:
                 try:
                     await asyncio.sleep(30)
                     now = _time.time()
+                    _fired = 0
                     for t in _scheduler_store(app).due(since=last, now=now):
+                        _fired += 1
                         try:
                             await fire_schedule(app, t)
                         except Exception as fe:
                             logger.warning(f"[karvyloop console] 定时任务 {t.id} 执行异常: {fe}")
+                    if _tick_stats is not None:
+                        # elapsed = 与上一拍的实际间隔(>2×30s 记跳拍);duration = 本拍干活耗时
+                        _tick_stats.record(_time.time() - now, fired=_fired,
+                                           elapsed_s=now - last)
                     last = now
                 except asyncio.CancelledError:
                     break

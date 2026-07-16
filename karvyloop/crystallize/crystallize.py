@@ -178,15 +178,37 @@ def maybe_promote(
     Trace 派生的满意度(含 checker FAIL 差评/LLM 低质量评)持续低于 floor → 不晋升。
     """
     now = now if now is not None else time.time()
+
+    # B-5 #4 标定埋点 `promote_blocked`(内测分布采集):每个 NotYet/NotEligible 拒绝分支
+    # 落一条 —— 记 reason + 当下分数 vs 各常数当前值(satisfaction_floor=0.45 等"旋钮非真理"
+    # 一族),内测后按真实通过率/拒绝原因分布标定。fail-soft(emit 自兜 + 这里再裹一层),
+    # 埋点绝不改变判定结果。频率 = 每次 slow-brain 落 Trace 的 run 至多一条,无需采样。
+    # 注:crystallize() 的重判仅在 READY 时走到,不会双记拒绝。
+    def _blocked(d: "PromoteDecision", *, score: float = 0.0, sr: float = 0.0,
+                 sat: Optional[float] = None) -> "PromoteDecision":
+        try:
+            from karvyloop.cognition.calibration import emit
+            emit("promote_blocked", {
+                "sig": sig[:12], "gate": d.kind.value, "reason": d.reason,
+                "score": round(score, 3), "success_rate": round(sr, 3),
+                "satisfaction": (round(sat, 3) if sat is not None else None),
+                "promote_score": thresholds.promote_score,
+                "min_success_rate": thresholds.min_success_rate,
+                "floor": getattr(thresholds, "satisfaction_floor", 0.45),
+            })
+        except Exception:
+            pass
+        return d
+
     stats = store.get(sig)
     if stats is None:
-        return PromoteDecision.NotEligible("no usage stats yet")
+        return _blocked(PromoteDecision.NotEligible("no usage stats yet"))
 
     # 关 1(资格):可验证 + 至少成功 1 次
     if not verify.has_gate(sig):
-        return PromoteDecision.NotEligible("no verify gate (关1)")
+        return _blocked(PromoteDecision.NotEligible("no verify gate (关1)"))
     if stats.success_count < 1:
-        return PromoteDecision.NotEligible("never succeeded (关1)")
+        return _blocked(PromoteDecision.NotEligible("never succeeded (关1)"))
 
     # 关 2(价值):用够 + 泛化 + 成功率(均走可配置 thresholds)
     score = usage_score(stats, now=now)
@@ -194,11 +216,14 @@ def maybe_promote(
     generalized = _is_generalized(stats.param_variants, distinct=thresholds.generalized_distinct)
     high_freq = stats.usage_count >= thresholds.min_usage_count
     if score < thresholds.promote_score:
-        return PromoteDecision.NotYet(f"score {score:.2f} < {thresholds.promote_score}")
+        return _blocked(PromoteDecision.NotYet(
+            f"score {score:.2f} < {thresholds.promote_score}"), score=score, sr=sr)
     if sr < thresholds.min_success_rate:
-        return PromoteDecision.NotYet(f"success_rate {sr:.2f} < {thresholds.min_success_rate}")
+        return _blocked(PromoteDecision.NotYet(
+            f"success_rate {sr:.2f} < {thresholds.min_success_rate}"), score=score, sr=sr)
     if not (generalized or high_freq):
-        return PromoteDecision.NotYet("not generalized and not high_freq")
+        return _blocked(PromoteDecision.NotYet("not generalized and not high_freq"),
+                        score=score, sr=sr)
     # 关 2(信用,docs/44 断⑭):满意度(新近度加权,抗滞后)不许持续差评。保守:
     # 样本不足 min_samples 不判;评不出(异常)不拦 —— 只有**确凿**差评才挡晋升。
     if satisfaction is not None:
@@ -209,8 +234,9 @@ def maybe_promote(
             if len(samples) >= min_n:
                 sat = satisfaction.mean_overall_recent(sig)
                 if sat is not None and sat < floor:
-                    return PromoteDecision.NotYet(
-                        f"satisfaction {sat:.2f} < {floor}(近期被打差评,不晋升)")
+                    return _blocked(PromoteDecision.NotYet(
+                        f"satisfaction {sat:.2f} < {floor}(近期被打差评,不晋升)"),
+                        score=score, sr=sr, sat=sat)
         except Exception:
             pass  # 满意度评不出 → 不拦(信号缺失≠差评)
     return PromoteDecision.Ready(

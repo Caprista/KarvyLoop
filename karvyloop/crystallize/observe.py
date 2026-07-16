@@ -57,8 +57,24 @@ def observe(
         # 9.4:先试把这个意图归并到最相近的已有 cluster(token overlap);无人达标 → 精确签名开新
         sig = None
         if cluster_threshold > 0 and intent:
+            _cd: dict = {}
             sig = match_cluster(intent, ((s, st.intent_repr) for s, st in store.all()),
-                                cluster_threshold)
+                                cluster_threshold, explain_sink=_cd)
+            # B-5 #5 标定埋点 `cluster_decision`:overlap 分布/聚类命中率,内测后标定
+            # cluster_overlap_threshold=0.2。**只在这里落**(observe 是累积聚类的判定点;
+            # main_loop 3b 的对齐重查不传 sink → 不双记)。频率 = 每次 slow-brain run 一条,
+            # 无需采样。fail-soft:emit 自兜 + 再裹一层,埋点绝不影响投影。
+            try:
+                from karvyloop.cognition.calibration import emit
+                emit("cluster_decision", {
+                    "overlap": round(float(_cd.get("best_overlap", 0.0)), 3),
+                    "shared": int(_cd.get("best_shared", 0)),
+                    "merged": sig is not None,
+                    "threshold": cluster_threshold,
+                    "n_clusters": int(_cd.get("n_candidates", 0)),
+                })
+            except Exception:
+                pass
         sig = sig or exact_sig
         # 每个 run 自带时间戳(来自 Trace);缺失才用 clock
         now = run.ts if run.ts else clock()

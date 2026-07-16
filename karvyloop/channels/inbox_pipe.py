@@ -306,6 +306,15 @@ def validate_triage(obj: Optional[dict]) -> Optional[dict]:
 
 def triage_material(mail: InboxMail) -> str:
     """分诊材料 = 只有这一封邮件(隐私分级:不含收件箱以外任何上下文)。"""
+    if len(mail.body) > BODY_TRIAGE_CHARS:
+        # B-5 #9 标定埋点 `governance_truncated`(1500 帽族;fail-soft,只在真截时落)
+        try:
+            from karvyloop.cognition.calibration import emit
+            emit("governance_truncated", {
+                "site": "inbox_pipe.triage_material",
+                "orig_len": len(mail.body), "cap": BODY_TRIAGE_CHARS})
+        except Exception:
+            pass
     return (
         f"发件人:{mail.sender}\n"
         f"主题:{mail.subject}\n"

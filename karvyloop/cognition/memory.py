@@ -28,6 +28,24 @@ class MultipleExternalProvidersError(ValueError):
     """同时配多个外部 provider → 拒绝(参照业界单外部限制)。"""
 
 
+# ---- B-5 #10 标定采样(spread_recall_stats 的量控)----
+# 召回每轮 drive 都跑,全量落账会灌爆 Trace。策略(写死在 recall_block 调用点):
+# ① drive 生产路径本就传 explain_sink(ws/routes)→ spread 明细免费拿;
+# ② 没传 sink 的路径每 _SPREAD_SAMPLE_EVERY 次强制开一次本地 sink(采样);
+# ③ 落账条件 = **采样命中**(给 via_spread 命中率一个无偏分母)或 **via_spread>0**
+#   (hop 分布的每一例都要 —— 扩散命中本身低频,是 hops=3/decay=0.5 标定的主料)。
+# 计数器是模块级 int(GIL 下自增偶有竞态只影响采样相位,不影响任何业务行为)。
+_SPREAD_SAMPLE_EVERY = 8
+_spread_calib_seq = 0
+
+
+def _spread_calib_sampled() -> bool:
+    global _spread_calib_seq
+    seq = _spread_calib_seq
+    _spread_calib_seq = seq + 1
+    return seq % _SPREAD_SAMPLE_EVERY == 0
+
+
 def belief_recency_ts(b: Belief) -> float:
     """Belief 的"沉淀时刻":provenance.ts 优先(写入时刻),缺/坏则退 freshness_ts。
     只读辅助(recent 排序 + API 展示共用一个口径,不各算各的)。"""
@@ -490,10 +508,33 @@ class MemoryManager:
             except Exception:
                 concepts = None   # 标签层是增益不是命脉:读缓存失败退回纯词面,不挂召回
 
-        spread_sink: Optional[list] = [] if explain_sink is not None else None
+        # B-5 #10:采样开关(策略见模块头 _SPREAD_SAMPLE_EVERY 注释)。explain_sink 已给
+        # (drive 生产路径)→ 明细免费;否则按 1/N 采样才开本地 sink(不给未采样调用
+        # 加 hop 跟踪开销)。
+        _calib_sampled = _spread_calib_sampled()
+        spread_sink: Optional[list] = (
+            [] if (explain_sink is not None or _calib_sampled) else None)
         ranked = spreading_activation_recall(beliefs, query, concepts=concepts,
                                              top_k=max(0, limit),
                                              explain_sink=spread_sink)
+        # B-5 #10 标定埋点 `spread_recall_stats`(召回咽喉):把 explain 的 via_spread/hops
+        # 从临时字段变持久分布 —— 内测后标定 hops=3/decay=0.5。落账 = 采样命中 或 有扩散命中;
+        # payload 只装聚合标量(条数/跳数),不装内容。fail-soft,绝不影响召回返回。
+        if spread_sink is not None:
+            try:
+                from karvyloop.cognition.calibration import emit
+                _n_spread = sum(1 for e in spread_sink if e.get("via_spread"))
+                if _calib_sampled or _n_spread:
+                    _hops = [int(e.get("hops", 0)) for e in spread_sink if e.get("via_spread")]
+                    from karvyloop.cognition.spread import _DEFAULT_DECAY, _DEFAULT_HOPS
+                    emit("spread_recall_stats", {
+                        "picked": len(spread_sink), "via_spread": _n_spread,
+                        "max_hops": max(_hops) if _hops else 0, "hops": _hops,
+                        "beliefs": len(beliefs), "sampled": _calib_sampled,
+                        "hops_cfg": _DEFAULT_HOPS, "decay_cfg": _DEFAULT_DECAY,
+                    }, trace=getattr(self, "trace", None))
+            except Exception:
+                pass
         # Q1 召回解释:spread 的算法级解释(词面/标签/扩散)+ 本层补溯源与定位字段。
         # belief_key:index 以 content 为唯一 key(provenance["id"] 全仓无 producer 写),
         # 但 payload 不塞全文 → 用 provenance.id(若有)否则 content 短 hash 做稳定标识。

@@ -58,6 +58,7 @@ def match_cluster(
     threshold: float,
     *,
     min_shared: int = _MIN_SHARED,
+    explain_sink: Optional[dict] = None,
 ) -> Optional[str]:
     """把 intent 归并到最相近的已有 cluster,返回其 sig;无人达标 → None(开新 cluster)。
 
@@ -65,7 +66,13 @@ def match_cluster(
     threshold:重叠分门槛(0..1);<=0 视为关闭聚类(总是 None=精确签名旧行为)。
     min_shared:还要求**绝对共享 token 数 >= 此值** —— 防短意图只共享 1 个通用词
       (如 "python")就被误并到不同任务(ratio 对短意图太敏感)。
+    explain_sink(B-5 #5 标定,可选;模式同 spread.explain_sink):给个 dict 就回填判定
+      中间量 —— best_overlap(**未过门槛也记**的最强原始重叠分,给分布看阈值 0.2 卡在哪)、
+      best_shared / n_candidates / merged。默认 None = 热路径行为与产出一字不变。
     """
+    if explain_sink is not None:
+        explain_sink.update({"best_overlap": 0.0, "best_shared": 0,
+                             "n_candidates": 0, "merged": False})
     if threshold <= 0:
         return None
     toks = intent_tokens(intent)
@@ -78,12 +85,21 @@ def match_cluster(
             continue
         cluster_toks = intent_tokens(repr_intent)
         shared = len(toks & cluster_toks)
+        if explain_sink is not None:
+            # 标定要看"没并上的差多远":原始重叠分不吃 min_shared/threshold 门(只记不判)
+            explain_sink["n_candidates"] += 1
+            s_raw = shared / len(toks)
+            if s_raw > explain_sink["best_overlap"]:
+                explain_sink["best_overlap"] = s_raw
+                explain_sink["best_shared"] = shared
         if shared < min_shared:
             continue  # 共享太少 → 不同任务,不并
         s = shared / len(toks)
         if s > best and s >= threshold:
             best = s
             best_sig = sig
+    if explain_sink is not None:
+        explain_sink["merged"] = best_sig is not None
     return best_sig
 
 

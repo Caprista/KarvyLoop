@@ -190,6 +190,15 @@ class MainLoop:
         # M3+ 批 6:Trace 持久化底座(append-only)。生产路径走 SqliteTraceStore;
         # 测试/MainLoop 单跑默认 InMemoryTraceStore,行为不变。
         self.trace = trace if trace is not None else TraceStore(clock=self._clock)
+        # B-5 标定埋点(docs/68 P1 未标定常数族):把本 loop 的 Trace 装成**进程级**标定 sink——
+        # 散在 conversation/channels/console 等无 Trace 句柄模块里的常数分布埋点由此落账。
+        # fail-soft 观测面,不反哺业务面;生产恰好一个 MainLoop(与周报/评价共用同一份事件底座),
+        # 测试多实例 last-wins 只影响标定数据归属,不影响任何行为。弱引用,不给弃店续命。
+        try:
+            from karvyloop.cognition.calibration import set_calibration_trace
+            set_calibration_trace(self.trace)
+        except Exception:
+            pass
         # 拍 9.3c(修 D1):漏斗原文层(fastbrain.TraceIndex,duck-type 只调 append_raw)。
         # 注入则每次 drive 把事件落原文层 → 提炼器异步 原文→摘要→习惯(docs/27)。
         # 默认 None = 不写漏斗(0 回归;此前原文层无写入者是断链根因)。

@@ -489,7 +489,22 @@ class ConversationManager:
     def context_view(self) -> tuple[Turn, ...]:
         if self._current is None:
             return ()
-        return self._current.context_view(self._context_turns)
+        view = self._current.context_view(self._context_turns)
+        # B-5 #8 标定埋点 `context_truncated`:Conversation.context_view 的静默切窗
+        # (DEFAULT_CONTEXT_TURNS=12)从不留痕 → 记 total/kept/dropped 分布,内测后标定窗宽。
+        # 频率 = 长对话里每轮一条(与 user_turn 同量级,几十/天,不采样);fail-soft,
+        # 埋点绝不影响视图返回。
+        total = self._current.turn_count
+        if len(view) < total:
+            try:
+                from karvyloop.cognition.calibration import emit
+                emit("context_truncated", {
+                    "total_turns": total, "kept": len(view),
+                    "dropped": total - len(view), "max_turns": self._context_turns,
+                })
+            except Exception:
+                pass
+        return view
 
     def governance_text(self) -> str:
         """当前场的治理文本(CV-14):业务域线 = 该域 value.md **+ deontic 硬规则**(forbid/oblige/permit,
@@ -518,6 +533,16 @@ class ConversationManager:
             # 拍 9.3b:value.md 封顶(docs/28 TK token 纪律)—— 防超长 value.md 每轮重付;
             # 域级稳定文本本就靠 prompt cache 复用,这里再兜一道上限。
             if len(value_text) > 1500:
+                # B-5 #9 标定埋点 `governance_truncated`(主注入点):1500 字符帽真截时
+                # 记 orig_len 分布,内测后标定帽值。只在真截时落(低频),fail-soft。
+                try:
+                    from karvyloop.cognition.calibration import emit
+                    emit("governance_truncated", {
+                        "site": "conversation.governance_text", "orig_len": len(value_text),
+                        "cap": 1500, "domain": self._peer.domain_id,
+                    })
+                except Exception:
+                    pass
                 value_text = value_text[:1500] + "…"
             blocks.append(
                 f"你正在业务域「{name}」里工作,必须遵循该域的价值观(value.md):\n{value_text}"
