@@ -443,6 +443,17 @@ def build_console_app(
         async def _scheduler_loop() -> None:
             import time as _time
             from karvyloop.console.routes import _scheduler_store, fire_schedule
+            # 跨天离线追赶(持久 loop 二环):关机期间错过的场次,开机先按水位扫一遍 →
+            # 每个 schedule 聚合**一张** H2A 补跑确认卡(绝不逐场自动重放);水位随扫描
+            # 推进,REJECT/无人拍也不重弹同一批。fail-soft:扫描炸了调度照旧。
+            try:
+                from karvyloop.console.routes_schedules import raise_schedule_catchup_cards
+                _n_catchup = await raise_schedule_catchup_cards(app)
+                if _n_catchup:
+                    logger.info(f"[karvyloop console] 离线追赶:{_n_catchup} 个定时任务有错过场次,"
+                                "已出补跑确认卡(待拍板,不自动补)")
+            except Exception as e:
+                logger.warning(f"[karvyloop console] 离线追赶扫描失败(跳过,调度照常): {e}")
             # B-5 #11 标定埋点 `tick_stats`:30s tick 的时长/跳拍分布。**绝不每拍落账**
             # (2880 条/天灌爆 Trace)—— 聚合每小时一条窗口汇总 + 异常慢拍(≥5s)节流直报,
             # 策略在 calibration.TickStatsAggregator。fail-soft:装不上/记炸了调度照旧。

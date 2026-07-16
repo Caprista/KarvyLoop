@@ -307,6 +307,21 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     return handler
 
 
+def _mark_schedule_run(app: Any, payload: dict, *, error: str = "") -> None:
+    """schedule_catchup 骑 run_task:补跑结果落回 schedule 看板(last_run/last_status)。
+
+    水位(last_fired)在开机扫描时已推进,这里只把"真跑过了"记诚实(mark_run 顺带
+    保水位不倒退)。fail-soft:记不上不影响补跑结果本身。非补跑卡(无 schedule_id)零开销。"""
+    sid = str((payload or {}).get("schedule_id") or "").strip()
+    if not sid:
+        return
+    try:
+        from karvyloop.console.routes_schedules import _scheduler_store
+        _scheduler_store(app).mark_run(sid, "error" if error else "ok", error=error)
+    except Exception as e:
+        logger.debug(f"[run_task] schedule 补跑落账失败(不阻断): {e}")
+
+
 def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     """run_task ACCEPT 兑现(loop-step2c:闭合主动 loop)。
 
@@ -361,12 +376,14 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
         except Exception as e:
             if task_reg is not None and tid:
                 task_reg.finish(tid, error=str(e))
+            _mark_schedule_run(app, payload, error=str(e))
             logger.warning(f"[run_task] 重跑失败: {e}")
             return False, f"重跑失败: {e}"
         err = getattr(result, "error", "") or ""
         txt = (getattr(result, "text", "") or "").strip()
         if task_reg is not None and tid:
             task_reg.finish(tid, result=txt, error=err)
+        _mark_schedule_run(app, payload, error=err)
         if err:
             return False, f"重跑出错: {err}"
         short = txt.replace("\n", " ")

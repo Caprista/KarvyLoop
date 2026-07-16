@@ -56,6 +56,51 @@ def resume_proposal_for(t: dict, *, now: Optional[float] = None) -> Optional[Pro
     )
 
 
+def catchup_proposal_for(t, missed_count: int, latest_missed: Optional[float], *,
+                         capped: bool = False, now: Optional[float] = None) -> Optional[Proposal]:
+    """给一条离线期间错过场次的定时任务造一张「要补跑一次吗」H2A 卡(骑 run_task)。
+
+    - **聚合**:一个 schedule 一张卡;N 场错过只补跑**一次**(关机三天的 hourly=72 场,
+      逐场重放才是错的)。绝不 auto-execute:卡只是问,ACCEPT 才由既有 run_task handler
+      真跑 intent(payload 带 schedule_id → handler 顺手把结果记回 schedule 看板)。
+    - **幂等**:proposal_id 按 schedule id 稳定 → 同 schedule 收敛一张卡,不重弹。
+    - `t` duck type:需 id/intent/title/target_domain/target_role(karvy.scheduler.ScheduledTask)。
+    """
+    from karvyloop import i18n
+    intent = (getattr(t, "intent", "") or "").strip()
+    if not intent or missed_count < 1:
+        return None
+    title = (getattr(t, "title", "") or intent).strip() or intent
+    if len(title) > 40:
+        title = title[:40] + "…"
+    n_disp = f"{missed_count}+" if capped else str(missed_count)
+    when = "-"
+    if latest_missed:
+        import datetime
+        when = datetime.datetime.fromtimestamp(latest_missed).strftime("%Y-%m-%d %H:%M")
+    return Proposal(
+        summary=i18n.t("proposal.schedule_catchup.summary", title=title, n=n_disp, when=when),
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=0.7,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=(now if now is not None else time.time()),
+        kind=KIND_RUN_TASK,
+        payload={
+            "intent": intent,
+            "domain_id": getattr(t, "target_domain", "") or "l0",
+            "role": getattr(t, "target_role", "") or "",
+            "source": "schedule_catchup",
+            "schedule_id": getattr(t, "id", ""),
+            "missed_count": int(missed_count),
+        },
+        proposal_id=f"schedule_catchup-{getattr(t, 'id', '')}",
+        basis=i18n.t("proposal.schedule_catchup.basis", title=title, n=n_disp),
+        context_ref={"kind": "schedule", "id": getattr(t, "id", "")},
+    )
+
+
 def propose_from_tasks(task_registry, *, now: Optional[float] = None) -> Optional[Proposal]:
     """观察任务看板:最近若有失败/中断的任务,提议重试它;否则返 None(沉默)。
 
@@ -75,4 +120,4 @@ def propose_from_tasks(task_registry, *, now: Optional[float] = None) -> Optiona
     return None
 
 
-__all__ = ["propose_from_tasks", "resume_proposal_for"]
+__all__ = ["propose_from_tasks", "resume_proposal_for", "catchup_proposal_for"]

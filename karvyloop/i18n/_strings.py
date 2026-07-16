@@ -659,6 +659,16 @@ _EN = {
     "insight.kind.env": "environment fact",
     "insight.kind.correction": "correction lesson",
     "insight.kind.observation": "incidental observation",
+    # ---- schedule-catchup 段(跨天离线追赶:关机期间错过的定时任务 → 聚合补跑确认卡)----
+    "proposal.schedule_catchup.summary": (
+        "While you were away, “{title}” missed {n} scheduled run(s) "
+        "(most recent was due {when}) — want me to run it once to catch up?"
+    ),
+    "proposal.schedule_catchup.basis": (
+        "The system was off when “{title}” came due, so those {n} run(s) never happened. "
+        "Catching up means running it once now — not replaying every missed slot. "
+        "If you decline or ignore this, nothing runs, and I won't bring this batch up again."
+    ),
 }
 
 # ---- 中文 ----
@@ -1240,6 +1250,14 @@ _ZH = {
     "insight.kind.env": "环境事实",
     "insight.kind.correction": "纠错经验",
     "insight.kind.observation": "顺带观察",
+    # ---- schedule-catchup 段(跨天离线追赶:关机期间错过的定时任务 → 聚合补跑确认卡)----
+    "proposal.schedule_catchup.summary": (
+        "你不在的时候,「{title}」错过了 {n} 次(最近该跑:{when})—— 要补跑一次吗?"
+    ),
+    "proposal.schedule_catchup.basis": (
+        "「{title}」到点时系统没开机,这 {n} 场都没跑成。补跑 = 现在按原意图跑**一次**,"
+        "不是把错过的每一场都重放。你拒绝或不理会就不补,这批旧账下次开机也不会再提。"
+    ),
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

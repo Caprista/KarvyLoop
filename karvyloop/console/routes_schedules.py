@@ -148,6 +148,42 @@ async def api_schedule_run_now(req: ScheduleIdRequest, request: Request) -> dict
     return {"ok": True}
 
 
+async def raise_schedule_catchup_cards(app: Any) -> int:
+    """跨天离线追赶(持久 loop 二环收尾):console 开机时调一次 —— 扫水位算出关机期间
+    每条定时任务错过的场次,**每个 schedule 聚合弹一张**「要补跑一次吗」H2A 卡。
+
+    H2A 纪律:
+    - 绝不 auto-execute:卡只是问;ACCEPT 才由既有 run_task handler 真跑**一次**
+      (骑 run_task,payload 带 schedule_id/missed_count;绝不逐场重放)。
+    - 水位在 catchup_scan 里已推进到 now:REJECT/无人拍 = 不补,下次开机不再弹同一批。
+    - 防重弹:proposal_id 按 schedule id 稳定;同 schedule 的补跑卡还挂着 → 跳过。
+    返回本次弹出的卡数;单条失败跳过不阻断。
+    """
+    import time as _t
+    st = _scheduler_store(app)
+    missed = st.catchup_scan(now=_t.time())
+    if not missed:
+        return 0
+    from karvyloop.console.proposals import broadcast_proposal
+    from karvyloop.karvy.proactive import catchup_proposal_for
+    reg = getattr(app.state, "proposal_registry", None)
+    raised = 0
+    for m in missed:
+        t = m["task"]
+        if reg is not None and reg.get(f"schedule_catchup-{t.id}") is not None:
+            continue   # 同 schedule 已有待决补跑卡挂着,不重弹
+        card = catchup_proposal_for(t, m["missed_count"], m.get("latest_missed"),
+                                    capped=bool(m.get("capped")), now=_t.time())
+        if card is None:
+            continue
+        try:
+            await broadcast_proposal(app, card)
+            raised += 1
+        except Exception as e:
+            logger.warning(f"[schedule] 补跑确认卡广播失败(跳过 {t.id}): {e}")
+    return raised
+
+
 async def fire_schedule(app: Any, t) -> None:
     """到点(或手动)执行一条定时任务:灌进 drive 管线;有委派目标就以那个角色人格跑,否则小卡自己跑。
 

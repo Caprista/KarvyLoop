@@ -34,6 +34,9 @@ class ScheduledTask:
     last_run: float = 0.0
     last_status: str = ""        # ok | error | ""(没跑过)
     last_error: str = ""
+    # 离线追赶水位(跨天):**该时刻之前的所有场次都已处置过**(真跑过 / 或开机扫描时
+    # 有意识地聚合报过一次)。老数据没有这字段 → 0.0,首次扫描补水位、不编错过(加性兼容)。
+    last_fired: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -42,6 +45,46 @@ class ScheduledTask:
 def _valid_cron(expr: str) -> bool:
     from croniter import croniter
     return bool(expr) and croniter.is_valid(expr)
+
+
+# 离线追赶单次扫描的场次计数上限:防"每分钟 cron + 离线一年"把开机扫描拖死。
+# 数到顶就停(卡文案带 "+"),补跑本来就只补一次,精确到场没有价值。
+CATCHUP_CAP = 1000
+
+
+def missed_between(cron: str, since: float, until: float, *, cap: int = CATCHUP_CAP) -> tuple[int, Optional[float]]:
+    """算 (since, until] 之间该触发而没触发的场次数,返回 (N, 最近一次该跑的时间戳)。
+
+    诚实边界(不编):cron 非法 / since<=0(老数据没水位)/ since>=until(时钟回拨或
+    零窗口)→ (0, None)。计数顶到 cap 就停;此时"最近该跑"用 until 往回倒一格补准。
+    与 next_run_after 同口径:按本地墙钟算(用户说"每天 8 点"=他本地 8 点)。
+    """
+    if not _valid_cron(cron) or since <= 0 or since >= until:
+        return 0, None
+    import datetime
+
+    from croniter import croniter
+    try:
+        it = croniter(cron, datetime.datetime.fromtimestamp(since))
+        n = 0
+        latest: Optional[float] = None
+        while n < cap:
+            ts = it.get_next(datetime.datetime).timestamp()
+            if ts > until:
+                break
+            latest = ts
+            n += 1
+        if n >= cap:   # 顶了:最近一场用 until 往回倒(计数是下限,展示才诚实)
+            try:
+                prev = croniter(cron, datetime.datetime.fromtimestamp(until)).get_prev(
+                    datetime.datetime).timestamp()
+                if prev > since:
+                    latest = prev
+            except Exception:
+                pass
+        return n, latest
+    except Exception:
+        return 0, None
 
 
 def next_run_after(cron: str, after_ts: float) -> Optional[float]:
@@ -112,11 +155,13 @@ class SchedulerStore:
         if not _valid_cron(cron) or not (intent or "").strip():
             return None
         tid = uuid.uuid4().hex[:12]
+        now = self._now()
         t = ScheduledTask(
             id=tid, cron=cron.strip(), intent=intent.strip(),
             title=(title or intent).strip()[:60],
             target_domain=target_domain or "", target_role=target_role or "",
-            target_agent_id=target_agent_id or "", enabled=True, created_at=self._now(),
+            target_agent_id=target_agent_id or "", enabled=True, created_at=now,
+            last_fired=now,   # 水位从创建起算:创建之前谈不上"错过"
         )
         self._tasks[tid] = t
         self._save()
@@ -150,6 +195,7 @@ class SchedulerStore:
         t.last_run = ts if ts is not None else self._now()
         t.last_status = status
         t.last_error = (error or "")[:300]
+        t.last_fired = max(t.last_fired, t.last_run)   # 跑过(哪怕失败)= 这场处置过,水位跟上
         self._save()
 
     # ---- 触发判定 ----
@@ -178,5 +224,42 @@ class SchedulerStore:
                 out.append(t)
         return out
 
+    # ---- 离线追赶(跨天;console 开机时调一次)----
 
-__all__ = ["ScheduledTask", "SchedulerStore", "next_run_after"]
+    def catchup_scan(self, *, now: Optional[float] = None) -> list[dict]:
+        """扫描关机期间错过的场次(持久 loop 二环):对每条任务按水位 last_fired 算
+        (last_fired, now] 之间该跑没跑的场次数,返回只含 enabled 且 N≥1 的
+        [{"task", "missed_count", "latest_missed", "capped"}] —— 调用方据此**每个
+        schedule 聚合弹一张 H2A 补跑卡**(绝不逐场自动重放)。
+
+        水位纪律(同一批只报一次,拍不拍/怎么拍都不重弹):
+        - 没水位(老数据 last_fired=0)→ 补水位到 now、不报错过(诚实:不编);
+        - 时钟回拨(last_fired > now)→ 不报、不动水位(墙钟追上来自愈);
+        - 其余(含 disabled / N=0 / N≥1)→ 水位一律推进到 now。disabled 是你主动
+          停的,停用期不算"错过",重新启用也不翻旧账。
+        """
+        cur = now if now is not None else self._now()
+        out: list[dict] = []
+        changed = False
+        for t in self._tasks.values():
+            wm = float(t.last_fired or 0.0)
+            if wm <= 0:                       # 老数据没水位:补上,不编错过
+                t.last_fired = cur
+                changed = True
+                continue
+            if wm > cur:                      # 时钟回拨:不编、不动
+                continue
+            if t.enabled:
+                n, latest = missed_between(t.cron, wm, cur)
+                if n >= 1:
+                    out.append({"task": t, "missed_count": n, "latest_missed": latest,
+                                "capped": n >= CATCHUP_CAP})
+            if t.last_fired != cur:
+                t.last_fired = cur
+                changed = True
+        if changed:
+            self._save()
+        return out
+
+
+__all__ = ["ScheduledTask", "SchedulerStore", "next_run_after", "missed_between", "CATCHUP_CAP"]
