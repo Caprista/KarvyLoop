@@ -54,6 +54,8 @@ _SOURCE_ALIAS = {
     "consolidated": "trace_verified",  # 知识合并条(人 ACCEPT 过 = 过了人审门)
     "roundtable": "trace_observed",   # 圆桌沉淀(系统观察产物)
     "conversation": "distill_extracted",  # 对话自动蒸馏(猜的,低权威)
+    "task_insight": "distill_extracted",  # 执行洞察(docs/82 daily tick 自动蒸的,auto 档:
+                                          # 永掀不翻 user_explicit;provisional 再封顶一道)
     "import": "imported",
 }
 

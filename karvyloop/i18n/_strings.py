@@ -654,6 +654,11 @@ _EN = {
         "No LLM wired, or decomposition didn't succeed → deterministic adapter (tools listed by name "
         "only; no atoms minted)."
     ),
+    # ---- task-insight 段(docs/82 非任务认知沉淀:记忆面板来源列/kind 标签)----
+    "memory.source.task_insight": "execution insight (auto-distilled from run traces, provisional)",
+    "insight.kind.env": "environment fact",
+    "insight.kind.correction": "correction lesson",
+    "insight.kind.observation": "incidental observation",
 }
 
 # ---- 中文 ----
@@ -1230,6 +1235,11 @@ _ZH = {
         "要让它真能干活 → 去技能库**建或导一个 skill** 给它(skill 会落到写代码跑 / 连 MCP)。"
     ),
     "agent_import.note.v0_fallback": "未接 LLM 或拆解未成 → 走确定性 adapter(tools 仅列名,未出原子)",
+    # ---- task-insight 段(docs/82 非任务认知沉淀:记忆面板来源列/kind 标签)----
+    "memory.source.task_insight": "执行洞察(从运行记录自动沉淀,暂记待核)",
+    "insight.kind.env": "环境事实",
+    "insight.kind.correction": "纠错经验",
+    "insight.kind.observation": "顺带观察",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

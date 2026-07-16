@@ -14,6 +14,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from karvyloop import i18n
 from karvyloop.llm.token_ledger import token_source as _token_src
 
 from .distill_engine import (
@@ -399,6 +400,10 @@ def api_memory_list(request: Request, include_invalid: int = 0) -> dict[str, Any
             "kind": b.provenance.get("kind", "?"),
             "pinned": mem.index.is_pinned(b),
             "source": b.provenance.get("source", "?"),
+            # task-insight 展示口径(docs/82):新 source 的人话标签由后端 i18n 给
+            # (前端 mem.src_* 表没有它时回退裸 source;其余 source 仍走前端表,label 留空)
+            "source_label": (i18n.t("memory.source.task_insight")
+                             if b.provenance.get("source") == "task_insight" else ""),
             "source_ref": b.provenance.get("source_ref", ""),   # 列表/详情卡显示真实来源(链接/文件)
             # Q2 出处回链:对话蒸馏产物带产生它的会话 id → 面板"对话沉淀"可点回;老数据降级 ""
             "conversation_id": b.provenance.get("conversation_id", ""),
