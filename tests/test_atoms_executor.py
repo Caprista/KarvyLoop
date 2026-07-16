@@ -582,6 +582,161 @@ async def test_slicec_chain_coding_fail_then_success_yields_insight_signal():
     assert "文件不存在" in sigs[0].material                        # 失败真因进材料
 
 
+# ============ 存量 fail-loud 真伤:turn 内部上抛时终态必须诚实(§0.7)============
+# 对抗验收实锤:run_tools 整体上抛(串行批 BaseException / capability_check 自身抛)时,
+# finally 的 fail_loud_crash 未置位 → 曾先吐 TerminalEvent(COMPLETED, success=True)
+# 假成功事件再传异常。修后:终态照 abort 既有失败形状标 ABORTED_TOOLS(success=False),
+# 异常照传不吞;关停路径(CancelledError)不吐终态原样上冒。
+
+class _HardCrash(BaseException):
+    """非 Exception 的 BaseException:穿透 _run_one 的 except Exception 兜底。"""
+
+
+class _RaisingTool:
+    """串行(非并发安全)工具,调用即抛指定异常。"""
+    def __init__(self, name: str, exc: BaseException):
+        self.name = name
+        self.exc = exc
+        self.description = f"raising tool {name}"
+        self.parameters = {"type": "object", "properties": {}}
+
+    async def __call__(self, input: dict):
+        raise self.exc
+
+    def is_concurrency_safe(self, input: dict) -> bool:
+        return False
+
+
+def _one_tool_rounds() -> ScriptedMockAdapter:
+    return ScriptedMockAdapter(rounds=[
+        tool_round("c1", "write_file", {"path": "/tmp/a", "data": "x"}),
+        text_round("never reached"),
+    ])
+
+
+@pytest.mark.asyncio
+async def test_failloud_serial_batch_baseexception_honest_terminal():
+    """串行批工具抛 BaseException → 无 COMPLETED/success=True 假事件;
+    终态诚实(ABORTED_TOOLS + success=False,照 abort 既有失败形状)+ 异常照传。"""
+    tool = _RaisingTool("write_file", _HardCrash("hard crash in tool"))
+    events: list = []
+    with pytest.raises(_HardCrash, match="hard crash"):
+        async for ev in run(_atom(), {"q": "go"}, _tok(), gateway=_gw(_one_tool_rounds()),
+                            tools={"write_file": tool}):
+            events.append(ev)
+    terms = [e for e in events if isinstance(e, TerminalEvent)]
+    assert not any(t.reason == Terminal.COMPLETED or t.run.success for t in terms), \
+        f"崩溃路径吐了假成功终态: {[(t.reason, t.run.success) for t in terms]}"
+    # 终态诚实:失败终态在、形状照旧(reason + AtomRun.success/terminal,无新形状)
+    assert len(terms) == 1
+    assert terms[0].reason == Terminal.ABORTED_TOOLS
+    assert terms[0].run.success is False
+    assert terms[0].run.terminal == "aborted_tools"
+    assert isinstance(events[-1], TerminalEvent)   # 终态仍是(异常前)最后一个事件
+
+
+@pytest.mark.asyncio
+async def test_failloud_capability_check_raise_honest_terminal(monkeypatch):
+    """capability_check 自身抛(gate 代码缺陷)→ 同款:无假成功终态 + 异常上抛 + 终态诚实。"""
+    def _gate_bug(pc):
+        raise KeyError("gate bug")
+    monkeypatch.setattr("karvyloop.atoms.executor._authorize", _gate_bug)
+    read = _Tool("write_file", safe=False)
+    events: list = []
+    with pytest.raises(KeyError, match="gate bug"):
+        async for ev in run(_atom(), {"q": "go"}, _tok(), gateway=_gw(_one_tool_rounds()),
+                            tools={"write_file": read}):
+            events.append(ev)
+    assert read.call_log == []   # 没跑到工具
+    terms = [e for e in events if isinstance(e, TerminalEvent)]
+    assert not any(t.reason == Terminal.COMPLETED or t.run.success for t in terms)
+    assert len(terms) == 1 and terms[0].reason == Terminal.ABORTED_TOOLS
+    assert terms[0].run.success is False
+
+
+@pytest.mark.asyncio
+async def test_failloud_serial_cancellederror_no_terminal_and_propagates():
+    """关停路径:CancelledError 原样上抛不吞,且**不吐**任何终态(取消中不再发事件)。"""
+    tool = _RaisingTool("write_file", asyncio.CancelledError("shutdown"))
+    events: list = []
+    with pytest.raises(asyncio.CancelledError):
+        async for ev in run(_atom(), {"q": "go"}, _tok(), gateway=_gw(_one_tool_rounds()),
+                            tools={"write_file": tool}):
+            events.append(ev)
+    assert not any(isinstance(e, TerminalEvent) for e in events), \
+        "关停路径不该吐 TerminalEvent"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_batch_baseexception_true_cause_not_dropped_unknown():
+    """并发批 BaseException:gather 兜底按位归回自己的 block —— error_reason 带真因
+    异常类名+消息(旧代码 id='?' 对不上 block,真因被丢成 dropped:unknown)。"""
+    class _ConcRaising:
+        name = "boom"
+        description = "t"
+        parameters = {"type": "object", "properties": {}}
+        async def __call__(self, input):
+            raise _HardCrash("conc crash detail")
+        def is_concurrency_safe(self, input):
+            return True
+
+    ok = _Tool("read_file", safe=True)
+    blocks = [
+        ToolUseBlock(id="b1", name="read_file", input={"i": 1}),
+        ToolUseBlock(id="b2", name="boom", input={}),
+    ]
+    res = await run_tools(blocks, {"read_file": ok, "boom": _ConcRaising()}, _tok())
+    assert [r.tool_use_id for r in res] == ["b1", "b2"]   # 保序,每块一结果
+    assert res[0].is_error is False
+    assert res[1].is_error is True
+    assert res[1].error_reason.startswith("_HardCrash:")   # 真因类名
+    assert "conc crash detail" in res[1].error_reason      # 真因消息
+    assert "dropped:unknown" not in res[1].error_reason
+
+
+@pytest.mark.asyncio
+async def test_concurrent_batch_cancellederror_reraises():
+    """并发批里子任务抛 CancelledError → run_tools 原样上抛不吞(关停路径)。"""
+    class _ConcCancel:
+        name = "boom"
+        description = "t"
+        parameters = {"type": "object", "properties": {}}
+        async def __call__(self, input):
+            raise asyncio.CancelledError("child cancelled")
+        def is_concurrency_safe(self, input):
+            return True
+
+    ok = _Tool("read_file", safe=True)
+    blocks = [
+        ToolUseBlock(id="b1", name="read_file", input={}),
+        ToolUseBlock(id="b2", name="boom", input={}),
+    ]
+    with pytest.raises(asyncio.CancelledError):
+        await run_tools(blocks, {"read_file": ok, "boom": _ConcCancel()}, _tok())
+
+
+@pytest.mark.asyncio
+async def test_normal_path_terminal_shape_regression_lock():
+    """回归锁:正常路径事件时序/终态形状原样 —— 恰一个 TerminalEvent、居末、
+    COMPLETED + success=True + terminal='completed',工具事件序不变。"""
+    read = _Tool("read_file", safe=True)
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"path": "/tmp/a"}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": read})]
+    terms = [e for e in events if isinstance(e, TerminalEvent)]
+    assert len(terms) == 1 and events[-1] is terms[0]
+    assert terms[0].reason == Terminal.COMPLETED
+    assert terms[0].run.success is True
+    assert terms[0].run.terminal == "completed"
+    # 时序:ToolCallEvent 在 ToolResultEvent 前,二者都在终态前
+    i_call = next(i for i, e in enumerate(events) if isinstance(e, ToolCallEvent))
+    i_res = next(i for i, e in enumerate(events) if isinstance(e, ToolResultEvent))
+    assert i_call < i_res < len(events) - 1
+
+
 # ============ AC10：transition.reason 可断言 ============
 def test_ac10_loop_state_transition_is_assertable():
     s = LoopState()

@@ -80,12 +80,17 @@ async def _run_concurrent_batch(
     # return_exceptions=True 防止单个 tool 异常炸 gather
     results = await asyncio.gather(*coros, return_exceptions=True)
     out: list[ToolResult] = []
-    for r in results:
+    # gather 保序 → 与 items 按位对应,兜到的 BaseException 归回**它自己的** block
+    # (旧代码 id="?" 对不上任何 block,合并处真因被丢成 dropped:unknown)。
+    for (tool, block), r in zip(items, results):
+        if isinstance(r, asyncio.CancelledError):
+            # 关停路径:原样上抛不吞(Exception 早在 _run_one 兜掉,这里只剩 BaseException)。
+            raise r
         if isinstance(r, BaseException):
             out.append(ToolResult(
-                tool_use_id="?", name="?",
+                tool_use_id=block.id, name=tool.name,
                 content=None, is_error=True,
-                error_reason=type(r).__name__ + ":" + str(r),
+                error_reason=type(r).__name__ + ":" + str(r)[:200],
             ))
         else:
             out.append(r)

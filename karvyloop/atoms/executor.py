@@ -265,6 +265,11 @@ async def run(
     # 可观测性②:代码缺陷 fail-loud 上冒时置位 —— finally 不再吐 TerminalEvent
     # (否则半截"COMPLETED/success"假事件先于异常到达消费方 = 误报)。
     fail_loud_crash = False
+    # 存量 fail-loud 真伤:turn 内部**未分类**上抛(run_tools 串行批 BaseException /
+    # capability_check 自身抛…)穿过主循环时 fail_loud_crash 没置位,finally 曾先吐
+    # TerminalEvent(COMPLETED, success=True) 假成功事件再传异常(违背 §0.7 fail-loud)。
+    # 这里记录在飞异常,finally 据此把终态改**诚实**(或关停路径不吐)。
+    crash_exc: Optional[BaseException] = None
 
     try:
         while True:
@@ -530,10 +535,29 @@ async def run(
                 abort_requested=state.abort_requested,
             )
 
+    except BaseException as e:
+        # 只记录在飞异常供 finally 判定,原样 re-raise —— 异常链一个字节不动,绝不吞。
+        crash_exc = e
+        raise
     finally:
         # 可观测性②:代码缺陷 fail-loud 路径**不吐** TerminalEvent —— 原始异常链直接上冒
         # (注意:此处绝不能 return —— finally 里 return 会吞掉在飞的异常,恰是要治的病),
         # 消费方(forge → drive → 桥)在各自边界记真因/兜文案,不发半截"成功"假事件。
+        if crash_exc is not None and not fail_loud_crash:
+            if isinstance(crash_exc, (GeneratorExit, asyncio.CancelledError,
+                                      KeyboardInterrupt, SystemExit)):
+                # 关停/收流路径:不吐终态,原样上冒。取消中再 yield 会拖住关停;
+                # GeneratorExit 时 yield 直接违反 async-gen 协议(RuntimeError)。
+                fail_loud_crash = True
+            else:
+                # turn 内部上抛(run_tools 串行批 BaseException / capability_check 自身抛…):
+                # 终态必须**诚实** —— 照 abort 既有失败形状(step 0 同款映射)标
+                # ABORTED_TOOLS/ABORTED_STREAMING,success 随之为 False;异常照传不吞
+                # (yield 之后 finally 走完,在飞异常继续上冒)。绝不再有
+                # "COMPLETED + success=True 假事件先于异常到达消费方"。
+                final_reason = (Terminal.ABORTED_TOOLS
+                                if state.transition.reason == "ran_tools"
+                                else Terminal.ABORTED_STREAMING)
         if not fail_loud_crash:
             # 写 AtomRun(末事件给上层去存 Trace;结晶 observe 用)
             # output 必须是 dict(str/list 转 dict 的兼容做法:list→{"items":...},str→{"text":...})
