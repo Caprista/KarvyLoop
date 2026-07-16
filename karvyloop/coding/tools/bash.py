@@ -88,6 +88,20 @@ class BashTool:
 
     async def __call__(self, inp: dict) -> CodingResult:
         cmd = inp.get("command", "")
+        # 敏感路径预检(防御纵深,**不是密封**)—— 在 exec 前对命令串做保守的敏感标记扫描。
+        # 上游 capability 决策链 step6(authorize/_safety_check)本就对 run_command 的命令串跑
+        # is_sensitive_path 硬拦;这里在**工具边界**再兜一层同口径地板,让 BashTool 即便被绕过
+        # 上游闸单独调用也不裸奔(尤其 Windows 降级档无 OS 隔离时)。绕法边界见
+        # fs_grants.scan_command_for_sensitive 的 docstring:真封闭靠 OS 沙箱层。
+        # 红线:只拦明确指向 SENSITIVE_MARKERS 的命令,正常工作区命令(ls/grep/python)零回归。
+        from karvyloop.capability.fs_grants import scan_command_for_sensitive
+        hit = scan_command_for_sensitive(cmd)
+        if hit:
+            return CodingResult(
+                ok=False, payload=None, error_code=1,
+                error_message=(f"命令疑似访问受保护路径(敏感标记 {hit}),已拦 —— "
+                               f"密钥/凭据类路径永不放行(run_command 敏感路径预检;"
+                               f"真隔离在沙箱层)。"))
         timeout = float(inp.get("timeout", 30))
         cwd = self.workspace_root
         try:

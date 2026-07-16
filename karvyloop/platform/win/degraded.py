@@ -68,6 +68,19 @@ class DegradedWindowsSandbox:
         # 第三方技能脚本:fail-closed(唯一被禁用的路径)
         if is_skill_exec_token(token):
             raise PermissionError(_THIRD_PARTY_REFUSED)
+        # 敏感路径预检(降级档诚实收口)—— 本层**无任何 OS 级隔离**,是弱隔离 tier,
+        # 别的后端靠 mount/seatbelt 兜住的敏感读在这里没有 OS 地板兜。故把 run_command 用的
+        # 同一套敏感标记预检也搬到 exec 边界跑一遍,把最常见的直读密钥形态挡掉
+        # (cat/type ~/.karvyloop/config.yaml 等)。**诚实**:这是可被绕过的字符串扫描
+        # (变量拼接/base64/间接读绕得过,见 fs_grants.scan_command_for_sensitive),
+        # 不是真隔离;真封闭需在 Linux(bwrap mount)/ macOS(seatbelt deny)上运行。
+        from karvyloop.capability.fs_grants import scan_command_for_sensitive
+        hit = scan_command_for_sensitive(" ".join(str(a) for a in argv))
+        if hit:
+            raise PermissionError(
+                f"Windows 降级模式(无 OS 级隔离,弱隔离 tier):命令疑似访问受保护路径"
+                f"(敏感标记 {hit}),已拦 —— 密钥/凭据类路径永不放行。此为弱隔离层的字符串预检"
+                f"(可被绕过,非真隔离);完整隔离在 Linux(bubblewrap)/ macOS(sandbox-exec)。")
         # 第一方 token 闸:cwd 必须落在 token 的 fs 授权内(不接受 ambient cwd)
         covered = any(
             g.resource.startswith("fs:") and is_within_workspace(cwd, g.resource[3:])

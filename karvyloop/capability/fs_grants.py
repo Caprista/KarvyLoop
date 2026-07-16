@@ -52,6 +52,33 @@ def is_sensitive_path(path: str) -> bool:
     return any(m in n for m in SENSITIVE_MARKERS)
 
 
+def scan_command_for_sensitive(command: str) -> Optional[str]:
+    """对一条 shell 命令字符串做**保守的敏感路径预检**,命中则返回那条敏感标记(给人看的
+    诚实提示),否则返回 None。与 is_sensitive_path 同口径(归一化后对 SENSITIVE_MARKERS
+    子串匹配)—— 只对**明确出现在命令里的**敏感路径片段报警。
+
+    ⚠️ 诚实边界(这是**防御纵深,不是密封**):shell 有无穷种绕法 ——
+      - 变量拼接:`C=/.ssh; cat ~$C/id_rsa`(标记散在赋值里仍可能被逮,但 `C=$(printf ...)`
+        逐字节拼装就绕过)
+      - base64 / printf 解码:`echo Li9zc2g= | base64 -d | xargs cat`
+      - 间接读:写个脚本文件再 `python evil.py`、或 `$(cat file_with_path)`
+    这些预检**看不见**。真正的封闭靠 **OS 层**:Linux bwrap 的 workspace-only mount(读工作区外
+    直接失败)、macOS Seatbelt 的敏感 deny 子集。此函数只是把同一套 SENSITIVE_MARKERS 地板
+    在 run_command 的**工具边界**再兜一层,让 BashTool 即便被绕过上游 capability 闸单独调用也不裸奔;
+    **绝不**把它当作完全防护宣传。
+
+    红线:只对明确的 SENSITIVE_MARKERS 子串报警 —— 正常工作区命令(ls/grep/python 跑工作区脚本)
+    不含这些片段,零误伤(与既有 is_sensitive_path 地板完全一致)。
+    """
+    if not command:
+        return None
+    n = _norm(command)
+    for m in SENSITIVE_MARKERS:
+        if m in n:
+            return m
+    return None
+
+
 class FsGrantsStore:
     """授权台账(落盘,fail-safe)。一条授权 = {id, path, ops, role, origin, created_at, expires_at}。
 
@@ -203,5 +230,5 @@ def note_denied(path: str, op: str) -> None:
         st.note_denied(path, op)
 
 
-__all__ = ["FsGrantsStore", "is_sensitive_path", "SENSITIVE_MARKERS",
-           "register_store", "get_store", "path_allowed", "note_denied"]
+__all__ = ["FsGrantsStore", "is_sensitive_path", "scan_command_for_sensitive",
+           "SENSITIVE_MARKERS", "register_store", "get_store", "path_allowed", "note_denied"]

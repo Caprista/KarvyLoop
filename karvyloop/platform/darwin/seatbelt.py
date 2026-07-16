@@ -18,8 +18,12 @@
 围栏已在真 Mac（macOS 26.5.1 / Apple Silicon）上对抗式验证：写工作区外 / 写 $HOME / 未授权联网
 全部 `Operation not permitted`；授权后联网 http 200。详见 tests/test_seatbelt_profile.py。
 
-**v1 诚实边界（P1 收紧）**：`(allow file-read*)` —— 读放宽（macOS 上限制读极脆、易废掉工具）。
-安全地基靠**写隔离 + 网络门**守（不能篡改、未授权不能外传）；读隔离列入 P1。env 不清洗（同 v1）。
+**v1 诚实边界（P1 收紧）**：`(allow file-read*)` —— 读**默认**放宽（macOS 上限制读极脆、易废掉工具）。
+安全地基靠**写隔离 + 网络门**守（不能篡改、未授权不能外传）；一般读隔离列入 P1。env 不清洗（同 v1）。
+**例外(已收紧)**：敏感路径(密钥/凭据/ssh/云凭据/浏览器 cookie)对**读也 deny** —— deny 子集统一到
+`fs_grants.SENSITIVE_MARKERS` **单一真相源全集**(见 `_sensitive_deny_lines`),SBPL 后写规则赢,
+盖过上面的 `(allow file-read*)`。诚实:此为 OS 层敏感地板,与 run_command 工具层预检、capability
+决策链 step6 三层叠加;正则方言真强制以真 Mac 上 `test_seatbelt_profile.py` 的对抗验证为准。
 """
 
 from __future__ import annotations
@@ -47,6 +51,63 @@ def _truncate_utf8(data: bytes, limit: int) -> tuple[bytes, bool]:
 def _sbpl_str(path: str) -> str:
     """把路径转成 SBPL 字符串字面量（转义 \\ 和 "）。"""
     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+# ---- 敏感地板:单一真相源(SENSITIVE_MARKERS)派生的 deny 规则 ----
+# 元字符表:正则里需转义的字符(`/` 不是元字符,不转义 —— 免得触发某些 ERE 方言的
+# "backslash 接普通字符" 未定义行为)。markers 已归一化(小写、/ 分隔、无反斜杠)。
+_SBPL_RE_META = frozenset(r".^$*+?()[]{}|\\")
+
+
+def _marker_to_sbpl_regex(marker: str) -> str:
+    """把一个 SENSITIVE_MARKER 子串转成**大小写不敏感、匹配任意位置**的 SBPL 正则片段。
+
+    忠实映射 is_sensitive_path 的"归一化后子串匹配"语义:它把路径先小写再对 marker 做子串比对,
+    而 SBPL 看到的是真实大小写的路径。故这里对每个 ASCII 字母生成 `[Xx]` 字符类(POSIX 括号
+    表达式,TRE 稳吃)做大小写无关匹配 —— 否则 macOS 上浏览器凭据 'Login Data' / 'Cookies'
+    是大写、不折叠就漏。前后加 `.*` 兼容"整串匹配"与"子串搜索"两种 SBPL 语义,双保险。
+    """
+    body: list[str] = []
+    for ch in marker:
+        if ch.isascii() and ch.isalpha():
+            body.append("[" + ch.upper() + ch.lower() + "]")
+        elif ch in _SBPL_RE_META:
+            body.append("\\" + ch)
+        else:
+            body.append(ch)
+    return ".*" + "".join(body) + ".*"
+
+
+def _concrete_sensitive_paths(marker: str, home: str) -> list[str]:
+    """把**可锚定**的标记翻成真实位置(仍是单一真相源派生,非手抄一份小清单):
+    `$HOME` 下的 dotpath、`/etc/*` 绝对路径。裸名标记(id_rsa / cookies / tokens.db /
+    login data / appdata... 无从确定锚点)→ 返回空,交给 _marker_to_sbpl_regex 的正则覆盖。
+    """
+    if marker.startswith("/etc/"):
+        return [marker]
+    if marker.startswith("/."):   # /.ssh /.karvyloop/config.yaml /.env /.config/gcloud ...
+        return [home + marker]
+    return []
+
+
+def _sensitive_deny_lines() -> list[str]:
+    """对**全部 SENSITIVE_MARKERS**(从 fs_grants 导入,单一真相源)生成 SBPL deny 行。
+
+    每个标记两种互补形式:
+      (a) 大小写无关子串正则 —— 忠实 is_sensitive_path(匹配规范路径里任意位置的标记;也是
+          唯一能表达 id_rsa / cookies / login data 这类裸名标记与 $HOME 外 dotfile 的形式)。
+      (b) 真实位置的具体 subpath/literal deny —— 已在真 Mac 验证过的 SBPL 形式,作为"腰带":
+          万一正则方言意外欠匹配,最高价值密钥仍被这层实锚 deny 兜住(deny+deny 幂等无害)。
+    """
+    from karvyloop.capability.fs_grants import SENSITIVE_MARKERS
+    home = os.path.expanduser("~")
+    lines: list[str] = []
+    for m in SENSITIVE_MARKERS:
+        lines.append(f'(deny file-read* file-write* (regex #"{_marker_to_sbpl_regex(m)}"))')
+        for concrete in _concrete_sensitive_paths(m, home):
+            kind = "subpath" if os.path.isdir(concrete) else "literal"
+            lines.append(f"(deny file-read* file-write* ({kind} {_sbpl_str(os.path.realpath(concrete))}))")
+    return lines
 
 
 def build_profile(token: CapabilityToken) -> str:
@@ -90,12 +151,11 @@ def build_profile(token: CapabilityToken) -> str:
         lines.append("; egress allowlist requested but domain-level unenforceable in SBPL"
                      " -> fail-closed deny (see module docstring 2b)")
     lines.append("(allow network*)" if net else "(deny network*)")
-    # 敏感地板(fs_grants 同源):密钥/凭据类显式 deny —— SBPL 后写的规则赢,盖过上面的读放宽。
-    home = os.path.expanduser("~")
-    for sens in (f"{home}/.karvyloop/config.yaml", f"{home}/.ssh", f"{home}/.aws",
-                 f"{home}/.gnupg", f"{home}/.netrc"):
-        kind = "subpath" if os.path.isdir(sens) else "literal"
-        lines.append(f"(deny file-read* file-write* ({kind} {_sbpl_str(os.path.realpath(sens))}))")
+    # 敏感地板(fs_grants 单一真相源):对**全部 SENSITIVE_MARKERS** deny —— 不再手抄一份小清单
+    # (旧版只 deny 5 条,漏了 console.runtime.json / .env / 云凭据 / 浏览器 cookie)。
+    # SBPL 后写的规则赢:这些 deny 盖过上面的 (allow file-read*) 读放宽,也盖过已授写路径
+    # (敏感绝对优先)。见 _sensitive_deny_lines。
+    lines.extend(_sensitive_deny_lines())
     return "\n".join(lines)
 
 
