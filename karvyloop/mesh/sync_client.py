@@ -9,11 +9,14 @@ console,① GET 对端 frontier ② 算我对它的 delta,连我 frontier 一起
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Optional
 
 from karvyloop.mesh.store import MeshLogStore
 from karvyloop.mesh.synclog import HLC, MeshEvent
+
+logger = logging.getLogger(__name__)
 
 
 async def mesh_sync_with_peer(relay_url: str, peer_room: str, *, fingerprint: str,
@@ -26,6 +29,16 @@ async def mesh_sync_with_peer(relay_url: str, peer_room: str, *, fingerprint: st
     frontier 响应里对端的 advert 落进我的花名册 + mark_seen —— 一次同步双方花名册都齐。
     my_relay_url = 我自己的 relay(广告"怎么连回我"用);None → 沿用拨出用的 relay_url
     (同主人设备共用一台 relay 的常态)。
+
+    **身份**:mesh 拨出用本机**设备身份**(relay_key,= device_id 那把指纹),不是接入端
+    remote_key —— 对端授权表里记下的就是本设备 mesh 身份,双方免码互拨/回配才对得上号。
+
+    **同主人一步互配(docs/74 对等语义)**:首配(code 非空)整个来回成功后,把对端 console
+    身份回写进**我方**已配对表(scope full)—— 它反向拨我不再要第二枚码。三重门全在才写:
+    ① 我方主动用一次性码发起(code 非空;复连 code=None 不写)② 指纹 pin 验证通过
+    (open_remote_session 里 client_complete,不过就抛了)③ full scope 已证 —— read 分享码
+    在对端咽喉就把 POST /api/mesh/sync 403 掉(scope_read_only),整个同步失败,走不到回写;
+    **绝不**因收到 advert / 被动被配就信任别人(advert 只进花名册,不进授权表)。
     """
     from karvyloop.relay.remote import open_remote_session
 
@@ -39,7 +52,8 @@ async def mesh_sync_with_peer(relay_url: str, peer_room: str, *, fingerprint: st
         my_advert = {}
 
     ws, sess = await open_remote_session(relay_url, peer_room, fingerprint=fingerprint,
-                                         code=code, state_dir=state_dir)
+                                         code=code, state_dir=state_dir,
+                                         use_device_identity=True)
     try:
         # ① 拉对端 frontier(+ 它的能力广告)
         r = await sess.request("GET", "/api/mesh/frontier")
@@ -79,6 +93,23 @@ async def mesh_sync_with_peer(relay_url: str, peer_room: str, *, fingerprint: st
                 reg.mark_seen(peer_id)
         except Exception:  # noqa: BLE001
             pass
+        # ⑤ 同主人一步互配(docs/74;不变量三重门见函数 docstring):首配整来回成功 → 对端
+        #    console 身份(指纹 pin 验过的 sess.peer_pub)回写我方已配对表(scope full),
+        #    它反向拨我免第二枚码。复连(code=None)不写;peer_pub 拿不到/坏 → trust_peer
+        #    宁空勿毒拒写。label 取对端 advert 的设备名(纯展示,trust_peer 里再消毒)。
+        if code:
+            try:
+                from karvyloop.relay.pairing import PairingStore
+                adv = peer_body.get("advert") or {}
+                label = str(adv.get("label") or "") if isinstance(adv, dict) else ""
+                peer_pub = getattr(sess, "peer_pub", b"") or b""
+                if PairingStore(state_dir).trust_peer(peer_pub, label=label):
+                    logger.info("[mesh-sync] paired back peer console (scope=full) — "
+                                "it can now dial us without a second code")
+            except Exception as e:  # noqa: BLE001 — 回配失败不吞同步结果,但必须出声:
+                logger.warning(     # 否则对端反向拨会被 pairing_rejected,用户又要第二枚码
+                    f"[mesh-sync] pair-back failed ({type(e).__name__}) — "
+                    f"peer will still need a code to dial us back")
         return {"pulled": pulled, "pushed": int(resp.get("merged", 0))}
     finally:
         await sess.close()

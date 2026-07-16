@@ -36,6 +36,22 @@ def _audience(request: Request) -> str:
     return request.headers.get("x-karvy-audience", "").strip().lower()
 
 
+def _audience_role(request: Request) -> str:
+    """external 召回的被访角色(per-channel role 绑定,docs/78 §4.3):relay/client.py 咽喉从
+    配对记录注入 `x-karvy-audience-role`(百分号编码——role 名可含中文;`_FWD_REQ_HEADERS`
+    白名单不含它,远端伪造/剥除都不可能,同 audience 纪律)。没绑/解码失败 → ""(宁空勿毒,
+    谓词③ deny-by-default 全拒)。LAN 直打 loopback 自加此头不提权:谓词③只在 external 时
+    看它,且放的只是该角色升层兵法(比不带头能看的更窄)。"""
+    raw = request.headers.get("x-karvy-audience-role", "").strip()
+    if not raw:
+        return ""
+    try:
+        from urllib.parse import unquote
+        return unquote(raw).strip()
+    except Exception:
+        return ""
+
+
 def _deny_external_dump(request: Request) -> None:
     """裸 dump 端点(整库列/最近沉淀)对外**直接拒**:它们绕过 recall_block 的召回过滤,
     audience 白名单刀盖不到 —— 外部分享方一个 GET 就能拉走个人生活事实,是护城河数据的对外
@@ -421,12 +437,13 @@ def api_memory_recall(request: Request, q: str = "", as_of: Optional[float] = No
     try:
         lim = max(1, min(int(limit or 8), 50))
         # 对外白名单刀(docs/78 §4.3):分享方 → audience=external,共享层 deny-by-default,
-        # 只放被访角色的升层兵法。audience_role 现无源(per-channel role 绑定未建,§9.6 下批)→
-        # 空 role = 全拒(接上即安全,一条兵法也不漏;绑定建成后同一处填 role 即真放行)。自有设备无标零回归。
+        # 只放被访角色的升层兵法。audience_role 源 = 分享码上的 per-channel role 绑定
+        # (pairing 记录 → relay/client.py 咽喉注头 → 这里解码传谓词③)。没绑 role 的分享码
+        # 照旧全拒(一条兵法也不漏);自有设备无标零回归。
         aud = _audience(request)
         block = mem.recall_block(query, scope="personal", limit=lim, as_of=as_of,
                                  audience=("external" if aud == "external" else ""),
-                                 audience_role="")
+                                 audience_role=(_audience_role(request) if aud == "external" else ""))
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[memory/recall] 召回失败: {e}")
         return {"ok": False, "reason": f"召回失败: {e}", "as_of": as_of, "block": ""}

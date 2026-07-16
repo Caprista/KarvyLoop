@@ -68,6 +68,12 @@ class RemoteSession:
         if self._recv_task is None:
             self._recv_task = asyncio.create_task(self._recv_loop())
 
+    @property
+    def peer_pub(self) -> bytes:
+        """对端 console 的静态公钥 —— open_remote_session 里**指纹 pin 验证过**的那把
+        (client_complete 通过后从 WELCOME 帧取出挂上)。拿不到 → b""(调用方宁空勿毒)。"""
+        return getattr(self._sess, "peer_pub", b"") or b""
+
     async def _recv_loop(self) -> None:
         """唯一读 ws 的地方:解密 → 按 id 派发到等待的 future。ws 断 → 所有 pending 失败。"""
         try:
@@ -128,16 +134,29 @@ class RemoteSession:
 
 
 async def open_remote_session(relay_url: str, rid: str, *, fingerprint: str,
-                              code: Optional[str] = None, state_dir=None):
+                              code: Optional[str] = None, state_dir=None,
+                              use_device_identity: bool = False):
     """连 relay ``/join?rid=`` + client 侧握手 → (ws, RemoteSession)。
 
-    code 首次配对必给(一次性,来自 `relay-pair`);已配对设备可省(remote_key 免码重连)。
+    code 首次配对必给(一次性,来自 `relay-pair`);已配对设备可省(免码重连)。
     **验指纹**(client_complete):relay 掉包公钥 → FingerprintMismatch,必须放弃(防中间人)。
+
+    use_device_identity(docs/74 同主人 mesh):True → 用本机 **设备身份**(PairingStore 的
+    relay_key,= mesh device_id 那把指纹)握手,而不是接入端 remote_key —— 对端授权表里记下的
+    就是本设备的 mesh 身份,回配(trust_peer)/免码互拨才能对上号。默认 False = 原行为
+    (`karvyloop remote`/浏览器接入端不变)。
+
+    握手成功后把**验过指纹**的对端 console 公钥挂在 session.peer_pub 上(client 侧原本留空)——
+    同主人回配(mesh/sync_client)要用;它就是 client_complete 刚按 pin 校验过的那 32 字节。
     """
     import asyncio
 
     import websockets
-    priv, _pub = _remote_identity(state_dir)
+    if use_device_identity:
+        from karvyloop.relay.pairing import PairingStore
+        priv, _pub = PairingStore(state_dir).identity()
+    else:
+        priv, _pub = _remote_identity(state_dir)
     url = relay_url.rstrip("/") + f"/join?rid={rid}"
     ws = await websockets.connect(url, max_size=MAX_FRAME_BYTES + 4096)
     try:
@@ -149,6 +168,8 @@ async def open_remote_session(relay_url: str, rid: str, *, fingerprint: str,
         if e2e.frame_type(msg) == e2e.T_ERR:
             raise e2e.HandshakeError(f"rejected by relay/console: {e2e.parse_err(msg)}")
         session = e2e.client_complete(msg, priv, fingerprint)   # 验指纹,防中间人
+        # 对端身份 = WELCOME 里的 console 公钥(client_complete 刚用指纹 pin 验过这段字节)。
+        session.peer_pub = bytes(msg[e2e.HEADER_LEN:e2e.HEADER_LEN + 32])
         sess = RemoteSession(ws, session)
         sess.start()                                            # 启后台收帧派发循环
         return ws, sess

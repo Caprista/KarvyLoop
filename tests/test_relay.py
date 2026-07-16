@@ -678,6 +678,84 @@ class TestScopeEnforcement:
         assert resp["status"] == 403 and resp["error"] == "revoked_or_unpaired"
         assert calls == []
 
+    # ---- per-channel role 绑定(docs/78 §4.3:audience_role 的源与咽喉注入)----
+
+    def _paired_with_role(self, tmp_path, scope, role):
+        from karvyloop.relay import e2e
+        from karvyloop.relay.pairing import PairingStore
+        store = PairingStore(tmp_path)
+        code = store.new_code(scope, role=role)
+        _priv, pub = e2e.gen_keypair()
+        assert store.verify_and_consume(pub, e2e.pair_mac(code, pub)) is True
+        return store, pub
+
+    def test_role_bound_share_code_injects_role_header(self, tmp_path):
+        """带 role 的 read 分享码 → 咽喉注 x-karvy-audience-role(百分号编码,role 可含中文),
+        与 external 标同请求同纪律 —— 外部召回的白名单刀这才有'放行名单'。"""
+        from urllib.parse import quote
+        store, pub = self._paired_with_role(tmp_path, "read", "写作助手")
+        assert store.role_for(pub.hex()) == "写作助手"
+        resp, calls = self._handle(store, pub, "GET")
+        assert resp["status"] == 200
+        assert calls[0][2].get("x-karvy-audience") == "external"
+        assert calls[0][2].get("x-karvy-audience-role") == quote("写作助手", safe="")
+
+    def test_role_header_only_when_scope_not_full(self, tmp_path):
+        """full scope 永不注 role 头(自有设备不该被收窄)—— 哪怕记录上莫名带了 role。"""
+        store, pub = self._paired_with_role(tmp_path, "full", "写作助手")
+        resp, calls = self._handle(store, pub, "GET")
+        assert resp["status"] == 200
+        assert "x-karvy-audience" not in calls[0][2]
+        assert "x-karvy-audience-role" not in calls[0][2]
+
+    def test_read_code_without_role_injects_no_role_header(self, tmp_path):
+        """不带 role 的 read 码 → 只有 external 标,无 role 头(召回谓词③全拒,零兵法外漏)。"""
+        store, pub = self._paired(tmp_path, "read")
+        resp, calls = self._handle(store, pub, "GET")
+        assert resp["status"] == 200
+        assert calls[0][2].get("x-karvy-audience") == "external"
+        assert "x-karvy-audience-role" not in calls[0][2]
+
+    def test_remote_forged_role_header_stripped(self, tmp_path):
+        """远端自带 x-karvy-audience-role 伪装被访角色 → _FWD_REQ_HEADERS 白名单不含它,被丢
+        (没绑 role 的分享码伪造不出放行名单;绑了的也盖不掉咽喉注入值)。"""
+        import asyncio as _aio
+        import json as _j
+
+        from karvyloop.relay.client import _handle_request
+        store, pub = self._paired(tmp_path, "read")          # 没绑 role
+        captured = {}
+
+        class _FakeResp:
+            status_code = 200; content = b"ok"; headers = {"content-type": "text/plain"}
+
+        class _FakeHttp:
+            async def request(self, m, p, headers=None, content=b""):
+                captured.update(headers or {}); return _FakeResp()
+
+        pt = _j.dumps({"id": 1, "method": "GET", "path": "/api/x",
+                       "headers": {"x-karvy-audience-role": "决策画像"}}).encode()
+        _aio.run(_handle_request(pt, _FakeHttp(), "owner-token", store=store, peer_pub=pub))
+        assert "x-karvy-audience-role" not in captured       # 伪造被白名单挡在外
+
+    def test_role_for_revoked_and_legacy_records(self, tmp_path):
+        """role_for 回源语义:撤销 → "";旧裸 hex 记录 → "";坏 role(控制字符)宁空勿毒。"""
+        from karvyloop.relay import e2e
+        from karvyloop.relay.pairing import PairingStore
+        store, pub = self._paired_with_role(tmp_path, "read", "写作助手")
+        store.revoke(pub.hex())
+        assert store.role_for(pub.hex()) == ""               # 撤销即断,同 scope_for
+        _, legacy = e2e.gen_keypair()
+        st = store._load()
+        st.setdefault("paired", []).append(legacy.hex())     # 旧裸 hex 记录
+        store._save(st)
+        assert store.role_for(legacy.hex()) == ""
+        # 坏 role 在签码时就被宁空勿毒(控制字符会破 HTTP 头)
+        code = store.new_code("read", role="evil\r\nx-karvy-token: steal")
+        _, pub2 = e2e.gen_keypair()
+        assert store.verify_and_consume(pub2, e2e.pair_mac(code, pub2)) is True
+        assert store.role_for(pub2.hex()) == ""
+
 
 async def test_remote_client_end_to_end(relay_server, real_console, tmp_path):
     """接入端真客户端(remote.RemoteSession)端到端:remote → relay(只见密文)→ console client

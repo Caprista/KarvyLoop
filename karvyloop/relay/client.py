@@ -82,6 +82,14 @@ async def _handle_request(pt: bytes, http, token: str, *, store=None, peer_pub: 
         # 端点见标即拒。防伪同 via-relay:此标由本咽喉注入,远端自带的被 _FWD_REQ_HEADERS 白名单挡在外。
         if scope != SCOPE_FULL:
             headers["x-karvy-audience"] = "external"
+            # per-channel role 绑定(docs/78 §4.3 白名单刀的"放行名单"):分享码上绑了被访角色 →
+            # 同一咽喉、同一防伪纪律注 x-karvy-audience-role(白名单不含它,远端伪造/剥除都不可能;
+            # full scope 永不注——自有设备不被收窄)。百分号编码:role 名可含中文,裸塞会破 HTTP 头。
+            # 没绑(role="")→ 不注,召回谓词③ deny-by-default 全拒,一条兵法也不漏。
+            role = store.role_for(peer_pub.hex()) if (store is not None and peer_pub) else ""
+            if role:
+                from urllib.parse import quote
+                headers["x-karvy-audience-role"] = quote(role, safe="")
         for k, v in (req.get("headers") or {}).items():
             if str(k).lower() in _FWD_REQ_HEADERS:
                 headers[str(k).lower()] = str(v)

@@ -43,6 +43,23 @@ def normalize_scope(scope: str) -> str:
     return s if s in _VALID_SCOPES else SCOPE_READ
 
 
+_ROLE_MAX = 80
+
+
+def clean_role(role) -> str:
+    """归一码/配对记录上的 audience_role 绑定(docs/78 §4.3 per-channel role)。
+
+    宁空勿毒:非字符串/空/超长/含控制字符(会破 HTTP 头)→ ""(= 无绑定 = 外部召回全拒,
+    deny-by-default)。role 名可含中文(咽喉注头时再做百分号编码,这里只挡毒)。
+    """
+    if not isinstance(role, str):
+        return ""
+    r = role.strip()
+    if not r or len(r) > _ROLE_MAX or any(ord(ch) < 0x20 or ch == "\x7f" for ch in r):
+        return ""
+    return r
+
+
 def _default_dir() -> Path:
     return Path.home() / ".karvyloop"
 
@@ -128,19 +145,27 @@ class PairingStore:
         return str(rid)
 
     # --- 一次性配对码 ---
-    def new_code(self, scope: str = "full") -> str:
+    def new_code(self, scope: str = "full", role: str = "") -> str:
         """生成一枚一次性码(XXXX-XXXX),TTL 15 分钟;顺手清理过期码。
 
         scope 绑在码上 → 用此码配对的设备继承该 scope(§9.6 slice 2):
         `full`=完整访问(自有设备默认);`read`=只读(GET/HEAD/OPTIONS,分享给别人看不能改)。
         未知 scope **deny-by-default 降到 read**(别因笔误就发全权)。
+
+        role(可选,docs/78 §4.3 per-channel role 绑定):分享码可绑一个被访角色 →
+        用此码配对的设备做外部召回时**只放该角色的升层兵法**(谓词③白名单刀)。
+        未知/空/坏 role = 无绑定(外部召回全拒,deny-by-default)。
         """
         raw = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
         code = f"{raw[:4]}-{raw[4:]}"
         state = self._load()
         codes = [c for c in state.get("codes", [])
                  if time.time() - float(c.get("ts", 0)) < CODE_TTL_S]
-        codes.append({"code": code, "ts": time.time(), "scope": normalize_scope(scope)})
+        entry = {"code": code, "ts": time.time(), "scope": normalize_scope(scope)}
+        r = clean_role(role)
+        if r:
+            entry["role"] = r
+        codes.append(entry)
         state["codes"] = codes
         self._save(state)
         return code
@@ -176,11 +201,13 @@ class PairingStore:
         if matched is not None:
             live.remove(matched)                      # 一次性:首用即焚
             state["codes"] = live
-            # 结构化配对记录(§9.6 授权层):记谁、继承码上的 scope、何时配对。
-            # 码默认 scope=full(自有设备完整访问,零回归);分享码 scope=read 则设备只读。
+            # 结构化配对记录(§9.6 授权层):记谁、继承码上的 scope/role、何时配对。
+            # 码默认 scope=full(自有设备完整访问,零回归);分享码 scope=read 则设备只读;
+            # role(docs/78 §4.3)= 分享码绑的被访角色,外部召回只放它的升层兵法。
             state.setdefault("paired", []).append(
                 {"pub": pubhex, "label": "",
-                 "scope": normalize_scope(matched.get("scope", "full")), "granted_at": now})
+                 "scope": normalize_scope(matched.get("scope", "full")),
+                 "role": clean_role(matched.get("role", "")), "granted_at": now})
             self._save(state)
             return True
         if len(live) != len(codes):                   # 只是清了过期码
@@ -203,11 +230,57 @@ class PairingStore:
                 return normalize_scope(e.get("scope", SCOPE_FULL)) if isinstance(e, dict) else SCOPE_FULL
         return None
 
+    def role_for(self, pubkey_hex: str) -> str:
+        """一个已配对 client 的 audience_role 绑定(docs/78 §4.3 per-channel role)。
+
+        绑了 → role 名(咽喉据此注 `x-karvy-audience-role`,外部召回只放该角色的升层兵法);
+        没绑/未配对/已撤销/旧裸 hex 记录 → **""**(= 谓词③ deny-by-default 全拒)。
+        per-request 调用 = 回源在线校验(同 scope_for:撤销后活连接的下一个请求就查不到)。
+        """
+        ph = (pubkey_hex or "").lower()
+        if not ph:
+            return ""
+        for e in self._load().get("paired", []):
+            if self._paired_pub(e).lower() == ph:
+                return clean_role(e.get("role", "")) if isinstance(e, dict) else ""
+        return ""
+
+    def trust_peer(self, peer_pub: bytes, label: str = "") -> bool:
+        """同主人回配(docs/74 对等语义):把**我主动配过去**的对端 console 身份写进我方已配对表(scope full)。
+
+        调用纪律(设计不变量,见 mesh/sync_client.py 调用点):只在「我方主动用一次性码发起配对
+        + 指纹 pin 验证通过(client_complete)+ full scope 已证」之后调用——我主动拿它的码配它
+        = 显式信任行为,回配是同主人对等语义。**绝不**因收到 advert / 被动被配就调它。
+
+        宁空勿毒:peer_pub 不是 32B → 拒写;已在表里(含旧裸 hex)→ 不重复写、不改既有
+        scope/role(不做静默提权);自己的公钥 → 不写(同目录自拨的测试形态)。返回是否真写了。
+        """
+        if not isinstance(peer_pub, (bytes, bytearray)) or len(peer_pub) != 32:
+            return False
+        peer_pub = bytes(peer_pub)
+        try:                          # 只读已有密钥判"是不是自己",不为判定生成密钥(无副作用)
+            if self.key_path.exists():
+                priv = self.key_path.read_bytes()
+                if len(priv) == 32 and e2e.pub_from_priv(priv) == peer_pub:
+                    return False
+        except Exception:
+            pass                      # 判不了"是不是自己" → 不因此拒写(下面的去重仍在)
+        state = self._load()
+        if peer_pub.hex() in self._paired_pubs(state):
+            return False              # 已配对 → 不重复写(复连/重复首配都幂等)
+        lbl = label if isinstance(label, str) else ""
+        lbl = "".join(ch for ch in lbl if ord(ch) >= 0x20 and ch != "\x7f").strip()[:64]
+        state.setdefault("paired", []).append(
+            {"pub": peer_pub.hex(), "label": lbl,
+             "scope": SCOPE_FULL, "granted_at": time.time()})
+        self._save(state)
+        return True
+
     # --- 已配对设备:列 + 撤销(§9.6 授权层:撤销 = 绝对把控权)---
     def list_paired(self) -> list:
-        """列已配对设备(结构化记录 [{pub, fingerprint, label, scope, granted_at}])。
+        """列已配对设备(结构化记录 [{pub, fingerprint, label, scope, role, granted_at}])。
 
-        兼容旧裸 hex 记录(视作 label="" scope="full")。fingerprint 现算,便于用户按指纹撤销。
+        兼容旧裸 hex 记录(视作 label="" scope="full" role="")。fingerprint 现算,便于用户按指纹撤销。
         """
         state = self._load()
         out = []
@@ -215,9 +288,9 @@ class PairingStore:
             pubhex = self._paired_pub(e)
             if not pubhex:
                 continue
-            rec = {"pub": pubhex, "label": "", "scope": "full", "granted_at": 0.0}
+            rec = {"pub": pubhex, "label": "", "scope": "full", "role": "", "granted_at": 0.0}
             if isinstance(e, dict):
-                rec.update({k: e[k] for k in ("label", "scope", "granted_at") if k in e})
+                rec.update({k: e[k] for k in ("label", "scope", "role", "granted_at") if k in e})
             try:
                 rec["fingerprint"] = e2e.fingerprint(bytes.fromhex(pubhex))
             except Exception:
@@ -311,4 +384,5 @@ def cmd_relay_unpair(target: Optional[str] = None,
     return 1
 
 
-__all__ = ["PairingStore", "cmd_relay_pair", "cmd_relay_unpair", "CODE_TTL_S"]
+__all__ = ["PairingStore", "cmd_relay_pair", "cmd_relay_unpair", "CODE_TTL_S",
+           "clean_role", "normalize_scope"]

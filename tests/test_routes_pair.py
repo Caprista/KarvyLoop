@@ -60,6 +60,38 @@ def test_issue_without_relay_is_honest(monkeypatch, tmp_path):
     assert r["ok"] is False and "relay" in r["reason"]
 
 
+def test_issue_default_full_no_role(monkeypatch, tmp_path):
+    """不带 body(旧前端)= 原行为:自有设备 full 码、无 role 绑定(零回归)。"""
+    _patch_store(monkeypatch, tmp_path)
+    r = _client().post("/api/pair/issue").json()
+    assert r["ok"] is True and r["scope"] == "full" and r["role"] == ""
+
+
+def test_issue_with_role_signs_read_share_code(monkeypatch, tmp_path):
+    """带 role = 分享码(给顾问看,docs/78 §4.3):scope 收到 read + role 绑定;
+    真配对后 paired 记录带 role(咽喉据此注 x-karvy-audience-role,外部召回只放该角色兵法)。"""
+    _patch_store(monkeypatch, tmp_path)
+    from karvyloop.relay import e2e
+    from karvyloop.relay.pairing import PairingStore
+    r = _client().post("/api/pair/issue", json={"role": "写作助手"}).json()
+    assert r["ok"] is True
+    assert r["scope"] == "read" and r["role"] == "写作助手"   # 分享码=只读,绝不发全权
+    store = PairingStore(tmp_path)
+    _, pub = e2e.gen_keypair()
+    assert store.verify_and_consume(pub, e2e.pair_mac(r["code"], pub)) is True
+    assert store.scope_for(pub.hex()) == "read"
+    assert store.role_for(pub.hex()) == "写作助手"
+    assert store.list_paired()[0]["role"] == "写作助手"
+
+
+def test_issue_with_garbage_role_stays_read_unbound(monkeypatch, tmp_path):
+    """坏 role(控制字符,会破 HTTP 头)宁空勿毒 → 仍是 read 分享码但**无绑定**(召回全拒);
+    绝不能因消毒失败反向掉成 full 全权码。响应 role="" 让调用方看得见绑定没生效。"""
+    _patch_store(monkeypatch, tmp_path)
+    r = _client().post("/api/pair/issue", json={"role": "bad\r\nrole"}).json()
+    assert r["ok"] is True and r["role"] == "" and r["scope"] == "read"
+
+
 def test_devices_and_revoke_roundtrip(monkeypatch, tmp_path):
     _patch_store(monkeypatch, tmp_path)
     from karvyloop.relay import e2e
