@@ -336,6 +336,252 @@ async def test_ac9_capability_deny_returns_error_result_continues():
     assert "capability_denied" in errs[0].result.error_reason
 
 
+# ============ slice C：tool_calls_log 事实字段 ok/error_reason(docs/82)============
+# 记事实不是算评价(跑评分离禁的是热路径算评价);工具跑完按 tool_use_id 回填。
+# 失败真因各自如实标(异常/超时/deny 不吞成一样的),截断 ≤200 字。
+
+def _last_run_calls(events) -> list[dict]:
+    last = events[-1]
+    assert isinstance(last, TerminalEvent)
+    return last.run.tool_calls
+
+
+@pytest.mark.asyncio
+async def test_slicec_tool_success_backfills_ok_true():
+    read = _Tool("read_file", safe=True)
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"path": "/tmp/a"}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": read})]
+    calls = _last_run_calls(events)
+    assert len(calls) == 1
+    assert calls[0]["id"] == "c1" and calls[0]["name"] == "read_file"
+    assert calls[0]["ok"] is True
+    assert calls[0]["error_reason"] == ""
+
+
+@pytest.mark.asyncio
+async def test_slicec_tool_exception_backfills_ok_false_with_reason():
+    fail = _Tool("read_file", safe=True, fail=True)   # 抛 RuntimeError("read_file boom")
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"path": "/tmp/a"}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": fail})]
+    calls = _last_run_calls(events)
+    assert calls[0]["ok"] is False
+    assert calls[0]["error_reason"].startswith("RuntimeError:")   # 异常类名+消息,如实
+    assert "boom" in calls[0]["error_reason"]
+
+
+@pytest.mark.asyncio
+async def test_slicec_tool_timeout_has_its_own_reason():
+    class _TimeoutTool:
+        name = "read_file"
+        description = "t"
+        parameters = {"type": "object", "properties": {}}
+        async def __call__(self, input):
+            raise asyncio.TimeoutError("tool timed out")
+        def is_concurrency_safe(self, input):
+            return True
+
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"path": "/tmp/a"}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": _TimeoutTool()})]
+    calls = _last_run_calls(events)
+    assert calls[0]["ok"] is False
+    assert calls[0]["error_reason"].startswith("TimeoutError")    # 超时≠一般异常≠deny
+    assert "capability_denied" not in calls[0]["error_reason"]
+
+
+@pytest.mark.asyncio
+async def test_slicec_capability_deny_has_its_own_reason():
+    write = _Tool("write_file", safe=False)
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "write_file", {"path": "/tmp/a", "data": "x"}),
+        text_round("done"),
+    ])
+    from karvyloop.capability import Mode
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"write_file": write},
+                                      default_mode=Mode.READ_ONLY)]
+    calls = _last_run_calls(events)
+    assert calls[0]["ok"] is False
+    assert "capability_denied" in calls[0]["error_reason"]        # deny 是 deny,不吞成异常
+    assert not calls[0]["error_reason"].startswith("RuntimeError")
+
+
+@pytest.mark.asyncio
+async def test_slicec_error_reason_truncated_to_200():
+    class _LongBoom:
+        name = "read_file"
+        description = "t"
+        parameters = {"type": "object", "properties": {}}
+        async def __call__(self, input):
+            raise RuntimeError("x" * 500)
+        def is_concurrency_safe(self, input):
+            return True
+
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"path": "/tmp/a"}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": _LongBoom()})]
+    calls = _last_run_calls(events)
+    assert calls[0]["ok"] is False
+    assert len(calls[0]["error_reason"]) == 200                   # 截断 ≤200 字
+    assert calls[0]["error_reason"].startswith("RuntimeError:")
+
+
+@pytest.mark.asyncio
+async def test_slicec_multi_turn_every_entry_backfilled():
+    """多轮混合(成功→失败→成功):每条日志条目都有 ok 字段,逐条如实。"""
+    calls_seen: list[str] = []
+
+    class _Flaky:
+        name = "read_file"
+        description = "t"
+        parameters = {"type": "object", "properties": {}}
+        async def __call__(self, input):
+            calls_seen.append(input.get("path", ""))
+            if len(calls_seen) == 2:
+                raise RuntimeError("flaky boom")
+            return "ok"
+        def is_concurrency_safe(self, input):
+            return True
+
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"path": "/a"}),
+        tool_round("c2", "read_file", {"path": "/b"}),
+        tool_round("c3", "read_file", {"path": "/c"}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": _Flaky()})]
+    calls = _last_run_calls(events)
+    assert [c["id"] for c in calls] == ["c1", "c2", "c3"]
+    assert [c["ok"] for c in calls] == [True, False, True]
+    assert calls[1]["error_reason"].startswith("RuntimeError:")
+    assert calls[0]["error_reason"] == "" and calls[2]["error_reason"] == ""
+
+
+# ---- slice C 修订:生产 coding 工具集以 CodingResult(ok=False) **返回值**报失败、
+# 不抛异常(read/write/edit/bash/web/mcp,16+ 处失败点,中间无转换层)——
+# 对抗验收实锤:只看 is_error 会把真失败记成 ok=True。以下杀采样偏差。
+
+class _CodingTool:
+    """CodingResult 风格工具:不抛异常,按 result_fn 的返回值报成败。"""
+    name = "read_file"
+    description = "coding-style tool"
+    parameters = {"type": "object", "properties": {}}
+
+    def __init__(self, result_fn):
+        self._result_fn = result_fn
+
+    async def __call__(self, input):
+        return self._result_fn(input)
+
+    def is_concurrency_safe(self, input):
+        return True
+
+
+@pytest.mark.asyncio
+async def test_slicec_coding_result_failure_backfills_ok_false():
+    from karvyloop.coding.tools import CodingResult
+    tool = _CodingTool(lambda inp: CodingResult(
+        ok=False, payload=None, error_code=6,
+        error_message=f"文件不存在: {inp.get('file_path')}"))
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"file_path": "config.yml"}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": tool})]
+    calls = _last_run_calls(events)
+    assert calls[0]["ok"] is False                                # 返回值式失败也是失败
+    assert "文件不存在" in calls[0]["error_reason"]                # error_message 真因如实
+    assert "config.yml" in calls[0]["error_reason"]
+
+
+@pytest.mark.asyncio
+async def test_slicec_coding_result_success_backfills_ok_true():
+    from karvyloop.coding.tools import CodingResult
+    tool = _CodingTool(lambda inp: CodingResult(ok=True, payload="content"))
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"file_path": "a.txt"}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": tool})]
+    calls = _last_run_calls(events)
+    assert calls[0]["ok"] is True and calls[0]["error_reason"] == ""
+
+
+@pytest.mark.asyncio
+async def test_slicec_dict_shaped_failure_and_no_message_fallback():
+    """同形 dict(ok=False)也认;ok=False 没附原因 → 非空如实短语,不留假空串。"""
+    seen: list[dict] = []
+
+    def _result(inp):
+        seen.append(inp)
+        if len(seen) == 1:
+            return {"ok": False, "error": "端口被占用: 8766"}     # dict 形失败
+        return {"ok": False}                                      # 失败但没写原因
+    tool = _CodingTool(_result)
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"p": 1}),
+        tool_round("c2", "read_file", {"p": 2}),
+        text_round("done"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": tool})]
+    calls = _last_run_calls(events)
+    assert calls[0]["ok"] is False and "端口被占用" in calls[0]["error_reason"]
+    assert calls[1]["ok"] is False and calls[1]["error_reason"] == "tool_reported_failure"
+
+
+@pytest.mark.asyncio
+async def test_slicec_chain_coding_fail_then_success_yields_insight_signal():
+    """真 drive 曾暴露的整链回归锁:read 错路径失败(CodingResult 返回值报失败)→
+    改对路径成功 → AtomRun.tool_calls 事实 → insight 确定性档必须出 tool_retry 信号。
+    (修前:失败被记 ok=True → 全 True 压掉旧推断 → 0 信号,老代码 1 信号 = 回归。)"""
+    from types import SimpleNamespace
+
+    from karvyloop.coding.tools import CodingResult
+    from karvyloop.cognition.insight import find_insight_signals
+
+    def _result(inp):
+        if inp.get("file_path") == "config.yml":                  # 错路径 → 失败
+            return CodingResult(ok=False, payload=None, error_code=6,
+                                error_message="文件不存在: config.yml")
+        return CodingResult(ok=True, payload="yaml content")      # 改对 → 成功
+    tool = _CodingTool(_result)
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "read_file", {"file_path": "config.yml"}),
+        tool_round("c2", "read_file", {"file_path": "config.yaml"}),
+        text_round("读到了"),
+    ])
+    events = [ev async for ev in run(_atom(), {}, _tok(), gateway=_gw(adapter),
+                                      tools={"read_file": tool})]
+    run_obj = events[-1].run
+    assert [c["ok"] for c in run_obj.tool_calls] == [False, True]
+    entry = SimpleNamespace(kind="atom_run", task_id="t1", ts=1.0, seq=0,
+                            payload={"atom_id": run_obj.atom_id, "success": run_obj.success,
+                                     "output": run_obj.output, "terminal": run_obj.terminal,
+                                     "tool_calls": run_obj.tool_calls})
+    sigs = find_insight_signals([entry])
+    assert len(sigs) == 1 and sigs[0].pattern == "tool_retry"
+    assert "确定性" in sigs[0].material                            # 走确定性档
+    assert "文件不存在" in sigs[0].material                        # 失败真因进材料
+
+
 # ============ AC10：transition.reason 可断言 ============
 def test_ac10_loop_state_transition_is_assertable():
     s = LoopState()

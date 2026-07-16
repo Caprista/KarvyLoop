@@ -151,6 +151,31 @@ def _synthesize_missing_tool_results(
     return synth
 
 
+def _tool_call_fact(r: ToolResult) -> tuple[bool, str]:
+    """ToolResult → (ok, error_reason) 成败事实对(slice C;记事实不算评价)。
+
+    **失败有两种报法,都要认**(对抗验收实锤:只看 is_error 会把真失败记成 ok=True):
+    ① 抛异常/超时/deny → orchestration 包成 is_error=True(真因 "ExcType:msg" /
+       "TimeoutError:…" / "capability_denied: …",如实携带不改写);
+    ② 生产 coding 工具集(read/write/edit/bash/web/mcp,16+ 处失败点)**不抛**,
+       以 CodingResult(ok=False, error_message=…) 或同形 dict **返回值**报失败,
+       中间无转换层 → 这里识别其形态取 error_message/error/message 真因。
+       只认显式 `ok is False`(布尔判等),别的形状不猜;**不**把它映射进
+       ToolResult.is_error —— 那会顺带改断路器语义,不在本单。
+    """
+    if r.is_error:
+        return False, r.error_reason or ""
+    c = r.content
+    ok_field = c.get("ok") if isinstance(c, dict) else getattr(c, "ok", None)
+    if ok_field is False:
+        for key in ("error_message", "error", "message", "reason"):   # reason:如 create_atom 的失败形态(复审边角)
+            v = c.get(key) if isinstance(c, dict) else getattr(c, key, None)
+            if isinstance(v, str) and v.strip():
+                return False, v.strip()
+        return False, "tool_reported_failure"   # ok=False 但没附原因,如实短语兜底
+    return True, ""
+
+
 # ---- 内部事件（透传给上层/bus）----
 
 @dataclass
@@ -431,9 +456,14 @@ async def run(
 
             state.transition = Transition(reason="ran_tools",
                                           extra={"n": len(assistant_tool_uses)})
-            # 记日志
+            # 记日志(slice C:本轮条目留 id→entry 索引,工具跑完按 tool_use_id 回填
+            # ok/error_reason 两个**事实字段** —— 记事实不是算评价,不违跑评分离;
+            # 工具成败本来就是"跑+写事实"契约的一部分,docs/82)
+            turn_log_by_id: dict[str, dict] = {}
             for tu in assistant_tool_uses:
-                tool_calls_log.append({"id": tu.id, "name": tu.name, "input": tu.input})
+                entry = {"id": tu.id, "name": tu.name, "input": tu.input}
+                tool_calls_log.append(entry)
+                turn_log_by_id[tu.id] = entry
 
             # 6) 跑工具(含 capability gate)
             # 默认 mode 由调用方传(原子执行多写少读,默认 WORKSPACE_WRITE)
@@ -448,6 +478,16 @@ async def run(
 
             results = await run_tools(assistant_tool_uses, tools, token,
                                        capability_check=_cap_check)
+            # slice C 回填:按 tool_use_id 写回成败事实(_tool_call_fact 认两种失败报法:
+            # is_error=True 的异常/超时/deny + CodingResult(ok=False) 返回值式),
+            # 真因如实携带不改写不吞并;截断 ≤200 字。
+            # run_tools 若在上面炸了 → 本轮条目无 ok 字段(老格式),消费侧(insight)回退推断。
+            for r in results:
+                entry = turn_log_by_id.get(r.tool_use_id)
+                if entry is not None:
+                    ok, reason = _tool_call_fact(r)
+                    entry["ok"] = ok
+                    entry["error_reason"] = reason[:200]
             for r in results:
                 yield ToolResultEvent(result=r)
 

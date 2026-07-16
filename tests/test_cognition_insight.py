@@ -3,6 +3,10 @@
 不变量:
 ① 信号门(零 LLM)命中:同名工具≥2次 input 变+最终成功 / terminal 非 COMPLETED 且后续成功
   (error 真因并进材料)/ task_run error→done
+①' slice C 确定性升级:同名组内**全部**条目带 ok 事实字段时,tool_retry =
+  `ok=False → 同名 ok=True`(确定性,error_reason 真因入材料;ok 全 True 的
+  "同名+input 变"不再误报);老数据无 ok 字段回退旧推断(加性兼容);
+  组内部分有 ok(混合/截断数据)= 事实不全 → 也回退推断,保守别漏报太宽
 ② 平静零候选:无模式命中 → [](同 input 重试 / 纯失败 / 顺序不对都不算)
 ③ 解析宁空勿毒:prose/坏 JSON → [];超长丢;**编造 evidence_ref 整条丢**;带 domain/role 丢
 ④ 复现关:硬证据(env/correction+硬信号)首见即写;软观察 1 run 背书不写、≥2 run 写
@@ -70,6 +74,145 @@ def test_gate_task_recovery_hit():
     sigs = I.find_insight_signals([e1, e2])
     assert len(sigs) == 1 and sigs[0].pattern == "task_recovery" and sigs[0].hard is True
     assert set(sigs[0].refs) == {"reg-9:1", "reg-9:0"}
+
+
+# ============ ①' slice C:tool_retry 确定性升级(ok=False → 同名 ok=True)============
+
+
+def _ok_run(task_id="t1", *, calls, success=True, terminal="completed", ts=1.0, seq=0):
+    """tool_calls 直接给(可带 ok/error_reason 事实字段 —— slice C 之后的新数据形态)。"""
+    return _e("atom_run", task_id, {"atom_id": "a1", "input": {}, "output": {"text": "装好了"},
+                                    "success": success, "tool_calls": list(calls),
+                                    "trace_ref": f"trace://a1/{seq}", "terminal": terminal},
+              ts=ts, seq=seq)
+
+
+def test_gate_deterministic_ok_pairing_hits_with_reason_in_material():
+    calls = [
+        {"id": "c0", "name": "pip_install", "input": {"index": "pypi"},
+         "ok": False, "error_reason": "TimeoutError:connect pypi timed out"},
+        {"id": "c1", "name": "pip_install", "input": {"index": "mirror"},
+         "ok": True, "error_reason": ""},
+    ]
+    sigs = I.find_insight_signals([_ok_run(calls=calls)])
+    assert len(sigs) == 1
+    s = sigs[0]
+    assert s.pattern == "tool_retry" and s.hard is True and s.trace_ref == "t1:0"
+    assert "确定性" in s.material                       # 走的是确定性档不是推断
+    assert "TimeoutError" in s.material                 # 失败真因(error_reason)并进材料
+
+
+def test_gate_deterministic_same_input_flake_still_hits():
+    # 确定性档不要求 input 变:同参数重试 ok=False→ok=True 也是失败→成功配对
+    # (旧推断会漏掉它;这正是事实字段带来的升级)
+    calls = [
+        {"id": "c0", "name": "fetch", "input": {"url": "u"}, "ok": False,
+         "error_reason": "RuntimeError:503"},
+        {"id": "c1", "name": "fetch", "input": {"url": "u"}, "ok": True, "error_reason": ""},
+    ]
+    sigs = I.find_insight_signals([_ok_run(calls=calls)])
+    assert len(sigs) == 1 and sigs[0].pattern == "tool_retry"
+
+
+def test_gate_deterministic_hits_even_if_run_failed_overall():
+    # 工具级失败→成功已闭环 = 硬证据,不是"纯失败";run 整体后来因别的原因没成功也算
+    calls = [
+        {"id": "c0", "name": "pip_install", "input": {"index": "pypi"}, "ok": False,
+         "error_reason": "RuntimeError:no matching distribution"},
+        {"id": "c1", "name": "pip_install", "input": {"index": "mirror"}, "ok": True,
+         "error_reason": ""},
+    ]
+    sigs = I.find_insight_signals([_ok_run(calls=calls, success=False, terminal="max_turns")])
+    assert len(sigs) == 1 and sigs[0].pattern == "tool_retry"
+
+
+def test_gate_ok_facts_override_old_inference():
+    # ok 全 True + input 变 + run 成功:旧推断会误报"纠错",事实说没失败过 → 零信号
+    calls = [
+        {"id": "c0", "name": "read_file", "input": {"path": "/a"}, "ok": True, "error_reason": ""},
+        {"id": "c1", "name": "read_file", "input": {"path": "/b"}, "ok": True, "error_reason": ""},
+    ]
+    assert I.find_insight_signals([_ok_run(calls=calls)]) == []
+
+
+def test_gate_ok_false_without_later_success_no_signal():
+    # 成功在前失败在后(顺序不对)/ 纯失败:都不是"失败→成功"配对
+    wrong_order = [
+        {"id": "c0", "name": "fetch", "input": {"u": 1}, "ok": True, "error_reason": ""},
+        {"id": "c1", "name": "fetch", "input": {"u": 2}, "ok": False, "error_reason": "RuntimeError:x"},
+    ]
+    pure_fail = [
+        {"id": "c0", "name": "fetch", "input": {"u": 1}, "ok": False, "error_reason": "RuntimeError:x"},
+        {"id": "c1", "name": "fetch", "input": {"u": 2}, "ok": False, "error_reason": "RuntimeError:y"},
+    ]
+    assert I.find_insight_signals([_ok_run(calls=wrong_order)]) == []
+    assert I.find_insight_signals([_ok_run(task_id="t2", calls=pure_fail)]) == []
+
+
+def test_gate_mixed_old_and_new_data_each_judged_by_its_own_rule():
+    # 加性兼容:老格式 run(无 ok 字段)走旧推断、新格式 run 走确定性 —— 各判各的,都命中
+    old = _retry_run(task_id="told", seq=0)   # 老数据:同名+input 变+成功 → 回退推断命中
+    new = _ok_run(task_id="tnew", seq=0, calls=[
+        {"id": "c0", "name": "ssh", "input": {"port": 22}, "ok": False,
+         "error_reason": "TimeoutError:22"},
+        {"id": "c1", "name": "ssh", "input": {"port": 2222}, "ok": True, "error_reason": ""},
+    ])
+    sigs = I.find_insight_signals([old, new])
+    assert len(sigs) == 2
+    assert {s.task_id for s in sigs} == {"told", "tnew"}
+    assert all(s.pattern == "tool_retry" and s.hard for s in sigs)
+    new_sig = next(s for s in sigs if s.task_id == "tnew")
+    old_sig = next(s for s in sigs if s.task_id == "told")
+    assert "确定性" in new_sig.material and "确定性" not in old_sig.material
+
+
+def test_gate_partial_ok_group_falls_back_to_inference():
+    # 组内部分条目有 ok 部分没有(混合/截断数据)= 事实不全,确定性档**不**独占裁决,
+    # 回退旧推断(同名≥2+input 变+run 成功)——保守但别漏报太宽(对抗验收修订#3)
+    calls = [
+        {"id": "c0", "name": "pip_install", "input": {"index": "pypi"},
+         "ok": False, "error_reason": "TimeoutError:pypi"},
+        {"id": "c1", "name": "pip_install", "input": {"index": "mirror"}},   # 无 ok 字段
+    ]
+    sigs = I.find_insight_signals([_ok_run(calls=calls)])
+    assert len(sigs) == 1 and sigs[0].pattern == "tool_retry"
+    assert "确定性" not in sigs[0].material                     # 走的是推断档不是确定性档
+    # 推断档条件不满足(input 没变)→ 保守零信号,不拿残缺事实硬凑配对
+    same_input = [
+        {"id": "c0", "name": "fetch", "input": {"u": 1}, "ok": False, "error_reason": "x"},
+        {"id": "c1", "name": "fetch", "input": {"u": 1}},
+    ]
+    assert I.find_insight_signals([_ok_run(task_id="t2", calls=same_input)]) == []
+
+
+def test_gate_deterministic_empty_reason_renders_unrecorded():
+    # ok=False 但 error_reason 空串/缺字段:材料显"未记录",不渗 "null"(对抗验收修订#4)
+    empty = [
+        {"id": "c0", "name": "fetch", "input": {"u": 1}, "ok": False, "error_reason": ""},
+        {"id": "c1", "name": "fetch", "input": {"u": 2}, "ok": True, "error_reason": ""},
+    ]
+    missing = [
+        {"id": "c0", "name": "fetch", "input": {"u": 1}, "ok": False},   # 连字段都没有
+        {"id": "c1", "name": "fetch", "input": {"u": 2}, "ok": True},
+    ]
+    for tid, calls in (("t1", empty), ("t2", missing)):
+        sigs = I.find_insight_signals([_ok_run(task_id=tid, calls=calls)])
+        assert len(sigs) == 1
+        assert "未记录" in sigs[0].material and "null" not in sigs[0].material
+
+
+def test_gate_deterministic_group_with_pairing_beats_sibling_inference_group():
+    # 同一 run 里混合:名组 A 带 ok 且有配对 → 确定性命中(每 run 至多一条,不重复计)
+    calls = [
+        {"id": "c0", "name": "pip_install", "input": {"i": "pypi"}, "ok": False,
+         "error_reason": "RuntimeError:mirror needed"},
+        {"id": "c1", "name": "pip_install", "input": {"i": "mirror"}, "ok": True, "error_reason": ""},
+        # 名组 B:老格式(无 ok)同名 input 变 —— 也可命中,但每 run 只出一条
+        {"id": "c2", "name": "read_file", "input": {"p": "/a"}},
+        {"id": "c3", "name": "read_file", "input": {"p": "/b"}},
+    ]
+    sigs = I.find_insight_signals([_ok_run(calls=calls)])
+    assert len(sigs) == 1                                # 每个 run 至多一条
 
 
 # ============ ② 平静零候选(不该命中的都不命中)============

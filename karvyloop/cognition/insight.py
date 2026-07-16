@@ -7,8 +7,10 @@ auto_distill 只读对话轮从不读 Trace)。
 
 **结构镜像 roles/experience.py**(同一套纪律,不另起炉灶):
 - 门1(零 LLM 信号门)`find_insight_signals`:只认三种**确定性执行模式**——
-  ① 同名工具 ≥2 次且 input 变 + 最终成功(纠错模式)② terminal 非 COMPLETED 且
-  同任务后续 run 成功(replan 恢复)③ task_run error→done。平静日子零信号 → 零 LLM。
+  ① 纠错模式:同名工具 `ok=False → 之后 ok=True`(slice C 事实字段,确定性;
+  老数据无 ok 字段回退旧推断"同名 ≥2 次且 input 变 + 最终成功")② terminal 非
+  COMPLETED 且同任务后续 run 成功(replan 恢复)③ task_run error→done。
+  平静日子零信号 → 零 LLM。
 - 解析 `parse_insights` **宁空勿毒升到指称层**:严格 JSON 失败返 [];**evidence_ref
   必须核回本批真实 trace_ref,核不上整条丢**(编造证据 = 整条不要)。
 - 门2(复现关)`build_insight_beliefs`:硬证据候选(失败→成功配对背书)首见即写
@@ -110,24 +112,54 @@ def _entry_text(e: Any) -> str:
 
 
 def _tool_retry_signal(e: Any) -> Optional[InsightSignal]:
-    """①纠错模式:同一 run 里同名工具 ≥2 次、input 变、整次 run 最终成功。
+    """①纠错模式(每个 run 至多一条)。两档判定,按 tool_calls 有没有 ok 事实字段分流:
 
-    (slice C 给 tool_calls 补 ok/error_reason 后,"先失败后成功"从推断变确定性;
-    本门现在只凭 name/input/success 三个已有事实字段,不等热路径改动。)
+    - **确定性**(slice C 之后的新数据,tool_calls 条目带 ok/error_reason):同名工具
+      `ok=False → 之后 ok=True` = 失败→成功配对**本身就是硬证据**,不再要求 input 变
+      或整次 run 成功(工具级纠错已闭环,不是"纯失败";失败真因 error_reason 并进材料)。
+    - **回退推断**(老 Trace 数据无 ok 字段,标注保留):同名 ≥2 次、input 变、
+      整次 run 最终成功 —— 旧行为原样,加性兼容。
+      **确定性档只在同名组内全部条目都带 ok 布尔字段时独占裁决**(ok 全 True 的
+      "同名+input 变"是探索不是纠错,不落回推断——旧推断在全事实数据上是误报);
+      部分有部分没有(混合/截断数据)→ 事实不全,回退推断档,宁可保守也别漏报太宽。
     """
     p = getattr(e, "payload", None) or {}
-    if not p.get("success"):
-        return None   # 最终没成功 → 纠错没闭环,不算(纯失败归 role replan,不归洞察)
-    by_name: dict[str, list[str]] = {}
+    by_name: dict[str, list[dict]] = {}
     for c in (p.get("tool_calls") or []):
         if not isinstance(c, dict):
             continue
         name = str(c.get("name", "") or "").strip()
         if name:
-            by_name.setdefault(name, []).append(_freeze_input(c.get("input")))
-    for name, inputs in by_name.items():
+            by_name.setdefault(name, []).append(c)
+    ref = _entry_ref(e)
+    for name, calls in by_name.items():
+        # ---- 确定性档:同名组内**全部**条目带 ok 布尔字段 → 事实齐,只认事实 ----
+        if all(isinstance(c.get("ok"), bool) for c in calls):
+            failed: Optional[dict] = None
+            for c in calls:   # tool_calls 列表序 = 时间序
+                ok = c.get("ok")
+                if ok is False:
+                    failed = c
+                elif ok is True and failed is not None:
+                    reason = _short(str(failed.get("error_reason") or ""), 160)
+                    shown = " → ".join(
+                        _short(_freeze_input(cc.get("input")), 120) for cc in calls[:3])
+                    material = (
+                        f"[ref={ref}] 纠错模式(确定性):一次执行里工具「{name}」先失败"
+                        f"(真因:{reason or '未记录'}),之后同名调用成功,共 {len(calls)} 次。"
+                        f"参数序列:{shown}。输出摘要:{_short(p.get('output'), 200)}"
+                    )
+                    return InsightSignal(pattern="tool_retry",
+                                         task_id=getattr(e, "task_id", ""),
+                                         trace_ref=ref, refs=(ref,), material=material,
+                                         hard=True, ts=float(getattr(e, "ts", 0.0) or 0.0))
+            continue   # 事实齐但无 False→True 配对 → 该组确定没纠错,不落回推断
+        # ---- 回退推断档(老数据/事实不全的混合数据):
+        #      最终没成功 → 纠错没闭环,不算(纯失败归 role replan)----
+        if not p.get("success"):
+            continue
+        inputs = [_freeze_input(c.get("input")) for c in calls]
         if len(inputs) >= 2 and len(set(inputs)) >= 2:
-            ref = _entry_ref(e)
             shown = " → ".join(_short(i, 120) for i in inputs[:3])
             material = (
                 f"[ref={ref}] 纠错模式:一次执行里工具「{name}」试了 {len(inputs)} 次、"
@@ -144,7 +176,8 @@ def find_insight_signals(entries: Iterable[Any]) -> list[InsightSignal]:
     """零 LLM 确定性信号门(门1):从 Trace 执行事件里筛"值得抽洞察"的片段。
 
     只认三种模式(全是硬证据 = 失败→成功配对):
-    ① tool_retry:同名工具 ≥2 次且 input 变 + run 最终成功(纠错模式);
+    ① tool_retry:同名工具 ok=False → 之后 ok=True(确定性,slice C 事实字段;
+       老数据无 ok 字段回退推断"同名 ≥2 次且 input 变 + run 最终成功");
     ② replan_recovery:terminal 非 COMPLETED 的 run 之后,同任务后续 run 成功
        (同任务的 kind="error" 事件真因顺带并进材料);
     ③ task_recovery:同一任务(registry_id)的 task_run error→done。
