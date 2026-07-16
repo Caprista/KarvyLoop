@@ -35,8 +35,13 @@ def _store():
 
 class PairIssueRequest(BaseModel):
     """可选请求体:role 非空 = 签**分享码**(给顾问/朋友看的,docs/78 §4.3)——
-    scope 收到 read,且绑定被访角色:对方经隧道召回时只放该角色的升层兵法(谓词③白名单刀)。"""
+    scope 收到 read,且绑定被访角色:对方经隧道召回时只放该角色的升层兵法(谓词③白名单刀)。
+
+    scope(分享 UI,docs/73 §9.6):显式 `"read"` = 纯只读分享码(**可不绑 role**——
+    对方能看、召回全拒)。绑了 role 的码无论请求什么 scope 一律 read(绝不升权);
+    未知 scope 走 normalize_scope deny-by-default 降 read;都没给 = 自有设备 full(零回归)。"""
     role: str = Field("", max_length=80)
+    scope: str = Field("", max_length=16)
 
 
 @router.post("/pair/issue")
@@ -47,11 +52,11 @@ def api_pair_issue(request: Request, req: Optional[PairIssueRequest] = None) -> 
     (BYO-server:自建 relay 的用户,邀请天然指向他自己的服务器)。console 没挂 relay →
     诚实报错(配对是为了跨网,relay 不在配了也没用)。
 
-    不带 body / role 空 = 原行为:自有设备 full 码。body 带 role = 分享码(给顾问看):
+    不带 body / role、scope 都空 = 原行为:自有设备 full 码。body 带 role = 分享码(给顾问看):
     scope **read** + per-channel role 绑定 —— 用它配对的设备只读,且外部召回只放该角色的
-    升层兵法(没绑 role 的 read 码召回全拒,deny-by-default)。坏 role(超长/控制字符)宁空勿毒
-    降成**无绑定的 read 分享码**(用户意图是分享,失误绝不能反向发出 full 全权码),
-    响应里 role="" 让调用方看得见绑定没生效。
+    升层兵法(没绑 role 的 read 码召回全拒,deny-by-default)。body 带 scope="read"(分享 UI)=
+    纯只读分享码,role 可空。坏 role(超长/控制字符)宁空勿毒降成**无绑定的 read 分享码**
+    (用户意图是分享,失误绝不能反向发出 full 全权码),响应里 role="" 让调用方看得见绑定没生效。
     """
     if _via_relay(request):
         return {"ok": False, "reason": _MGMT_LOCAL_ONLY}
@@ -59,12 +64,21 @@ def api_pair_issue(request: Request, req: Optional[PairIssueRequest] = None) -> 
     if not relay_url:
         return {"ok": False, "reason": "还没连接中转服务器,先在启动时带上 --relay 或在 config.yaml 里设 relay。"}
     try:
-        from karvyloop.relay.pairing import clean_role
+        from karvyloop.relay.pairing import clean_role, normalize_scope
         store = _store()
         raw_role = (req.role if req is not None else "") or ""
+        raw_scope = ((req.scope if req is not None else "") or "").strip()
         role = clean_role(raw_role)
-        # 给了 role(哪怕最终被消毒成空)= 分享意图 → read;没给 = 自有设备(full,零回归)。
-        scope = "read" if raw_role.strip() else "full"
+        # scope 判定(方向只许收窄,绝不因笔误发全权):
+        # ① 给了 role(哪怕最终被消毒成空)= 分享意图 → read,无视请求的 scope(绝不升权);
+        # ② 显式给 scope = 按 normalize_scope 归一(未知 deny-by-default 降 read);
+        # ③ 都没给 = 自有设备(full,旧前端零回归)。
+        if raw_role.strip():
+            scope = "read"
+        elif raw_scope:
+            scope = normalize_scope(raw_scope)
+        else:
+            scope = "full"
         code = store.new_code(scope, role=role)
         # mesh_room:同主人设备做 mesh 同步拨的**第二**房(docs/74;主房 client 位被 away
         # 浏览器占着)。旧客户端不认识多出的字段,无害。

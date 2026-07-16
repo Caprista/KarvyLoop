@@ -84,6 +84,38 @@ def test_issue_with_role_signs_read_share_code(monkeypatch, tmp_path):
     assert store.list_paired()[0]["role"] == "写作助手"
 
 
+def test_issue_explicit_read_scope_without_role(monkeypatch, tmp_path):
+    """分享 UI 的"不选角色=纯只读":POST {scope:"read"} → read 码、无 role 绑定
+    (对方能看不能改;外部召回 deny-by-default 全拒)。真配对后 scope 如实落 read。"""
+    _patch_store(monkeypatch, tmp_path)
+    from karvyloop.relay import e2e
+    from karvyloop.relay.pairing import PairingStore
+    r = _client().post("/api/pair/issue", json={"scope": "read"}).json()
+    assert r["ok"] is True and r["scope"] == "read" and r["role"] == ""
+    store = PairingStore(tmp_path)
+    _, pub = e2e.gen_keypair()
+    assert store.verify_and_consume(pub, e2e.pair_mac(r["code"], pub)) is True
+    assert store.scope_for(pub.hex()) == "read"
+    assert store.role_for(pub.hex()) == ""
+
+
+def test_issue_scope_only_narrows_never_escalates(monkeypatch, tmp_path):
+    """方向只许收窄:带 role 的码请求 scope=full 也一律 read(分享意图绝不发全权);
+    未知 scope deny-by-default 降 read。"""
+    _patch_store(monkeypatch, tmp_path)
+    r = _client().post("/api/pair/issue", json={"scope": "full", "role": "写作助手"}).json()
+    assert r["ok"] is True and r["scope"] == "read" and r["role"] == "写作助手"
+    r2 = _client().post("/api/pair/issue", json={"scope": "admin"}).json()
+    assert r2["ok"] is True and r2["scope"] == "read"
+
+
+def test_issue_explicit_full_scope_is_own_device(monkeypatch, tmp_path):
+    """显式 scope=full 且无 role = 自有设备码(与不带 body 同义,不是新权限)。"""
+    _patch_store(monkeypatch, tmp_path)
+    r = _client().post("/api/pair/issue", json={"scope": "full"}).json()
+    assert r["ok"] is True and r["scope"] == "full" and r["role"] == ""
+
+
 def test_issue_with_garbage_role_stays_read_unbound(monkeypatch, tmp_path):
     """坏 role(控制字符,会破 HTTP 头)宁空勿毒 → 仍是 read 分享码但**无绑定**(召回全拒);
     绝不能因消毒失败反向掉成 full 全权码。响应 role="" 让调用方看得见绑定没生效。"""

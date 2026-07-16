@@ -195,6 +195,72 @@ def test_sync_endpoint_applies_remote_belief_into_memory(tmp_path):
     assert r2["merged"] == 0
 
 
+# ---- 任务板可见面(GET /api/mesh/board,docs/74 §6.5:设备面板挂"这台在跑什么") ----
+
+def _seed_board(tmp_path):
+    """盘上种一块任务板(walls 取真实 now,端点内部用真墙钟判 lease):
+    dev-a:t-run 在跑(claim 1 分钟前,15min 租约还厚)+ t-done 已完(不该上板);
+    dev-b:t-stale 中断(60s 租约过期没心跳 → reclaimable)+ t-open 只 offer 没人认领。"""
+    import time
+    from karvyloop.mesh.tasks import claim_task, complete_task, offer_task
+    now = int(time.time() * 1000)
+    lease_ms = 15 * 60 * 1000.0
+    a = MeshLog("dev-a")
+    offer_task(a, "t-run", [], {"intent": "整理周报", "source_device": "dev-a"},
+               wall=now - 60_000, lease_s=lease_ms)
+    claim_task(a, "t-run", wall=now - 60_000)
+    offer_task(a, "t-done", [], {"intent": "已完的活", "source_device": "dev-a"},
+               wall=now - 120_000, lease_s=lease_ms)
+    claim_task(a, "t-done", wall=now - 120_000)
+    complete_task(a, "t-done", {"status": "done"}, wall=now - 30_000)
+    b = MeshLog("dev-b")
+    offer_task(b, "t-stale", [], {"intent": "跑每日汇总", "source_device": "dev-b"},
+               wall=now - 120_000, lease_s=60_000.0)
+    claim_task(b, "t-stale", wall=now - 120_000)
+    offer_task(b, "t-open", [], {"intent": "长" * 100, "source_device": "dev-b"},
+               wall=now - 10_000, lease_s=lease_ms)
+    from karvyloop.mesh.store import MeshLogStore
+    MeshLogStore(tmp_path).append(a.entries() + b.entries())
+
+
+def test_board_groups_by_claimer_with_machine_states(tmp_path):
+    """契约:非终态任务按 claimer(没人认领 → source_device)分组;done 不上板;
+    三机器态(claimed/reclaimable/offered)如实;claimed 带正的 lease_remaining_s;
+    intent 超长截断;reclaimable 排最前(要人管的顶上)。"""
+    _seed_board(tmp_path)
+    body = TestClient(_app(tmp_path)).get("/api/mesh/board").json()
+    assert body["total"] == 3                                       # t-done 不上板
+    by = body["tasks_by_device"]
+    assert set(by) == {"dev-a", "dev-b"}
+    [run] = by["dev-a"]
+    assert run["task_id"] == "t-run" and run["status"] == "claimed"
+    assert run["claimer"] == "dev-a" and run["source_device"] == "dev-a"
+    assert 0 < run["lease_remaining_s"] <= 15 * 60                  # "在跑(还剩X)"的数据源
+    assert [r["task_id"] for r in by["dev-b"]] == ["t-stale", "t-open"]   # 中断的顶上
+    stale, opened = by["dev-b"]
+    assert stale["status"] == "reclaimable"                         # 前端标 ⚠ 中断待接
+    assert opened["status"] == "offered" and opened["claimer"] == ""      # 没人认领 → 归 source_device
+    assert opened["intent"].endswith("…") and len(opened["intent"]) == 81  # 摘要截断(80+省略号)
+
+
+def test_board_empty_is_zero_and_read_only(tmp_path):
+    """空板 → 零形状(前端零高度不占地);K4 纯只读:看板不写盘 —— 不产日志文件、
+    不动花名册(自注册只在 /mesh/devices)。"""
+    client = TestClient(_app(tmp_path))
+    body = client.get("/api/mesh/board").json()
+    assert body == {"tasks_by_device": {}, "total": 0}
+    assert not (tmp_path / "mesh_log.jsonl").exists()
+    assert not (tmp_path / "devices.json").exists()
+
+
+def test_board_denies_external_audience(tmp_path):
+    """板上有 intent/设备 id,是同主人设备间的事 —— read-scope 分享方经隧道 403。"""
+    _seed_board(tmp_path)
+    r = TestClient(_app(tmp_path)).get("/api/mesh/board",
+                                       headers={"x-karvy-audience": "external"})
+    assert r.status_code == 403
+
+
 def test_mesh_endpoints_deny_external_audience(tmp_path):
     """mesh 面对外直接拒(样式同 routes_memory):read-scope 分享方经隧道带
     `x-karvy-audience: external`(relay/client.py 咽喉注入)→ 四个端点全 403,

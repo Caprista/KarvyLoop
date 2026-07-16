@@ -134,6 +134,23 @@ def api_mesh_sync(req: MeshSyncRequest, request: Request) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 任务板可见面(docs/74 §6.5:设备面板挂"这台在跑什么/板上什么状态")
+# ---------------------------------------------------------------------------
+
+@router.get("/mesh/board")
+def api_mesh_board(request: Request) -> dict[str, Any]:
+    """mesh 任务板只读快照:全量任务按 claimer 设备分组(接活卡之外,人第一次**看得见**板)。
+
+    K4 纯只读:不写事件、不动花名册(自注册在 /mesh/devices,看板不该有副作用)。
+    读逻辑复用 mesh_task_board.board_snapshot(与发布/接活 tick 同一双眼睛,不另算)。
+    对外直接拒(_deny_external):板上有 intent/设备指纹,是同主人设备间的事。
+    """
+    _deny_external(request)
+    from karvyloop.console.mesh_task_board import board_snapshot
+    return board_snapshot(_mesh_state_dir(request.app))
+
+
+# ---------------------------------------------------------------------------
 # 设备花名册(用户可见面 —— cli.cmd_devices 的 console 半身,同语义)
 # ---------------------------------------------------------------------------
 

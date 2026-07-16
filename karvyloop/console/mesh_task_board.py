@@ -34,7 +34,7 @@ from karvyloop.mesh.registry import DeviceRegistry
 from karvyloop.mesh.schedule import feasible
 from karvyloop.mesh.store import MeshLogStore
 from karvyloop.mesh.tasks import (
-    ST_DONE, ST_RECLAIMABLE, TaskState,
+    ST_CLAIMED, ST_DONE, ST_OFFERED, ST_RECLAIMABLE, TaskState,
     claim_task, complete_task, heartbeat_task, materialize_tasks, offer_task,
 )
 
@@ -250,6 +250,48 @@ def prune_seen_done(app: Any, *, now_ms: Optional[int] = None) -> int:
     return pruned
 
 
+# ---- ③ 板面只读快照(routes_mesh /api/mesh/board 的读半身;纯读,零事件零副作用)----
+
+BOARD_INTENT_MAX = 80   # 板面 intent 摘要长度(设备卡一行放得下;全文在发布方本地板上,不复制上墙)
+
+
+def board_snapshot(sd, *, now_ms: Optional[int] = None) -> dict:
+    """把盘上 mesh 日志折叠成「我的设备各自在跑什么」的只读快照(docs/74 §6.5 可见面)。
+
+    与发布/接活同一套读逻辑(MeshLogStore.load_events + materialize_tasks)→ 板面所见 =
+    tick 所裁,不另算一套。**纯读**:不写事件、不心跳、不 claim(看板不该改板,K4)。
+
+    分组:非终态任务按 **claimer**(没人认领 → source_device)归到设备名下;done 不上板
+    (板 = 在跑/排队/中断待接,不是历史账——历史在 Trace)。row 只带展示所需字段;
+    `status` 是机器态(offered/claimed/reclaimable),人话标签在前端 i18n(后端不产 UI 文案)。
+    `lease_remaining_s` 给"在跑(还剩X)"用(claimed 恒 >0:过期即被 materialize 判成
+    reclaimable);排序 reclaimable 最前(要人管的顶上),同态按 task_id 稳定。
+    """
+    now = _wall_ms(now_ms)
+    by_dev: dict = {}
+    total = 0
+    for t in materialize_tasks(MeshLogStore(sd).load_events(), now=now).values():
+        if t.status == ST_DONE:
+            continue
+        p = t.payload or {}
+        intent = str(p.get("intent") or "").strip()
+        row = {
+            "task_id": t.task_id,
+            "intent": intent if len(intent) <= BOARD_INTENT_MAX else intent[:BOARD_INTENT_MAX] + "…",
+            "status": t.status,
+            "claimer": t.claimer,
+            "source_device": str(p.get("source_device") or ""),
+            "lease_until": t.lease_until,
+            "lease_remaining_s": int((t.lease_until - now) / 1000),
+        }
+        by_dev.setdefault(t.claimer or row["source_device"], []).append(row)
+        total += 1
+    order = {ST_RECLAIMABLE: 0, ST_CLAIMED: 1, ST_OFFERED: 2}
+    for rows in by_dev.values():
+        rows.sort(key=lambda r: (order.get(r["status"], 3), r["task_id"]))
+    return {"tasks_by_device": by_dev, "total": total}
+
+
 # ---- ④ ACCEPT 兑现 handler(claim 上账 → 骑 run_task 从头重跑 → complete 上账)----
 
 def make_mesh_takeover_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
@@ -295,6 +337,6 @@ def make_mesh_takeover_handler(app: Any) -> Callable[[object], Tuple[bool, str]]
     return handler
 
 
-__all__ = ["TASK_LEASE_S", "TASK_HEARTBEAT_EVERY_S", "SEEN_FILE",
+__all__ = ["TASK_LEASE_S", "TASK_HEARTBEAT_EVERY_S", "SEEN_FILE", "BOARD_INTENT_MAX",
            "publish_local_tasks", "scan_takeover_proposals", "prune_seen_done",
-           "takeover_proposal_for", "make_mesh_takeover_handler"]
+           "board_snapshot", "takeover_proposal_for", "make_mesh_takeover_handler"]
