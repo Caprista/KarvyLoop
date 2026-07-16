@@ -160,6 +160,32 @@ _EN = {
     "wizard.written": "✓ written: {target}",
     "wizard.next_ollama": "next: start ollama (default http://127.0.0.1:11434), then karvyloop run \"...\"",
     "wizard.next_apikey": "next: just run karvyloop run \"...\" (the API key is already in config.yaml)",
+    "wizard.next_export": "note: config.yaml has a ${{{env_var}}} placeholder — it will NOT work until you set that env var (export {env_var}=..., then karvyloop run \"...\")",
+    "wizard.custom_desc": "custom OpenAI-compatible endpoint (your own base_url + model id: vLLM / Ark / self-hosted gateway)",
+    "wizard.custom_base_prompt": "Base URL of the OpenAI-compatible endpoint (e.g. https://host/v1): ",
+    "wizard.custom_base_bad": "base URL must start with http:// or https://",
+    "wizard.custom_model_prompt": "Model id as the endpoint expects it (e.g. gpt-4o / an Ark endpoint id): ",
+    "wizard.custom_model_bad": "model id can't be empty",
+    "wizard.custom_key_prompt": "API key (leave empty only for keyless/local endpoints): ",
+    # 模型配置(gateway/console 共用;fail-loud 出人话)
+    "models.api_unimplemented_choice": (
+        "API dialect '{api}' isn't implemented in this build — the model would fail on every chat. "
+        "For OpenAI-compatible endpoints (vLLM / Ollama-OpenAI / Ark / most gateways) pick "
+        "'openai-completions'; for Anthropic-compatible endpoints pick 'anthropic-messages'."
+    ),
+    "models.kimi_coding_key_hint": (
+        "This key (sk-kimi-…) is a Kimi For Coding key: it only works on the coding endpoint "
+        "https://api.kimi.com/coding/v1 (User-Agent allowlist-gated; it may 403 until this client "
+        "is allowlisted) and will NOT work on Moonshot chat endpoints. For chat, get a key from "
+        "platform.moonshot.ai (Global) or platform.moonshot.cn (CN); or pick the 'Kimi For Coding' "
+        "preset to use this key on its own endpoint."
+    ),
+    "gateway.api_unimplemented": (
+        "API dialect '{api}' isn't implemented in this build. Edit the model (console 🤖 Models, or "
+        "config.yaml): OpenAI-compatible endpoint → api 'openai-completions'; Anthropic-compatible "
+        "endpoint → api 'anthropic-messages'."
+    ),
+    "gateway.api_embed_unimplemented": "embedding for API dialect '{api}' isn't implemented in this build.",
     # console subcommand help
     "cli.help.console": "start the local HTML console (K3/K4 read-only, K5 factory)",
     "cli.help.console.config": "path to config.yaml (default ~/.karvyloop/config.yaml)",
@@ -751,6 +777,30 @@ _ZH = {
     "wizard.written": "✓ 已写入:{target}",
     "wizard.next_ollama": "下一步:启动 ollama (默认 http://127.0.0.1:11434),然后 karvyloop run \"...\"",
     "wizard.next_apikey": "下一步:直接 karvyloop run \"...\" 即可(API key 已写入 config.yaml)",
+    "wizard.next_export": "注意:config.yaml 写的是 ${{{env_var}}} 占位 —— 环境变量没设之前**跑不起来**(先 export {env_var}=...,再 karvyloop run \"...\")",
+    "wizard.custom_desc": "自定义 OpenAI 兼容端点(自己的 base_url + 模型 id:vLLM / Ark / 自建网关)",
+    "wizard.custom_base_prompt": "OpenAI 兼容端点的 Base URL(如 https://host/v1): ",
+    "wizard.custom_base_bad": "base URL 必须以 http:// 或 https:// 开头",
+    "wizard.custom_model_prompt": "端点认的模型 id(如 gpt-4o / Ark 的 endpoint id): ",
+    "wizard.custom_model_bad": "模型 id 不能为空",
+    "wizard.custom_key_prompt": "API key(仅免 key/本地端点可留空): ",
+    # 模型配置(gateway/console 共用;fail-loud 出人话)
+    "models.api_unimplemented_choice": (
+        "API 形态「{api}」本版未实现 —— 存下来每次聊天都会失败。"
+        "OpenAI 兼容端点(vLLM / Ollama-OpenAI / Ark / 多数网关)请选 'openai-completions';"
+        "Anthropic 兼容端点请选 'anthropic-messages'。"
+    ),
+    "models.kimi_coding_key_hint": (
+        "这是 Kimi For Coding 的 key(sk-kimi-…):只能走 coding 端点 "
+        "https://api.kimi.com/coding/v1(有 User-Agent 白名单门,本客户端未过审前可能 403),"
+        "在 Moonshot 聊天端点上必失败。聊天请去 platform.moonshot.ai(Global)或 "
+        "platform.moonshot.cn(中国区)拿 key;或选「Kimi For Coding」预设在它自己的端点上用这把 key。"
+    ),
+    "gateway.api_unimplemented": (
+        "API 形态「{api}」本版未实现。请改这个模型的 api(console 🤖 模型面板或 config.yaml):"
+        "OpenAI 兼容端点 → 'openai-completions';Anthropic 兼容端点 → 'anthropic-messages'。"
+    ),
+    "gateway.api_embed_unimplemented": "API 形态「{api}」的 embedding 本版未实现。",
     "cli.help.console": "启动本地 HTML 控制台(K3/K4 只读,K5 工厂)",
     "cli.help.console.config": "config.yaml 路径(默认 ~/.karvyloop/config.yaml)",
     "cli.help.console.host": "绑定 host(默认 127.0.0.1;LAN 需显式 0.0.0.0)",

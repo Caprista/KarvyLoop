@@ -1800,7 +1800,13 @@
     const close = document.getElementById("mgmt-close");
     if (close) close.addEventListener("click", closeMgmtModal);
     const overlay = document.getElementById("mgmt-modal");
-    if (overlay) overlay.addEventListener("click", (e) => { if (e.target === overlay) closeMgmtModal(); });
+    // CFG-01①(内测):模型设置窗禁"点空白关闭"(防切页误关,✕/Esc 仍可关);
+    // 开窗方经 openMgmtModal(title, {backdropClose:false}) 声明,其余面板维持原交互。
+    if (overlay) overlay.addEventListener("click", (e) => {
+      if (e.target !== overlay) return;
+      if (_KModal.backdropCloseEnabled && !_KModal.backdropCloseEnabled()) return;
+      closeMgmtModal();
+    });
     let _lastPanel = "";
     document.querySelectorAll(".nav-item[data-panel]").forEach((btn) => {
       if (btn.disabled) return;

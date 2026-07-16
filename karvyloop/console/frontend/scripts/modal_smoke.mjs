@@ -49,4 +49,22 @@ assert.ok(msg.className.includes("err") && msg.textContent === "出错了");
 M.setMsg(msg, true, "成了");
 assert.ok(msg.className.includes("ok"));
 
-console.log("✓ modal smoke OK — 开/关 + 强制引导锁 + 表单消息 行为正确");
+// ---- CFG-01①:per-open 蒙层/Esc 契约(默认行为不变;声明了才变)----
+assert.ok(typeof M.backdropCloseEnabled === "function", "backdropCloseEnabled 契约缺失");
+M.openMgmtModal("普通面板");
+assert.equal(M.backdropCloseEnabled(), true, "默认:点空白可关(既有面板行为不变)");
+M.openMgmtModal("模型设置", { backdropClose: false, escClose: true });
+assert.equal(M.backdropCloseEnabled(), false, "模型设置声明 backdropClose:false 应生效");
+// Esc:声明了 escClose 的窗按 Esc 关
+const esc = () => dom.window.document.dispatchEvent(
+  new dom.window.KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true }));
+esc();
+assert.equal(modal.classList.contains("hidden"), true, "escClose:true 时 Esc 应能关");
+// 没声明 escClose 的窗:Esc 不动它(不全局改行为)
+M.openMgmtModal("普通面板2");
+assert.equal(M.backdropCloseEnabled(), true, "重开无 opts 应复位为默认(不残留)");
+esc();
+assert.equal(modal.classList.contains("hidden"), false, "未声明 escClose 的窗 Esc 不该关");
+M.closeMgmtModal();
+
+console.log("✓ modal smoke OK — 开/关 + 强制引导锁 + 表单消息 + per-open 蒙层/Esc 契约 行为正确");

@@ -175,10 +175,14 @@ class OpenAICompletionsAdapter:
         base = provider.base_url.rstrip("/")
         path = getattr(provider, "messages_path", "") or ""
         # 自愈:messages_path 没设(或是 ProviderConfig 的 anthropic schema 默认 "/v1/messages",
-        # 对 openai 端点会 404)→ 当"未设",按 base 是否已含 /v1 选对路径,让旧/错配置也开箱即跑。
-        # base 末尾已是 /v1(deepseek/openai/...)→ 只补 /chat/completions;否则补 /v1/chat/completions。
+        # 对 openai 端点会 404)→ 当"未设",按 base 是否已含版本段选对路径,让旧/错配置也开箱即跑。
+        # base 末尾已是版本段(/v1 = deepseek/openai/...;/v3 等 = 火山 Ark 之类的 OpenAI 兼容端点)
+        # → 只补 /chat/completions;否则补 /v1/chat/completions。CFG-04 实况:Ark base 是
+        # .../api/v3,旧的「只认 /v1」会拼出 .../api/v3/v1/chat/completions → 404。
         if not path or path == "/v1/messages":
-            path = "/chat/completions" if base.endswith("/v1") else "/v1/chat/completions"
+            import re as _re
+            has_version_root = bool(_re.search(r"/v\d+$", base))
+            path = "/chat/completions" if has_version_root else "/v1/chat/completions"
         url = base + path
         tools_acc: dict = {}   # index → {id,name,args}(工具流式累积)
         if os.environ.get("KARVYLOOP_ADAPTER_DEBUG"):

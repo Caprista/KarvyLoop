@@ -12,8 +12,16 @@ function dom(): Dom {
 }
 
 let _setupLocked = false;   // 无 Key 强制引导:锁住时模态不可关(直到配好可用模型)
+// CFG-01①(内测):模型设置窗要禁"点空白关闭"(防切页误关),其余面板维持原交互。
+// 每次 openMgmtModal 按 opts 重置 —— 面板切换(roles→models→…)各自声明,互不残留。
+let _backdropClose = true;
+let _escClose = false;      // Esc 关闭默认关(与既有全局行为一致),要的窗显式开
 
-function openMgmtModal(title: string): void {
+interface OpenOpts { backdropClose?: boolean; escClose?: boolean }
+
+function openMgmtModal(title: string, opts?: OpenOpts): void {
+  _backdropClose = !opts || opts.backdropClose !== false;
+  _escClose = !!(opts && opts.escClose);
   const ttl = document.getElementById("mgmt-title");
   if (ttl) ttl.textContent = title;
   document.getElementById("mgmt-modal")?.classList.remove("hidden");
@@ -24,6 +32,16 @@ function closeMgmtModal(): void {
 }
 function mgmtBody(): HTMLElement | null { return document.getElementById("mgmt-body"); }
 function setSetupLocked(locked: boolean): void { _setupLocked = locked; }
+function backdropCloseEnabled(): boolean { return _backdropClose; }  // app.js 蒙层点击处查它
+
+// Esc 关闭:只对声明了 escClose 的窗生效(CFG-01① 模型设置窗禁蒙层后仍留 ✕/Esc 两条出路)。
+document.addEventListener("keydown", (e: KeyboardEvent) => {
+  if (e.key !== "Escape" || e.defaultPrevented || !_escClose) return;
+  const m = document.getElementById("mgmt-modal");
+  if (!m || m.classList.contains("hidden")) return;
+  e.preventDefault();
+  closeMgmtModal();
+});
 
 function formMsg(): HTMLElement { return dom().el("div", { class: "mgmt-msg" }); }
 function setMsg(msg: HTMLElement, ok: boolean, text: string): void {
@@ -31,6 +49,7 @@ function setMsg(msg: HTMLElement, ok: boolean, text: string): void {
   msg.textContent = text;
 }
 
-const KarvyModal = { openMgmtModal, closeMgmtModal, mgmtBody, setSetupLocked, formMsg, setMsg };
+const KarvyModal = { openMgmtModal, closeMgmtModal, mgmtBody, setSetupLocked,
+  backdropCloseEnabled, formMsg, setMsg };
 (window as unknown as { KarvyModal: typeof KarvyModal }).KarvyModal = KarvyModal;
 export { KarvyModal };

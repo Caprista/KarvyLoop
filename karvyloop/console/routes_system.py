@@ -191,14 +191,32 @@ def api_residents_invite(req: ResidentInviteRequest, request: Request) -> dict[s
 
 
 @router.get("/setup_status")
-def api_setup_status(request: Request) -> dict[str, Any]:
+async def api_setup_status(request: Request, live: bool = False) -> dict[str, Any]:
     """无 Key 强制引导:进系统后判断有没有可用模型(网页 + TUI 一致)。
 
     must_setup=True → 前端弹**强制**录入模型(不可关,直到配好);没 Key 用不了。
     覆盖:首次安装从没配 + Key 后续被删/env 没设。用户显式 --no-llm 不强制。
+
+    ?live=1(CFG-05 内测):配置级就绪(key 在)≠ 真能用 —— 此前重启后 key 被手改坏,
+    gate 直接放行进主界面。live=1 时对默认 chat 模型再做一次**与首配"保存并验证"同一套**
+    的最小真调用(validate_default_model,不造第二套),结果放 live_* 字段:前端据
+    error_class 区分 key 坏/地址错(回 setup gate)vs 网络不通(给"离线继续"出口,
+    别把离线用户锁死在门外)。默认 live=0 零成本(不发真请求),既有调用方不受影响。
     """
     from karvyloop.gateway.readiness import setup_status
-    return setup_status(request.app)
+    out = setup_status(request.app)
+    out["live_checked"] = False
+    # 配置级没就绪(本来就要强制引导)或显式 --no-llm(用户主动选只读)→ 不发真请求
+    if live and out.get("ready") and not out.get("no_llm_mode"):
+        from karvyloop.console.routes_models import validate_default_model
+        v = await validate_default_model(request.app)
+        out["live_checked"] = True
+        out["live_ok"] = bool(v.get("ok"))
+        out["live_model"] = str(v.get("model", "") or "")
+        if not v.get("ok"):
+            out["live_reason"] = str(v.get("reason", "") or "")        # 已脱敏(不泄 key)
+            out["live_error_class"] = str(v.get("error_class", "") or "")
+    return out
 
 
 @router.get("/health")

@@ -1437,6 +1437,15 @@ html, body {
   background: rgba(0, 0, 0, 0.18); color: #fff; border: none;
 }
 .update-banner .update-x:hover { background: rgba(0, 0, 0, 0.32); }
+/* CFG-05:模型不可用(离线继续后)→ 顶栏黄条(警示但不是错误红:系统还在,只是模型断了)*/
+.update-banner.model-down-banner { background: #f5c542; color: #4a3b00; }
+.update-banner.model-down-banner .update-x { color: #4a3b00; background: rgba(0, 0, 0, 0.10); }
+
+/* CFG-05:setup gate 校验失败页(诚实原因 + 重新配置/离线继续 两出口)*/
+.setup-live-fail { margin-bottom: 8px; }
+.setup-degraded-actions { display: flex; gap: 10px; margin-top: 10px; }
+.setup-offline-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); }
+.setup-offline-link { margin-top: 10px; }
 
 /* L1 自愈:🩺 诊断入口 + 诊断卡(LLM 只提议不执行)*/
 .ops-diagnose-btn {

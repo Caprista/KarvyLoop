@@ -7,7 +7,7 @@ Hardy:模型是全局配置,要有管理入口(增删改查 + 默认/推理档 +
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -61,6 +61,10 @@ class ModelSaveRequest(BaseModel):
     context_window: int = Field(default=200000, ge=0)
     max_tokens: int = Field(default=8192, ge=0)
     reasoning: bool = False
+    # 额外静态请求头(如 Kimi For Coding 的 User-Agent 放行门)。None = 不碰已有配置;
+    # 传 dict = 覆写(config_models 会剥掉任何鉴权头 —— 密钥唯一来源仍是 api_key)。
+    # 此前 preset 带 extra_headers 但这层没字段 → 引导保存时被静默丢掉(Kimi 跑不通的一环)。
+    extra_headers: Optional[dict[str, str]] = None
 
 
 def _restart_required(app, reloaded: bool) -> bool:
@@ -86,10 +90,17 @@ def api_model_save(req: ModelSaveRequest, request: Request) -> dict[str, Any]:
     if not ok:
         return {"ok": False, "reason": reason}
     reloaded, rmsg = _reload_gateway_registry(request.app)
-    return {"ok": True, "reloaded": reloaded, "reload_note": rmsg,
-            # 断②:保存成功≠能聊。fresh 进程无 gateway/main_loop → 明确告知要重启,
-            # 前端(引导页)据此显示"密钥已保存,重启 console 后生效"的大字提示,不再静默。
-            "restart_required": _restart_required(request.app, reloaded)}
+    # Kimi 三面孔诚实提示:sk-kimi- 前缀 = For Coding 的 key,粘在 moonshot 聊天端点必 401。
+    # 不拦保存(key 归属只看前缀是推断不是断言),但当场把话说明白 —— 别等 validate 401 让用户猜。
+    from karvyloop.gateway.presets import kimi_key_guidance
+    hint = kimi_key_guidance(req.api_key, req.base_url)
+    out: dict[str, Any] = {"ok": True, "reloaded": reloaded, "reload_note": rmsg,
+                           # 断②:保存成功≠能聊。fresh 进程无 gateway/main_loop → 明确告知要重启,
+                           # 前端(引导页)据此显示"密钥已保存,重启 console 后生效"的大字提示,不再静默。
+                           "restart_required": _restart_required(request.app, reloaded)}
+    if hint:
+        out["hint"] = hint
+    return out
 
 
 @router.get("/providers/presets")
@@ -109,19 +120,20 @@ def _scrub_secret(msg: str) -> str:
     return s[:200]
 
 
-@router.post("/model/validate")
-async def api_model_validate(request: Request) -> dict[str, Any]:
-    """对当前默认 chat 模型做一次最小真调用,确认 key/端点真能用。
+async def validate_default_model(app) -> dict[str, Any]:
+    """对当前默认 chat 模型做一次最小真调用,确认 key/端点真能用(唯一一套校验,别造第二套)。
 
-    zero-barrier:坏 key / 连不上 **当场抓**,而不是用户首次用才暴露。错误信息脱敏(不泄 key)。
+    复用方:① POST /api/model/validate(引导页"保存并验证");② GET /api/setup_status?live=1
+    (CFG-05:console 重启后的启动 gate —— 配置在≠能用,与首配同级真验)。
+    错误信息脱敏(不泄 key);失败时带 model + error_class(前端给"哪个模型/什么错"的诚实原因)。
     """
-    rk = getattr(request.app.state, "runtime_kwargs", None) or {}
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
     gw = rk.get("gateway")
     if gw is None:
         # fresh 进程(冷启动无 config)也要能**真验证**:从刚保存的 config 建临时 gateway
         # 打一发最小调用 —— 否则引导页"保存并验证"在最需要验证的场景(首配)反而不验,
         # 坏 key 要等用户重启+首聊才炸(Hardy 实拍拍死的不诚实面)。
-        cfgp = _model_cfg_path(request.app)
+        cfgp = _model_cfg_path(app)
         if not cfgp:
             return {"ok": False, "reason": "no_gateway"}
         try:
@@ -131,19 +143,41 @@ async def api_model_validate(request: Request) -> dict[str, Any]:
         except Exception as e:
             msg = _scrub_secret(f"{type(e).__name__}: {e}")
             return {"ok": False, "reason": msg, "error_class": _classify_model_error(msg)}
+    ref = ""
     try:
         ref = getattr(gw.reg, "default_chat", "") or ""
         if not ref:
             return {"ok": False, "reason": "no_default_model"}
+        # CFG-04 验证阶段 fail-loud:默认模型的 api 是 stub(M0 未实现)→ 不打注定
+        # NotImplementedError 的请求,当场给人话("此形态未实现,OpenAI 兼容请用 openai-completions")。
+        # models 缺失(测试桩 reg)→ 跳过判定,不影响既有 mock 流。
+        md = (getattr(gw.reg, "models", None) or {}).get(ref)
+        api = getattr(md, "api", "") if md is not None else ""
+        if api:
+            from karvyloop.gateway.config_models import IMPLEMENTED_APIS
+            if api not in IMPLEMENTED_APIS:
+                from karvyloop.i18n import t
+                return {"ok": False, "reason": t("models.api_unimplemented_choice", api=api),
+                        "error_class": "unimplemented_api", "model": ref}
         got = False
         async for _ev in gw.complete([{"role": "user", "content": "ping"}], [], ref):
             got = True
             break   # 收到第一个事件 = 端点+key 通了,够了
-        return {"ok": True, "model": ref} if got else {"ok": False, "reason": "no_response"}
+        return {"ok": True, "model": ref} if got \
+            else {"ok": False, "reason": "no_response", "model": ref}
     except Exception as e:
         msg = _scrub_secret(f"{type(e).__name__}: {e}")
         # #42 优化②:错误分类学 —— 别把裸异常甩给用户,告诉他是 key 坏了/地址错了/没网
-        return {"ok": False, "reason": msg, "error_class": _classify_model_error(msg)}
+        return {"ok": False, "reason": msg, "error_class": _classify_model_error(msg), "model": ref}
+
+
+@router.post("/model/validate")
+async def api_model_validate(request: Request) -> dict[str, Any]:
+    """对当前默认 chat 模型做一次最小真调用,确认 key/端点真能用。
+
+    zero-barrier:坏 key / 连不上 **当场抓**,而不是用户首次用才暴露。错误信息脱敏(不泄 key)。
+    """
+    return await validate_default_model(request.app)
 
 
 def _classify_model_error(msg: str) -> str:

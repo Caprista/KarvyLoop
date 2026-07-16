@@ -19,16 +19,23 @@ from .openai_completions import OpenAICompletionsAdapter
 
 
 class _StubAdapter:
-    """未实现的方言占位：调用时报错（M0 范围外，#1 §3.1 v1 推迟）。"""
+    """未实现的方言占位：调用时报错（M0 范围外，#1 §3.1 v1 推迟）。
+
+    CFG-04:报错必须带行动指引(i18n en+zh)——用户撞到这里时已经在聊天路径上,
+    "M0 未实现"五个字没法自救;告诉他改哪、改成什么。写入侧(config_models)与验证侧
+    (routes /model/validate)各有一道前置闸,这里是最后的诚实兜底。
+    """
     def __init__(self, api: str):
         self.api = api
 
     async def complete(self, *a, **k) -> AsyncIterator[Event]:
-        raise NotImplementedError(f"api '{self.api}' adapter 在 M0 未实现（见 docs/modules/gateway.md §4 v1 范围）")
+        from karvyloop.i18n import t
+        raise NotImplementedError(t("gateway.api_unimplemented", api=self.api))
         yield  # pragma: no cover — 使其成为 async generator
 
     async def embed(self, text: str, model: ModelDefinition, provider: ProviderConfig) -> list[float]:
-        raise NotImplementedError(f"api '{self.api}' embedding 在 M0 未实现")
+        from karvyloop.i18n import t
+        raise NotImplementedError(t("gateway.api_embed_unimplemented", api=self.api))
 
 
 def default_adapters() -> dict[str, ProviderAdapter]:

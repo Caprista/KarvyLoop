@@ -53,6 +53,19 @@ PROVIDER_PRESETS: list[dict] = [
         "is_local": False,
     },
     {
+        # Kimi 标准中国区聊天端点(moonshot.cn)—— 与 Global(moonshot.ai)是**两套账号/两把 key**,
+        # 互不通用(用户实测"Kimi 跑不通"的一大来源:拿 CN 平台的 key 打 Global 端点 → 401)。
+        # 端点/鉴权与 llm/profiles/kimi.py(已验通)一致:moonshot.cn/v1 + Authorization Bearer。
+        "id": "kimi-cn", "name": "Kimi / Moonshot (中国区 CN)",
+        "base_url": "https://api.moonshot.cn/v1", "messages_path": "/chat/completions",
+        "auth_header": "Authorization", "api": "openai-completions",
+        "model_id": "kimi-cn/kimi-k2-0711-preview", "model_name": "Kimi K2 (CN)",
+        "context_window": 128000, "max_tokens": 8192,
+        "key_env": "MOONSHOT_API_KEY",
+        "get_key_url": "https://platform.moonshot.cn/console/api-keys",
+        "is_local": False,
+    },
+    {
         # Kimi 国区"For Coding"端点 —— 与 Global(moonshot.ai)/标准 CN 聊天(moonshot.cn)都不同。
         # 它按 User-Agent **只放行白名单内的编码客户端**(Kimi CLI / Claude Code / Roo Code 等);非白名单 → 403。
         # 重要(Kimi 明文 TOS):**篡改 UA 假装成别的客户端 = 违规,可能封停会员权益**。所以这里
@@ -100,4 +113,20 @@ def presets_public() -> list[dict]:
     return [dict(p) for p in PROVIDER_PRESETS]
 
 
-__all__ = ["PROVIDER_PRESETS", "presets_public"]
+def kimi_key_guidance(api_key: str, base_url: str = "") -> str:
+    """Kimi 三张面孔的诚实提示:`sk-kimi-` 前缀 = **Kimi For Coding** 的 key(仅
+    api.kimi.com/coding/v1,且有 UA 白名单门),粘到 moonshot Global/CN 聊天端点必 401。
+
+    返回本地化提示串;不适用(不是 sk-kimi- key / 本就配的 coding 端点 / 遮罩串)→ ""。
+    只看 key **前缀**,绝不 log/回显 key 本身。
+    """
+    k = str(api_key or "").strip()
+    if not k.startswith("sk-kimi-"):
+        return ""
+    if "api.kimi.com" in str(base_url or "").lower():
+        return ""   # 已经在 coding 端点上,不用提示
+    from karvyloop.i18n import t
+    return t("models.kimi_coding_key_hint")
+
+
+__all__ = ["PROVIDER_PRESETS", "presets_public", "kimi_key_guidance"]

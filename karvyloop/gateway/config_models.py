@@ -17,11 +17,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-# 有效 API 方言(与 schemas/model.py ModelApi 对齐;前端下拉用)
+# 有效 API 方言(与 schemas/model.py ModelApi 对齐 —— schema 兼容层,旧配置能读)
 VALID_APIS = (
     "anthropic-messages", "openai-completions", "openai-responses",
     "google-generative-ai", "ollama", "bedrock-converse",
 )
+# **真实现**的方言(与 gateway/providers/default_adapters 非 stub 集合对齐)。
+# CFG-04 教训:前端下拉列了 6 个、其中 4 个是 stub → 用户自定义模型选中 stub,
+# 配置"成功保存",聊天时才 NotImplementedError 炸脸。下拉只给这两个;chat 模型落 stub 直接拒。
+IMPLEMENTED_APIS = ("anthropic-messages", "openai-completions")
 VALID_ROLES = ("chat", "embedding")
 # 推理强度档(碎碎念⑩;与 gateway/reasoning.py REASONING_LEVELS 同源语义)
 VALID_REASONING = ("fast", "balanced", "deep")
@@ -103,10 +107,13 @@ def list_models(cfg_path=None) -> dict:
                 "is_default_chat": mid == dc,
                 "is_default_embedding": mid == de,
             })
+    # valid_apis 喂前端下拉:**只列真实现的方言**(CFG-04:列 stub = 引用户造一个必炸的配置)。
+    # all_apis 保留完整 schema 集合(诊断/兼容读旧配置用,不进下拉)。
     return {"models": out, "default_chat": dc, "default_embedding": de,
             "default_reasoning": _default_reasoning(cfg),
             "valid_reasoning": list(VALID_REASONING),
-            "providers": list(provs.keys()), "valid_apis": list(VALID_APIS)}
+            "providers": list(provs.keys()), "valid_apis": list(IMPLEMENTED_APIS),
+            "all_apis": list(VALID_APIS)}
 
 
 def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
@@ -126,6 +133,11 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
     role = str(spec.get("role", "chat")).strip() or "chat"
     if role not in VALID_ROLES:
         return False, "role 须是 chat 或 embedding"
+    # CFG-04 写入即拦:chat 模型落在未实现方言上 = 存一个每次聊天必炸的配置,当场拒 + 人话指路。
+    # 只拦 chat:默认配置自带 embedding 模型(api: ollama)且 embed 无生产调用者,不误伤旧配置编辑。
+    if role == "chat" and api not in IMPLEMENTED_APIS:
+        from karvyloop.i18n import t
+        return False, t("models.api_unimplemented_choice", api=api)
     p = provs.setdefault(pname, {"base_url": "", "models": []})
     if spec.get("base_url"):
         p["base_url"] = str(spec["base_url"]).strip()
@@ -180,19 +192,30 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
 
 
 def delete_model(mid: str, cfg_path=None) -> tuple[bool, str]:
-    """删模型。守护:默认 chat/embedding 不可删(先换默认)。"""
+    """删模型。守护:默认 chat/embedding 不可删(先换默认)。
+
+    CFG-06(内测建议):删掉某 provider 的**最后一个**模型时,把该 provider 块整块清掉
+    (base_url/api_key/auth_header 等"相关配置数据"不残留在 config.yaml 里)。
+    只清**本次删空**的 provider —— 用户手写的其它配置项(别的 provider/顶层键)一概不动;
+    写盘走既有 _save(整树回写已加载键 + 写前留一代 .bak)。
+    """
     cfg = _load(cfg_path)
     if mid in (_default_chat(cfg), _default_embedding(cfg)):
         return False, "这是默认模型,不能删(先把默认换成别的)"
     provs = _providers(cfg)
     found = False
-    for p in provs.values():
+    emptied: list[str] = []
+    for pname, p in provs.items():
         before = len(p.get("models") or [])
         p["models"] = [x for x in (p.get("models") or []) if x.get("id") != mid]
         if len(p["models"]) < before:
             found = True
+            if not p["models"]:
+                emptied.append(pname)   # 本次删空 → provider 块(含 key)一起清
     if not found:
         return False, f"模型 {mid} 不存在"
+    for pname in emptied:
+        provs.pop(pname, None)
     _save(cfg, cfg_path)
     return True, ""
 
@@ -232,4 +255,4 @@ def set_default_reasoning(level: str, cfg_path=None) -> tuple[bool, str]:
 
 
 __all__ = ["list_models", "upsert_model", "delete_model", "set_default",
-           "set_default_reasoning", "VALID_APIS", "VALID_REASONING"]
+           "set_default_reasoning", "VALID_APIS", "IMPLEMENTED_APIS", "VALID_REASONING"]

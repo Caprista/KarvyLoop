@@ -326,11 +326,12 @@ def test_validate_api_key_minimax_no_prefix():
 # ---- AC11: wizard PROVIDERS 列表 16 个 ----
 
 def test_wizard_providers_count_17():
-    """AC11: wizard PROVIDERS 列表有 17 个(M3+ 批 8.5 修问题 1 加 minimax-cn)。"""
-    assert len(PROVIDERS) == 17
+    """AC11: wizard PROVIDERS 列表 17 vendor + 1 自定义档(CFG-04:init 也能加自定义模型)。"""
+    assert len(PROVIDERS) == 18
     names = [n for n, _ in PROVIDERS]
-    # ollama 排第一(本地优先)
+    # ollama 排第一(本地优先);自定义档恒在末尾
     assert names[0] == "ollama"
+    assert names[-1] == "custom"
     # 含 anthropic + minimax + minimax-cn
     assert "anthropic" in names
     assert "minimax" in names
@@ -564,11 +565,11 @@ def test_minimax_cn_resolve_api_key_uses_cn_env_only(monkeypatch):
 
 
 def test_minimax_cn_in_wizard_provider_list():
-    """AC15d: wizard.PROVIDERS 含 minimax-cn(动态拉自 registry,17 个 vendor)。"""
+    """AC15d: wizard.PROVIDERS 含 minimax-cn(动态拉自 registry,17 vendor + 1 自定义档)。"""
     names = [n for n, _ in PROVIDERS]
-    assert "minimax-cn" in names, f"minimax-cn 应在 wizard 列表,实际 17 选: {names}"
-    # 总数变 17(原 16 + minimax-cn)
-    assert len(PROVIDERS) == 17, f"期望 17 个 vendor,实际 {len(PROVIDERS)}"
+    assert "minimax-cn" in names, f"minimax-cn 应在 wizard 列表,实际: {names}"
+    # 总数 18 = 17 vendor + custom 档(CFG-04)
+    assert len(PROVIDERS) == 18, f"期望 17 vendor + custom = 18,实际 {len(PROVIDERS)}"
 
 
 def test_minimax_cn_create_provider_uses_cn_base_url(fake_llm_config):

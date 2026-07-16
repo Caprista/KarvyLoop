@@ -14,7 +14,7 @@ interface Dom {
   postJSON: (url: string, payload: unknown) => Promise<{ ok: boolean; status: number; data: any }>;
 }
 interface Modal {
-  openMgmtModal: (title: string) => void;
+  openMgmtModal: (title: string, opts?: { backdropClose?: boolean; escClose?: boolean }) => void;
   mgmtBody: () => HTMLElement | null;
   formMsg: () => HTMLElement;
   setMsg: (msgEl: HTMLElement, ok: boolean, text: string) => void;
@@ -191,7 +191,11 @@ function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void)
   const idIn = f("id", "provider/model-id"), nameIn = f("name", "");
   const provIn = f("provider", "anthropic"), baseIn = f("base_url", "https://...");
   const keyIn = el("input", { type: "password", placeholder: m.has_key ? m.api_key_masked + " (" + t("models.key_keep") + ")" : "sk-... 或 ${ENV_VAR}" }) as HTMLInputElement;
-  const apiSel = el("select", null, ..._modelApis.map((a) => el("option", { value: a, text: a, selected: a === m.api }))) as HTMLSelectElement;
+  // CFG-04:下拉只列**真实现**的方言(后端 valid_apis 已收敛);编辑旧配置时它当前的 api
+  // 仍要在列表里(否则浏览器默默选中第一项 = 静默改写);新建默认 openai-completions(兼容端点最多)。
+  const apiOptions = (m.api && _modelApis.indexOf(m.api) < 0) ? _modelApis.concat([m.api]) : _modelApis;
+  const apiCur = m.api || "openai-completions";
+  const apiSel = el("select", null, ...apiOptions.map((a) => el("option", { value: a, text: a, selected: a === apiCur }))) as HTMLSelectElement;
   const roleSel = el("select", null, el("option", { value: "chat", text: "chat", selected: m.role !== "embedding" }), el("option", { value: "embedding", text: "embedding", selected: m.role === "embedding" })) as HTMLSelectElement;
   const authSel = el("select", null, el("option", { value: "x-api-key", text: "x-api-key", selected: m.auth_header !== "Authorization" }), el("option", { value: "Authorization", text: "Authorization", selected: m.auth_header === "Authorization" })) as HTMLSelectElement;
   const ctxIn = el("input", { type: "number" }) as HTMLInputElement; ctxIn.value = String(m.context_window || 200000);
@@ -206,6 +210,8 @@ function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void)
         context_window: Number(ctxIn.value) || 200000, max_tokens: Number(maxIn.value) || 8192,
       });
       if (r.ok && r.data && r.data.ok) {
+        // 诚实提示(如 sk-kimi- key 配在 moonshot 聊天端点):alert 弹一次,重渲染也不丢
+        if (r.data.hint) window.alert(tB(r.data.hint));
         if (r.data.reloaded === false) _setMsg(msg, true, r.data.reload_note || "saved");
         if (onSaved) await onSaved(); else await renderModelsPanel();
       } else _setMsg(msg, false, t("mgmt.failed", { err: (r.data && (r.data.reason || r.data.detail)) || r.status }));
@@ -227,7 +233,9 @@ function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void)
 }
 
 function _openModelEdit(m: any): void {
-  openMgmtModal(m.id); const b = mgmtBody(); if (!b) return; b.innerHTML = "";
+  // CFG-01①:模型设置(含编辑页)禁点空白关闭 —— 防切换页面时误关;✕/Esc 仍可关
+  openMgmtModal(m.id, { backdropClose: false, escClose: true });
+  const b = mgmtBody(); if (!b) return; b.innerHTML = "";
   b.appendChild(_modelForm(m, t("models.edit_title")));
   b.appendChild(el("button", { class: "mgmt-inline-link", text: t("models.back"), onclick: () => open() }));
 }
@@ -305,6 +313,9 @@ async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Pro
     api: p.api, role: "chat", base_url: p.base_url, api_key: key,
     auth_header: p.auth_header, messages_path: p.messages_path || "",
     context_window: p.context_window || 200000, max_tokens: p.max_tokens || 8192,
+    // preset 自带的静态请求头(如 Kimi For Coding 的 User-Agent 放行门)——
+    // 此前这里没传 → preset 的 extra_headers 被静默丢掉,coding 端点必 403(Kimi 跑不通的一环)
+    extra_headers: p.extra_headers || null,
   });
   if (!(r.ok && r.data && r.data.ok)) {
     _setMsg(msg, false, t("mgmt.failed", { err: tB((r.data && (r.data.reason || r.data.detail)) || r.status) }));
@@ -331,42 +342,123 @@ async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Pro
       : cls === "bad_url" ? "onb.err_bad_url"
       : cls === "unreachable" ? "onb.err_unreachable" : "";
     const hint = hintKey ? t(hintKey) + " — " : "";
-    _setMsg(msg, false, hint + t("onb.validate_failed", { err: (v.data && v.data.reason) || "?" }));
+    // 保存侧的诚实提示(如 sk-kimi- key 配在 moonshot 端点必 401)放最前 —— 它才是根因人话
+    const saveHint = (r.data && r.data.hint) ? tB(r.data.hint) + " — " : "";
+    _setMsg(msg, false, saveHint + hint + t("onb.validate_failed", { err: (v.data && v.data.reason) || "?" }));
   }
   if (onDone) await onDone();   // 不管校验成败都回判 must_setup(有 key 没通会留在引导继续提示)
 }
 
 // ============ 无 Key 强制引导(进系统后判断有没有可用模型,没有就强制录入)============
+// CFG-05(内测):配置在 ≠ 能用。boot 走 /api/setup_status?live=1 —— 后端对默认模型再做一次
+// 与首配"保存并验证"**同一套**的最小真调用。状态机:
+//   ① --no-llm            → 不设门(用户主动选只读)
+//   ② 没配置/没 key        → 强制引导(锁死,同旧行为)
+//   ③ 配置在 + 真调用通过   → 进主界面
+//   ④ key 坏/地址错(确定性)→ 回 setup gate,带诚实原因(哪个模型/什么错),配好才放行
+//   ⑤ 连不上/未知(可能只是没网)→ 拦住但给两个出口:重新配置 / 离线继续(顶栏黄条提示模型不可用)
+interface LiveFail { model: string; reason: string; cls: string }
+function _liveFailOf(s: any): LiveFail {
+  return { model: (s && s.live_model) || "?", reason: (s && s.live_reason) || "",
+           cls: (s && s.live_error_class) || "" };
+}
+function _isConfigError(cls: string): boolean { return cls === "bad_key" || cls === "bad_url"; }
+function _clsHint(cls: string): string {
+  return cls === "bad_key" ? t("onb.err_bad_key")
+    : cls === "bad_url" ? t("onb.err_bad_url")
+    : cls === "unreachable" ? t("onb.err_unreachable") : "";
+}
+function _liveFailLine(fail: LiveFail): HTMLElement {
+  const hint = _clsHint(fail.cls);
+  return el("div", { class: "mgmt-msg err setup-live-fail",
+    text: t("setup.live_fail", { model: fail.model, err: fail.reason || "?" })
+      + (hint ? " — " + hint : "") });
+}
+function _gateClose(): void {
+  _KM.setSetupLocked(false);
+  const closeBtn = document.getElementById("mgmt-close");
+  if (closeBtn) closeBtn.style.display = "";
+  const modalEl = document.getElementById("mgmt-modal");
+  if (modalEl) modalEl.classList.add("hidden");
+}
+// 离线继续:进主界面,但顶栏挂黄条(诚实:模型不可用,别装一切正常)
+function _offlineContinue(fail: LiveFail): void {
+  _gateClose();
+  _showModelDownBanner(fail);
+  _deps.pollSnapshot();
+}
+function _showModelDownBanner(fail: LiveFail): void {
+  if (document.getElementById("model-down-banner")) return;
+  const bar = el("div", { class: "update-banner model-down-banner", id: "model-down-banner" });
+  bar.appendChild(el("span", { class: "update-banner-msg",
+    text: t("setup.model_down_banner", { model: fail.model }) }));
+  bar.appendChild(el("button", { class: "update-go", text: t("setup.reconfigure"),
+    onClick: () => { bar.remove(); openForcedSetup(fail); } }));
+  bar.appendChild(el("button", { class: "update-x", text: "✕", onClick: () => bar.remove() }));
+  document.body.insertBefore(bar, document.body.firstChild);
+}
+
 async function checkSetupGate(deps?: Deps): Promise<void> {
   if (deps) _deps = deps;
-  const s = await _getJSON("/api/setup_status");
-  if (s && s.must_setup) openForcedSetup();
+  const s = await _getJSON("/api/setup_status?live=1");
+  if (!s || s.no_llm_mode) return;                    // ①:显式只读模式不设门
+  if (s.must_setup) { openForcedSetup(); return; }    // ②:同旧行为
+  if (!s.live_checked || s.live_ok) return;           // ③:真验通过 → 进主界面
+  const fail = _liveFailOf(s);
+  if (_isConfigError(fail.cls)) openForcedSetup(fail);  // ④:确定性配置病 → 回 gate
+  else openDegradedGate(fail);                          // ⑤:网络类 → 别把离线用户锁死
 }
-function openForcedSetup(): void {
+function openForcedSetup(fail?: LiveFail): void {
   _KM.setSetupLocked(true);               // 锁住模态:配好前关不掉
-  openMgmtModal(t("setup.title"));
+  openMgmtModal(t("setup.title"), { backdropClose: false });
   const closeBtn = document.getElementById("mgmt-close");
   if (closeBtn) closeBtn.style.display = "none";   // 藏掉 ✕
   const b = mgmtBody(); if (!b) return; b.innerHTML = "";
+  // CFG-05 诚实原因:哪个模型 / 什么错(reason 后端已脱敏),别让人对着空引导页猜
+  if (fail) b.appendChild(_liveFailLine(fail));
   b.appendChild(el("div", { class: "mgmt-hint", text: t("setup.hint") }));  // 没 Key 用不了,先配一个模型
   const guided = el("div");
   const done = async () => {
-    const s = await _getJSON("/api/setup_status");
-    if (s && !s.must_setup) {                 // 配好了 → 解锁、复原 ✕、关闭、刷新
-      _KM.setSetupLocked(false);
-      if (closeBtn) closeBtn.style.display = "";
-      const modalEl = document.getElementById("mgmt-modal");
-      if (modalEl) modalEl.classList.add("hidden");
-      _deps.pollSnapshot();
+    // 配好没有?与 boot gate 同一把尺(live=1):config 在了还得真调用通过才算
+    const s = await _getJSON("/api/setup_status?live=1");
+    if (!s || s.must_setup) return;   // 还没配出模型/key:留在引导(原因已就地显示)
+    if (s.live_checked && !s.live_ok) {
+      const f = _liveFailOf(s);
+      if (_isConfigError(f.cls)) return;   // key/地址仍坏:留在引导(_onbSave 已显示校验失败原因)
+      openDegradedGate(f); return;         // 网络类失败:给"离线继续"出口,别锁死
     }
-    // 没配好就留在引导里(_onbSave 已就地显示校验失败/缺 key 的原因),不额外刷屏
+    _gateClose();                          // 配好且真验通过(或 fresh 进程待重启)→ 放行
+    _deps.pollSnapshot();
   };
   b.appendChild(guided);
   _guidedSetup(guided, done);   // 引导式:选 provider→预填→粘 key→实时校验(替代裸全字段表单)
+  // 从"连不上"进来的重新配置:保留离线出口(网一时半会修不好时,不至于被锁死在门外)
+  if (fail && !_isConfigError(fail.cls)) {
+    b.appendChild(el("button", { class: "mgmt-inline-link setup-offline-link",
+      text: t("setup.offline_continue"), onClick: () => _offlineContinue(fail) }));
+  }
+}
+// ⑤ 网络类校验失败:拦住但不锁死 —— 两个出口(重新配置 / 离线继续)
+function openDegradedGate(fail: LiveFail): void {
+  _KM.setSetupLocked(true);
+  openMgmtModal(t("setup.title"), { backdropClose: false });
+  const closeBtn = document.getElementById("mgmt-close");
+  if (closeBtn) closeBtn.style.display = "none";
+  const b = mgmtBody(); if (!b) return; b.innerHTML = "";
+  b.appendChild(_liveFailLine(fail));
+  b.appendChild(el("div", { class: "mgmt-hint", text: t("setup.net_hint") }));
+  const row = el("div", { class: "setup-degraded-actions" });
+  row.appendChild(el("button", { class: "mgmt-submit", text: t("setup.reconfigure"),
+    onClick: () => openForcedSetup(fail) }));
+  row.appendChild(el("button", { class: "mgmt-submit setup-offline-btn",
+    text: t("setup.offline_continue"), onClick: () => _offlineContinue(fail) }));
+  b.appendChild(row);
 }
 
 async function open(): Promise<void> {
-  openMgmtModal(t("models.title")); await renderModelsPanel();
+  // CFG-01①:全局模型设置窗禁点空白关闭(防切页误关);✕/Esc 仍可关
+  openMgmtModal(t("models.title"), { backdropClose: false, escClose: true });
+  await renderModelsPanel();
 }
 
 const KarvyModelsPanel = { open, checkSetupGate };

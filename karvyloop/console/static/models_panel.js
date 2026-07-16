@@ -187,7 +187,9 @@ var KarvyModelsPanelBundle = (function(exports) {
     const idIn = f("id", "provider/model-id"), nameIn = f("name", "");
     const provIn = f("provider", "anthropic"), baseIn = f("base_url", "https://...");
     const keyIn = el("input", { type: "password", placeholder: m.has_key ? m.api_key_masked + " (" + t("models.key_keep") + ")" : "sk-... 或 ${ENV_VAR}" });
-    const apiSel = el("select", null, ..._modelApis.map((a) => el("option", { value: a, text: a, selected: a === m.api })));
+    const apiOptions = m.api && _modelApis.indexOf(m.api) < 0 ? _modelApis.concat([m.api]) : _modelApis;
+    const apiCur = m.api || "openai-completions";
+    const apiSel = el("select", null, ...apiOptions.map((a) => el("option", { value: a, text: a, selected: a === apiCur })));
     const roleSel = el("select", null, el("option", { value: "chat", text: "chat", selected: m.role !== "embedding" }), el("option", { value: "embedding", text: "embedding", selected: m.role === "embedding" }));
     const authSel = el("select", null, el("option", { value: "x-api-key", text: "x-api-key", selected: m.auth_header !== "Authorization" }), el("option", { value: "Authorization", text: "Authorization", selected: m.auth_header === "Authorization" }));
     const ctxIn = el("input", { type: "number" });
@@ -212,6 +214,7 @@ var KarvyModelsPanelBundle = (function(exports) {
           max_tokens: Number(maxIn.value) || 8192
         });
         if (r.ok && r.data && r.data.ok) {
+          if (r.data.hint) window.alert(tB(r.data.hint));
           if (r.data.reloaded === false) _setMsg(msg, true, r.data.reload_note || "saved");
           if (onSaved) await onSaved();
           else await renderModelsPanel();
@@ -248,7 +251,7 @@ var KarvyModelsPanelBundle = (function(exports) {
     );
   }
   function _openModelEdit(m) {
-    openMgmtModal(m.id);
+    openMgmtModal(m.id, { backdropClose: false, escClose: true });
     const b = mgmtBody();
     if (!b) return;
     b.innerHTML = "";
@@ -360,7 +363,10 @@ var KarvyModelsPanelBundle = (function(exports) {
       auth_header: p.auth_header,
       messages_path: p.messages_path || "",
       context_window: p.context_window || 2e5,
-      max_tokens: p.max_tokens || 8192
+      max_tokens: p.max_tokens || 8192,
+      // preset 自带的静态请求头(如 Kimi For Coding 的 User-Agent 放行门)——
+      // 此前这里没传 → preset 的 extra_headers 被静默丢掉,coding 端点必 403(Kimi 跑不通的一环)
+      extra_headers: p.extra_headers || null
     });
     if (!(r.ok && r.data && r.data.ok)) {
       _setMsg(msg, false, t("mgmt.failed", { err: tB(r.data && (r.data.reason || r.data.detail) || r.status) }));
@@ -381,40 +387,132 @@ var KarvyModelsPanelBundle = (function(exports) {
       const cls = v.data && v.data.error_class || "";
       const hintKey = cls === "bad_key" ? "onb.err_bad_key" : cls === "bad_url" ? "onb.err_bad_url" : cls === "unreachable" ? "onb.err_unreachable" : "";
       const hint = hintKey ? t(hintKey) + " — " : "";
-      _setMsg(msg, false, hint + t("onb.validate_failed", { err: v.data && v.data.reason || "?" }));
+      const saveHint = r.data && r.data.hint ? tB(r.data.hint) + " — " : "";
+      _setMsg(msg, false, saveHint + hint + t("onb.validate_failed", { err: v.data && v.data.reason || "?" }));
     }
     if (onDone) await onDone();
   }
+  function _liveFailOf(s) {
+    return {
+      model: s && s.live_model || "?",
+      reason: s && s.live_reason || "",
+      cls: s && s.live_error_class || ""
+    };
+  }
+  function _isConfigError(cls) {
+    return cls === "bad_key" || cls === "bad_url";
+  }
+  function _clsHint(cls) {
+    return cls === "bad_key" ? t("onb.err_bad_key") : cls === "bad_url" ? t("onb.err_bad_url") : cls === "unreachable" ? t("onb.err_unreachable") : "";
+  }
+  function _liveFailLine(fail) {
+    const hint = _clsHint(fail.cls);
+    return el("div", {
+      class: "mgmt-msg err setup-live-fail",
+      text: t("setup.live_fail", { model: fail.model, err: fail.reason || "?" }) + (hint ? " — " + hint : "")
+    });
+  }
+  function _gateClose() {
+    _KM.setSetupLocked(false);
+    const closeBtn = document.getElementById("mgmt-close");
+    if (closeBtn) closeBtn.style.display = "";
+    const modalEl = document.getElementById("mgmt-modal");
+    if (modalEl) modalEl.classList.add("hidden");
+  }
+  function _offlineContinue(fail) {
+    _gateClose();
+    _showModelDownBanner(fail);
+    _deps.pollSnapshot();
+  }
+  function _showModelDownBanner(fail) {
+    if (document.getElementById("model-down-banner")) return;
+    const bar = el("div", { class: "update-banner model-down-banner", id: "model-down-banner" });
+    bar.appendChild(el("span", {
+      class: "update-banner-msg",
+      text: t("setup.model_down_banner", { model: fail.model })
+    }));
+    bar.appendChild(el("button", {
+      class: "update-go",
+      text: t("setup.reconfigure"),
+      onClick: () => {
+        bar.remove();
+        openForcedSetup(fail);
+      }
+    }));
+    bar.appendChild(el("button", { class: "update-x", text: "✕", onClick: () => bar.remove() }));
+    document.body.insertBefore(bar, document.body.firstChild);
+  }
   async function checkSetupGate(deps) {
     if (deps) _deps = deps;
-    const s = await _getJSON("/api/setup_status");
-    if (s && s.must_setup) openForcedSetup();
+    const s = await _getJSON("/api/setup_status?live=1");
+    if (!s || s.no_llm_mode) return;
+    if (s.must_setup) {
+      openForcedSetup();
+      return;
+    }
+    if (!s.live_checked || s.live_ok) return;
+    const fail = _liveFailOf(s);
+    if (_isConfigError(fail.cls)) openForcedSetup(fail);
+    else openDegradedGate(fail);
   }
-  function openForcedSetup() {
+  function openForcedSetup(fail) {
     _KM.setSetupLocked(true);
-    openMgmtModal(t("setup.title"));
+    openMgmtModal(t("setup.title"), { backdropClose: false });
     const closeBtn = document.getElementById("mgmt-close");
     if (closeBtn) closeBtn.style.display = "none";
     const b = mgmtBody();
     if (!b) return;
     b.innerHTML = "";
+    if (fail) b.appendChild(_liveFailLine(fail));
     b.appendChild(el("div", { class: "mgmt-hint", text: t("setup.hint") }));
     const guided = el("div");
     const done = async () => {
-      const s = await _getJSON("/api/setup_status");
-      if (s && !s.must_setup) {
-        _KM.setSetupLocked(false);
-        if (closeBtn) closeBtn.style.display = "";
-        const modalEl = document.getElementById("mgmt-modal");
-        if (modalEl) modalEl.classList.add("hidden");
-        _deps.pollSnapshot();
+      const s = await _getJSON("/api/setup_status?live=1");
+      if (!s || s.must_setup) return;
+      if (s.live_checked && !s.live_ok) {
+        const f = _liveFailOf(s);
+        if (_isConfigError(f.cls)) return;
+        openDegradedGate(f);
+        return;
       }
+      _gateClose();
+      _deps.pollSnapshot();
     };
     b.appendChild(guided);
     _guidedSetup(guided, done);
+    if (fail && !_isConfigError(fail.cls)) {
+      b.appendChild(el("button", {
+        class: "mgmt-inline-link setup-offline-link",
+        text: t("setup.offline_continue"),
+        onClick: () => _offlineContinue(fail)
+      }));
+    }
+  }
+  function openDegradedGate(fail) {
+    _KM.setSetupLocked(true);
+    openMgmtModal(t("setup.title"), { backdropClose: false });
+    const closeBtn = document.getElementById("mgmt-close");
+    if (closeBtn) closeBtn.style.display = "none";
+    const b = mgmtBody();
+    if (!b) return;
+    b.innerHTML = "";
+    b.appendChild(_liveFailLine(fail));
+    b.appendChild(el("div", { class: "mgmt-hint", text: t("setup.net_hint") }));
+    const row = el("div", { class: "setup-degraded-actions" });
+    row.appendChild(el("button", {
+      class: "mgmt-submit",
+      text: t("setup.reconfigure"),
+      onClick: () => openForcedSetup(fail)
+    }));
+    row.appendChild(el("button", {
+      class: "mgmt-submit setup-offline-btn",
+      text: t("setup.offline_continue"),
+      onClick: () => _offlineContinue(fail)
+    }));
+    b.appendChild(row);
   }
   async function open() {
-    openMgmtModal(t("models.title"));
+    openMgmtModal(t("models.title"), { backdropClose: false, escClose: true });
     await renderModelsPanel();
   }
   const KarvyModelsPanel = { open, checkSetupGate };

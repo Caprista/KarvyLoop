@@ -130,3 +130,47 @@ def test_reject_bad_api(tmp_path):
     p = _w(tmp_path)
     ok, reason = cm.upsert_model({"provider": "x", "model_id": "x/y", "api": "bogus"}, p)
     assert not ok and "api" in reason
+
+
+# ---- CFG-06(内测建议):UI 删模型 → config.yaml 里"相关配置数据"同步清干净 ----
+
+def test_delete_last_model_removes_provider_block(tmp_path):
+    """删掉 provider 的最后一个模型:整个 provider 块(含 api_key/base_url)从 config.yaml 清掉,
+    其它手写配置项(lang / 别的 provider / 默认指针)一个不伤,写前照旧留 .bak。"""
+    import yaml
+    p = _w(tmp_path)
+    ok, _ = cm.upsert_model({"provider": "openai", "model_id": "openai/gpt",
+                             "api": "openai-completions",
+                             "base_url": "https://api.openai.com",
+                             "api_key": "FAKE-DO-NOT-LEAK-openai-key"}, p)
+    assert ok
+    before = p.read_text(encoding="utf-8")
+    ok, reason = cm.delete_model("openai/gpt", p)        # openai 唯一模型 → 删空
+    assert ok, reason
+    raw = p.read_text(encoding="utf-8")
+    cfg = yaml.safe_load(raw)
+    assert "openai" not in cfg["models"]["providers"]              # provider 块整个没了
+    assert "FAKE-DO-NOT-LEAK-openai-key" not in raw                # key 不残留
+    assert "api.openai.com" not in raw                             # base_url 不残留
+    # 其它键一个不伤
+    assert cfg["lang"] == "en"
+    assert cfg["models"]["providers"]["anthropic"]["api_key"] == "sk-ant-SECRET12345"
+    assert cfg["agents"]["defaults"]["model"] == "anthropic/claude"
+    # 写前 .bak(既有 _save 机制):上一版(还含 openai)拿得回
+    bak = p.with_suffix(".yaml.bak")
+    assert bak.exists() and bak.read_text(encoding="utf-8") == before
+
+
+def test_delete_one_of_two_keeps_provider_and_key(tmp_path):
+    """provider 还有别的模型 → 只删那条模型,provider 块和 key 原样保留。"""
+    import yaml
+    p = _w(tmp_path)
+    ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/haiku",
+                             "api": "anthropic-messages", "api_key": ""}, p)   # 同 provider 第二模型
+    assert ok
+    ok, reason = cm.delete_model("anthropic/haiku", p)
+    assert ok, reason
+    cfg = yaml.safe_load(p.read_text(encoding="utf-8"))
+    prov = cfg["models"]["providers"]["anthropic"]
+    assert prov["api_key"] == "sk-ant-SECRET12345"                 # key 还在
+    assert [m["id"] for m in prov["models"]] == ["anthropic/claude"]

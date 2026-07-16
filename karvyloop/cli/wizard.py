@@ -40,6 +40,11 @@ class WizardError(Exception):
     """wizard 流程中断(用户 Ctrl-C / 错误输入)。"""
 
 
+# 自定义 OpenAI 兼容端点档(测试矩阵建议:init 也能加自定义模型,不用非走 console)。
+# 不是 llm profile(端点/模型都用户给),api 固定 openai-completions(唯一已实现的兼容形态)。
+CUSTOM_PROVIDER = "custom"
+
+
 def validate_api_key(provider: str, key: str) -> Tuple[bool, str]:
     """校验 API key 格式(从 M3+ 批 8.5 走 profile 兜底)。
 
@@ -53,9 +58,25 @@ def validate_api_key(provider: str, key: str) -> Tuple[bool, str]:
     Returns: (is_valid, error_message)
     """
     ensure_profiles_loaded()
+    if provider == CUSTOM_PROVIDER:
+        # 自定义端点(名字不在 profile 注册表):只做通用检查(空/换行/占位符);
+        # 前缀无从判(端点是用户自己的),长度也不强制(本地网关常用短 token)。
+        if "\n" in key or "\r" in key:
+            return False, "API key 含换行(可能粘贴时混入了)"
+        if "FAKE" in key or "TODO" in key or "PLACEHOLDER" in key:
+            return False, "API key 是占位符(请复制真 key)"
+        if key != key.strip():
+            return False, "API key 首尾有空格(可能多粘贴了)"
+        return True, ""
     profile = get_profile(provider)
     if profile is None:
         return False, f"未知 provider: {provider!r}"
+
+    # Kimi 三面孔诚实拦截:sk-kimi- 前缀 = Kimi For Coding 的 key(仅 api.kimi.com/coding/v1,
+    # UA 白名单门),粘到 moonshot Global/CN 聊天端点必 401 —— 写出这配置就是坑用户,当场说明白。
+    if profile.name in ("kimi", "moonshot") and key.strip().startswith("sk-kimi-"):
+        from karvyloop.i18n import t
+        return False, t("models.kimi_coding_key_hint")
 
     # 本地(ollama)不真校验,只挡占位符
     if profile.auth_type == AUTH_TYPE_NONE:
@@ -108,7 +129,11 @@ def _list_providers() -> List[Tuple[str, str]]:
         is_local = 0 if p.auth_type == AUTH_TYPE_NONE else 1
         return (is_local, p.api_mode, p.name)
 
-    return [(p.name, p.description) for p in sorted(profiles, key=sort_key)]
+    from karvyloop.i18n import t
+    out = [(p.name, p.description) for p in sorted(profiles, key=sort_key)]
+    # 末尾恒有"自定义 OpenAI 兼容端点"档(vLLM / Ark / 自建网关 —— 列不进 vendor 表的都走这)
+    out.append((CUSTOM_PROVIDER, t("wizard.custom_desc")))
+    return out
 
 
 # 保留旧名 PROVIDERS 供测试 + 外部引用(底层是动态生成)
@@ -214,11 +239,14 @@ def run_wizard(
     # 1) provider
     provider = _ask_provider(renderer, stdout)
 
-    # 2) API key(可选)
-    api_key = _ask_api_key(provider, renderer)
-
-    # 3) 写 yaml(基于 DEFAULT_CONFIG_YAML,替换对应字段)
-    config_text = _build_config_for(provider, api_key)
+    # 2) API key(可选)+ 3) 生成 yaml
+    if provider == CUSTOM_PROVIDER:
+        # 自定义 OpenAI 兼容端点:问 base_url / 模型 id / key(api 固定 openai-completions)
+        base_url, model_id, api_key = _ask_custom_endpoint(renderer, stdout)
+        config_text = _build_custom_config(base_url, model_id, api_key)
+    else:
+        api_key = _ask_api_key(provider, renderer)
+        config_text = _build_config_for(provider, api_key)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(config_text, encoding="utf-8")
 
@@ -226,11 +254,88 @@ def run_wizard(
     stdout.write("\n" + t("wizard.written", target=target) + "\n")
     if provider == "ollama":
         stdout.write(t("wizard.next_ollama") + "\n")
+    elif isinstance(api_key, str) and api_key.startswith("${"):
+        # CFG-02 诚实面:用户跳过 key,写盘的是 ${ENV} 占位 —— **不能**说"key 已写入 config"
+        # (那是谎话,跑起来必失败);明说"env 没设之前跑不起来 + 先 export"。
+        stdout.write(t("wizard.next_export", env_var=api_key[2:-1]) + "\n")
     else:
         # M3+ 批 8.5 修问题 2:key 已写入 yaml,transport 走 yaml 优先,不需要再 export env
         # (旧版 wizard 提示"export X=... 再跑"是 bug,用户在 wizard 输的 key 被 transport 丢了)
         stdout.write(t("wizard.next_apikey") + "\n")
     return 0
+
+
+def _ask_custom_endpoint(renderer: Renderer, out) -> Tuple[str, str, Optional[str]]:
+    """自定义 OpenAI 兼容端点三问:base_url / 模型 id / key。
+
+    Returns: (base_url, model_id, api_key)。key 留空时:本地端点(127.0.0.1/localhost)→
+    "dummy";云端 → "${CUSTOM_API_KEY}" 占位(run_wizard 末尾会给"先 export 才跑得起"的诚实提示)。
+    """
+    from karvyloop.i18n import t
+
+    def _ask(prompt: str) -> str:
+        out.write("\n" + prompt)
+        out.flush()
+        try:
+            return input().strip()
+        except (EOFError, KeyboardInterrupt):
+            raise WizardError("用户取消")
+
+    base_url = _ask(t("wizard.custom_base_prompt"))
+    if not (base_url.startswith("http://") or base_url.startswith("https://")):
+        renderer.render_error_with_hint(code="E_BASE_URL",
+                                        message=t("wizard.custom_base_bad"),
+                                        hint=t("wizard.custom_base_prompt").strip())
+        raise WizardError("base_url 无效")
+    model_id = _ask(t("wizard.custom_model_prompt"))
+    if not model_id:
+        renderer.render_error_with_hint(code="E_MODEL_ID",
+                                        message=t("wizard.custom_model_bad"),
+                                        hint=t("wizard.custom_model_prompt").strip())
+        raise WizardError("model id 无效")
+    raw_key = _ask(t("wizard.custom_key_prompt"))
+    if raw_key:
+        ok, err = validate_api_key(CUSTOM_PROVIDER, raw_key)
+        if not ok:
+            renderer.render_error_with_hint(code="E_API_KEY",
+                                            message=t("wizard.apikey_bad", err=err),
+                                            hint=t("wizard.custom_key_prompt").strip())
+            raise WizardError("API key 格式错")
+        return base_url, model_id, raw_key
+    low = base_url.lower()
+    if "127.0.0.1" in low or "localhost" in low:
+        return base_url, model_id, "dummy"          # 本地端点惯例免 key
+    out.write(t("wizard.apikey_skipped", env_var="CUSTOM_API_KEY") + "\n")
+    return base_url, model_id, "${CUSTOM_API_KEY}"
+
+
+def _build_custom_config(base_url: str, model_id: str, api_key: Optional[str]) -> str:
+    """自定义 OpenAI 兼容端点 → config yaml(块 key=custom,与 model id 前缀一致;
+    api 固定 openai-completions —— 唯一已实现的 OpenAI 兼容形态,CFG-04 不给 stub 选项)。"""
+    from .init import DEFAULT_CONFIG_YAML
+
+    _DEFAULT_MODEL_LINE = "    model: ollama/qwen2.5-coder:7b"
+    # 用户给的是端点认的模型名;引用键统一 custom/<name>(容忍手滑带 custom/ 前缀)
+    bare = model_id[len("custom/"):] if model_id.startswith("custom/") else model_id
+    full_id = f"custom/{bare}"
+    key_value = api_key or "${CUSTOM_API_KEY}"
+    new_block = f"""    custom:
+      base_url: {base_url}
+      auth: api-key
+      auth_header: Authorization
+      api_key: {key_value}
+      models:
+        - id: {full_id}
+          name: {bare}
+          api: openai-completions
+          context_window: 128000
+          max_tokens: 4096
+"""
+    cfg = DEFAULT_CONFIG_YAML
+    if "    anthropic:" in cfg:
+        cfg = cfg.replace("    anthropic:", new_block + "    anthropic:")
+    cfg = cfg.replace(_DEFAULT_MODEL_LINE, f"    model: {full_id}")
+    return cfg
 
 
 def _build_config_for(provider: str, api_key: Optional[str]) -> str:
@@ -333,6 +438,7 @@ _refresh_providers_cache()
 
 __all__ = [
     "WizardError",
+    "CUSTOM_PROVIDER",
     "validate_api_key",
     "PROVIDERS",
     "run_wizard",

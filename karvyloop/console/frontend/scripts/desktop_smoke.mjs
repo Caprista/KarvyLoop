@@ -242,6 +242,12 @@ assert.ok(!document.getElementById("chat-modal").classList.contains("desk-min"),
 
 // ---- ⚖ notifyH2A(replay):开机回放存量 pending 卡 = 状态不是事件 ——
 // 置顶/在位可瞟照做,但**零剧场**(不叼卡/不闪/不冒泡;Hardy 实拍"开屏飘上去"回归锁)
+// desktop.ts 2026-07-14 起,置顶/剧场先验"看得见"(rect 宽高>0;实拍教训:小卡朝隐形便签走)。
+// jsdom 无布局 rect 全 0 会被判"隐形" → 给 ⚖ 便签一个真实尺寸,模拟"便签在屏上"的用户真态。
+decide.getBoundingClientRect = () => ({
+  x: 40, y: 40, left: 40, top: 40, right: 300, bottom: 200, width: 260, height: 160,
+  toJSON: () => ({}),
+});
 const zReplayBefore = parseInt(decide.style.zIndex, 10);
 KD.notifyH2A({ replay: true });
 assert.ok(parseInt(decide.style.zIndex, 10) > zReplayBefore, "replay 仍应置顶 ⚖(状态保证)");
@@ -394,6 +400,14 @@ notes = document.querySelectorAll(".desk-signed-note:not(.is-fading)");
 assert.equal(notes.length, 3, "署名便签 3 张上限(旧的淡出)");
 
 // ---- 叼卡(vignette ③):notifyH2A → 小演员出现 → 到位后 ⚖ 闪 + 回窝 ----
+// desktop.ts 2026-07-14 起,叼卡要求起点(卡皮巴拉 fab)与目的地(⚖ 便签)rect 宽高>0
+// (实拍教训:别朝隐形目标走)。jsdom 无布局 → 给两端真实尺寸,模拟用户真态。
+const _rect = (l, t2, w, h) => () => ({
+  x: l, y: t2, left: l, top: t2, right: l + w, bottom: t2 + h, width: w, height: h,
+  toJSON: () => ({}),
+});
+document.getElementById("chat-open").getBoundingClientRect = _rect(900, 600, 64, 64);
+document.querySelector(".col-decide").getBoundingClientRect = _rect(40, 40, 260, 160);
 KD2.notifyH2A();
 const actor = document.getElementById("desk-carry-actor");
 assert.ok(actor, "h2a 到达应出现叼卡小演员(.desk-carry)");
