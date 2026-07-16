@@ -241,14 +241,26 @@ def test_j6_agent_import_llm_decompose_real_model(app):
             break
     assert out is not None and out.get("ok"), f"导入直接失败: {out}"
     assert out.get("decomposed") is True, f"真模型没拆解(反复降级 v0;多半并发截断了 JSON): {out}"
-    # (a) role 物化
-    assert (app.state.role_registry.root / out["role_id"]).exists(), "拆解了但角色没落库"
-    # (b) ≥1 atom 进公共原子库 + COMPOSITION 引的是原子不是死字符串
-    assert len(out["atoms"]) >= 1, "没拆出原子(Hardy 验收锚 b)"
-    for aid in out["atoms"]:
+    # docs/84 #2 判型后,这个"研究分析师+工具"样例落在 hybrid/executor 边界,真模型两判皆合法。
+    # Hardy 原验收锚(不扁平拷 + 真耗 token)不变;落库断言按判型走 —— 判 executor 时
+    # 不建 role 恰是新语义的正确行为(纯执行体不进决策席),不是没拆解。
+    kind = out.get("agent_kind", "hybrid")
+    if kind in ("decision", "hybrid"):
+        # (a) role 物化
+        assert (app.state.role_registry.root / out["role_id"]).exists(), "拆解了但角色没落库"
+        if kind == "hybrid":
+            # (b) ≥1 atom 进公共原子库 + COMPOSITION 引的是原子不是死字符串
+            assert len(out["atoms"]) >= 1, "hybrid 没拆出原子(Hardy 验收锚 b)"
+            comp = (app.state.role_registry.root / out["role_id"] / "COMPOSITION.yaml").read_text(encoding="utf-8")
+            assert any(f"atom: {aid}" in comp for aid in out["atoms"]), "COMPOSITION 没引原子"
+    elif kind == "executor":
+        assert out.get("import_kind") == "pure_executor"
+        assert not (app.state.role_registry.root / out["role_id"]).exists(), "executor 不该建 role"
+        assert len(out["atoms"]) >= 1, "executor 没落原子"
+    else:  # skill —— 带 4 个工具的样例不该被判成纯剧本;真发生 = 判型质量问题,红出来看
+        raise AssertionError(f"真模型把带工具的 agent 判成了 skill: {out}")
+    for aid in out.get("atoms", []):
         assert app.state.atom_registry.get(aid) is not None, f"原子 {aid} 没进公共池"
-    comp = (app.state.role_registry.root / out["role_id"] / "COMPOSITION.yaml").read_text(encoding="utf-8")
-    assert any(f"atom: {aid}" in comp for aid in out["atoms"]), "COMPOSITION 没引原子"
 
 
 # ---- J7:模糊指令 LLM 拆解(真模型)—— "去X域找人做Y" → 拆成 域+人+H2A 提案 ----

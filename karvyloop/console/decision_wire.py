@@ -34,6 +34,117 @@ logger = logging.getLogger(__name__)
 
 DECISION_BATCH = 3   # 攒够 N 个决策样本 → 结晶一次(决策稀疏,批小;省 token)
 
+# ---- docs/85 Part B + docs/81 B-5:决策侧 Trace 埋点(全 fail-soft,绝不阻断决策流)----
+# 决策建成七段里三段在拍板瞬间蒸发(提案 basis 即删/预对齐现算不落账/dispatch 回执 pop 即清)
+# → 补 Trace kind:decision_point(T1,proposals.broadcast)/ decision_made(T3,本文件)/
+#   decision_dispatched(T4,dispatch_decision)。B-5 校准事件(decision_pref_reinforced/weakened/
+#   pref_auto_revoked/revoke_suppressed/surface_triggered/defer_aged_out)每条带当前常数值+触发
+#   上下文,内测真数据标定拍脑袋常数。payload 封顶 ~500 字(容量环纪律);新 kind 全部**不进**
+#   DROPPABLE_KINDS(小事件,prune 永不丢)。
+TRACE_PAYLOAD_CAP = 500          # 单条埋点 payload 的 JSON 字符上限(单测锁死)
+PREF_TRACE_TASK = "decision_pref"   # 偏好校准事件共用 task 桶(无提案上下文的分布事件都记这)
+
+
+def _trace_store(app: Any):
+    """决策侧埋点用的 TraceStore:main_loop.trace 为主,app.state.trace 备选(同 weekly tick)。"""
+    st = getattr(app, "state", None)
+    ml = getattr(st, "main_loop", None) if st is not None else None
+    tr = getattr(ml, "trace", None) if ml is not None else None
+    if tr is None and st is not None:
+        tr = getattr(st, "trace", None)
+    return tr
+
+
+def clamp_trace_payload(payload: dict, cap: int = TRACE_PAYLOAD_CAP) -> dict:
+    """把埋点 payload 压到 JSON ≤ cap 字符(确定性逐级截断字符串值;绝不抛)。
+
+    埋点是观测不是账本 —— 超长一律截断保头部,宁短勿爆(容量环纪律)。"""
+    import json as _json
+    try:
+        d = {k: v for k, v in (payload or {}).items()}
+        for limit in (160, 80, 40, 16):
+            if len(_json.dumps(d, ensure_ascii=False)) <= cap:
+                return d
+            d = {k: (v[:limit] if isinstance(v, str) else v) for k, v in d.items()}
+        # 还超(键太多/非字符串值巨大)→ 只留最小骨架
+        return {k: d[k] for k in list(d)[:6]}
+    except Exception:
+        return {}
+
+
+def emit_decision_trace(app: Any, kind: str, task_id: str, payload: dict, *,
+                        agent: str = "", source: str = "decision_wire") -> str:
+    """fail-soft 落一条决策侧 TraceEntry(task_id=proposal_id 惯例,同 silenced_decision)。
+
+    决策流是命脉:trace 缺/坏/append 炸,一律 debug log 后返 ""(调用方行为一字不变)。"""
+    try:
+        tr = _trace_store(app)
+        if tr is None:
+            return ""
+        from karvyloop.cognition.trace import TraceEntry
+        return tr.append(TraceEntry(task_id=(task_id or PREF_TRACE_TASK), kind=kind,
+                                    payload=clamp_trace_payload(payload),
+                                    agent=(agent or "karvy"), source=source))
+    except Exception as e:
+        logger.debug(f"[decision_trace] {kind} 埋点失败(不阻断): {e}")
+        return ""
+
+
+def _task_id_for_proposal(app: Any, proposal_id: str) -> str:
+    """这条提案兑现时登记的任务 id(Task.proposal_id 回链;老任务无此字段 → "")。"""
+    try:
+        reg = getattr(app.state, "task_registry", None)
+        if reg is None or not proposal_id:
+            return ""
+        for tk in reg.list():   # newest-first,取最近那次兑现
+            if tk.get("proposal_id") == proposal_id:
+                return str(tk.get("id") or "")
+    except Exception:
+        pass
+    return ""
+
+
+def dispatch_decision(app: Any, *, proposal_id: str, decision: str,
+                      handlers: Optional[dict] = None, edits: Optional[dict] = None):
+    """T4 咽喉(docs/85):registry.decide 包 run_scope + 落 `decision_dispatched`。
+
+    WS(ws._dispatch)与 REST(/api/h2a_decide)同调此函数 —— 兑现期间执行体写的每条
+    Trace 都带同一 run_id(contextvar,asyncio.to_thread 复制上下文天然透传),lifeline
+    端点凭它 trace.query_run 取回"每一步工具动作"。埋点全 fail-soft:trace 坏/缺,
+    decide 的行为与返回值一字不变。报告卡 verdict 在 pop 之前 **peek**(不消费)。"""
+    registry = getattr(app.state, "proposal_registry", None)
+    if registry is None:
+        return None
+    if handlers is None:
+        handlers = getattr(app.state, "proposal_handlers", None) or {}
+    rid = ""
+    try:
+        from karvyloop.cognition.trace import run_scope
+        scope = run_scope()
+    except Exception:
+        scope = None
+    if scope is None:   # trace 原语不可用 → 裸跑(决策流不因埋点断)
+        res = registry.decide(proposal_id, decision, handlers=handlers, edits=edits)
+    else:
+        with scope as rid:
+            res = registry.decide(proposal_id, decision, handlers=handlers, edits=edits)
+    try:
+        if res is not None:
+            payload = {"decision": (decision or "").upper(), "kind": res.kind,
+                       "ok": bool(res.ok), "detail": (res.detail or "")[:200], "run_id": rid}
+            tid = _task_id_for_proposal(app, proposal_id)
+            if tid:
+                payload["tid"] = tid
+            store = getattr(app.state, "report_cards", None)   # pop 前 peek(⑤蒸发段的证据)
+            card = store.get(proposal_id) if isinstance(store, dict) else None
+            if isinstance(card, dict):
+                payload["verdict"] = str(card.get("resolvable", "") or "")
+                payload["verdict_grounded"] = bool(card.get("grounded"))
+            emit_decision_trace(app, "decision_dispatched", proposal_id, payload)
+    except Exception as e:
+        logger.debug(f"[decision_trace] decision_dispatched 埋点失败(不阻断): {e}")
+    return res
+
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", "", (s or "").lower())
@@ -154,6 +265,18 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
     except Exception as e:
         logger.warning(f"[decision_wire] 静音控制器钩子失败(proposal_id={proposal_id},"
                        f"不阻断决策流): {e}")
+    # 段3c(T3 decision_made,docs/85):拍板本体落 Trace —— 决策建成的第④站从此不蒸发
+    # (decision_log 是给人回看的流水,这条是评价/lifeline 的事件底座;fail-soft 同各段)。
+    try:
+        emit_decision_trace(app, "decision_made", proposal_id, {
+            "decision": (decision or "").upper(), "kind": kind,
+            "domain": eff_domain, "role": role or "",
+            "reason": (eff_reason or "")[:160],
+            "edited": sorted(edits.keys())[:6] if edits else [],
+        })
+    except Exception as e:
+        logger.warning(f"[decision_wire] decision_made 埋点失败(proposal_id={proposal_id},"
+                       f"不阻断): {e}")
     # 段4:样本入结晶缓冲 + 调度结晶(楔子的进料口 —— 丢了必须可见)
     try:
         observe_decision(app, DecisionSample(
@@ -224,10 +347,24 @@ async def maybe_crystallize_decisions(app: Any) -> int:
             if should_revoke(w):
                 revoked += 1
                 by_norm.pop(_norm(tgt.content), None)
+                # B-5 #3(docs/81):跌破 STRENGTH_FLOOR 自动撤销 —— 记触发率 + 当前常数值
+                from karvyloop.crystallize.decision_pref import STRENGTH_FLOOR, WEAKEN_STEP
+                emit_decision_trace(app, "pref_auto_revoked", PREF_TRACE_TASK, {
+                    "floor": STRENGTH_FLOOR, "weaken_step": WEAKEN_STEP,
+                    "strength_after": round(float(w.provenance.get("strength", 0.0)), 3),
+                    "status": str(tgt.provenance.get("status", "") or ""),
+                    "content": (tgt.content or "")[:80]})
             else:
                 mem.write(w)
                 by_norm[_norm(w.content)] = w
                 weakened += 1
+                # B-5 #2(docs/81):相反决策削弱 —— 记 WEAKEN_STEP 当前值 + 前后 strength 分布
+                from karvyloop.crystallize.decision_pref import WEAKEN_STEP
+                emit_decision_trace(app, "decision_pref_weakened", PREF_TRACE_TASK, {
+                    "step": WEAKEN_STEP,
+                    "strength_before": round(float(tgt.provenance.get("strength", 0.0)), 3),
+                    "strength_after": round(float(w.provenance.get("strength", 0.0)), 3),
+                    "content": (w.content or "")[:80]})
         except Exception as e:
             logger.warning(f"[decision_pref] 翻转偏好失败: {e}")
 
@@ -289,6 +426,11 @@ async def crystallize_candidates(app: Any, candidates: list, *, ctx_domain: str 
         # 你撤回过且仍在冷却窗口内 → 别自动学回来(撤回的牙;连复现计数也清,别偷偷攒)。
         if rev is not None and rev.is_suppressed(key, now=now):
             recur.pop(key, None)
+            # B-5 #12(docs/81):撤回抑制窗真挡了一次结晶 —— 记 14 天窗当前值 + 挡了什么
+            emit_decision_trace(app, "revoke_suppressed", PREF_TRACE_TASK, {
+                "cooldown_days": round(getattr(rev, "cooldown_days", 0.0), 1),
+                "explicit": bool(c.get("explicit")),
+                "content": (c.get("content", "") or "")[:80]})
             continue
         if key in by_norm:
             old = by_norm[key]
@@ -298,6 +440,13 @@ async def crystallize_candidates(app: Any, candidates: list, *, ctx_domain: str 
                 mem.write(upd)
                 by_norm[key] = upd
                 reinforced += 1
+                # B-5 #1(docs/81):加固触发 —— 记 REINFORCE_STEP 当前值 + 前后 strength 分布
+                from karvyloop.crystallize.decision_pref import REINFORCE_STEP
+                emit_decision_trace(app, "decision_pref_reinforced", PREF_TRACE_TASK, {
+                    "step": REINFORCE_STEP,
+                    "strength_before": round(float(old.provenance.get("strength", 0.0)), 3),
+                    "strength_after": round(float(upd.provenance.get("strength", 0.0)), 3),
+                    "content": (upd.content or "")[:80]})
             except Exception as e:
                 logger.warning(f"[decision_pref] 加固偏好失败: {e}")
             continue
@@ -483,4 +632,7 @@ __all__ = [
     "crystallize_candidates", "schedule_decision_crystallize", "prealign_governance",
     "assemble_governance",
     "proposal_for_confirm_decision",
+    # docs/85 决策侧埋点(T3/T4 + B-5 校准事件的公共咽喉)
+    "TRACE_PAYLOAD_CAP", "PREF_TRACE_TASK", "clamp_trace_payload",
+    "emit_decision_trace", "dispatch_decision",
 ]

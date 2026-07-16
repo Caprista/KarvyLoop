@@ -2831,6 +2831,7 @@
   // 拼接的)诚实回退原文 —— 宁可漏译,不显示 key 名/空白。契约:tests/test_i18n_backend_reasons.py
   // grep 后端静态中文 reason 逐条断言在此表 —— 新加后端 reason 不补翻译会挂测试。
   const BACKEND_ZH_EN: Record<string, string> = {
+    "这条决策没有任何记录": "No record of this decision",
     "云端模型必须先填 API Key(留空只在编辑已有配置时表示保留原值)": "A cloud model needs an API key — leaving it blank only means \"keep the existing key\" when editing an already-configured provider.",
     "授权管理只能在本机/局域网操作(经隧道的远程会话不能颁发/吊销授权)": "Authorization management is local-only — a remote session (over the tunnel) can't issue or revoke access.",
     "还没连接中转服务器,先在启动时带上 --relay 或在 config.yaml 里设 relay。": "No relay connected yet — start with --relay, or set `relay:` in config.yaml.",

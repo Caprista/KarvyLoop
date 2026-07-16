@@ -46,10 +46,12 @@
       <div class="topbar-spacer"></div>
       <!-- 统计 + token 成本表:降级为次级小字(成本仍可见可点开,但不抢主位) -->
       <div class="topbar-secondary">
+        <!-- 第一屏生词审计(docs/85 Part A ⑤):stats 人话化 —— 占位不再裸英文,
+             真值由 renderStats 填(label 走 i18n stat.*,tooltip 走 stat.*.title) -->
         <div class="topbar-stats" id="stats">
-          <span id="stat-drives">drives: —</span>
-          <span class="fast-brain" id="stat-fast-brain">fast-brain: —</span>
-          <span class="crystallizations" id="stat-crystallized">crystallized: —</span>
+          <span id="stat-drives" data-i18n-title="stat.drives.title">🏃 —</span>
+          <span class="fast-brain" id="stat-fast-brain" data-i18n-title="stat.fast_brain.title">⚡ —</span>
+          <span class="crystallizations" id="stat-crystallized" data-i18n-title="stat.skills.title">💎 —</span>
         </div>
         <span class="token-meter" id="token-meter" data-i18n-title="cockpit.token_title">💰 —</span>
       </div>
@@ -82,13 +84,15 @@
     <nav class="sidebar">
       <div class="nav-group">
         <div class="nav-group-title" data-i18n="nav.manage">Manage</div>
-        <button class="nav-item" data-panel="domains">
+        <!-- 界面灌输(docs/85 Part A ④):四个承担教学点的入口挂 tooltip(问责链/开公司/你的标准);
+             tour 刻意不说「原子」—— 原子的教学点就在这里 -->
+        <button class="nav-item" data-panel="domains" data-i18n-title="nav.domains.title">
           <span class="nav-ico">📂</span><span data-i18n="nav.domains">Business Domains</span>
         </button>
-        <button class="nav-item" data-panel="roles">
+        <button class="nav-item" data-panel="roles" data-i18n-title="nav.roles.title">
           <span class="nav-ico">◑</span><span data-i18n="nav.roles">Roles</span>
         </button>
-        <button class="nav-item" data-panel="atoms">
+        <button class="nav-item" data-panel="atoms" data-i18n-title="nav.atoms.title">
           <span class="nav-ico">⬡</span><span data-i18n="nav.atoms">Atom Agents</span>
         </button>
         <button class="nav-item" data-panel="agents">
@@ -103,7 +107,7 @@
         <button class="nav-item" data-panel="memory">
           <span class="nav-ico">🧠</span><span data-i18n="nav.memory">Knowledge</span>
         </button>
-        <button class="nav-item" data-panel="decision_prefs">
+        <button class="nav-item" data-panel="decision_prefs" data-i18n-title="nav.decision_prefs.title">
           <span class="nav-ico">🧭</span><span data-i18n="nav.decision_prefs">Decision Preferences</span>
         </button>
         <button class="nav-item" data-panel="skills">

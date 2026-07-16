@@ -2334,6 +2334,38 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .life-ev-detail { font-size: var(--fs-12); color: var(--text-2); margin-top: 2px; white-space: pre-wrap; }
 .life-ev-trace { font-size: 11px; color: var(--text-3); margin-top: 2px; word-break: break-all; }
 
+/* —— 决策时间线 = 决策的生命线(docs/85):七站垂直轴,复用 life-timeline 骨架 —— */
+.dlife-summary { font-size: var(--fs-13); font-weight: 700; color: var(--text-1); margin: 2px 0 6px; }
+.dlife-station { padding: 8px 0 8px 2px; border-bottom: 1px dashed var(--border); }
+.dlife-station:last-child { border-bottom: none; }
+.dlife-st-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+.dlife-row { margin: 2px 0 0 24px; font-size: var(--fs-12); color: var(--text-2); }
+.dlife-row .recent-badge { margin-left: 6px; font-weight: 700; }
+.dlife-missing .dlife-st-head { opacity: 0.55; }
+.dlife-empty-note { color: var(--text-3); font-style: italic; }      /* 诚实空位:此段无记录 */
+.dlife-auto { font-size: 11px; color: var(--text-3); margin-left: 6px; }
+.dlife-strength, .dlife-tokens { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.dlife-step-name { font-weight: 600; color: var(--text-2); margin-right: 6px; }
+.dlife-step-gist { color: var(--text-3); word-break: break-all; }
+.dlife-replay { margin: 2px 0 6px; }
+/* ▶ 逐站回放:回放态先全暗,逐站 ~400ms 淡入点亮;reduced-motion 由 JS 直接全显(不进回放态) */
+.dlife-replaying .dlife-station { opacity: 0.12; transition: opacity 0.36s ease; }
+.dlife-replaying .dlife-station.dlife-lit { opacity: 1; }
+/* 🗳 最近拍板行 = 时间线主入口(有 proposal_id 才可点) */
+.recent-row.recent-click { cursor: pointer; }
+.recent-row.recent-click:hover { background: var(--surface-2); border-radius: 6px; }
+/* 聊天终态卡的「🧬 回放」副入口 */
+.dlife-link { border: none; background: transparent; color: var(--accent-deep, var(--text-2));
+  font-size: 11px; cursor: pointer; padding: 0 2px; text-decoration: underline; }
+.dlife-link:hover { color: var(--text-1); }
+/* 首张决策卡一次性提示(Part A ③):教「决策点」+ 引流 🗳 回放 */
+.dcard-first-hint { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0;
+  padding: 8px 10px; border: 1px solid var(--accent-line, var(--border));
+  background: var(--accent-soft, var(--surface-2)); border-radius: 8px;
+  font-size: var(--fs-12); color: var(--text-2); }
+.dcard-first-hint-x { flex: 0 0 auto; border: none; background: transparent; cursor: pointer;
+  color: var(--text-3); font-size: 12px; margin-left: auto; }
+
 /* —— 原子库等管理卡的删除钮:hover 才现(降误点;触屏无 hover 保持常显)—— */
 .mgmt-card .mc-del { opacity: 0; transition: opacity .12s; }
 .mgmt-card:hover .mc-del, .mgmt-card:focus-within .mc-del { opacity: 1; }

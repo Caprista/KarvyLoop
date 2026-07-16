@@ -8,7 +8,7 @@
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -126,6 +126,13 @@ async def api_proposals_pending(request: Request) -> dict[str, Any]:
     except Exception as e:
         import logging as _logging
         _logging.getLogger(__name__).warning(f"[residents] 引荐检查失败(待决列表照常返回): {e}")
+    # B-5 #7(docs/81):DEFER 老化重浮的必经口在此 —— 首次熬过 48h 的卡落 defer_aged_out
+    # 埋点(registry 打标保幂等;fail-soft,待决列表照常返回)。
+    try:
+        from karvyloop.console.proposals import trace_aged_defers
+        trace_aged_defers(request.app)
+    except Exception:
+        pass
     out: list[dict[str, Any]] = []
     for p in registry.pending():
         try:
@@ -251,6 +258,149 @@ def api_lang_set(req: LangRequest, request: Request) -> dict[str, Any]:
     cfg_path = getattr(request.app.state, "config_path", "") or None
     persisted = write_lang(req.lang, cfg_path)
     return {"ok": True, "lang": req.lang, "persisted": persisted}
+
+
+# ---- /api/decision/{pid}/lifeline(决策的生命线,docs/85 Part B)----
+
+# Trace kind → 时间线站位(与前端 _DLIFE_STATIONS 对齐;缺站前端显诚实空位)
+_DLIFE_KIND_TO_TYPE = {
+    "decision_point": "born",           # T1 💡诞生(登记/广播咽喉)
+    "decision_judged": "judged",        # T2 ✍️你的判断(二刀才埋;这里先认,不编数据)
+    "decision_made": "decided",         # T3 ⚖你拍板
+    "decision_dispatched": "dispatched",  # T4 🚚兑现
+    "silenced_decision": "dispatched",  # 静音自动兑现(auto 标出;拍板站诚实留空)
+}
+
+
+@router.get("/decision/{proposal_id}/lifeline")
+def api_decision_lifeline(proposal_id: str, request: Request) -> dict[str, Any]:
+    """一次决策的生命线(docs/85):与 /api/skill_lifecycle 同心智同数据纪律 ——
+    **K4 只读,全部从 Trace 聚合**(decision_log 兜底拍板存根 + 任务态 + query_run 工具步
+    投影 + token_ledger.task_total),不在执行路径另算。
+
+    契约(同构 skill_lifecycle,别改形状):
+    {"ok", "proposal_id", "stub",
+     "events": [{"ts","type","detail","trace_ref", ...extras}],   # type ∈ born/judged/decided/dispatched
+     "steps":  [{"ts","name","gist"}],                            # 兑现 run 的真实工具步(run_id 投影)
+     "tokens": int|null, "task": {...}|null}
+    缺哪站诚实缺(不编);埋点前的老决策只有 decision_log 存根 → stub=true。
+    """
+    pid = (proposal_id or "").strip()[:512]
+    if not pid:
+        return {"ok": False, "reason": "缺 proposal_id", "events": [], "steps": [],
+                "tokens": None, "task": None, "stub": False}
+    st = request.app.state
+    trace = getattr(getattr(st, "main_loop", None), "trace", None)
+    if trace is None:
+        trace = getattr(st, "trace", None)   # 无 main_loop 时的备选源(同 weekly tick)
+
+    events: list[dict[str, Any]] = []
+    run_id = ""
+    if trace is not None:
+        try:
+            for e in trace.query(pid):
+                ev_type = _DLIFE_KIND_TO_TYPE.get(e.kind)
+                if ev_type is None:
+                    continue
+                p = getattr(e, "payload", {}) or {}
+                row: dict[str, Any] = {"ts": e.ts, "type": ev_type,
+                                       "trace_ref": f"{e.task_id}:{e.seq}"}
+                if e.kind == "decision_point":
+                    row["detail"] = str(p.get("basis") or p.get("summary") or "")
+                    row["summary"] = str(p.get("summary", "") or "")
+                    row["strength"] = p.get("strength")
+                    row["kind"] = str(p.get("kind", "") or "")
+                elif e.kind == "decision_made":
+                    row["detail"] = str(p.get("reason", "") or "")
+                    row["decision"] = str(p.get("decision", "") or "")
+                    row["edited"] = list(p.get("edited") or [])
+                elif e.kind == "decision_dispatched":
+                    row["detail"] = str(p.get("detail", "") or "")
+                    row["ok"] = bool(p.get("ok"))
+                    row["verdict"] = str(p.get("verdict", "") or "")
+                    if not run_id:
+                        run_id = str(p.get("run_id", "") or "")
+                elif e.kind == "silenced_decision":
+                    row["detail"] = str(p.get("detail", "") or p.get("summary", "") or "")
+                    row["ok"] = bool(p.get("ok"))
+                    row["auto"] = True   # 静音自动兑现(非你拍板)—— 前端如实标
+                else:   # decision_judged(二刀)
+                    row["detail"] = str(p.get("basis") or p.get("detail") or "")
+                events.append(row)
+        except Exception as ex:
+            return {"ok": False, "reason": f"trace 读取失败:{ex}", "events": [],
+                    "steps": [], "tokens": None, "task": None, "stub": False}
+    events.sort(key=lambda r: r["ts"])
+
+    # ⚖拍板兜底:埋点前的老决策 Trace 无痕,但 decision_log 落过流水 → 给"拍板存根"
+    stub = False
+    if not any(r["type"] == "decided" for r in events):
+        try:
+            log = getattr(st, "decision_log", None)
+            hit = None
+            if log is not None and hasattr(log, "query"):
+                hit = next((r for r in log.query(limit=5000)
+                            if str(r.get("proposal_id") or "") == pid), None)
+            if hit is not None:
+                stub = not events   # Trace 全空、只有流水 = 埋点前老决策(前端标一句实话)
+                events.append({"ts": float(hit.get("ts") or 0.0), "type": "decided",
+                               "detail": str(hit.get("reason", "") or ""),
+                               "decision": str(hit.get("decision", "") or ""),
+                               "summary": str(hit.get("summary", "") or ""),
+                               "trace_ref": ""})
+                events.sort(key=lambda r: r["ts"])
+        except Exception:
+            pass
+
+    # 任务态(run_task 兑现登记的任务,Task.proposal_id 回链;老任务无此字段 → null)
+    task: Optional[dict] = None
+    tid = ""
+    try:
+        reg = getattr(st, "task_registry", None)
+        if reg is not None:
+            for tk in reg.list():
+                if tk.get("proposal_id") == pid:
+                    tid = str(tk.get("id") or "")
+                    task = {"id": tid, "status": tk.get("status", ""),
+                            "who": tk.get("who", ""), "result": tk.get("result", ""),
+                            "started": tk.get("started"), "finished": tk.get("finished")}
+                    break
+    except Exception:
+        task = None
+
+    # 🔧执行工具步:T4 记下的 run_id → trace.query_run 投影(用户原话的 "each agent's
+    # reasoning steps");无 run_id / 无记录 → 空列表(前端显诚实空位)。
+    steps: list[dict[str, Any]] = []
+    if trace is not None and run_id:
+        try:
+            for e in trace.query_run(run_id):
+                p = getattr(e, "payload", {}) or {}
+                if e.kind == "atom_run":
+                    for c in (p.get("tool_calls") or [])[:40]:
+                        steps.append({"ts": e.ts, "name": str(c.get("name", "") or "?"),
+                                      "gist": str(c.get("input", ""))[:160]})
+                elif e.kind == "tool_call":
+                    steps.append({"ts": e.ts, "name": str(p.get("name", "") or "?"),
+                                  "gist": str(p.get("input", ""))[:160]})
+                if len(steps) >= 40:
+                    break
+        except Exception:
+            steps = []
+
+    # 💰token:per-task 归因账本(route_to_role 记在 proposal_id 名下,run_task 记在任务 id)
+    tokens: Optional[int] = None
+    try:
+        ledger = getattr(st, "token_ledger", None)
+        if ledger is not None and hasattr(ledger, "task_total"):
+            tokens = int(ledger.task_total(pid)) or (int(ledger.task_total(tid)) if tid else 0)
+    except Exception:
+        tokens = None
+
+    if not events and task is None and not steps:
+        return {"ok": False, "reason": "这条决策没有任何记录", "proposal_id": pid,
+                "events": [], "steps": [], "tokens": None, "task": None, "stub": False}
+    return {"ok": True, "proposal_id": pid, "stub": stub, "events": events,
+            "steps": steps, "tokens": tokens, "task": task}
 
 
 # ---- /api/decision_card(决策卡:翻译提案 + 记录拍板)----

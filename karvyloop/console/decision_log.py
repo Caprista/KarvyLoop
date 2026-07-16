@@ -118,6 +118,11 @@ class RevocationStore:
             except Exception:
                 self._marks = {}
 
+    @property
+    def cooldown_days(self) -> float:
+        """当前抑制窗天数(docs/81 B-5 #12 校准埋点要记"常数当前值",给公共只读口)。"""
+        return self._cooldown / 86400.0
+
     def mark(self, norm_content: str, *, now: Optional[float] = None) -> None:
         """记一条撤回(键 = 归一内容,值 = 撤回时刻)。"""
         k = (norm_content or "").strip()

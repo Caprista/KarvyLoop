@@ -564,6 +564,13 @@
           text: _DECISION_BADGE[d.decision] || "·" }));
         row.appendChild(el("span", { class: "recent-summary", text: d.summary || d.proposal_id || "" }));
         row.appendChild(el("span", { class: "recent-time", text: _relTime(d.ts) }));
+        // 决策时间线主入口(docs/85):拍过的板可点开回放"怎么建成的";没 proposal_id 的
+        // 老流水(极老数据)不可点(诚实:没键联不回去)。待决卡不放入口(决策没建成别催)。
+        if (d.proposal_id) {
+          row.classList.add("recent-click");
+          row.title = t("dlife.entry_title");
+          row.addEventListener("click", () => openDecisionLifeline(d.proposal_id, d.summary || ""));
+        }
         list.appendChild(row);
       });
     } catch (e) {
@@ -1012,6 +1019,18 @@
       return;
     }
     _stripEmpty(list, "h2a-empty");   // 清空态占位,但**保留已挂的兄弟卡**(多卡不覆盖)
+    // 首张决策卡一次性提示(docs/85 Part A ③):教「决策点」+ 引流 🗳 回放(教学功能互相引流)。
+    // localStorage 记「见过」→ 只出这一次;✕ 手动收起。
+    try {
+      if (!localStorage.getItem("karvyloop_dcard_hint") && !document.getElementById("dcard-first-hint")) {
+        localStorage.setItem("karvyloop_dcard_hint", "1");
+        const hint = el("div", { class: "dcard-first-hint", id: "dcard-first-hint" },
+          el("span", { text: t("dcard.first_hint") }),
+          el("button", { class: "dcard-first-hint-x", text: "✕", "aria-label": "dismiss",
+            onClick: () => hint.remove() }));
+        list.appendChild(hint);
+      }
+    } catch (e) { /* 无 localStorage(隐私模式)→ 不提示,不炸 */ }
     const built = _buildProposalCard(payload);
     _placeCard(list, built.proposalId, built.card);   // 多卡不覆盖:同 id 替换、新 id 追加
     _renderProposalInChat(payload, built.proposalId); // S3:决策卡双面出 —— 同时冒进聊天流
@@ -1046,6 +1065,7 @@
       card.appendChild(el("div", {
         class: "h2a-strength",
         text: t("proposal.strength", { pct: Math.round(payload.strength * 100) }),
+        title: t("proposal.strength.title"),   // 生词审计(docs/85 ⑥):strength 加一句人话解释
       }));
     }
     // #42 打计费黑箱:"花钱之前告诉你" —— 执行类提案带最近同类任务的真实消耗分布。
@@ -1210,6 +1230,11 @@
       } else {
         done.textContent = (_DECISION_BADGE[decision] || "✔") + " " + t(_DECISION_DONE_KEY[decision] || "h2a.done_generic");
       }
+      // 决策时间线副入口(docs/85):聊天流终态卡挂「🧬 回放」—— 拍完就能看这板怎么建成的
+      done.appendChild(document.createTextNode(" "));
+      done.appendChild(el("button", { class: "dlife-link", text: "🧬 " + t("dlife.replay_link"),
+        title: t("dlife.entry_title"),
+        onClick: () => openDecisionLifeline(String(proposalId), "") }));
       wrap.appendChild(done);
     });
   }
@@ -1243,7 +1268,8 @@
     }
     if (typeof payload.strength === "number") {
       card.appendChild(el("div", { class: "predict-strength",
-        text: t("proposal.strength", { pct: Math.round(payload.strength * 100) }) }));
+        text: t("proposal.strength", { pct: Math.round(payload.strength * 100) }),
+        title: t("proposal.strength.title") }));   // 生词审计(docs/85 ⑥)
     }
     const pid = payload.proposal_id || ("p-" + (payload.habit_id || 0));
     const row = el("div", { class: "predict-buttons" });
@@ -1942,12 +1968,14 @@
 
   // 微动效 P1-4:统计 chip 数值**增长**才轻 bump 一次(首次填充/持平/回落不动;
   // prev 记在 data-v 上,2s 轮询同值不触发;reduced-motion 由 CSS 总闸关)
-  function _setStatChip(id, num, display, label) {
+  function _setStatChip(id, num, display, label, title) {
     const n = document.getElementById(id);
     if (!n) return;
     const raw = n.getAttribute("data-v");
     const prev = raw === null ? NaN : Number(raw);   // 首次 = NaN → 任何比较都 false(Number(null) 是 0,别踩)
-    n.innerHTML = `<b>${display}</b> ${label}`;
+    // docs/85 Part A ⑤:人话在前、数在后(「🏃 跑活 12」),hover 有一句解释
+    n.innerHTML = `${label} <b>${display}</b>`;
+    if (title) n.title = title;
     n.setAttribute("data-v", String(num));
     if (Number(num) > prev) {
       n.classList.remove("stat-bump");
@@ -1956,11 +1984,11 @@
     }
   }
   function renderStats(s) {
-    // 顶栏仪表盘:紧凑、值在前(slow/restored 细节收进 token 弹窗,顶栏只留三个核心)
+    // 顶栏仪表盘:人话化(docs/85 Part A ⑤)—— 🏃跑活 N · ⚡直觉 N% · 💎结晶 N + tooltip
     const pct = (s.fast_brain_hit_rate * 100).toFixed(0);
-    _setStatChip("stat-drives", s.drive_calls, s.drive_calls, t("stat.drives"));
-    _setStatChip("stat-fast-brain", pct, pct + "%", t("stat.fast_brain"));
-    _setStatChip("stat-crystallized", s.crystallizations, s.crystallizations, t("stat.skills"));
+    _setStatChip("stat-drives", s.drive_calls, s.drive_calls, t("stat.drives"), t("stat.drives.title"));
+    _setStatChip("stat-fast-brain", pct, pct + "%", t("stat.fast_brain"), t("stat.fast_brain.title"));
+    _setStatChip("stat-crystallized", s.crystallizations, s.crystallizations, t("stat.skills"), t("stat.skills.title"));
   }
 
   // ============ ch4 圆桌:小卡兼主持,围绕主题多轮收敛(你只跟主持沟通)============
@@ -2961,6 +2989,114 @@
     body.appendChild(el("button", { class: "mgmt-submit", text: t("skills.back"),
       onClick: () => window.KarvySkillsPanel.open() }));
   }
+  // ============ 决策时间线 = 决策的生命线(docs/85 Part B):七站垂直轴 + ▶逐站回放 ============
+  // 与技能生命线同心智同 modal 同数据纪律(K4 只读,全从 Trace 聚合)。契约(与后端约定死):
+  //   GET /api/decision/{pid}/lifeline → {ok, stub, events:[{ts,type,detail,trace_ref,…}],
+  //   steps:[{ts,name,gist}], tokens, task}。type ∈ born/aligned/judged/decided/dispatched。
+  // 缺哪站显诚实空位「此段无记录」;埋点前老决策 = 拍板存根 + 一句实话(stub_hint)。
+  const _DLIFE_STATIONS = ["born", "aligned", "judged", "decided", "dispatched", "executed", "result"];
+  const _DLIFE_ICONS = { born: "💡", aligned: "🧭", judged: "✍️", decided: "⚖",
+                         dispatched: "🚚", executed: "🔧", result: "✅" };
+  async function openDecisionLifeline(proposalId, summary) {
+    openMgmtModal(t("dlife.title"));
+    const body = mgmtBody();
+    if (!body) return;
+    body.innerHTML = "";
+    const data = await _getJSON("/api/decision/" + encodeURIComponent(proposalId) + "/lifeline");
+    if (!data || !data.ok) {
+      body.appendChild(el("div", { class: "mgmt-empty",
+        text: (data && data.reason) ? tB(data.reason) : t("dlife.load_failed") }));
+      return;
+    }
+    const head = (data.events || []).find((ev) => ev.type === "born");
+    const shown = summary || (head && head.summary) || "";
+    if (shown) body.appendChild(el("div", { class: "dlife-summary", text: shown }));
+    body.appendChild(el("div", { class: "mgmt-hint",
+      text: t(data.stub ? "dlife.stub_hint" : "dlife.hint") }));
+    // ▶ 逐站回放:~400ms/站 淡入高亮;prefers-reduced-motion → 全显不演
+    const tl = el("div", { class: "life-timeline dlife-timeline" });
+    body.appendChild(el("button", { class: "mgmt-inline-link dlife-replay",
+      text: "▶ " + t("dlife.replay"), onClick: () => _dlifeReplay(tl) }));
+    const byType = {};
+    (data.events || []).forEach((ev) => { (byType[ev.type] = byType[ev.type] || []).push(ev); });
+    for (const st of _DLIFE_STATIONS) {
+      const station = el("div", { class: "dlife-station", "data-station": st });
+      station.appendChild(el("div", { class: "dlife-st-head" },
+        el("span", { class: "life-ev-icon", text: _DLIFE_ICONS[st] || "·" }),
+        el("span", { class: "life-ev-type", text: t("dlife.st_" + st) })));
+      let filled = false;
+      if (st === "executed") {
+        // 🔧 执行工具步(run_id 投影,"each agent's reasoning steps")+ 💰 token
+        for (const s of (data.steps || [])) {
+          station.appendChild(el("div", { class: "dlife-row dlife-step" },
+            el("span", { class: "dlife-step-name", text: "· " + (s.name || "?") }),
+            s.gist ? el("span", { class: "dlife-step-gist", text: s.gist }) : null));
+          filled = true;
+        }
+        if (typeof data.tokens === "number" && data.tokens > 0) {
+          station.appendChild(el("div", { class: "dlife-row dlife-tokens",
+            text: t("dlife.tokens", { n: data.tokens }) }));
+          filled = true;
+        }
+      } else if (st === "result") {
+        const tk = data.task;
+        if (tk && tk.status === "running") {
+          station.appendChild(el("div", { class: "dlife-row", text: t("dlife.result_running") }));
+          filled = true;
+        } else if (tk && (tk.result || tk.status)) {
+          station.appendChild(el("div", { class: "dlife-row",
+            text: (tk.status === "error" ? "✗ " : "✔ ") + (tk.result || tk.status) }));
+          filled = true;
+        } else {
+          // 无任务态 → 回退 dispatched 回执/验收 verdict 当结果行(诚实:只摆真有的)
+          const disp = (byType.dispatched || [])[0];
+          if (disp && (disp.detail || disp.verdict)) {
+            station.appendChild(el("div", { class: "dlife-row",
+              text: (disp.ok === false ? "✗ " : "✔ ") + (disp.verdict ? "[" + disp.verdict + "] " : "")
+                    + tB(disp.detail || "") }));
+            filled = true;
+          }
+        }
+      } else {
+        for (const ev of (byType[st] || [])) {
+          const when = ev.ts ? new Date(ev.ts * 1000).toLocaleString() : "";
+          const row = el("div", { class: "dlife-row" },
+            el("span", { class: "life-ev-time", text: when }));
+          if (ev.decision) row.appendChild(el("span", {
+            class: "recent-badge recent-" + String(ev.decision).toLowerCase(),
+            text: (_DECISION_BADGE[ev.decision] || "·") + " " + ev.decision }));
+          if (ev.auto) row.appendChild(el("span", { class: "dlife-auto", text: t("dlife.auto") }));
+          if (ev.detail) row.appendChild(el("div", { class: "life-ev-detail", text: tB(ev.detail) }));
+          if (typeof ev.strength === "number") row.appendChild(el("div", { class: "dlife-strength",
+            text: t("proposal.strength", { pct: Math.round(ev.strength * 100) }),
+            title: t("proposal.strength.title") }));
+          if (ev.trace_ref) row.appendChild(el("div", { class: "life-ev-trace", text: "🔬 " + ev.trace_ref }));
+          station.appendChild(row);
+          filled = true;
+        }
+      }
+      if (!filled) {
+        station.classList.add("dlife-missing");   // 诚实空位:此段无记录(不编)
+        station.appendChild(el("div", { class: "dlife-row dlife-empty-note", text: t("dlife.no_record") }));
+      }
+      tl.appendChild(station);
+    }
+    body.appendChild(tl);
+  }
+  function _dlifeReplay(tl) {
+    const stations = Array.from(tl.querySelectorAll(".dlife-station"));
+    let reduced = false;
+    try { reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+    if (reduced) {   // reduced-motion:不演,全显(等价终态)
+      tl.classList.remove("dlife-replaying");
+      stations.forEach((s) => s.classList.add("dlife-lit"));
+      return;
+    }
+    tl.classList.add("dlife-replaying");           // 先全暗(CSS 降透明度)
+    stations.forEach((s) => s.classList.remove("dlife-lit"));
+    stations.forEach((s, i) => setTimeout(() => s.classList.add("dlife-lit"), 400 * i + 80));
+  }
+
   // 技能库面板(TS 构建产物,不在此改)每张技能卡挂「🧬 生命线」入口:
   // MutationObserver 观察 #mgmt-body,面板每次(重)渲染都补挂,不漏内部 re-render。
   function _wireSkillLifelineEntries() {

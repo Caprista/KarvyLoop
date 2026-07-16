@@ -44,6 +44,26 @@ async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = T
 
     K5:本函数**只推建议**,不替用户决策(决策走 ws.h2a_decision → decision_to_envelope)。
     """
+    # T1 decision_point(docs/85):决策点在此诞生(登记/广播咽喉)—— 提案的 basis/strength
+    # 此前在拍板瞬间随卡蒸发,lifeline 第①站从此有据。静音接管/正常出卡都算"诞生"(诚实);
+    # fail-soft:埋点坏,推送/静音/登记行为一字不变。
+    try:
+        _pid = getattr(proposal, "proposal_id", "") or ""
+        if _pid:
+            from karvyloop.console.decision_wire import emit_decision_trace
+            _ctx = getattr(proposal, "context_ref", None) or {}
+            emit_decision_trace(app, "decision_point", _pid, {
+                "kind": getattr(proposal, "kind", "") or "",
+                "summary": (getattr(proposal, "summary", "") or "")[:160],
+                "basis": (getattr(proposal, "basis", "") or "")[:160],
+                "strength": round(float(getattr(proposal, "strength", 0.0) or 0.0), 2),
+                "context_ref": (f"{_ctx.get('kind', '')}:{_ctx.get('id', '')}"
+                                if isinstance(_ctx, dict) and _ctx else ""),
+                "source": "broadcast",
+            }, source="proposals")
+    except Exception as e:
+        logger.debug(f"[proposals] T1 decision_point 埋点失败(不阻断): {e}")
+
     # 挣来的静音(docs/49 机制2 / docs/50 决定1):**register 咽喉**在此 —— 已授权桶的卡
     # 不进待决表、不推卡,由 karvy/silence.py 按口味预测自动兑现 + 完整留痕 + WS 轻通知。
     # 判定链任何一环不满足(高危 kind / 未授权 / 预测非 ACCEPT / 置信不足 / 无 handler)
@@ -275,11 +295,40 @@ class ProposalPump:
         return proposal, sent
 
 
+def trace_aged_defers(app: Any) -> int:
+    """B-5 #7(docs/81):DEFER 熬过 48h 首次重浮 → 落 `defer_aged_out` 埋点。
+
+    调用点 = /api/proposals/pending(待决卡重呈现的必经口)。registry 自己判"首次"
+    (pop_aged_defers 打标持久),这里只翻成 TraceEntry(带阈值当前值,内测标定用)。
+    fail-soft:任何失败返 0,待决列表照常。返回本次落的埋点条数。"""
+    try:
+        registry = getattr(app.state, "proposal_registry", None)
+        pop = getattr(registry, "pop_aged_defers", None)
+        if registry is None or not callable(pop):
+            return 0
+        from karvyloop.console.decision_wire import emit_decision_trace
+        from karvyloop.karvy.proposal_registry import AGING_THRESHOLD_S
+        n = 0
+        for row in pop():
+            emit_decision_trace(app, "defer_aged_out", row.get("proposal_id", ""), {
+                "threshold_s": AGING_THRESHOLD_S,
+                "defer_age_s": round(float(row.get("defer_age_s", 0.0)), 1),
+                "age_s": round(float(row.get("age_s", 0.0)), 1),
+                "kind": row.get("kind", "") or "",
+            }, source="proposals")
+            n += 1
+        return n
+    except Exception as e:
+        logger.debug(f"[proposals] defer_aged_out 埋点失败(不阻断): {e}")
+        return 0
+
+
 __all__ = [
     "WS_TYPE_H2A_PROPOSAL",
     "ProposalPump",
     "broadcast_proposal",
     "raise_fs_access_cards",
+    "trace_aged_defers",
 ]
 
 def _schedule_taste_bet(app: Any, proposal: Any) -> None:

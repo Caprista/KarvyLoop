@@ -152,6 +152,8 @@ class PendingProposalRegistry:
             self._meta[pid] = {
                 "created_ts": created if created > 0 else load_now,
                 "deferred_at": deferred if deferred > 0 else None,
+                # docs/81 B-5 #7:DEFER 老化"已报过"标记跨重启保留(否则重启后同卡再报一次,分布掺水)
+                "defer_aged_reported": bool(m.get("defer_aged_reported")),
             }
 
     def _save(self) -> None:
@@ -224,6 +226,34 @@ class PendingProposalRegistry:
         out.sort(key=lambda d: -d["age_s"])
         return out
 
+    def pop_aged_defers(self, now: Optional[float] = None, *,
+                        threshold_s: float = AGING_THRESHOLD_S) -> List[dict]:
+        """DEFER 熬过阈值(默认 48h)**首次**重浮的卡(docs/81 B-5 #7 的老化点)。
+
+        每张卡每轮 DEFER 只报一次(报过打 `defer_aged_reported` 标记并持久;再次 DEFER 由
+        decide() 清标 → 重新计)。registry 不依赖 Trace —— 调用方(console 侧,如
+        /api/proposals/pending 重呈现咽喉)拿返回值落 `defer_aged_out` 埋点。
+        返回 [{"proposal_id","kind","age_s","defer_age_s"}](defer_age_s = 从 DEFER 起算)。
+        """
+        t = time.time() if now is None else float(now)
+        out: List[dict] = []
+        changed = False
+        for pid, prop in self._pending.items():
+            meta = self._meta.get(pid) or {}
+            deferred = meta.get("deferred_at")
+            if not deferred or meta.get("defer_aged_reported"):
+                continue
+            defer_age = t - float(deferred)
+            if defer_age >= threshold_s:
+                meta["defer_aged_reported"] = True
+                changed = True
+                out.append({"proposal_id": pid, "kind": getattr(prop, "kind", ""),
+                            "age_s": t - float(meta.get("created_ts") or t),
+                            "defer_age_s": defer_age})
+        if changed:
+            self._save()
+        return out
+
     def __len__(self) -> int:
         return len(self._pending)
 
@@ -264,6 +294,7 @@ class PendingProposalRegistry:
             meta = self._meta.setdefault(proposal_id, {"created_ts": time.time() if now is None else float(now),
                                                        "deferred_at": None})
             meta["deferred_at"] = time.time() if now is None else float(now)
+            meta.pop("defer_aged_reported", None)   # 重新 DEFER = 新一轮挂起,老化重新计(B-5 #7)
             self._save()
             return DispatchResult(proposal_id, getattr(proposal, "kind", ""), True, "deferred")
 

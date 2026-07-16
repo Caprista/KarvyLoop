@@ -517,9 +517,14 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
             if registry is None:
                 return None
             handlers = getattr(app.state, "proposal_handlers", None) or {}
+            # T4(docs/85):decide 走 dispatch_decision 咽喉 —— 包 run_scope(contextvar 复制
+            # 过 to_thread,执行体工具步同 run_id)+ 落 decision_dispatched(fail-soft,
+            # 行为与直接 registry.decide 一字不变)。REST /api/h2a_decide 同调。
+            from karvyloop.console.decision_wire import dispatch_decision
             res = await asyncio.to_thread(
-                lambda: registry.decide(req.proposal_id, req.decision, handlers=handlers,
-                                        edits=(req.edits or None))
+                lambda: dispatch_decision(app, proposal_id=req.proposal_id,
+                                          decision=req.decision, handlers=handlers,
+                                          edits=(req.edits or None))
             )
             # 委派兑现同步 drive 后:被委派 role 碰壁工作区外路径攒的「想要」→ 这一轮升 H2A
             # 授权卡(与顶层 drive 收尾同待遇;REST 端点同调)。已在事件循环里 → 直接 await。

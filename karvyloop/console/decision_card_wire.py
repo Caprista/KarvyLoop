@@ -255,6 +255,18 @@ def judge_card(app: Any, *, proposal_id: str, decision: str, engaged: bool,
     eff_engaged = bool(engaged) or bool(basis)
     tracker = _tracker(app)
     tracker.record(accepted=(str(decision).upper() == "ACCEPT"), engaged=eff_engaged)
+    # B-5 #6(docs/81):反投降**恰好跨阈**那一下留痕(连击超阈不重复计 → 分布=真触发率)。
+    # fail-soft:埋点坏,judge/回喂行为一字不变。
+    try:
+        if tracker.consecutive_blind_accepts == tracker.threshold:
+            from karvyloop.console.decision_wire import emit_decision_trace
+            emit_decision_trace(app, "surface_triggered", proposal_id, {
+                "threshold": int(tracker.threshold),
+                "consecutive": int(tracker.consecutive_blind_accepts),
+                "decision": str(decision).upper()[:16],
+            }, source="decision_card_wire")
+    except Exception:
+        logger.debug("[decision_card_wire] surface_triggered 埋点失败(不阻断)", exc_info=True)
     if eff_engaged:
         try:
             from karvyloop.console.decision_wire import observe_decision

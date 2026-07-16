@@ -1857,8 +1857,12 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
         if registry is None:
             return None
         handlers = getattr(request.app.state, "proposal_handlers", None) or {}
-        res = registry.decide(req.proposal_id, req.decision, handlers=handlers,
-                              edits=(req.edits or None))
+        # T4(docs/85):与 WS 同走 dispatch_decision 咽喉(run_scope 串工具步 +
+        # decision_dispatched 埋点;fail-soft,行为与直接 registry.decide 一字不变)。
+        from karvyloop.console.decision_wire import dispatch_decision
+        res = dispatch_decision(request.app, proposal_id=req.proposal_id,
+                                decision=req.decision, handlers=handlers,
+                                edits=(req.edits or None))
         # 委派兑现(route_to_role / run_task 等)会同步 drive → 被委派 role 可能碰壁工作区外
         # 路径(note_denied 攒「想要」)。与顶层 drive 收尾同待遇:这一轮就把「想要」升成 H2A
         # 授权卡,否则委派活的授权卡永远不出(缺口)。sync 端点在 FastAPI 线程池(无运行
