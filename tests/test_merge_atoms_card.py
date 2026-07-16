@@ -19,9 +19,15 @@ def test_kind_registered():
 
 
 def test_card_basis_is_honest_about_rewire_before_delete():
-    p = proposal_for_merge_atoms(
-        canonical_id="web_search", member_ids=["web_search", "search_web", "do_web_search"],
-        reason="三者都是网页检索", ts=1.0)
+    # 卡文案走 i18n(按当前 locale 定稿)→ 锁 zh 断言中文原文;reason 是数据 locale 无关
+    from karvyloop import i18n
+    try:
+        i18n.set_locale("zh")
+        p = proposal_for_merge_atoms(
+            canonical_id="web_search", member_ids=["web_search", "search_web", "do_web_search"],
+            reason="三者都是网页检索", ts=1.0)
+    finally:
+        i18n.set_locale(None)
     assert p.kind == KIND_MERGE_ATOMS
     assert "rewire-before-delete" in p.basis
     assert "不留悬空引用" in p.basis

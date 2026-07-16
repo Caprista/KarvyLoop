@@ -271,7 +271,9 @@ def test_workflow_dependency_editable():
     assert "workflow_canvas.js" not in html                          # 已从常驻脚本移除
     assert "_ensureWorkflowCanvas" in app_js                         # 按需加载器
     assert 'createElement("script")' in app_js and "/static/workflow_canvas.js" in app_js
-    assert "vendor/drawflow.min.css" in html                         # CSS 小,留常驻
+    # 弱机瘦身:drawflow CSS 与其 JS 同点懒注入(修"JS 已懒其 CSS 却首屏"的错配)
+    assert "vendor/drawflow.min.css" not in html                      # 不再首屏常驻
+    assert "drawflow-css" in app_js                                   # _ensureWorkflowCanvas 注入(防重复 id)
     assert (STATIC_DIR / "vendor" / "drawflow.min.css").is_file()     # MIT,vendored
     i18n = (STATIC_DIR / "i18n.js").read_text(encoding="utf-8")
     for k in ("wf.deps_label", "wf.flow_legend", "wf.dep_parallel", "wf.edit_canvas"):

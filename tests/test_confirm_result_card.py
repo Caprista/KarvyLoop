@@ -53,7 +53,13 @@ def test_kind_registered():
 
 
 def test_card_basis_is_about_result_not_atom():
-    p = proposal_for_confirm_result(role="译者", requirement="翻译这篇文档", minted=_MINTED, ts=1.0)
+    # 卡文案走 i18n(按当前 locale 定稿)→ 锁 zh 断言中文原文;atom/role 名是数据 locale 无关
+    from karvyloop import i18n
+    try:
+        i18n.set_locale("zh")
+        p = proposal_for_confirm_result(role="译者", requirement="翻译这篇文档", minted=_MINTED, ts=1.0)
+    finally:
+        i18n.set_locale(None)
     assert p.kind == KIND_CONFIRM_RESULT
     assert "认可这次结果" in p.basis and "zh_en" in p.basis
     assert "综合裁" in p.basis or "综合判断" in p.basis or "由 译者" in p.basis
