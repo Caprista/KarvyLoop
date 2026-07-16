@@ -126,6 +126,14 @@
   function _ensureWorkflowCanvas() {
     if (window.KarvyWorkflowCanvas) return Promise.resolve();
     if (_wfCanvasLoading) return _wfCanvasLoading;
+    // drawflow.min.css 与 JS 同点按需注入(docs/83 顺手项:首屏不再常驻这份画布样式)
+    if (!document.getElementById("drawflow-css")) {
+      const l = document.createElement("link");
+      l.id = "drawflow-css";
+      l.rel = "stylesheet";
+      l.href = "/static/vendor/drawflow.min.css";
+      document.head.appendChild(l);
+    }
     _wfCanvasLoading = new Promise((resolve, reject) => {
       const s = document.createElement("script");
       s.src = "/static/workflow_canvas.js";
@@ -4123,6 +4131,19 @@
       const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);
       try { localStorage.setItem("karvyloop_theme", next); } catch (e) {}
+    });
+    // T2 轻量模式(docs/83):body.lite 降毛玻璃/大阴影/常驻动画(降级块在 styles.css/desktop.css 末尾)。
+    // 防闪预应用在 index.html <body> 内联脚本;这里只管点按开关+记忆+按钮按下态。
+    const liteBtn = document.getElementById("lite-toggle");
+    function _syncLiteBtn() {
+      if (!liteBtn) return;
+      liteBtn.setAttribute("aria-pressed", document.body.classList.contains("lite") ? "true" : "false");
+    }
+    _syncLiteBtn();   // 开机态(内联脚本可能已挂 body.lite)同步到按钮
+    if (liteBtn) liteBtn.addEventListener("click", () => {
+      const on = document.body.classList.toggle("lite");
+      _syncLiteBtn();
+      try { localStorage.setItem("karvyloop_lite", on ? "1" : "0"); } catch (e) {}
     });
     // rail ⛶:四象限临时放大(点 ⛶/✕ 或 Esc 回对话;临时态不写 karvyloop_view)
     const zoomBtn = document.getElementById("rail-zoom-btn");

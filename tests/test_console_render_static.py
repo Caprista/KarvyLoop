@@ -302,3 +302,149 @@ def test_dcard_aligned_pref_kind_uses_i18n():
     js = _read("app.js")
     assert 'dpref.kind_' in js, "标准行 kind 标签未走 i18n"
     assert 'p.kind_label || ""' in js, "kind_label 服务端兜底丢了(旧卡兼容)"
+
+
+# ============================================================================
+# docs/83 弱机瘦身第一刀:T2 轻量模式 + T1/T3/T7/T8 降级块 + T6 defer + drawflow CSS 懒加载
+# ============================================================================
+import re as _re
+
+
+def _reduced_transparency_block(css: str) -> str:
+    """抽 @media (prefers-reduced-transparency: reduce) 块正文(括号配平)。"""
+    m = _re.search(r"@media\s*\(prefers-reduced-transparency:\s*reduce\)\s*\{", css)
+    assert m, "缺 @media (prefers-reduced-transparency: reduce) 自动等效入口"
+    depth = 1
+    for i in range(m.end(), len(css)):
+        if css[i] == "{":
+            depth += 1
+        elif css[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return css[m.end():i]
+    raise AssertionError("prefers-reduced-transparency 块括号不配平")
+
+
+def test_lite_mode_desktop_css_degrade_block():
+    """desktop.css:T1 三处壁纸 blur / T7 大阴影 / T8 六 sprite 动画,
+    body.lite 与 prefers-reduced-transparency 两个入口都要覆盖(双份同步)。"""
+    css = _read("desktop.css")
+    media = _reduced_transparency_block(css)
+    # 手动入口 body.lite 与系统偏好入口各一份
+    for arm_name, arm in (("body.lite", css), ("media", media)):
+        prefix = "body.lite.desk-view" if arm_name == "body.lite" else "body.desk-view"
+        # T1 三处 backdrop-filter → none(半透实底)
+        for sel in (".desk-station", ".desk-dock", ".desk-pending-row"):
+            m = _re.search(_re.escape(prefix) + r"[^{}]*" + _re.escape(sel) + r"[^{}]*\{([^}]*)\}", arm)
+            assert m, f"{arm_name} 入口缺 {sel} 降级规则"
+            assert "backdrop-filter: none" in m.group(1), f"{arm_name} 入口 {sel} 未关 backdrop-filter"
+        # T7 大模糊阴影收敛(窗口变量 + 便签/看板/全屏聊天/署名便签/纪念物)
+        assert "--win-shadow: 0 6px 16px" in arm, f"{arm_name} 入口未收敛 --win-shadow"
+        for sel in (".cockpit-col", ".cockpit-grid", ".chat-panel", ".desk-signed-note", ".desk-memento"):
+            assert _re.search(_re.escape(prefix) + r"[^{}]*" + _re.escape(sel) + r"[^{}]*\{[^}]*box-shadow", arm), \
+                f"{arm_name} 入口缺 {sel} 阴影收敛"
+        # T8 六个 sprite infinite 动画停(idle/working/carry/sleep 的 img + keys + zzz)。
+        # 断言带前缀的完整选择器:不带前缀会误命中普通模式原规则(原规则也有 data-state 选择器)。
+        for state in ("idle", "working", "carry", "sleep"):
+            assert f'{prefix} .karvy-sprite[data-state="{state}"] .karvy-sprite-img' in arm, \
+                f"{arm_name} 入口漏停 sprite {state} 动画"
+        assert f'{prefix} .karvy-sprite[data-state="working"] .karvy-sprite-keys' in arm, f"{arm_name} 入口漏停 keys overlay"
+        assert f'{prefix} .karvy-sprite[data-state="sleep"] .karvy-sprite-zzz' in arm, f"{arm_name} 入口漏停 zzz overlay"
+
+
+def test_lite_mode_styles_css_degrade_block():
+    """styles.css:T3 顶栏 blur / T7 弹窗与拖拽阴影 / T8 busy-pulse+FAB,双入口覆盖。
+    body.lite 臂必须带 body.lite 前缀断言(不带会误命中普通模式的原规则=测了个寂寞)。"""
+    css = _read("styles.css")
+    media = _reduced_transparency_block(css)
+    checks = [
+        # (selector 尾巴, 降级声明特征)
+        (r"\.topbar", "backdrop-filter: none"),
+        (r"\.modal", "box-shadow: 0 4px 12px"),
+        (r"\.karvy-tour-pop\.driver-popover", "box-shadow: 0 4px 12px"),
+        (r"\.desk-dragging", "box-shadow: 0 4px 12px"),
+        (r"\.busy-dot", "animation: none"),
+        (r"\.karvy-fab", "drop-shadow(0 2px 5px"),
+    ]
+    for sel, decl in checks:
+        # 手动入口:body.lite(.desk-view)? 前缀 + 选择器 + 降级声明
+        m = _re.search(r"body\.lite[^{}]*" + sel + r"[^{}]*\{([^}]*)\}", css)
+        assert m and decl in m.group(1), f"body.lite 入口缺 {sel} 的 {decl}"
+        # 系统偏好入口:媒体块内同一批规则(块里只有降级规则,直接断言)
+        m2 = _re.search(sel + r"[^{}]*\{([^}]*)\}", media)
+        assert m2 and decl in m2.group(1), f"prefers-reduced-transparency 入口缺 {sel} 的 {decl}"
+
+
+def test_lite_mode_normal_visuals_untouched():
+    """普通模式一像素不动:原毛玻璃/大阴影/动画声明必须原样在(lite 只是**追加**覆盖)。"""
+    desk = _read("desktop.css")
+    for original in (
+        "backdrop-filter: blur(4px);",                       # T1① desk-station
+        "backdrop-filter: blur(10px);",                      # T1② desk-dock
+        "backdrop-filter: blur(3px);",                       # T1③ desk-pending-row
+        "box-shadow: 0 24px 70px rgba(58, 43, 31, 0.34);",   # 全屏聊天大阴影
+        "box-shadow: 0 10px 26px rgba(142, 95, 60, 0.16);",  # 便签大阴影
+        "--win-shadow: 0 18px 50px",                          # 聚焦窗口阴影(两主题)
+        "animation: karvy-breathe 3.4s ease-in-out infinite;",
+        "animation: karvy-type 0.42s ease-in-out infinite;",
+        "animation: karvy-keys 0.84s linear infinite;",
+        "animation: karvy-waddle 0.6s ease-in-out infinite;",
+        "animation: karvy-doze 4.6s ease-in-out infinite;",
+        "animation: karvy-zzz 2.6s ease-in-out infinite;",
+    ):
+        assert original in desk, f"普通模式视觉被动了:desktop.css 缺原声明 {original}"
+    styles = _read("styles.css")
+    for original in (
+        "backdrop-filter: saturate(160%) blur(8px);",        # T3 顶栏
+        "animation: busy-pulse 1s ease-in-out infinite;",    # busy 圆点
+        "box-shadow: 0 12px 40px rgba(59, 42, 26, 0.22);",   # .modal
+        "box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);",       # tour popover
+        "box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);",      # desk-dragging
+        "filter: drop-shadow(0 8px 18px rgba(142,95,60,0.28));",  # FAB
+    ):
+        assert original in styles, f"普通模式视觉被动了:styles.css 缺原声明 {original}"
+
+
+def test_lite_mode_toggle_wired():
+    """开关三件套:index.html 按钮 + 防闪内联预应用;app.js 记 localStorage;i18n en+zh。"""
+    html = _read("index.html")
+    assert 'id="lite-toggle"' in html, "index.html 缺 🪶 轻量模式开关按钮"
+    assert 'data-i18n-title="lite.title"' in html, "开关 tooltip 未走 i18n"
+    assert 'aria-pressed' in html, "开关缺 aria-pressed 态"
+    # 防闪:<body> 内联脚本在任何 defer 脚本执行前挂 body.lite(读 localStorage)
+    assert html.find('localStorage.getItem("karvyloop_lite")') != -1, "index.html 缺 lite 防闪预应用"
+    assert html.find('karvyloop_lite') < html.find('src="/static/app.js"'), "lite 预应用必须在 app.js 之前"
+    js = _read("app.js")
+    assert '"lite-toggle"' in js.replace("'", '"'), "app.js 未接 lite-toggle"
+    assert "karvyloop_lite" in js, "app.js 未持久化 lite 选择"
+    i18n = _read("i18n.js")
+    assert i18n.count('"lite.title"') == 2, "i18n lite.title 不是 en+zh 各一份"
+    # 开着时的按下态样式(普通默认态零变化:选择器只在 aria-pressed=true 命中)
+    css = _read("styles.css")
+    assert '#lite-toggle[aria-pressed="true"]' in css
+
+
+def test_body_scripts_all_defer():
+    """T6:24 个 body 外链脚本全 defer(保序,render→app / desktop→app 依赖不变)。"""
+    html = _read("index.html")
+    tags = _re.findall(r"<script\b[^>]*\bsrc=\"([^\"]+)\"[^>]*>", html)
+    assert len(tags) == 24, f"外链脚本应 24 个,实际 {len(tags)}(变了要同步 docs/83 清单)"
+    for m in _re.finditer(r"<script\b[^>]*\bsrc=\"([^\"]+)\"[^>]*>", html):
+        assert " defer" in m.group(0), f"{m.group(1)} 缺 defer"
+    # 执行序锁不变:render.js / i18n.js / desktop.js 都在 app.js 前(defer 按文档序执行)
+    a = tags.index("/static/app.js")
+    for dep in ("/static/render.js", "/static/i18n.js", "/static/desktop.js"):
+        assert tags.index(dep) < a, f"{dep} 必须排在 app.js 之前"
+
+
+def test_drawflow_css_lazy_with_canvas():
+    """drawflow.min.css 错配修复:JS 已懒加载,其 CSS 不再首屏常驻 —— 挪进
+    app.js _ensureWorkflowCanvas 同一注入点(点「编辑画布」才拉)。"""
+    html = _read("index.html")
+    assert "drawflow.min.css" not in html, "drawflow.min.css 不该再压在首屏"
+    js = _read("app.js")
+    i = js.find("function _ensureWorkflowCanvas")
+    assert i != -1
+    body = js[i:i + 1200]
+    assert "drawflow.min.css" in body and "drawflow-css" in body, \
+        "drawflow.min.css 应在 _ensureWorkflowCanvas 里与 JS 同点注入(带 id 防重复)"

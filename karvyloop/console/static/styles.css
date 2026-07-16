@@ -3176,3 +3176,46 @@ body.desk-view .desk-dragging {
   35% { box-shadow: 0 0 0 1px var(--accent-line); }
   100% { box-shadow: 0 0 0 1px transparent; }
 }
+
+/* ============================================================================
+   T2 轻量模式(docs/83 弱机瘦身第一刀)—— 对话视图侧降级块(桌面侧在 desktop.css 末尾)。
+   双入口等效:① body.lite(顶栏 🪶 手动开关,app.js 记 localStorage"karvyloop_lite",
+   防闪预应用在 index.html <body> 内联脚本)② 系统偏好 prefers-reduced-transparency: reduce。
+   ⚠ 下面两个块是**同一批规则的双入口拷贝**,改一处必同步另一处(契约测试锁双份)。
+   普通模式一像素不动。
+   ========================================================================= */
+/* 开关本体:开着时按下态(此规则只在 aria-pressed=true 时命中,普通默认态零变化) */
+#lite-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+  background: var(--accent-light);
+}
+/* T3 顶栏毛玻璃(saturate+blur 8px,首屏常驻、滚动逐帧取样) → 半透实底 */
+body.lite .topbar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: color-mix(in srgb, var(--sidebar) 97%, transparent);
+}
+/* T7 大模糊 box-shadow 收敛:管理弹窗 / 引导气泡 / 桌面拖拽抬起 */
+body.lite .modal { box-shadow: 0 4px 12px rgba(59, 42, 26, 0.24); }
+body.lite .karvy-tour-pop.driver-popover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
+body.lite.desk-view .desk-dragging { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }
+/* T8 常驻脉冲停(busy 圆点成静态实心点)+ 右下角小卡 FAB 的大 drop-shadow 收敛 */
+body.lite .busy-dot { animation: none; }
+body.lite .karvy-fab,
+body.lite .karvy-fab:hover { filter: drop-shadow(0 2px 5px rgba(142, 95, 60, 0.32)); }
+
+/* —— 同一批规则 · 系统偏好入口(与上块逐条同步) —— */
+@media (prefers-reduced-transparency: reduce) {
+  .topbar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: color-mix(in srgb, var(--sidebar) 97%, transparent);
+  }
+  .modal { box-shadow: 0 4px 12px rgba(59, 42, 26, 0.24); }
+  .karvy-tour-pop.driver-popover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
+  body.desk-view .desk-dragging { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }
+  .busy-dot { animation: none; }
+  .karvy-fab,
+  .karvy-fab:hover { filter: drop-shadow(0 2px 5px rgba(142, 95, 60, 0.32)); }
+}

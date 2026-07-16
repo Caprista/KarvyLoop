@@ -17,10 +17,17 @@
   <link rel="icon" type="image/png" href="/static/assets/karvyloop-logo-64.png" />
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/vendor/highlight-github.min.css" />
-  <link rel="stylesheet" href="/static/vendor/drawflow.min.css" />   <!-- 工作流拖拽画布(Drawflow,MIT) -->
+  <!-- Drawflow 画布样式不再首屏常驻:与画布脚本同点按需注入(主逻辑 _ensureWorkflowCanvas) -->
   <link rel="stylesheet" href="/static/desktop.css" />   <!-- 桌面视图(docs/51):须在 styles.css 之后,desk 规则压过对话视图规则 -->
 </head>
 <body>
+  <script>
+    /* 轻量模式防闪(docs/83 T2):首绘前挂 body.lite(旧电脑/虚拟机降绘制成本);
+       开关+记忆在主逻辑脚本(顶栏 🪶),这里只回放上次的选择。 */
+    (function () {
+      try { if (localStorage.getItem("karvyloop_lite") === "1") document.body.classList.add("lite"); } catch (e) { /* 无 localStorage → 普通模式 */ }
+    })();
+  </script>
   <!-- 9.4c 暖色品牌系重构:左导航(管理面)/ 中对话+IP 主视觉 / 右上下文。
        所有功能性 id 保持不变(JS 接线不动);看板从 5 列收进右侧上下文栏。 -->
   <div class="app" id="app">
@@ -65,6 +72,8 @@
         <!-- 随包演示实例(小林/Lin):看一个用了一周的"满级号",只读浏览(demo_panel.js) -->
         <button class="tour-replay" id="demo-open" data-i18n-title="demo.entry.title">👀</button>
         <button class="theme-toggle" id="theme-toggle" data-i18n-title="theme.title">◐</button>
+        <!-- T2 轻量模式(docs/83):旧电脑/虚拟机降绘制成本;aria-pressed=开关态,记 localStorage -->
+        <button class="theme-toggle" id="lite-toggle" data-i18n-title="lite.title" aria-pressed="false">🪶</button>
         <span class="lang-switcher" id="lang-switcher"></span>
       </div>
     </header>
@@ -273,32 +282,34 @@
   </div>
 
   <!-- 渲染层:markdown-it + DOMPurify 现已打包进 render.js(Vite/TS,源在 console/frontend/);
-       highlight.js 仍 vendored(大、可选增强,后续 slice 再迁)。render.js 须在主逻辑脚本之前。 -->
-  <script src="/static/vendor/highlight.min.js"></script>
-  <script src="/static/dom.js"></script>
-  <script src="/static/modal.js"></script>
-  <script src="/static/ui_widgets.js"></script>
-  <script src="/static/files_panel.js"></script>
-  <script src="/static/schedules_panel.js"></script>
-  <script src="/static/diagnose_panel.js"></script>
-  <script src="/static/atoms_panel.js"></script>
-  <script src="/static/roles_panel.js"></script>
-  <script src="/static/domains_panel.js"></script>
-  <script src="/static/agents_panel.js"></script>
-  <script src="/static/external_panel.js"></script>
-  <script src="/static/devices_panel.js"></script>
-  <script src="/static/skills_panel.js"></script>
-  <script src="/static/unlock_panel.js"></script>
-  <script src="/static/demo_panel.js"></script>
-  <script src="/static/memory_panel.js"></script>
-  <script src="/static/models_panel.js"></script>
-  <script src="/static/decision_prefs_panel.js"></script>
-  <script src="/static/tokens_panel.js"></script>
-  <script src="/static/render.js"></script>
-  <script src="/static/i18n.js"></script>
+       highlight.js 仍 vendored(大、可选增强,后续 slice 再迁)。render.js 须在主逻辑脚本之前。
+       T6(docs/83):全部 defer —— 解析不再被 24 个脚本逐个卡住,首绘提前;defer 保证按
+       文档序执行(render→i18n→desktop→app 的依赖天然满足),且都在 DOMContentLoaded 前跑完。 -->
+  <script defer src="/static/vendor/highlight.min.js"></script>
+  <script defer src="/static/dom.js"></script>
+  <script defer src="/static/modal.js"></script>
+  <script defer src="/static/ui_widgets.js"></script>
+  <script defer src="/static/files_panel.js"></script>
+  <script defer src="/static/schedules_panel.js"></script>
+  <script defer src="/static/diagnose_panel.js"></script>
+  <script defer src="/static/atoms_panel.js"></script>
+  <script defer src="/static/roles_panel.js"></script>
+  <script defer src="/static/domains_panel.js"></script>
+  <script defer src="/static/agents_panel.js"></script>
+  <script defer src="/static/external_panel.js"></script>
+  <script defer src="/static/devices_panel.js"></script>
+  <script defer src="/static/skills_panel.js"></script>
+  <script defer src="/static/unlock_panel.js"></script>
+  <script defer src="/static/demo_panel.js"></script>
+  <script defer src="/static/memory_panel.js"></script>
+  <script defer src="/static/models_panel.js"></script>
+  <script defer src="/static/decision_prefs_panel.js"></script>
+  <script defer src="/static/tokens_panel.js"></script>
+  <script defer src="/static/render.js"></script>
+  <script defer src="/static/i18n.js"></script>
   <!-- 桌面视图(docs/51):须在 app.js 之前 —— dock 按钮要先于 setupMgmtPanels 存在(同一批绑定) -->
-  <script src="/static/desktop.js"></script>
+  <script defer src="/static/desktop.js"></script>
   <!-- Drawflow 画布脚本(~70KB)不在此常驻:点「编辑画布」时由 app.js 按需注入(_ensureWorkflowCanvas) -->
-  <script src="/static/app.js"></script>
+  <script defer src="/static/app.js"></script>
 </body>
 </html>

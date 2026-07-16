@@ -1163,3 +1163,80 @@ body.desk-view .desk-pending [data-tip]:hover::after {
   body.desk-view .desk-pending-row:hover { transform: none; transition: none; }
   body.desk-view .cockpit-col.col-collapsed { transition: none; }
 }
+
+/* ============================================================================
+   T2 轻量模式(docs/83 弱机瘦身第一刀)—— 桌面侧降级块。
+   无 GPU 机器(旧电脑/虚拟机)贵的不是动画而是**静态绘制**:壁纸上的
+   backdrop-filter 逐帧取样、大模糊 box-shadow、常驻 infinite 动画。
+   双入口等效:① body.lite(顶栏 🪶 手动开关,app.js 记 localStorage)
+              ② 系统偏好 prefers-reduced-transparency: reduce(纯 CSS,不做 JS 硬件探测)。
+   ⚠ 下面两个块是**同一批规则的双入口拷贝**,改一处必同步另一处(契约测试锁双份)。
+   普通模式一像素不动。
+   ========================================================================= */
+/* T7 聚焦窗口大模糊阴影(--win-shadow: 0 18px 50px,两处窗口用)收敛:变量一改全生效 */
+body.lite { --win-shadow: 0 6px 16px rgba(0, 0, 0, 0.35); }
+/* T1① 壁纸上的工位毛玻璃(blur 4px) → 半透实底(提不透明度补可读性,取样成本归零) */
+body.lite.desk-view.desk-wall-day .desk-station,
+body.lite.desk-view.desk-wall-night .desk-station {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+}
+/* T1② dock 毛玻璃(blur 10px,壁纸上常驻) → 半透实底 */
+body.lite.desk-view .desk-dock {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+/* T1③ 待拍板行毛玻璃(blur 3px,行多时逐行取样) → 半透实底 */
+body.lite.desk-view .desk-pending-row {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+/* T7 大模糊 box-shadow 批收敛小半径(层次感留,模糊取样降一个量级) */
+body.lite.desk-view .cockpit-col { box-shadow: 0 3px 10px rgba(142, 95, 60, 0.20); }
+body.lite.desk-view.desk-board-open .cockpit-grid { box-shadow: 0 3px 8px rgba(30, 22, 14, 0.24); }
+body.lite.desk-view.desk-chat-full .chat-host .chat-panel { box-shadow: 0 6px 18px rgba(58, 43, 31, 0.36); }
+body.lite.desk-view .desk-signed-note { box-shadow: 0 3px 8px rgba(142, 95, 60, 0.22); }
+body.lite.desk-view .desk-memento { box-shadow: 0 3px 8px rgba(142, 95, 60, 0.20); }
+/* T8 六个 sprite 常驻 infinite 动画停(breathe/type/keys/waddle/doze/zzz;
+   happy 的 karvy-hop 是有限次的真事件回应,不在此列) */
+body.lite.desk-view .karvy-sprite[data-state="idle"] .karvy-sprite-img,
+body.lite.desk-view .karvy-sprite[data-state="working"] .karvy-sprite-img,
+body.lite.desk-view .karvy-sprite[data-state="carry"] .karvy-sprite-img,
+body.lite.desk-view .karvy-sprite[data-state="sleep"] .karvy-sprite-img,
+body.lite.desk-view .karvy-sprite[data-state="working"] .karvy-sprite-keys,
+body.lite.desk-view .karvy-sprite[data-state="sleep"] .karvy-sprite-zzz { animation: none; }
+
+/* —— 同一批规则 · 系统偏好入口(与上块逐条同步;选择器保持原规则同特异度以稳赢级联) —— */
+@media (prefers-reduced-transparency: reduce) {
+  body { --win-shadow: 0 6px 16px rgba(0, 0, 0, 0.35); }
+  body.desk-view.desk-wall-day .desk-station,
+  body.desk-view.desk-wall-night .desk-station {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
+  }
+  body.desk-view .desk-dock {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+  }
+  body.desk-view .desk-pending-row {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+  }
+  body.desk-view .cockpit-col { box-shadow: 0 3px 10px rgba(142, 95, 60, 0.20); }
+  body.desk-view.desk-board-open .cockpit-grid { box-shadow: 0 3px 8px rgba(30, 22, 14, 0.24); }
+  body.desk-view.desk-chat-full .chat-host .chat-panel { box-shadow: 0 6px 18px rgba(58, 43, 31, 0.36); }
+  body.desk-view .desk-signed-note { box-shadow: 0 3px 8px rgba(142, 95, 60, 0.22); }
+  body.desk-view .desk-memento { box-shadow: 0 3px 8px rgba(142, 95, 60, 0.20); }
+  body.desk-view .karvy-sprite[data-state="idle"] .karvy-sprite-img,
+  body.desk-view .karvy-sprite[data-state="working"] .karvy-sprite-img,
+  body.desk-view .karvy-sprite[data-state="carry"] .karvy-sprite-img,
+  body.desk-view .karvy-sprite[data-state="sleep"] .karvy-sprite-img,
+  body.desk-view .karvy-sprite[data-state="working"] .karvy-sprite-keys,
+  body.desk-view .karvy-sprite[data-state="sleep"] .karvy-sprite-zzz { animation: none; }
+}
