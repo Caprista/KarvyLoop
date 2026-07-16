@@ -13,6 +13,10 @@ from typing import Any, Optional
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api")
 
 
@@ -474,3 +478,128 @@ async def api_propose(request: Request) -> dict[str, Any]:
     if proposal is None:
         return {"proposal": None, "sent": 0}
     return {"proposal": proposal.to_dict(), "sent": sent}
+
+
+# ---- /api/h2a_decide(P2-② 纯搬移自 routes.py;K5 强校验)----
+from karvyloop.karvy.h2a import (  # noqa: E402
+    H2A_DEFER as _H2A_DEFER,
+    H2A_REJECT as _H2A_REJECT,
+    H2ADecision as _H2ADecision,
+    decision_to_envelope as _decision_to_envelope,
+)
+from .serializers import envelope_to_dict as _envelope_to_dict  # noqa: E402
+
+DEFAULT_REJECT_REASON = "(用户未说明)"
+
+class H2ADecideRequest(BaseModel):
+    proposal_id: str = Field(..., min_length=1, max_length=512)
+    decision: str = Field(..., pattern="^(ACCEPT|REJECT|DEFER)$")
+    reason: str = Field(default="", max_length=2000)
+    # #42 优化①「改了再批」:就地改过的 payload 字段(白名单覆盖在 registry.decide 做;
+    # 只许覆盖已有 str 键)。修改是楔子最富的偏好信号,记录在 record_decision_signals。
+    edits: dict = Field(default_factory=dict)
+    user_address_domain_id: str = Field(default="dom-1")
+    user_address_role: str = Field(default="user")
+    user_address_agent_id: str = Field(default="console-user")
+    to_address_domain_id: str = Field(default="dom-1")
+    to_address_role: str = Field(default="agent")
+    to_address_agent_id: str = Field(default="karvy")
+
+
+@router.post("/h2a_decide")
+def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
+    """H2A 决策 → 经 `decision_to_envelope` 工厂(K5 唯一路径)+ D5 按 kind 兑现。
+
+    错误码契约:
+    - DEFER → 200 + {"envelope": null} (K5:DEFER 不发 envelope;D5:挂起留 registry)
+    - 其他 → 200 + envelope dict(`by=[]` 是 K5 不变量)
+
+    REJECT-reason 的取舍(Hardy「不强制 reason」× 协议不变量 A8 的调和):
+    - A8(docs/19 §A8)是 A2A **协议级**不变量——`REJECT` envelope 必带非空 `reason`;
+      它有专属错误类 `RejectMissingReasonError`,且 docs/22(T1 路由)/docs/23(L0)都
+      显式承诺**冻结 A1–A8**。所以**不能**在协议层把它拆了。
+    - Hardy 要的是**不强制用户打字**("不想说为什么就能拒"),这是 **UX** 诉求。
+    - 调和:UI 边界**永不逼用户填**;REJECT 留空时,这里补一个**诚实占位** reason
+      `(用户未说明)`,既不挡用户、又让协议 A8 + 审计链(reject 有据可查)完好。
+    - K5(docs/20)= 人拍板 / envelope `by=[]`,由 `decision_to_envelope` 保证,与 reason 无关。
+
+    D5(docs/30):接 `app.state.proposal_registry` —— ACCEPT 凭 proposal_id 查回
+    原 Proposal 按 kind 兑现(`dispatch` 字段回显结果);无 registry / 未登记 → 静默兼容。
+    K5/PR-4:兑现只在用户已 ACCEPT 后跑;dispatch 不构 Envelope、不替决策。
+    """
+    from karvyloop.domain import Address
+    from datetime import datetime, timezone
+
+    user_addr = Address(
+        domain_id=req.user_address_domain_id,
+        role=req.user_address_role,
+        agent_id=req.user_address_agent_id,
+    )
+    to_addr = Address(
+        domain_id=req.to_address_domain_id,
+        role=req.to_address_role,
+        agent_id=req.to_address_agent_id,
+    )
+
+    # 不逼用户填(Hardy)+ 守协议 A8:REJECT 留空 → 补诚实占位,其余原样。
+    eff_reason = req.reason
+    if req.decision == _H2A_REJECT and not req.reason.strip():
+        eff_reason = DEFAULT_REJECT_REASON
+
+    decision_obj = _H2ADecision(
+        decision=req.decision,
+        reason=eff_reason,
+        proposal_id=req.proposal_id,
+        user_address=user_addr,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+    # §11 决策信号(P3-a 对齐):REST 拍板与 WS 同喂 样本→结晶 / stats / decision_log。
+    # 此前只有 WS 接了 —— 走 REST 拍的板从不进偏好结晶回路(决策 loop 白拍)。
+    # 必须在 _dispatch()(会把提案移出 registry)之前记,才能取到 summary/kind。
+    from karvyloop.console.decision_wire import record_decision_signals
+    record_decision_signals(request.app, decision=req.decision, proposal_id=req.proposal_id,
+                            reason=eff_reason,
+                            domain=req.to_address_domain_id or "",
+                            role=req.to_address_role or "",
+                            edits=(req.edits or None))
+
+    # D5:按 kind 兑现(若接了 registry)。reason 可选,不拦 REJECT。
+    def _dispatch() -> dict[str, Any] | None:
+        registry = getattr(request.app.state, "proposal_registry", None)
+        if registry is None:
+            return None
+        handlers = getattr(request.app.state, "proposal_handlers", None) or {}
+        # T4(docs/85):与 WS 同走 dispatch_decision 咽喉(run_scope 串工具步 +
+        # decision_dispatched 埋点;fail-soft,行为与直接 registry.decide 一字不变)。
+        from karvyloop.console.decision_wire import dispatch_decision
+        res = dispatch_decision(request.app, proposal_id=req.proposal_id,
+                                decision=req.decision, handlers=handlers,
+                                edits=(req.edits or None))
+        # 委派兑现(route_to_role / run_task 等)会同步 drive → 被委派 role 可能碰壁工作区外
+        # 路径(note_denied 攒「想要」)。与顶层 drive 收尾同待遇:这一轮就把「想要」升成 H2A
+        # 授权卡,否则委派活的授权卡永远不出(缺口)。sync 端点在 FastAPI 线程池(无运行
+        # loop)→ asyncio.run 安全;失败不阻断决策回执。
+        import asyncio
+        from karvyloop.console.proposals import raise_fs_access_cards
+        try:
+            asyncio.run(raise_fs_access_cards(request.app))
+        except Exception:
+            logger.debug("[h2a_decide] 委派收尾升 fs_access 卡失败(不阻断)", exc_info=True)
+        return res.to_dict() if res is not None else None
+
+    if req.decision == _H2A_DEFER:
+        # K5:DEFER 不发 envelope,返 null;D5:挂起(留 registry,下次再呈现)
+        return {"envelope": None, "decision": req.decision, "dispatch": _dispatch()}
+
+    # K5 唯一 Envelope 构造路径(REJECT 的空 reason 已在上面补成占位,A8 不破)
+    env = _decision_to_envelope(decision_obj, to_addr)
+    from karvyloop.console.proposal_handlers import pop_report_card
+    return {
+        "envelope": _envelope_to_dict(env),
+        "decision": req.decision,
+        "dispatch": _dispatch(),  # D5:ACCEPT 兑现结果 / REJECT 丢弃回执(handler 内会 stash 回报卡)
+        # 执行后回报卡:兑现跑了独立验收 → 把"它到底验过没"翻成卡(grounded ✓ 的自然产地)
+        "report_card": pop_report_card(request.app, req.proposal_id),
+    }
+

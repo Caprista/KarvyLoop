@@ -675,7 +675,15 @@ def test_j17_agent_import_in_world_real(world):
             break
     assert out is not None and out.get("ok"), f"导入失败: {out}"
     assert out.get("decomposed") is True, f"真模型没拆解(反复降级 v0): {out}"
-    assert (world.state.role_registry.root / out["role_id"]).exists(), "拆解了但角色没落库"
+    # 同 j6:判型(docs/84 #2)后"QA 专员+工具"落在 hybrid/executor 边界,真模型两判皆合法。
+    kind = out.get("agent_kind", "hybrid")
+    if kind in ("decision", "hybrid"):
+        assert (world.state.role_registry.root / out["role_id"]).exists(), "拆解了但角色没落库"
+    elif kind == "executor":
+        assert out.get("import_kind") == "pure_executor"
+        assert not (world.state.role_registry.root / out["role_id"]).exists(), "executor 不该建 role"
+    else:
+        raise AssertionError(f"真模型把带工具的 agent 判成了 skill: {out}")
     assert len(out.get("atoms", [])) >= 1, "没拆出原子"
 
 
