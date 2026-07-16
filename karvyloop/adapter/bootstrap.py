@@ -28,6 +28,9 @@ from karvyloop.adapter.source import ExternalManifest
 # 否则 COMPOSITION.yaml 里 `atom: <name>` 引用不到。LLM 给的名字先过这把尺。
 _ATOM_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _VALID_KINDS = ("task", "daemon")
+# 判型白名单(docs/84 #2,判据=宪法"担不担你的责"):折进同一次拆解调用,不加分类器前置。
+# 非法/缺失 → "hybrid"(宁保守勿毒:hybrid 走现路径,原子照落、角色照建,不会错杀也不会错落)。
+_VALID_AGENT_KINDS = ("decision", "executor", "hybrid", "skill")
 
 # 所有 LLM 控制、会落进公共原子库/atoms.json/磁盘的集合都要封顶(独立对抗验收:id 封了顶,
 # 但 tools/原子个数/skills 还能灌爆盘 —— 9.59MB atoms.json/单次导入)。封顶 = 宁空勿毒的一部分。
@@ -57,6 +60,7 @@ DECOMPOSE_SYSTEM = """你是 KarvyLoop 的 Agent 拆解器。用户从外部(Cla
 
 只输出**一个 JSON 对象**(不要任何解释、不要 markdown 代码围栏),schema:
 {
+  "agent_kind": "四选一:decision / executor / hybrid / skill(判型,唯一判据见下)",
   "identity": "一句话人设:这个角色是谁、最擅长什么(从 system_prompt 提炼,中文)",
   "soul": "2-4 条工作风格/原则,用 \\n 分隔(从 system_prompt 提炼)",
   "atoms": [
@@ -71,6 +75,13 @@ DECOMPOSE_SYSTEM = """你是 KarvyLoop 的 Agent 拆解器。用户从外部(Cla
   ],
   "skills": ["识别出的内含技能名(若无则空数组)"]
 }
+
+判型(agent_kind,唯一判据=这个 agent **担不担用户的责**):
+- "decision":有身份/立场,**替人做取舍与判断**(顾问/把关/评审这类"谁"——担你的责)。
+  atoms 可以为 0(纯人设顾问合法)。
+- "executor":只有能力步骤,**谁用都一样**、无立场(转换器/爬虫/查询器这类"工具",不担责的纯执行体)。
+- "hybrid":既有真人设立场、又有具体可执行能力,两样都真。**拿不准就填 hybrid**。
+- "skill":本质是一段**流程剧本/方法**(step-by-step 的 SOP,教"怎么做"而不是"谁")→ 该进技能库。
 
 硬约束:
 - 若给了 tools:列表里**每一个**都要落成至少一个 atom(别漏)。一个工具对一个原子是常态。
@@ -97,16 +108,28 @@ class AtomProposal:
 
 @dataclasses.dataclass(frozen=True)
 class DecompositionResult:
-    """一次 LLM 拆解的产物。identity/soul 覆盖 v0 模板占位;atoms 落库 + 进 COMPOSITION。"""
+    """一次 LLM 拆解的产物。identity/soul 覆盖 v0 模板占位;atoms 落库 + 进 COMPOSITION。
+
+    agent_kind(docs/84 #2)= 判型,决定路由:decision→建 role(atoms 可 0)/ hybrid→现路径 /
+    executor→只落公共原子库不建 role / skill→指路技能库导入(不落 role/atom)。
+    """
     identity: str
     soul: str
     atoms: tuple[AtomProposal, ...]
     skills: tuple[str, ...]
+    agent_kind: str = "hybrid"   # decision / executor / hybrid / skill(白名单外已在 parse 归一)
 
     def is_valid(self) -> bool:
-        """有效拆解的最低门槛 = **真提炼出了人设(identity)**。atoms 可为 0:纯人设 agent
-        (无显式 tools、人设里也无具体可复用能力)正确结果就是"顾问角色、零原子",不该因此
-        判失败、退回 v0 扁平拷(那才是 Hardy 骂的 0-token bug)。有 identity = LLM 真干了活。"""
+        """有效拆解的最低门槛**按型分**(docs/84 #2):
+        - decision / hybrid:要真提炼出人设(identity)——有身份立场才配决策席;atoms 可为 0
+          (纯人设顾问合法,不该退回 v0 扁平拷——那才是 Hardy 骂的 0-token bug)。
+        - executor:纯执行体没有"谁",identity 不作数,要 ≥1 个原子(否则啥也没拆出来)。
+        - skill:流程剧本,要 ≥1 个识别出的技能名(否则无从指路技能库)。
+        无效 → 调用方降级 v0(如实标 decomposed=False)。"""
+        if self.agent_kind == "executor":
+            return len(self.atoms) >= 1
+        if self.agent_kind == "skill":
+            return len(self.skills) >= 1
         return bool(self.identity and self.identity.strip())
 
 
@@ -123,9 +146,11 @@ def _strip_outer_fence(s: str) -> str:
 
 
 def parse_decomposition(text: str) -> Optional[DecompositionResult]:
-    """宁空勿毒:严格 JSON 解 LLM 拆解结果 → DecompositionResult;解不出 / 无合法原子 → None。
+    """宁空勿毒:严格 JSON 解 LLM 拆解结果 → DecompositionResult;解不出 / 全空产出 → None。
 
     None = 让调用方降级回 v0 确定性 adapter,**绝不**把坏结果当原子写进公共池。
+    注意"合法但零原子"≠垃圾:纯人设 agent(identity 有 / atoms 空)是提示词明许的合法结果,
+    返回给调用方由 is_valid() 按 agent_kind 分型把关(docs/84 在场 bug 修)。
     """
     raw = _strip_outer_fence(text or "")
     if not raw.startswith("{"):
@@ -169,16 +194,25 @@ def parse_decomposition(text: str) -> Optional[DecompositionResult]:
         if len(atoms) >= _MAX_ATOMS:      # 原子总数封顶,截断余下(防灌爆公共池/盘)
             break
 
-    if not atoms:
-        return None                       # 无合法原子 = 没真拆出来 → 降级
-
     skills = tuple(s for s in (str(x).strip() for x in (obj.get("skills") or []))
                    if s and len(s) <= _MAX_STR)[:_MAX_SKILLS]
+    identity = str(obj.get("identity", "")).strip()[:600]
+    # 判型白名单(docs/84 #2):非法/缺失 → hybrid(宁保守勿毒,hybrid 走现路径不会错杀/错落)
+    agent_kind = str(obj.get("agent_kind", "")).strip().lower()
+    if agent_kind not in _VALID_AGENT_KINDS:
+        agent_kind = "hybrid"
+    # 在场 bug 修(docs/84):提示词明说"纯人设 agent atoms 留空数组合法",此处原先
+    # `if not atoms: return None` 把合法结果丢弃 → 降级 v0 扁平拷(烧了 token 白拆)。
+    # 改成:atoms / identity / skills **全空**(啥也没拆出来)才 None;有任何一样真产出
+    # 都交给 is_valid() 按型把关(decision/hybrid 要 identity,executor 要原子,skill 要技能)。
+    if not atoms and not identity and not skills:
+        return None
     return DecompositionResult(
-        identity=str(obj.get("identity", "")).strip()[:600],
+        identity=identity,
         soul=str(obj.get("soul", "")).strip()[:1200],
         atoms=tuple(atoms),
         skills=skills,
+        agent_kind=agent_kind,
     )
 
 

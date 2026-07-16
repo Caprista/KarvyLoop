@@ -634,6 +634,26 @@ _EN = {
         "Adopted “{summary}” — keep working this way and the system will crystallize it into a "
         "skill automatically"
     ),
+    # ---- agent-import 段(docs/84 #2 判型分流:api_agent_import 用户可见 note)----
+    "agent_import.note.pure_executor": (
+        "This agent is a pure executor (capability steps only — no stance, it doesn't carry your "
+        "accountability), so no role seat was created. {n} reusable atom(s) landed in the shared atom "
+        "library; any role can compose them. Want it at the decision table? Create a role yourself and "
+        "bind these atoms."
+    ),
+    "agent_import.note.skill_like": (
+        "This agent is essentially a process playbook (a skill), not a “who” — nothing was written to "
+        "the role or atom library. Import it through the skill library instead."
+    ),
+    "agent_import.note.advisory_persona": (
+        "This role has no immediately executable atoms yet (pure persona, or needs external "
+        "integration). Imported as an advisory role. To make it actually do work → build or import a "
+        "skill for it in the skill library (skills land as runnable code / MCP connections)."
+    ),
+    "agent_import.note.v0_fallback": (
+        "No LLM wired, or decomposition didn't succeed → deterministic adapter (tools listed by name "
+        "only; no atoms minted)."
+    ),
 }
 
 # ---- 中文 ----
@@ -1196,6 +1216,20 @@ _ZH = {
     # crystallize_skill ACCEPT 回执(proposal_handlers)
     "receipt.crystallize.default_habit": "这个习惯",
     "receipt.crystallize.accepted": "已采纳「{summary}」— 你继续这样用,系统会自动把它结晶成技能",
+    # ---- agent-import 段(docs/84 #2 判型分流:api_agent_import 用户可见 note)----
+    "agent_import.note.pure_executor": (
+        "这个 agent 是纯执行体(只有能力步骤、无立场、不担你的责)——没有建角色席位。"
+        "已落 {n} 个公共原子,任何角色都能组合它们;要给它决策席,请自建角色并绑定这些原子。"
+    ),
+    "agent_import.note.skill_like": (
+        "这个 agent 本质是一段流程剧本(技能),不是「谁」——本次未写入角色库/原子库。"
+        "请改走技能库导入。"
+    ),
+    "agent_import.note.advisory_persona": (
+        "这个角色暂无可立即执行的原子(纯人设或需外部集成)。已按顾问角色导入。"
+        "要让它真能干活 → 去技能库**建或导一个 skill** 给它(skill 会落到写代码跑 / 连 MCP)。"
+    ),
+    "agent_import.note.v0_fallback": "未接 LLM 或拆解未成 → 走确定性 adapter(tools 仅列名,未出原子)",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

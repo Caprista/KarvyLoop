@@ -16,6 +16,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from karvyloop import i18n
 from karvyloop.llm.token_ledger import token_source as _token_src
 
 logger = logging.getLogger(__name__)
@@ -271,8 +272,15 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
     **M3 LLM 拆解(docs/14 §10,Hardy 2026-06-26 拍)**:有 LLM 时,先跑一次拆解
     (agent → 真人设 role + 公共原子库里的可复用 atom + 识别内含 skill),**耗 token**;
     tools 不再是 COMPOSITION 里的死字符串,而是落成原子(任何角色都能复用)。
-    **降级**:无 LLM(--no-llm)/ 拆解失败(宁空勿毒返 None)→ 回退 v0 确定性 adapter
-    (五段 Source→Map→Plan→Apply→Validate,套模板写 7 文件、0 原子、0 token)。
+    **按型分流(docs/84 #2,判据=宪法"担不担你的责",判型折进同一次拆解)**:
+    - decision → 建 role(atoms 可 0:纯人设顾问合法);
+    - hybrid → 现路径(落原子 + 建带原子引用的 role);
+    - executor → **只落公共原子库,不建 role**(把不担责的纯执行体安进决策席才是错),
+      role_id 参数降级为原子 provenance(origin="agent-import:<rid>");
+    - skill → 不落 role/atom(零写盘),如实标 import_kind="skill_like" + 指路技能库导入。
+    **降级链不变**:无 LLM(--no-llm)/ 拆解失败(宁空勿毒返 None)/ is_valid 按型不过
+    → 回退 v0 确定性 adapter(五段 Source→Map→Plan→Apply→Validate,套模板写 7 文件、
+    0 原子、0 token),如实标 decomposed=False。
     """
     app = request.app
     reg = getattr(app.state, "role_registry", None)
@@ -320,17 +328,49 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
             decomp = None
             logger.warning(f"[agent/import] LLM 拆解失败,降级 v0: {e}")
         if decomp is not None and decomp.is_valid():
+            kind = getattr(decomp, "agent_kind", "hybrid")
+            # ---- skill 型:一段流程剧本不是"谁" → 不落 role/atom(零写盘),指路技能库导入 ----
+            # 不静默强改写成角色;is_valid 已保证 skills≥1,前端拿着 skills_recognized 去 skill import。
+            if kind == "skill":
+                return {
+                    "ok": True, "role_id": rid, "decomposed": True,
+                    "agent_kind": "skill", "import_kind": "skill_like",
+                    "note": i18n.t("agent_import.note.skill_like"),
+                    "atoms": [], "atoms_created": [],
+                    "atoms_advisory": [], "atoms_executable": [],
+                    "skills_recognized": list(decomp.skills), "skills_bound": [],
+                    "identity": decomp.identity,
+                }
+            # ---- 落原子(decision / hybrid / executor 共用;origin = 导入 provenance)----
             atoms_created: list[str] = []
             for ap in decomp.atoms:
                 if atom_reg.get(ap.id) is not None:
                     continue                     # 复用已有(甲:用不拥有)
                 try:
                     atom_reg.create(ap.id, ap.kind, ap.purpose, tools=list(ap.tools),
-                                    tags=list(getattr(ap, "tags", ()) or ()))
+                                    tags=list(getattr(ap, "tags", ()) or ()),
+                                    origin=f"agent-import:{rid}")
                     atoms_created.append(ap.id)
                 except Exception as e:  # noqa: BLE001 — 单个原子建失败不阻断,跳过
                     logger.warning(f"[agent/import] 原子 {ap.id} 建失败: {e}")
             atom_ids = [ap.id for ap in decomp.atoms if atom_reg.get(ap.id) is not None]
+            # 诚实披露(docs/14 §11.1):哪些原子是顾问型(工具没接真实注册表,只靠人设推理)
+            advisory = [aid for aid in atom_ids
+                        if (atom_reg.get(aid) is not None and not atom_reg.get(aid).executable)]
+            executable = [aid for aid in atom_ids if aid not in advisory]
+            # ---- executor 型:纯执行体不担你的责 → 只落公共原子库,**不建 role**(docs/84 #2)----
+            # role_id 参数在此路降级为原子 provenance(上面 origin);要决策席请自建 role 绑这些原子。
+            if kind == "executor":
+                return {
+                    "ok": True, "role_id": rid, "decomposed": True,
+                    "agent_kind": "executor", "import_kind": "pure_executor",
+                    "note": i18n.t("agent_import.note.pure_executor", n=len(atom_ids)),
+                    "atoms": atom_ids, "atoms_created": atoms_created,
+                    "atoms_advisory": advisory, "atoms_executable": executable,
+                    "skills_recognized": list(decomp.skills), "skills_bound": [],
+                    "identity": decomp.identity,
+                }
+            # ---- decision / hybrid:现路径 —— 建带原子引用的 role(decision 的 atoms 可 0)----
             # 技能:只绑**确认在库**的(识别到但没导入的只报不绑 → 不谎称角色拥有它,也不触 UnknownSkillError)
             known = reg._known_skills() if hasattr(reg, "_known_skills") else None
             bind_skills = [s for s in decomp.skills if known is not None and s in known]
@@ -345,20 +385,15 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
                     except Exception:  # noqa: BLE001
                         pass
                 raise HTTPException(status_code=422, detail=f"拆解出原子但建角色失败:{e}")
-            # 诚实披露(docs/14 §11.1):哪些原子是顾问型(工具没接真实注册表,只靠人设推理)
-            advisory = [aid for aid in atom_ids
-                        if (atom_reg.get(aid) is not None and not atom_reg.get(aid).executable)]
-            executable = [aid for aid in atom_ids if aid not in advisory]
             # agent-vs-skill 识别(docs/14 §11.3):若**一个可执行原子都没有**,这更像一段顾问人设/技能,
             # 不是会干活的工具型 agent —— **不静默当 agent 强改写**,如实标 import_kind + 建议走 skill import。
             import_kind = "tool_agent" if executable else "advisory_persona"
             # 顾问角色 = 暂无可立即执行的能力。**补能力的正路是给它一个 skill**(不是"缺工具"——
             # 我们没有也不需要"工具编辑":skill 最终落到 run_command 写代码 / MCP 连外部系统)。
-            note = ("" if executable else
-                    "这个角色暂无可立即执行的原子(纯人设或需外部集成)。已按顾问角色导入。"
-                    "要让它真能干活 → 去技能库**建或导一个 skill** 给它(skill 会落到写代码跑 / 连 MCP)。")
+            note = "" if executable else i18n.t("agent_import.note.advisory_persona")
             return {
                 "ok": True, "role_id": rid, "decomposed": True,
+                "agent_kind": kind,
                 "import_kind": import_kind, "note": note,
                 "atoms": atom_ids, "atoms_created": atoms_created,
                 "atoms_advisory": advisory,        # 工具是合成名、对不上真工具 → 只能顾问推理
@@ -366,7 +401,7 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
                 "skills_recognized": list(decomp.skills), "skills_bound": bind_skills,
                 "identity": decomp.identity,
             }
-        # decomp 为 None/无效 → 落到 v0 降级
+        # decomp 为 None/无效(is_valid 按型不过)→ 落到 v0 降级
 
     # ---- v0 降级:确定性 adapter(无 LLM 或拆解失败)----
     try:
@@ -384,7 +419,7 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
         raise HTTPException(status_code=422, detail=f"导入失败:{e}")
     return {
         "ok": True, "role_id": rid, "decomposed": False,
-        "note": "未接 LLM 或拆解未成 → 走确定性 adapter(tools 仅列名,未出原子)",
+        "note": i18n.t("agent_import.note.v0_fallback"),
         "written": list(getattr(result, "written", [])),
         "valid": bool(getattr(validation, "is_valid", True)),
     }
