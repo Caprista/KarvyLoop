@@ -2347,6 +2347,29 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .dlife-strength, .dlife-tokens { font-size: 11px; color: var(--text-3); margin-top: 2px; }
 .dlife-step-name { font-weight: 600; color: var(--text-2); margin-right: 6px; }
 .dlife-step-gist { color: var(--text-3); word-break: break-all; }
+/* 🔧 执行步下钻(二刀):点行头展开 输入摘要 + ok/error_reason(slice C 成败事实;老格式无 ✓/✗) */
+.dlife-step-head { cursor: pointer; }
+.dlife-step-head:hover .dlife-step-name { color: var(--text-1); }
+.dlife-step-detail { display: none; margin: 2px 0 4px 14px; padding: 4px 8px;
+  border-left: 2px solid var(--border); font-size: 11px; }
+.dlife-step.dlife-step-open .dlife-step-detail { display: block; }
+.dlife-step-ok { color: var(--green); margin-right: 4px; }
+.dlife-step-err { color: var(--danger); margin-right: 4px; }
+.dlife-step-input { color: var(--text-3); word-break: break-all; white-space: pre-wrap; }
+/* ✍️ 你的判断(T2)+ 🧭 建卡事实 */
+.dlife-judged-note { color: var(--text-3); font-style: italic; }
+.dlife-violation-note { color: var(--danger); margin-top: 2px; }
+/* ♻ 回流站(三刀):批次级归因 —— 头行计数 + 逐条偏好动静 + 免责句 */
+.dlife-learned-head { font-weight: 600; color: var(--text-2); }
+.dlife-learned-mark { font-weight: 700; margin-right: 4px; }
+.dlife-learned-reinforced .dlife-learned-mark { color: var(--green); }
+.dlife-learned-weakened .dlife-learned-mark { color: var(--warn); }
+.dlife-learned-revoked .dlife-learned-mark { color: var(--danger); }
+.dlife-learned-label { color: var(--text-2); margin-right: 6px; }
+.dlife-learned .life-ev-detail { display: inline; }
+.dlife-learned-hint { color: var(--text-3); font-style: italic; font-size: 11px; }
+/* 任务详情 → 决策回链(二刀):「⚖ 由你拍板于 {时间} · 🧬 回放决策」 */
+.task-decision-backlink { margin: 2px 0 8px; font-size: var(--fs-12); color: var(--text-2); }
 .dlife-replay { margin: 2px 0 6px; }
 /* ▶ 逐站回放:回放态先全暗,逐站 ~400ms 淡入点亮;reduced-motion 由 JS 直接全显(不进回放态) */
 .dlife-replaying .dlife-station { opacity: 0.12; transition: opacity 0.36s ease; }

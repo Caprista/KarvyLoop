@@ -269,11 +269,63 @@ def api_lang_set(req: LangRequest, request: Request) -> dict[str, Any]:
 # Trace kind → 时间线站位(与前端 _DLIFE_STATIONS 对齐;缺站前端显诚实空位)
 _DLIFE_KIND_TO_TYPE = {
     "decision_point": "born",           # T1 💡诞生(登记/广播咽喉)
-    "decision_judged": "judged",        # T2 ✍️你的判断(二刀才埋;这里先认,不编数据)
+    "decision_judged": "judged",        # T2 ✍️你的判断(judge_card 埋;card_seen 时兼喂 aligned 站)
     "decision_made": "decided",         # T3 ⚖你拍板
     "decision_dispatched": "dispatched",  # T4 🚚兑现
     "silenced_decision": "dispatched",  # 静音自动兑现(auto 标出;拍板站诚实留空)
 }
+
+# ♻ 回流站(docs/85 三刀):偏好校准事件记在共用 task 桶(PREF_TRACE_TASK),payload 只有
+# content[:80]+strength —— **没有 proposal 键**(结晶按批攒样本一起喂,且与 distill 路径共用),
+# 逐条归因不可诚实推得 → 只做**批次级**:取这次拍板 ts 之后的**第一簇**偏好事件
+# (同一次结晶 run 的事件间隔为秒级;簇间隔 > _LEARNED_CLUSTER_GAP_S = 另一批,不算)。
+_LEARNED_KINDS = {"decision_pref_reinforced": "reinforced",
+                  "decision_pref_weakened": "weakened",
+                  "pref_auto_revoked": "revoked"}
+_LEARNED_CLUSTER_GAP_S = 600.0   # 首簇聚类间隔(一次结晶 run 内事件相邻为秒级,600s 很宽裕)
+_LEARNED_CAP = 8                 # 回流站最多摆几条(其余只报总数)
+
+
+def _learned_events(trace: Any, decided_ts: float) -> list[dict[str, Any]]:
+    """这次拍板之后的第一批偏好结晶事件(批次级归因,绝不编逐条对应)。
+
+    诚实边界:事件本身(何时/哪条偏好/强度变化)是 Trace 事实;「与这次拍板的关联」只是
+    时间就近 + 结晶按批的机制推论 —— 行内 attribution="batch" 标出,前端必须带免责句。
+    无拍板锚(decided_ts<=0)→ 不聚合(返回 [])。"""
+    if trace is None or decided_ts <= 0:
+        return []
+    from karvyloop.console.decision_wire import PREF_TRACE_TASK
+    rows: list[tuple[float, str, dict, str]] = []
+    try:
+        for kind, label in _LEARNED_KINDS.items():
+            for e in trace.query(PREF_TRACE_TASK, kind=kind):
+                if e.ts >= decided_ts:
+                    rows.append((e.ts, label, getattr(e, "payload", {}) or {},
+                                 f"{e.task_id}:{getattr(e, 'seq', 0)}"))
+    except Exception:
+        return []
+    if not rows:
+        return []
+    rows.sort(key=lambda r: r[0])
+    burst: list[tuple[float, str, dict, str]] = []
+    last_ts = None
+    for r in rows:                      # 首簇:从最早一条起,间隔 ≤ gap 连成一批
+        if last_ts is not None and (r[0] - last_ts) > _LEARNED_CLUSTER_GAP_S:
+            break
+        burst.append(r)
+        last_ts = r[0]
+    out: list[dict[str, Any]] = []
+    for ts, label, p, tref in burst[:_LEARNED_CAP]:
+        row: dict[str, Any] = {"ts": ts, "type": "learned", "pref_event": label,
+                               "detail": str(p.get("content", "") or ""),
+                               "attribution": "batch", "trace_ref": tref}
+        for k in ("strength_before", "strength_after"):
+            if isinstance(p.get(k), (int, float)):
+                row[k] = p[k]
+        out.append(row)
+    if out:
+        out[0]["learned_total"] = len(burst)   # 首簇总条数(超 cap 时前端报「共 N 条」)
+    return out
 
 
 @router.get("/decision/{proposal_id}/lifeline")
@@ -284,8 +336,12 @@ def api_decision_lifeline(proposal_id: str, request: Request) -> dict[str, Any]:
 
     契约(同构 skill_lifecycle,别改形状):
     {"ok", "proposal_id", "stub",
-     "events": [{"ts","type","detail","trace_ref", ...extras}],   # type ∈ born/judged/decided/dispatched
-     "steps":  [{"ts","name","gist"}],                            # 兑现 run 的真实工具步(run_id 投影)
+     "events": [{"ts","type","detail","trace_ref", ...extras}],
+       # type ∈ born/aligned/judged/decided/dispatched/learned
+       # aligned = T2 卡缓存命中时的建卡事实投影;learned = ♻ 批次级回流(attribution="batch",
+       # 首簇 + learned_total;逐条归因不可诚实推得,绝不编)
+     "steps":  [{"ts","name","gist","input",("ok","err")}],   # 兑现 run 的真实工具步(run_id 投影;
+       # ok/err = docs/82 slice C 成败事实,老格式条目键缺省)
      "tokens": int|null, "task": {...}|null}
     缺哪站诚实缺(不编);埋点前的老决策只有 decision_log 存根 → stub=true。
     """
@@ -328,8 +384,22 @@ def api_decision_lifeline(proposal_id: str, request: Request) -> dict[str, Any]:
                     row["detail"] = str(p.get("detail", "") or p.get("summary", "") or "")
                     row["ok"] = bool(p.get("ok"))
                     row["auto"] = True   # 静音自动兑现(非你拍板)—— 前端如实标
-                else:   # decision_judged(二刀)
+                else:   # decision_judged(T2,docs/85 二刀)
                     row["detail"] = str(p.get("basis") or p.get("detail") or "")
+                    row["engaged"] = bool(p.get("engaged"))
+                    row["card_seen"] = bool(p.get("card_seen"))
+                    if p.get("edits_n"):
+                        row["edits_n"] = int(p.get("edits_n") or 0)
+                        row["edited"] = str(p.get("edited", "") or "")
+                    # 建卡事实(卡缓存命中才有)→ 兼喂 🧭 aligned 站(缺省=站留诚实空位)
+                    if "aligned" in p:
+                        row["aligned"] = int(p.get("aligned") or 0)
+                        row["violations"] = int(p.get("violations") or 0)
+                        events.append({"ts": e.ts, "type": "aligned",
+                                       "aligned": int(p.get("aligned") or 0),
+                                       "aligned_omitted": int(p.get("aligned_omitted") or 0),
+                                       "violations": int(p.get("violations") or 0),
+                                       "trace_ref": f"{e.task_id}:{e.seq}"})
                 events.append(row)
         except Exception as ex:
             return {"ok": False, "reason": f"trace 读取失败:{ex}", "events": [],
@@ -356,6 +426,16 @@ def api_decision_lifeline(proposal_id: str, request: Request) -> dict[str, Any]:
         except Exception:
             pass
 
+    # ♻ 回流站(三刀):拍板锚之后的第一批偏好结晶(批次级归因;无锚/无事件 → 站留诚实空位)
+    try:
+        decided_ts = max((r["ts"] for r in events if r["type"] == "decided"), default=0.0)
+        learned = _learned_events(trace, float(decided_ts or 0.0))
+        if learned:
+            events.extend(learned)
+            events.sort(key=lambda r: r["ts"])
+    except Exception:
+        pass   # 回流聚合失败不拖垮整条生命线(其余站照常返回)
+
     # 任务态(run_task 兑现登记的任务,Task.proposal_id 回链;老任务无此字段 → null)
     task: Optional[dict] = None
     tid = ""
@@ -374,6 +454,18 @@ def api_decision_lifeline(proposal_id: str, request: Request) -> dict[str, Any]:
 
     # 🔧执行工具步:T4 记下的 run_id → trace.query_run 投影(用户原话的 "each agent's
     # reasoning steps");无 run_id / 无记录 → 空列表(前端显诚实空位)。
+    # 下钻(二刀):每步带 input 全一点的摘要 + ok/error_reason 成败事实(docs/82 slice C
+    # 执行器已回填;老格式条目无 ok 字段 → 键缺省诚实,前端不标 ✓/✗)。
+    def _step(ts: float, c: dict) -> dict[str, Any]:
+        s: dict[str, Any] = {"ts": ts, "name": str(c.get("name", "") or "?"),
+                             "gist": str(c.get("input", ""))[:160],
+                             "input": str(c.get("input", ""))[:400]}
+        if "ok" in c:
+            s["ok"] = bool(c.get("ok"))
+            if c.get("error_reason"):
+                s["err"] = str(c.get("error_reason", ""))[:200]
+        return s
+
     steps: list[dict[str, Any]] = []
     if trace is not None and run_id:
         try:
@@ -381,11 +473,9 @@ def api_decision_lifeline(proposal_id: str, request: Request) -> dict[str, Any]:
                 p = getattr(e, "payload", {}) or {}
                 if e.kind == "atom_run":
                     for c in (p.get("tool_calls") or [])[:40]:
-                        steps.append({"ts": e.ts, "name": str(c.get("name", "") or "?"),
-                                      "gist": str(c.get("input", ""))[:160]})
+                        steps.append(_step(e.ts, c))
                 elif e.kind == "tool_call":
-                    steps.append({"ts": e.ts, "name": str(p.get("name", "") or "?"),
-                                  "gist": str(p.get("input", ""))[:160]})
+                    steps.append(_step(e.ts, p))
                 if len(steps) >= 40:
                     break
         except Exception:

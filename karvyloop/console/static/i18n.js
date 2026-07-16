@@ -1440,7 +1440,26 @@
         "dlife.st_result": "Result",
         "dlife.tokens": "💰 {n} tokens",
         "dlife.auto": "handled quietly (earned silence — you authorized this kind)",
-        "dlife.result_running": "still running…"
+        "dlife.result_running": "still running…",
+        // 二刀:✍️ 你的判断(T2)/ 🧭 建卡事实 / 🔧 执行步下钻 / 任务详情回链
+        "dlife.judged_edits": "Edited {n} criteria before deciding",
+        "dlife.judged_blind": "Decided as-is — no edits, no stated basis.",
+        "dlife.judged_nocard": "No decision-card record (card not opened, or record lost).",
+        "dlife.aligned_hits": "{n} of your crystallized standards were laid on the card",
+        "dlife.aligned_omitted": " (+{n} more applicable, not shown)",
+        "dlife.aligned_violations": "⚠ {n} point(s) flagged against your standards",
+        "dlife.step_ok": "✓ succeeded",
+        "dlife.step_failed": "✗ failed",
+        "dlife.step_expand_title": "Click to expand input & outcome",
+        "task.from_decision": "⚖ You decided this on {when}",
+        "task.replay_decision": "Replay the decision",
+        // 三刀:♻ 回流站 —— 批次级归因(偏好按批结晶,逐条对应没记录,绝不编)
+        "dlife.st_learned": "Fed back into your standards",
+        "dlife.learned_batch": "♻ This batch of calls fed {n} preference update(s)",
+        "dlife.learned_hint": "Preferences crystallize in batches of several calls — attribution here is batch-level; per-call correspondence isn't recorded.",
+        "dlife.learned_reinforced": "reinforced",
+        "dlife.learned_weakened": "weakened",
+        "dlife.learned_revoked": "auto-revoked"
       },
       zh: {
         "ui.title": "KarvyLoop",
@@ -2880,7 +2899,26 @@
         "dlife.st_result": "结果",
         "dlife.tokens": "💰 {n} tokens",
         "dlife.auto": "静音代办(挣来的静音 —— 这类你授权过)",
-        "dlife.result_running": "还在跑…"
+        "dlife.result_running": "还在跑…",
+        // 二刀:✍️ 你的判断(T2)/ 🧭 建卡事实 / 🔧 执行步下钻 / 任务详情回链
+        "dlife.judged_edits": "拍前改/删了 {n} 条依据",
+        "dlife.judged_blind": "未改依据、未陈述理由(直接拍板)。",
+        "dlife.judged_nocard": "决策卡数据无记录(没看过卡,或记录丢失)。",
+        "dlife.aligned_hits": "建卡时摆上了你 {n} 条已结晶的标准",
+        "dlife.aligned_omitted": "(另有 {n} 条适用未摆上)",
+        "dlife.aligned_violations": "⚠ 有 {n} 处违背你的标准被标出",
+        "dlife.step_ok": "✓ 成功",
+        "dlife.step_failed": "✗ 失败",
+        "dlife.step_expand_title": "点开看输入与成败",
+        "task.from_decision": "⚖ 由你拍板于 {when}",
+        "task.replay_decision": "回放决策",
+        // 三刀:♻ 回流站 —— 批次级归因(偏好按批结晶,逐条对应没记录,绝不编)
+        "dlife.st_learned": "回流你的标准",
+        "dlife.learned_batch": "♻ 这批拍板参与喂养了 {n} 条偏好",
+        "dlife.learned_hint": "偏好按批结晶(攒几次拍板一起喂)—— 这里是批次级归因,逐条对应没有记录。",
+        "dlife.learned_reinforced": "加固",
+        "dlife.learned_weakened": "削弱",
+        "dlife.learned_revoked": "自动撤销"
       }
     };
     function normalize(lang) {

@@ -3056,14 +3056,16 @@
     body.appendChild(el("button", { class: "mgmt-submit", text: t("skills.back"),
       onClick: () => window.KarvySkillsPanel.open() }));
   }
-  // ============ 决策时间线 = 决策的生命线(docs/85 Part B):七站垂直轴 + ▶逐站回放 ============
+  // ============ 决策时间线 = 决策的生命线(docs/85 Part B):八站垂直轴 + ▶逐站回放 ============
   // 与技能生命线同心智同 modal 同数据纪律(K4 只读,全从 Trace 聚合)。契约(与后端约定死):
   //   GET /api/decision/{pid}/lifeline → {ok, stub, events:[{ts,type,detail,trace_ref,…}],
-  //   steps:[{ts,name,gist}], tokens, task}。type ∈ born/aligned/judged/decided/dispatched。
+  //   steps:[{ts,name,gist,input,(ok,err)}], tokens, task}。
+  //   type ∈ born/aligned/judged/decided/dispatched/learned。
   // 缺哪站显诚实空位「此段无记录」;埋点前老决策 = 拍板存根 + 一句实话(stub_hint)。
-  const _DLIFE_STATIONS = ["born", "aligned", "judged", "decided", "dispatched", "executed", "result"];
+  // ♻ learned 站(三刀)= **批次级**归因(偏好按批结晶,逐条对应没记录)—— 必带免责句,绝不编精确归因。
+  const _DLIFE_STATIONS = ["born", "aligned", "judged", "decided", "dispatched", "executed", "result", "learned"];
   const _DLIFE_ICONS = { born: "💡", aligned: "🧭", judged: "✍️", decided: "⚖",
-                         dispatched: "🚚", executed: "🔧", result: "✅" };
+                         dispatched: "🚚", executed: "🔧", result: "✅", learned: "♻" };
   async function openDecisionLifeline(proposalId, summary) {
     openMgmtModal(t("dlife.title"));
     const body = mgmtBody();
@@ -3093,16 +3095,83 @@
         el("span", { class: "life-ev-type", text: t("dlife.st_" + st) })));
       let filled = false;
       if (st === "executed") {
-        // 🔧 执行工具步(run_id 投影,"each agent's reasoning steps")+ 💰 token
+        // 🔧 执行工具步(run_id 投影,"each agent's reasoning steps")+ 💰 token。
+        // 下钻(二刀):点一行展开 输入摘要 + ok/error_reason(slice C 成败事实;
+        // 老格式条目无 ok 字段 → 不标 ✓/✗,不编)。
         for (const s of (data.steps || [])) {
-          station.appendChild(el("div", { class: "dlife-row dlife-step" },
+          const stepRow = el("div", { class: "dlife-row dlife-step" });
+          const head = el("div", { class: "dlife-step-head", title: t("dlife.step_expand_title") },
             el("span", { class: "dlife-step-name", text: "· " + (s.name || "?") }),
-            s.gist ? el("span", { class: "dlife-step-gist", text: s.gist }) : null));
+            (s.ok === true) ? el("span", { class: "dlife-step-ok", text: "✓" })
+              : (s.ok === false) ? el("span", { class: "dlife-step-err", text: "✗" }) : null,
+            s.gist ? el("span", { class: "dlife-step-gist", text: s.gist }) : null);
+          const det = el("div", { class: "dlife-step-detail" });
+          if (typeof s.ok === "boolean") {
+            det.appendChild(el("div", { class: s.ok ? "dlife-step-ok" : "dlife-step-err",
+              text: s.ok ? t("dlife.step_ok") : (t("dlife.step_failed") + (s.err ? ": " + s.err : "")) }));
+          }
+          if (s.input) det.appendChild(el("div", { class: "dlife-step-input", text: s.input }));
+          head.addEventListener("click", () => stepRow.classList.toggle("dlife-step-open"));
+          stepRow.appendChild(head);
+          stepRow.appendChild(det);
+          station.appendChild(stepRow);
           filled = true;
         }
         if (typeof data.tokens === "number" && data.tokens > 0) {
           station.appendChild(el("div", { class: "dlife-row dlife-tokens",
             text: t("dlife.tokens", { n: data.tokens }) }));
+          filled = true;
+        }
+      } else if (st === "aligned") {
+        // 🧭 建卡事实(T2 卡缓存命中才有):命中你几条标准 / 几处违背被标出
+        for (const ev of (byType.aligned || [])) {
+          const row = el("div", { class: "dlife-row" });
+          row.appendChild(el("div", { class: "life-ev-detail",
+            text: t("dlife.aligned_hits", { n: ev.aligned || 0 })
+                  + (ev.aligned_omitted ? t("dlife.aligned_omitted", { n: ev.aligned_omitted }) : "") }));
+          if (ev.violations) row.appendChild(el("div", { class: "dlife-violation-note",
+            text: t("dlife.aligned_violations", { n: ev.violations }) }));
+          station.appendChild(row);
+          filled = true;
+        }
+      } else if (st === "judged") {
+        // ✍️ 你的判断(T2 真数据,二刀):陈述依据 / 改动摘要;零判断与无卡记录各说各的实话
+        for (const ev of (byType.judged || [])) {
+          const when = ev.ts ? new Date(ev.ts * 1000).toLocaleString() : "";
+          const row = el("div", { class: "dlife-row" },
+            el("span", { class: "life-ev-time", text: when }));
+          if (ev.detail) row.appendChild(el("div", { class: "life-ev-detail", text: "✍️ " + ev.detail }));
+          if (ev.edits_n) row.appendChild(el("div", { class: "dlife-judged-note",
+            text: t("dlife.judged_edits", { n: ev.edits_n }) + (ev.edited ? ": " + ev.edited : "") }));
+          if (!ev.detail && !ev.edits_n) {
+            row.appendChild(el("div", { class: "dlife-judged-note",
+              text: t(ev.card_seen ? "dlife.judged_blind" : "dlife.judged_nocard") }));
+          }
+          if (ev.trace_ref) row.appendChild(el("div", { class: "life-ev-trace", text: "🔬 " + ev.trace_ref }));
+          station.appendChild(row);
+          filled = true;
+        }
+      } else if (st === "learned") {
+        // ♻ 回流(三刀):这批拍板参与喂养了 N 条偏好 —— **批次级**归因,免责句必带(绝不编逐条对应)
+        const evs = byType.learned || [];
+        if (evs.length) {
+          const total = evs[0].learned_total || evs.length;
+          station.appendChild(el("div", { class: "dlife-row dlife-learned-head",
+            text: t("dlife.learned_batch", { n: total }) }));
+          const marks = { reinforced: "▲", weakened: "▼", revoked: "✕" };
+          for (const ev of evs) {
+            const row = el("div", { class: "dlife-row dlife-learned dlife-learned-" + (ev.pref_event || "") },
+              el("span", { class: "dlife-learned-mark", text: marks[ev.pref_event] || "·" }),
+              el("span", { class: "dlife-learned-label", text: t("dlife.learned_" + (ev.pref_event || "reinforced")) }),
+              el("span", { class: "life-ev-detail", text: ev.detail || "" }));
+            if (typeof ev.strength_before === "number" && typeof ev.strength_after === "number") {
+              row.appendChild(el("span", { class: "dlife-strength",
+                text: " " + ev.strength_before + " → " + ev.strength_after }));
+            }
+            station.appendChild(row);
+          }
+          station.appendChild(el("div", { class: "dlife-row dlife-learned-hint",
+            text: t("dlife.learned_hint") }));
           filled = true;
         }
       } else if (st === "result") {
@@ -3214,6 +3283,23 @@
     body.appendChild(el("div", { class: "mgmt-section-title",
       text: _localizeWho(tk.who) + " · " + statusLbl }));
     body.appendChild(el("div", { class: "task-detail-intent", text: tk.intent || "" }));
+    // 决策回链(docs/85 二刀):这活来自你的哪次拍板 —— 「⚖ 由你拍板于 {时间} · 🧬 回放决策」。
+    // 键在但生命线载不出 → 撤行不摆坏入口;没有 decided(静音代办)→ 只给回放链,不冒认"你拍的"。
+    if (tk.proposal_id) {
+      const backRow = el("div", { class: "task-decision-backlink" });
+      body.appendChild(backRow);
+      _getJSON("/api/decision/" + encodeURIComponent(tk.proposal_id) + "/lifeline").then((lf) => {
+        if (!lf || !lf.ok) { backRow.remove(); return; }
+        const dec = (lf.events || []).find((ev) => ev.type === "decided");
+        if (dec && dec.ts) {
+          backRow.appendChild(el("span", { class: "task-backlink-when",
+            text: t("task.from_decision", { when: new Date(dec.ts * 1000).toLocaleString() }) + " · " }));
+        }
+        backRow.appendChild(el("button", { class: "dlife-link", text: "🧬 " + t("task.replay_decision"),
+          title: t("dlife.entry_title"),
+          onClick: () => openDecisionLifeline(String(tk.proposal_id), tk.intent || "") }));
+      }).catch(() => backRow.remove());
+    }
     const data = await _getJSON("/api/task/" + encodeURIComponent(tk.id));
     const detail = (data && data.task) || {};
     // 活动时间线(借鉴 Multica"可读的同事"):这个任务经历了什么 —— 持久、刷新/重启后仍在

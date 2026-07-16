@@ -136,6 +136,30 @@ def _attach_violations(app: Any, d: dict, aligned: list[dict], problem: str,
     d["needs_recheck"] = True
 
 
+_CARD_SEEN_CAP = 64   # 最近建过的卡缓存上限(FIFO;只喂 T2 埋点,丢了=字段缺省诚实)
+
+
+def _remember_card_built(app: Any, proposal_id: str, d: dict) -> None:
+    """T2 数据源(docs/85 二刀):建卡即缓存本卡的预对齐/违背计数,judge 时读走。
+
+    「没看过卡=字段缺省诚实」:judge 时缓存 miss(卡从没建过/重启丢了)→ T2 不带
+    aligned/violations 字段,绝不编。fail-soft:缓存坏,建卡行为一字不变。"""
+    try:
+        cache = getattr(app.state, "decision_card_seen", None)
+        if cache is None:
+            cache = app.state.decision_card_seen = {}
+        cache[proposal_id] = {
+            "aligned": len(d.get("aligned_prefs") or []),
+            "aligned_omitted": int(d.get("aligned_omitted") or 0),
+            "violations": len(d.get("violations") or []),
+            "high_value": bool(d.get("high_value")),
+        }
+        while len(cache) > _CARD_SEEN_CAP:          # FIFO(dict 保插入序)
+            cache.pop(next(iter(cache)))
+    except Exception:
+        logger.debug("[decision_card_wire] 卡缓存写入失败(不阻断建卡)", exc_info=True)
+
+
 def build_card_for_proposal(app: Any, proposal_id: str) -> Optional[dict]:
     """从一条待决提案建决策卡(接地于 verify store,无则 honest unverifiable)。"""
     reg = getattr(app.state, "proposal_registry", None)
@@ -178,6 +202,8 @@ def build_card_for_proposal(app: Any, proposal_id: str) -> Optional[dict]:
     d["violations"] = []
     # Cut 2 违背即拦:对召回到的标准跑守线(放在最后 —— 会把 high_value/needs_recheck 升上去)
     _attach_violations(app, d, aligned, problem, approach, payload)
+    # T2 数据源(docs/85 二刀):建卡即缓存预对齐/违背计数 —— judge_card 读走落 decision_judged
+    _remember_card_built(app, proposal_id, d)
     return d
 
 
@@ -267,6 +293,31 @@ def judge_card(app: Any, *, proposal_id: str, decision: str, engaged: bool,
             }, source="decision_card_wire")
     except Exception:
         logger.debug("[decision_card_wire] surface_triggered 埋点失败(不阻断)", exc_info=True)
+    # T2 decision_judged(docs/85 二刀):「✍️ 你的判断」站从此不蒸发。字段纪律:
+    # - engaged/basis/改动摘要 = 本次 judge 的事实,总是带;
+    # - aligned/violations 计数 = 建卡时缓存的事实 —— 缓存 miss(卡没建过/重启丢)
+    #   → card_seen=false 且**不带**这些字段(缺省诚实,绝不编)。
+    # fail-soft:埋点坏,judge/回喂行为一字不变(决策流是命脉)。
+    try:
+        from karvyloop.console.decision_wire import emit_decision_trace
+        payload: dict = {"decision": str(decision).upper()[:16], "engaged": eff_engaged}
+        if basis:
+            payload["basis"] = basis[:160]
+        texts = [c.get("text", "") for c in (edited_criteria or []) if c.get("text")]
+        if texts:
+            payload["edits_n"] = len(texts)
+            payload["edited"] = "; ".join(t[:40] for t in texts[:3])[:120]   # 改动摘要
+        seen = (getattr(app.state, "decision_card_seen", None) or {}).get(proposal_id)
+        payload["card_seen"] = bool(seen)
+        if seen:
+            payload["aligned"] = int(seen.get("aligned", 0))
+            payload["aligned_omitted"] = int(seen.get("aligned_omitted", 0))
+            payload["violations"] = int(seen.get("violations", 0))
+            payload["high_value"] = bool(seen.get("high_value"))
+        emit_decision_trace(app, "decision_judged", proposal_id, payload,
+                            source="decision_card_wire")
+    except Exception:
+        logger.debug("[decision_card_wire] decision_judged 埋点失败(不阻断)", exc_info=True)
     if eff_engaged:
         try:
             from karvyloop.console.decision_wire import observe_decision

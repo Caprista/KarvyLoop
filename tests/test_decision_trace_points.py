@@ -48,6 +48,7 @@ from karvyloop.karvy.proposal_registry import (  # noqa: E402
 
 NEW_KINDS = (
     "decision_point", "decision_made", "decision_dispatched",       # T1/T3/T4(docs/85)
+    "decision_judged",                                              # T2(docs/85 二刀)
     "decision_pref_reinforced", "decision_pref_weakened",           # B-5 #1/#2
     "pref_auto_revoked", "surface_triggered", "defer_aged_out",     # B-5 #3/#6/#7
     "revoke_suppressed",                                            # B-5 #12
@@ -203,6 +204,91 @@ def test_t3_fail_soft_append_raises_behavior_unchanged():
     record_decision_signals(app, decision="ACCEPT", proposal_id=p.proposal_id)
     assert app.state.decision_log.count() == 1
     assert len(app.state.decision_samples) == 1
+
+
+# ---- T2 decision_judged(judge_card 埋点,docs/85 二刀)----
+# 字段纪律:engaged/basis/改动摘要 = judge 事实总是带;aligned/violations 计数 =
+# 建卡缓存命中才带(「没看过卡=字段缺省诚实」,绝不编)。
+
+
+def test_t2_judged_after_card_built_carries_alignment_counts():
+    """真路径:先建卡(缓存落 app.state)→ judge → T2 带 card_seen + aligned/violations 计数。"""
+    from karvyloop.cognition.memory import MemoryManager
+    from karvyloop.console.decision_card_wire import build_card_for_proposal, judge_card
+    from karvyloop.crystallize.decision_pref import make_decision_pref_belief
+    app, p = _decide_app()
+    mem = MemoryManager()
+    mem.write(make_decision_pref_belief("调研必须先给预算", "constraint", strength=0.8, now=1.0))
+    app.state.memory = mem
+    card = build_card_for_proposal(app, p.proposal_id)
+    assert card is not None and len(card["aligned_prefs"]) >= 1   # 前提:真召回到标准
+    out = judge_card(app, proposal_id=p.proposal_id, decision="ACCEPT",
+                     engaged=False, basis="预算在批过的额度内")
+    assert out["ok"]
+    got = _trace(app).query(p.proposal_id, kind="decision_judged")
+    assert len(got) == 1
+    pl = got[0].payload
+    assert pl["decision"] == "ACCEPT"
+    assert pl["engaged"] is True                     # basis = STATE 显式信号 → eff_engaged
+    assert pl["basis"] == "预算在批过的额度内"
+    assert pl["card_seen"] is True
+    assert pl["aligned"] >= 1 and pl["violations"] == 0
+    _assert_capped(got)
+
+
+def test_t2_no_card_built_fields_absent():
+    """没建过卡(缓存 miss)→ card_seen=False 且 aligned/violations 字段**不带**(缺省诚实)。"""
+    from karvyloop.console.decision_card_wire import judge_card
+    app, p = _decide_app()
+    judge_card(app, proposal_id=p.proposal_id, decision="ACCEPT", engaged=False)
+    pl = _trace(app).query(p.proposal_id, kind="decision_judged")[0].payload
+    assert pl["card_seen"] is False
+    assert "aligned" not in pl and "violations" not in pl and "high_value" not in pl
+    assert pl["engaged"] is False and "basis" not in pl
+
+
+def test_t2_edits_summary_recorded():
+    """改/删依据(EDIT 信号)→ T2 带 edits_n + 改动摘要(封顶)。"""
+    from karvyloop.console.decision_card_wire import judge_card
+    app, p = _decide_app()
+    judge_card(app, proposal_id=p.proposal_id, decision="REJECT", engaged=True,
+               edited_criteria=[{"text": "输出必须带引用来源"}, {"text": "先小样本试跑"}])
+    pl = _trace(app).query(p.proposal_id, kind="decision_judged")[0].payload
+    assert pl["edits_n"] == 2
+    assert "输出必须带引用来源" in pl["edited"] and "先小样本试跑" in pl["edited"]
+    _assert_capped(_trace(app).query(p.proposal_id, kind="decision_judged"))
+
+
+def test_t2_fail_soft_bad_trace_judge_unchanged():
+    """trace append 炸 → judge 返回值/回喂行为一字不变(决策流是命脉)。"""
+    from karvyloop.console.decision_card_wire import judge_card
+    app, p = _decide_app()
+
+    class _Boom:
+        def append(self, e):
+            raise RuntimeError("no")
+
+    app.state.main_loop = types.SimpleNamespace(trace=_Boom())
+    out = judge_card(app, proposal_id=p.proposal_id, decision="ACCEPT",
+                     engaged=True, basis="理由")
+    assert out["ok"] is True and "needs_recheck" in out
+
+
+def test_card_seen_cache_fifo_capped():
+    """建卡缓存 FIFO 封顶(_CARD_SEEN_CAP):不随卡数无界涨。"""
+    from karvyloop.console.decision_card_wire import _CARD_SEEN_CAP, build_card_for_proposal
+    app = _mk_app()
+    reg = PendingProposalRegistry()
+    app.state.proposal_registry = reg
+    pids = []
+    for i in range(_CARD_SEEN_CAP + 8):
+        p = _proposal(pid=f"p-cache-{i}")
+        reg.register(p)
+        pids.append(p.proposal_id)
+        build_card_for_proposal(app, p.proposal_id)
+    cache = app.state.decision_card_seen
+    assert len(cache) == _CARD_SEEN_CAP
+    assert pids[0] not in cache and pids[-1] in cache   # 最老被挤掉,最新在
 
 
 # ---- T4 decision_dispatched(dispatch_decision 咽喉)----

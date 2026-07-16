@@ -18,19 +18,39 @@ def _i18n_ts() -> str:
     return (FRONTEND / "i18n.ts").read_text(encoding="utf-8")
 
 
-# ---- 决策时间线(七站 + 双入口 + 回放)----
+# ---- 决策时间线(八站 + 双入口 + 回放 + 下钻/回流)----
 
 
 def test_app_js_has_decision_lifeline():
     js = _app_js()
     assert "async function openDecisionLifeline" in js
     assert "/api/decision/" in js and "/lifeline" in js
-    # 七站齐(缺站显诚实空位靠这份站表)
-    for st in ("born", "aligned", "judged", "decided", "dispatched", "executed", "result"):
+    # 八站齐(缺站显诚实空位靠这份站表;三刀加 ♻ learned)
+    for st in ("born", "aligned", "judged", "decided", "dispatched", "executed",
+               "result", "learned"):
         assert f'"{st}"' in js, f"缺站 {st}"
     assert "dlife.no_record" in js          # 诚实空位文案
     assert "_dlifeReplay" in js             # ▶ 逐站回放
     assert "prefers-reduced-motion" in js   # reduced-motion 全显
+
+
+def test_app_js_cut2_cut3_wiring():
+    """二刀/三刀接线:✍️ judged 三态 / 🔧 步下钻 / ♻ 批次级免责句 / 任务详情回链。"""
+    js = _app_js()
+    # ✍️ judged 站三态文案都接了(有数据走 detail;零判断/无卡记录各说各的实话)
+    for key in ("dlife.judged_edits", "dlife.judged_blind", "dlife.judged_nocard"):
+        assert key in js, f"judged 站缺 {key}"
+    # 🧭 aligned 站吃 T2 建卡事实
+    assert "dlife.aligned_hits" in js and "dlife.aligned_violations" in js
+    # 🔧 执行步下钻:点行头 toggle 展开(输入 + ok/error_reason)
+    assert "dlife-step-open" in js and "dlife.step_failed" in js
+    # ♻ 回流站:批次级归因 + 免责句(绝不编精确归因)
+    assert "dlife.learned_batch" in js and "dlife.learned_hint" in js
+    assert "learned_total" in js
+    # 任务详情回链:「⚖ 由你拍板于 {时间} · 🧬 回放决策」(openTaskDetail 内)
+    detail = js.split("async function openTaskDetail")[1].split("// ============")[0]
+    assert "task.from_decision" in detail and "task.replay_decision" in detail
+    assert "openDecisionLifeline" in detail and "proposal_id" in detail
 
 
 def test_app_js_recent_row_entry_clickable():
@@ -47,7 +67,10 @@ def test_app_js_recent_row_entry_clickable():
 def test_styles_has_dlife_block():
     css = (STATIC / "styles.css").read_text(encoding="utf-8")
     for cls in (".dlife-station", ".dlife-empty-note", ".dlife-replaying",
-                ".recent-row.recent-click", ".dcard-first-hint"):
+                ".recent-row.recent-click", ".dcard-first-hint",
+                # 二刀/三刀:步下钻展开态 / judged·aligned 注记 / ♻ 回流 / 任务回链
+                ".dlife-step.dlife-step-open .dlife-step-detail", ".dlife-judged-note",
+                ".dlife-violation-note", ".dlife-learned-hint", ".task-decision-backlink"):
         assert cls in css, f"styles.css 缺 {cls}"
 
 
@@ -59,6 +82,14 @@ _DLIFE_KEYS = (
     "dlife.st_born", "dlife.st_aligned", "dlife.st_judged", "dlife.st_decided",
     "dlife.st_dispatched", "dlife.st_executed", "dlife.st_result",
     "dlife.tokens", "dlife.auto", "dlife.result_running",
+    # 二刀:judged 三态 / aligned 事实 / 步下钻 / 任务回链
+    "dlife.judged_edits", "dlife.judged_blind", "dlife.judged_nocard",
+    "dlife.aligned_hits", "dlife.aligned_omitted", "dlife.aligned_violations",
+    "dlife.step_ok", "dlife.step_failed", "dlife.step_expand_title",
+    "task.from_decision", "task.replay_decision",
+    # 三刀:♻ 回流站(批次级)
+    "dlife.st_learned", "dlife.learned_batch", "dlife.learned_hint",
+    "dlife.learned_reinforced", "dlife.learned_weakened", "dlife.learned_revoked",
 )
 
 
@@ -68,7 +99,9 @@ def test_i18n_dlife_keys_en_zh_parity():
         assert src.count(f'"{k}"') == 2, f"{k} 应恰好 en+zh 各一份"
     # 构建产物同步(i18n.js 变更须重建;away-dist 基线也须重建)
     for built in (STATIC / "i18n.js", STATIC / "away-dist" / "i18n.js"):
-        assert "dlife.st_born" in built.read_text(encoding="utf-8"), f"{built} 未重建"
+        blob = built.read_text(encoding="utf-8")
+        assert "dlife.st_born" in blob, f"{built} 未重建"
+        assert "dlife.st_learned" in blob, f"{built} 未重建(二刀/三刀键缺)"
 
 
 # ---- Part A 界面灌输(文案落点)----
