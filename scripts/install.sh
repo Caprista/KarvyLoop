@@ -50,14 +50,32 @@ say "→ Installing KarvyLoop from ${REPO}@${REF} …"
 mkdir -p "$BINDIR"
 ln -sf "$VENV/bin/karvyloop" "$BINDIR/karvyloop"
 say "→ Linked $BINDIR/karvyloop"
-# ensure ~/.local/bin is on PATH (append to your shell rc if it isn't already — nothing else to configure)
+# ensure ~/.local/bin is on PATH (append to your shell rc if it isn't already — nothing else to configure).
+# The canonical rc for the login shell is CREATED if missing (beta report: a zsh setup that only had
+# ~/.zprofile got nothing written and the install looked failed); existing rc files are updated too,
+# and we say exactly which files were touched — never silently do nothing.
 case ":${PATH:-}:" in
   *":$BINDIR:"*) : ;;
   *)
-    for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+    case "${SHELL:-}" in
+      */zsh)  primary_rc="$HOME/.zshrc" ;;
+      */bash) primary_rc="$HOME/.bashrc" ;;
+      *)      primary_rc="$HOME/.profile" ;;
+    esac
+    touch "$primary_rc" 2>/dev/null || true
+    touched=""
+    for rc in "$primary_rc" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.profile"; do
       [ -e "$rc" ] || continue
+      case " $touched " in *" $rc "*) continue ;; esac
       grep -q '.local/bin' "$rc" 2>/dev/null || printf '\n# added by KarvyLoop installer\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
+      touched="$touched $rc"
     done
+    if [ -n "$touched" ]; then
+      say "→ PATH updated in:$touched"
+    else
+      say "→ WARNING: no shell rc could be written — add this to your shell config yourself:"
+      say '     export PATH="$HOME/.local/bin:$PATH"'
+    fi
     ;;
 esac
 
