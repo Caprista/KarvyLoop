@@ -333,19 +333,26 @@ async def crystallize_candidates(app: Any, candidates: list, *, ctx_domain: str 
 
 
 def proposal_for_confirm_decision(belief: Any, *, now: float) -> Any:
-    """高价值决策偏好 → 一条"记成默认偏好吗?"的 H2A 建议(进预判列,轻提示)。"""
+    """高价值决策偏好 → 一条"记成默认偏好吗?"的 H2A 建议(进预判列,轻提示)。
+
+    卡文案走 i18n(en/zh 同 key,出卡时按当前 locale 定稿);belief.content 是用户数据原样带。"""
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     from karvyloop.karvy.proposal_registry import KIND_CONFIRM_DECISION_PREF
     kind = belief.provenance.get("kind", "taste")
-    label = {"constraint": "约束", "taste": "品味", "standing": "站位"}.get(kind, "偏好")
+    label_key = {"constraint": "proposal.confirm_pref.kind_constraint",
+                 "taste": "proposal.confirm_pref.kind_taste",
+                 "standing": "proposal.confirm_pref.kind_standing"}.get(
+        kind, "proposal.confirm_pref.kind_default")
     return Proposal(
-        summary=f"记成你的默认偏好吗?[{label}] {belief.content}",
+        summary=i18n.t("proposal.confirm_pref.summary", label=i18n.t(label_key),
+                       content=belief.content),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=float(belief.provenance.get("strength", 0.7)),
         evidence_refs=(), habit_id=0, model_ref="", ts=now,
         kind=KIND_CONFIRM_DECISION_PREF,
         payload={"content": belief.content, "pref_kind": kind},
-        basis="我从你的拍板里注意到这条;记下来后,我提案会提前按它对齐,你少拒、少重复解释自己。",
+        basis=i18n.t("proposal.confirm_pref.basis"),
     )
 
 

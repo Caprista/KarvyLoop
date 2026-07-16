@@ -258,7 +258,9 @@ def needs_revision(satisfaction: SatisfactionStore, sig: str) -> tuple[bool, str
         return (False, "no confidence")
     recent = samples[-REVISION_WINDOW:]
     n_bad = sum(1 for s in recent if s.overall <= REVISION_BAD_SAMPLE)
-    basis = f"confidence={conf:.2f}(<{REVISION_BAD_THRESH}触发) bad={n_bad}/{len(recent)}(≥{REVISION_MIN_BAD}触发)"
+    from karvyloop import i18n
+    basis = i18n.t("proposal.revise_skill.trigger", conf=f"{conf:.2f}", thresh=REVISION_BAD_THRESH,
+                   n_bad=n_bad, total=len(recent), min_bad=REVISION_MIN_BAD)
     return (conf < REVISION_BAD_THRESH and n_bad >= REVISION_MIN_BAD, basis)
 
 
@@ -309,9 +311,10 @@ def build_revision_proposal(*, skill_name: str, sig: str, path: str,
 
     payload 全字符串值 —— 走「改了再批」白名单时用户可就地改 new_steps。
     """
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal   # 局部 import:同 proposal_registry 惯例,避免层间硬耦合
     return Proposal(
-        summary=f"技能「{skill_name}」近几次客观信号差,建议大幅修订方法(重写/删步骤过半,需你过目)",
+        summary=i18n.t("proposal.revise_skill.summary", skill=skill_name),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=0.8,
         evidence_refs=(),
@@ -329,8 +332,8 @@ def build_revision_proposal(*, skill_name: str, sig: str, path: str,
             "trigger": trigger,
             "trace_refs": ",".join(trace_refs or []),
         },
-        basis=f"触发依据:{trigger};失败样本 traces: {', '.join(trace_refs or []) or '(原文已滚动)'}。"
-              f"改动幅度过大(方法重写/删步骤过半),按问责链升 H2A,不静默换方法。",
+        basis=i18n.t("proposal.revise_skill.basis", trigger=trigger,
+                     traces=(", ".join(trace_refs or []) or i18n.t("proposal.revise_skill.traces_rolled"))),
         context_ref={"kind": "skill", "id": skill_name},
     )
 

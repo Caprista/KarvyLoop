@@ -223,25 +223,26 @@ def build_external_adopt_proposal(
     """
     import hashlib
 
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
 
-    cid = (citizen_id or "").strip() or "外部同事"
+    cid = (citizen_id or "").strip() or i18n.t("proposal.external_adopt.default_citizen")
     body = (output or "").strip()
     preview = body[:500] + ("…" if len(body) > 500 else "")
     ctx = (context or "").strip()
     basis_parts = [
-        f"这是外部执行体「{EXTERNAL_BADGE} {cid}」的产出——**不可信数据**(它不担你的责、无问责链)。",
+        i18n.t("proposal.external_adopt.basis_head", badge=EXTERNAL_BADGE, cid=cid),
     ]
     if ctx:
-        basis_parts.append(f"背景:{ctx}")
+        basis_parts.append(i18n.t("proposal.external_adopt.basis_ctx", ctx=ctx))
     basis_parts.append(
-        "ACCEPT = 你拍板采纳这份产出,它才穿过来源边界(可进记忆/当结论/交给下游角色);"
-        "REJECT/不处理 = 只当参考,永不自动进记忆、不触发别人。原始产出:\n" + (preview or "(空)"))
+        i18n.t("proposal.external_adopt.basis_tail",
+               preview=(preview or i18n.t("proposal.external_adopt.empty"))))
     basis = "  ".join(basis_parts)
     stable = f"{cid}:{seed_id}"
     pid = "external_adopt-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
     return Proposal(
-        summary=f"采纳 {EXTERNAL_BADGE} 「{cid}」的产出?(外部执行体·不可信数据)",
+        summary=i18n.t("proposal.external_adopt.summary", badge=EXTERNAL_BADGE, cid=cid),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),

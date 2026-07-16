@@ -305,16 +305,19 @@ def build_weekly_digest_proposal(digest: dict, *, now: float):
     同一周重建同 id(registry.register 幂等覆盖),不同周不同 id。
     纯信息卡:ACCEPT=已读(无 handler 时 dispatch 只记录,不兑现副作用)。
     """
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     w = digest.get("window", {})
     t = digest.get("tasks", {})
     tok = digest.get("tokens", {})
     if digest.get("quiet"):
-        gist = "这周很安静(无任务/无消耗)"
+        gist = i18n.t("proposal.weekly_digest.gist_quiet")
     else:
-        gist = (f"跑了 {t.get('atom_runs', 0)} 次任务(成 {t.get('succeeded', 0)}/败 {t.get('failed', 0)}),"
-                f"烧了 {tok.get('total', 0):,} tokens")
-    summary = f"周报 {w.get('start_label', '')}→{w.get('end_label', '')}:{gist}"
+        gist = i18n.t("proposal.weekly_digest.gist",
+                      runs=t.get("atom_runs", 0), ok=t.get("succeeded", 0),
+                      fail=t.get("failed", 0), tokens=f"{tok.get('total', 0):,}")
+    summary = i18n.t("proposal.weekly_digest.summary",
+                     start=w.get("start_label", ""), end=w.get("end_label", ""), gist=gist)
     return Proposal(
         summary=summary,
         options=("ACCEPT", "DEFER", "REJECT"),
@@ -325,8 +328,7 @@ def build_weekly_digest_proposal(digest: dict, *, now: float):
         ts=now,
         kind=KIND_WEEKLY_DIGEST,
         payload={"digest": digest, "markdown": render_digest_markdown(digest)},
-        basis=("数字全部从 Trace / tokens.db / 决策流水确定性汇总,零 LLM、可回链"
-               "(每条带 trace_ref/id)。ACCEPT 仅表示已读,不触发任何执行。"),
+        basis=i18n.t("proposal.weekly_digest.basis"),
     )
 
 

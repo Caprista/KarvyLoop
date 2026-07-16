@@ -343,6 +343,271 @@ _EN = {
         "REJECT / no decision = nothing happens; any of your devices can still pick it up later."
     ),
     "mesh.takeover.receipt": "{detail} (takeover recorded on your shared task board)",
+    # ---- 提案工厂 summary/basis(服务端出卡时按当前 locale 定稿;LLM 动态文本是数据不走这里)----
+    # confirm_decision_pref(decision_wire)
+    "proposal.confirm_pref.kind_constraint": "constraint",
+    "proposal.confirm_pref.kind_taste": "taste",
+    "proposal.confirm_pref.kind_standing": "standing",
+    "proposal.confirm_pref.kind_default": "preference",
+    "proposal.confirm_pref.summary": "Make this your default preference? [{label}] {content}",
+    "proposal.confirm_pref.basis": (
+        "I noticed this in how you decide; once saved, my proposals will align with it up front — "
+        "fewer rejections, less repeating yourself."
+    ),
+    # run_task resume(proactive)
+    "proposal.run_task.summary": "Last time “{intent}” didn't finish (error/interrupted) — want me to retry?",
+    "proposal.run_task.basis": (
+        "The task “{intent}” run by “{who}” ended with status = error (failed/interrupted) — it never finished. "
+        "Cause / last output: {err}. Retry = run it again with the same intent."
+    ),
+    "proposal.run_task.default_error": "failed/interrupted",
+    "proposal.run_task.default_who": "Karvy",
+    # silence(挣来的静音:授权/续期/吊销)
+    "proposal.silence.domain_suffix": " (domain “{d}”)",
+    "proposal.silence_grant.summary": (
+        "On “{kind}”{dom} cards I've called your decision right {hits} of the last {n} times "
+        "(95% confidence lower bound {lb}%) — want me to quietly handle this kind for you from now on?"
+    ),
+    "proposal.silence_grant.basis": (
+        "This isn't a request for more power — it's a score card: {hits} right out of {n} on this kind of card, "
+        "≥{min_lb}% even at the 95% confidence lower bound (not a lucky streak; the accept and reject sides each "
+        "clear the bar). Of those, I predicted you'd REJECT {reject_pred} time(s) and was right {reject_correct} "
+        "time(s) (proof I can block the bad ones for you, not just nod along). After ACCEPT, for 30 days: I **only** "
+        "handle cards where I predict you'd ACCEPT with ≥{min_conf}% confidence; predicted-REJECT or low-confidence "
+        "cards still come to you; I'll also randomly let some through as ordinary cards to check my answers (you "
+        "won't be told which are spot checks); irreversible things — deletes, outbound sends, payments, going live — "
+        "always come to you. Every silent action leaves a full trail (run record + ledger), and after 30 days renewal "
+        "must be your own hand; one wrong call and the grant is **revoked automatically, immediately** — and you can "
+        "revoke it anytime. REJECT = keep things as they are, every card asks you."
+    ),
+    "proposal.silence_renew.audit_some": "spot-checked {audit_n} time(s), {audit_hits} right",
+    "proposal.silence_renew.audit_none": "no spot-check samples accrued this period",
+    "proposal.silence_renew.mark_overturned": "⚠overturned ",
+    "proposal.silence_renew.mark_failed": "✗failed ",
+    "proposal.silence_renew.review_item": "{mark}“{gist}”",
+    "proposal.silence_renew.review_disp": (
+        ". The {n} highest-risk item(s) this period (overturned/failed/most expensive first): {gists}"
+    ),
+    "proposal.silence_renew.summary": (
+        "The mute grant for “{kind}”{dom} hits its 30-day limit — last month it silenced {silenced_n} card(s) "
+        "for you, {audit}; renew for 30 days?"
+    ),
+    "proposal.silence_renew.basis_head": (
+        "A mute grant only lasts 30 days, and renewal must be your own hand — reconciliation nobody reads doesn't "
+        "count; if you don't click, it stops (this kind of card is already back to asking you one by one). "
+        "This period's account: {silenced_n} silenced, {audit}"
+    ),
+    "proposal.silence_renew.basis_oldest": ", oldest trail record {pid}",
+    "proposal.silence_renew.basis_tail": (
+        "; every item is auditable in the ledger / run records — read them one by one, then decide. "
+        "ACCEPT = renew 30 days (same rules: only handle cards I predict you'd ACCEPT with ≥{min_conf}% "
+        "confidence, keep the random spot checks, one wrong call revokes immediately); "
+        "REJECT = no renewal, every card asks you."
+    ),
+    "proposal.silence_revoked.summary": (
+        "Mute grant for “{kind}”{dom} auto-revoked — this kind of card is back to asking you one by one"
+    ),
+    "proposal.silence_revoked.reason_default": "I called one of your decisions wrong",
+    "proposal.silence_revoked.basis": (
+        "{reason}. Earned silence is only valid while the hit rate holds — one wrong call revokes it immediately "
+        "(conservative boundary); to earn it back, fresh reconciliation has to accrue after revocation "
+        "(95% confidence lower bound ≥{min_lb}%, at least {min_n} samples) before I ask you again. "
+        "ACCEPT = acknowledged."
+    ),
+    # cocreate_finalize(cocreation)
+    "proposal.cocreate.summary_template": "Co-creation final: open template domain “{name}” in one step",
+    "proposal.cocreate.basis_template": (
+        "In the co-creation session you picked the ready-made template “{name}”. ACCEPT = go through the existing "
+        "instantiate path and actually create that domain and its soul-configured roles (idempotent: an active "
+        "domain with the same name is refused and reported honestly)."
+    ),
+    "proposal.cocreate.summary_custom": "Co-creation final: create business domain “{name}” + {n} role(s)",
+    "proposal.cocreate.basis_custom": (
+        "This is the final draft of the co-creation session (nothing was written during S1/S2 — zero side effects). "
+        "Only ACCEPT creates things for real: roles go through RoleRegistry.create (the diligence contract "
+        "COMMITMENT is seeded from the same single source as system defaults / imports), and the domain lands with "
+        "value.md + real deontic guardrails. If any field on the card is off, edit it right there and approve."
+    ),
+    # weekly_digest
+    "proposal.weekly_digest.gist_quiet": "a quiet week (no tasks, no spend)",
+    "proposal.weekly_digest.gist": "ran {runs} task(s) ({ok} succeeded / {fail} failed), burned {tokens} tokens",
+    "proposal.weekly_digest.summary": "Weekly digest {start}→{end}: {gist}",
+    "proposal.weekly_digest.basis": (
+        "Every number is deterministically aggregated from Trace / tokens.db / the decision ledger — zero LLM, "
+        "fully traceable (each item carries a trace_ref/id). ACCEPT only means “read”; nothing gets executed."
+    ),
+    # archive_stale(knowledge_tick)
+    "proposal.archive_stale.summary": "🗄️ {n} knowledge item(s) unused for a year — archive them?",
+    "proposal.archive_stale.basis": (
+        "These {n} knowledge items haven't been recalled (or updated) in over a year — likely stale: {shown}. "
+        "ACCEPT = mark them invalid and archive (**invalidate, not delete**: they stay in the library, auditable "
+        "and reversible, just out of recall); REJECT = keep them in recall."
+    ),
+    # promote_experience(promotion_tick)
+    "proposal.promote_exp.line": "Before (in-domain): {before}\nPromoted (general): {content}",
+    "proposal.promote_exp.line_why": "\n  ↳ why it generalizes: {why}",
+    "proposal.promote_exp.summary": (
+        "📜 “{role}” has {n} in-domain lesson(s) ready to become general playbook — promote?"
+    ),
+    "proposal.promote_exp.basis": (
+        "These lessons of “{role}” in domain “{domain}” passed the generalization check and the de-identification "
+        "rewrite. ACCEPT = promote them into the role's general playbook (usable across domains; any future "
+        "outward-facing surface only ever sees this layer); REJECT = skip this round, keep using them in-domain "
+        "(they won't be re-proposed unless they change). After promotion, deleting the domain no longer retracts "
+        "them automatically — retract per item in the memory panel.\n\n{lines}"
+    ),
+    # route_to_role
+    "proposal.route.summary": "Hand “{requirement}” to “{role}” of business domain “{domain_name}”",
+    "proposal.route.basis": (
+        "This belongs to business domain “{domain_name}”; rather than overstep and do it myself, I'd delegate it "
+        "to “{role}” working under that domain's value.md governance. Nothing is handed over until you ACCEPT."
+    ),
+    # roundtable
+    "proposal.roundtable.who_default": "the roles in the group",
+    "proposal.roundtable.summary": "Open a roundtable in “{group}” with {who} to discuss “{topic}”",
+    "proposal.roundtable.basis": (
+        "You want several roles to discuss this together — that's a **roundtable** (people around a table), not "
+        "handing the job to one person (delegation). I'll gather {who} in group “{group}”, align the goal with you "
+        "first, then start the discussion. The table only opens once you ACCEPT."
+    ),
+    # ops_fix
+    "proposal.ops_fix.fallback_summary": "Ops diagnosis",
+    "proposal.ops_fix.cause": "Likely cause: {cause}",
+    "proposal.ops_fix.fix": "Suggested fix: {fix}",
+    "proposal.ops_fix.auto": (
+        "ACCEPT runs a **deterministic, reversible repair** (backup first, then reset; recoverable from "
+        ".corrupt.bak) — no model gets to change your system."
+    ),
+    "proposal.ops_fix.manual": (
+        "This is an LLM diagnosis, **unverified**; ACCEPT only means you acknowledge it — the system will **not** "
+        "change anything by itself. Please follow the steps above by hand."
+    ),
+    # merge_atoms
+    "proposal.merge_atoms.head": "Merge {n} near-duplicate atoms into canonical atom “{canon}”: {members}.",
+    "proposal.merge_atoms.reason": "Reasoning: {reason}",
+    "proposal.merge_atoms.why": (
+        "Merging = less duplication, more reuse (moat: batch-imported atoms often see low reuse because "
+        "near-duplicates never get merged)."
+    ),
+    "proposal.merge_atoms.accept": (
+        "ACCEPT will **rewire-before-delete**: first repoint every role referencing these atoms to the canonical "
+        "one, then delete the redundant ones — **never leaving dangling references**; doing nothing is also safe "
+        "(they just stay unmerged)."
+    ),
+    "proposal.merge_atoms.summary": "Merge {n} near-duplicate atoms → “{canon}”",
+    # fs_access
+    "proposal.fs_access.op_read": "read",
+    "proposal.fs_access.op_write": "write",
+    "proposal.fs_access.op_read_write": "read/write",
+    "proposal.fs_access.who_role": "Role “{role}”",
+    "proposal.fs_access.who_default": "A running role",
+    "proposal.fs_access.summary": "{who} requests {op} access to a path outside your workspace: {path}",
+    "proposal.fs_access.basis": (
+        "It needs to touch this path to do its job, but the path is outside your workspace — closed by default "
+        "under least privilege. ACCEPT = grant this path permanently (revocable anytime in the capability "
+        "overview); key/credential paths never show up here (hard floor)."
+    ),
+    # merge_knowledge
+    "proposal.merge_knowledge.head": "These {n} knowledge items say essentially the same thing: {shown}.",
+    "proposal.merge_knowledge.reason": "Reasoning: {reason}",
+    "proposal.merge_knowledge.accept": (
+        "Suggest merging into one item “{label}”. ACCEPT = write the merged item first, then delete the "
+        "merged-away originals (no data loss on mid-failure); doing nothing is also safe (the library just keeps "
+        "some near-duplicates)."
+    ),
+    "proposal.merge_knowledge.summary": "🧹 Merge {n} near-duplicate knowledge items → “{label}”",
+    # confirm_result
+    "proposal.confirm_result.default_role": "the role",
+    "proposal.confirm_result.default_req": "this task",
+    "proposal.confirm_result.basis": (
+        "“{role}” minted {n} new capabilities while completing “{req}”: {lines}. If you approve this result → "
+        "{role} weighs which ones deserve a place in its own toolbox (they only become official once other roles "
+        "reuse them); no action / not approved → they stay on trial and get cleaned up automatically if nobody "
+        "uses them."
+    ),
+    "proposal.confirm_result.summary": (
+        "“{role}” finished “{req}” and minted {n} new capabilities — approve the result to keep the useful ones?"
+    ),
+    # infeasible_report
+    "proposal.infeasible.default_goal": "(unnamed goal)",
+    "proposal.infeasible.default_role": "the role",
+    "proposal.infeasible.attempt_unfinished": "unfinished",
+    "proposal.infeasible.attempt_line": "attempt {i}: {term}",
+    "proposal.infeasible.attempt_note": " ({note})",
+    "proposal.infeasible.no_trail": "(no trail)",
+    "proposal.infeasible.basis": (
+        "“{role}” replanned on its own {n} time(s) trying to achieve “{goal}” and still didn't make it. "
+        "Trail: {trail}. Automatic replanning can't break through — this is an evidence-backed conclusion, not a "
+        "“what do I do?”: your call (accept it and let go / defer / adjust the goal or add resources and retry)."
+    ),
+    "proposal.infeasible.summary": "“{role}” didn't achieve “{goal}” (self-replanned {n} time(s))",
+    # inbox(邮件管道)
+    "proposal.inbox.no_body": "(no body)",
+    "proposal.inbox_decision.default_reason": "triage judged this needs your call",
+    "proposal.inbox_decision.default_action": "(see the mail)",
+    "proposal.inbox_decision.summary": "📧 Needs your call: {sender} “{subject}”",
+    "proposal.inbox_decision.basis": (
+        "This mail was triaged as **needs your decision** ({reason}). Suggested action: {action}. "
+        "Body snippet: {snippet}. This pipe only notifies and suggests — nothing is ever sent without your "
+        "confirmation; ACCEPT only records your decision, it does not auto-reply or trigger any external action."
+    ),
+    "proposal.inbox_reply.default_reason": "triage judged a reply can be drafted first",
+    "proposal.inbox_reply.summary": "✉️ Draft reply awaiting your approval: {sender} “{subject}”",
+    "proposal.inbox_reply.basis": (
+        "This mail was triaged as **needs a reply** ({reason}); a draft is prepared (edit it in place before "
+        "approving). ACCEPT = save the draft to the ledger and show it to you, and **you copy and send it "
+        "yourself** — the system never sends mail on its own (nothing goes out without your confirmation, "
+        "hard rule)."
+    ),
+    # revise_skill(crystallize/revision)
+    "proposal.revise_skill.summary": (
+        "Skill “{skill}” has shown poor objective signals lately — proposing a major revision of its method "
+        "(rewrite / over half the steps removed; needs your review)"
+    ),
+    "proposal.revise_skill.basis": (
+        "Trigger: {trigger}; failing-sample traces: {traces}. The change is too large (method rewritten / over "
+        "half the steps removed), so per the accountability chain it goes to you — no silent method swap."
+    ),
+    "proposal.revise_skill.traces_rolled": "(originals have rolled over)",
+    "proposal.revise_skill.trigger": "confidence={conf}(<{thresh} trips) bad={n_bad}/{total}(≥{min_bad} trips)",
+    # external_adopt(external_collab)
+    "proposal.external_adopt.default_citizen": "external collaborator",
+    "proposal.external_adopt.summary": "Adopt the output of {badge} “{cid}”? (external executor · untrusted data)",
+    "proposal.external_adopt.basis_head": (
+        "This is output from external executor “{badge} {cid}” — **untrusted data** (it doesn't carry your "
+        "accountability; no accountability chain)."
+    ),
+    "proposal.external_adopt.basis_ctx": "Context: {ctx}",
+    "proposal.external_adopt.basis_tail": (
+        "ACCEPT = you approve adopting this output, and only then does it cross the provenance boundary (into "
+        "memory / as a conclusion / to downstream roles); REJECT / no action = reference only, never entering "
+        "memory automatically, never triggering anyone. Raw output:\n{preview}"
+    ),
+    "proposal.external_adopt.empty": "(empty)",
+    # spend_budget 提醒卡(llm/spend_budget + console/entry 兜底)
+    "proposal.spend.period_month": "this month",
+    "proposal.spend.period_day": "today",
+    "proposal.spend.summary_blocked": (
+        "Budget used up: {period} spend {used} / cap {limit} ({pct}%) — background automatic tasks are paused; "
+        "foreground is unaffected. Raise the cap or change on_limit to continue."
+    ),
+    "proposal.spend.summary_warn": "Spend reminder: {period} spend {used} / cap {limit} ({pct}%, {tier}% tier reached)",
+    "proposal.spend.fallback_summary": "Spend reminder",
+    # resolve_conflict(domain/skill_conflict → proposal_from_conflict)
+    "conflict.rule_forbid": "forbidden rule",
+    "conflict.rule_oblige": "obligation",
+    "conflict.rule_value": "value principle",
+    "conflict.rule_generic": "rule",
+    "conflict.summary": "Skill “{skill}” may violate {label} “{rule}” of domain “{domain}” ({role})",
+    "conflict.judge_reason": (
+        "the skill's usage text hits keywords of a {label} — possible conflict, please confirm"
+    ),
+    # crystallize_skill ACCEPT 回执(proposal_handlers)
+    "receipt.crystallize.default_habit": "this habit",
+    "receipt.crystallize.accepted": (
+        "Adopted “{summary}” — keep working this way and the system will crystallize it into a "
+        "skill automatically"
+    ),
 }
 
 # ---- 中文 ----
@@ -658,6 +923,229 @@ _ZH = {
         "记下这次接管(其它设备不再重复提醒)。REJECT / 不拍 = 什么都不发生;之后你的任一设备仍可接。"
     ),
     "mesh.takeover.receipt": "{detail}(已在你的共享任务板记下这次接管)",
+    # ---- 提案工厂 summary/basis(zh 保持既有原文,行为零回归)----
+    # confirm_decision_pref(decision_wire)
+    "proposal.confirm_pref.kind_constraint": "约束",
+    "proposal.confirm_pref.kind_taste": "品味",
+    "proposal.confirm_pref.kind_standing": "站位",
+    "proposal.confirm_pref.kind_default": "偏好",
+    "proposal.confirm_pref.summary": "记成你的默认偏好吗?[{label}] {content}",
+    "proposal.confirm_pref.basis": "我从你的拍板里注意到这条;记下来后,我提案会提前按它对齐,你少拒、少重复解释自己。",
+    # run_task resume(proactive)
+    "proposal.run_task.summary": "上次「{intent}」没跑完(出错/中断)—— 要我重试吗?",
+    "proposal.run_task.basis": (
+        "「{who}」执行的任务「{intent}」状态 = error(出错/中断),没跑完。"
+        "原因/最后输出:{err}。重试 = 用同样的意图再跑一遍。"
+    ),
+    "proposal.run_task.default_error": "出错/中断",
+    "proposal.run_task.default_who": "小卡",
+    # silence(挣来的静音:授权/续期/吊销)
+    "proposal.silence.domain_suffix": "(域「{d}」)",
+    "proposal.silence_grant.summary": (
+        "「{kind}」{dom}这类板,我最近 {n} 次押中 {hits} 次"
+        "(95% 置信下界 {lb}%)—— 要不要以后这类替你静音处理?"
+    ),
+    "proposal.silence_grant.basis": (
+        "这不是要更多权限 —— 是同类卡上我 {n} 次押中 {hits} 次的成绩单,按 95% 置信"
+        "下界算也 ≥{min_lb}%(不是碰巧连中,批/拒两向各自过线),其中我押"
+        "你会拒 {reject_pred} 次、押对 {reject_correct} 次"
+        "(证明我能替你挡坏的,不只会点头)。"
+        "ACCEPT 后 30 天内:这类卡我**只**替你办「我押你会 ACCEPT 且把握 ≥"
+        "{min_conf}%」的;押 REJECT 或没把握的照旧问你;"
+        "我还会不定期抽一部分照常出卡对答案(哪张是抽查不告诉你);删除/外发/付款/"
+        "上线这类不可逆的永远问你。每次静音处理完整留痕(运行记录+台账)、满 30 天"
+        "要你亲手续期;我**押错一次立即自动收回**授权,你也随时可撤。"
+        "REJECT=保持现状,每张都问你。"
+    ),
+    "proposal.silence_renew.audit_some": "抽查对账 {audit_n} 次中 {audit_hits} 次",
+    "proposal.silence_renew.audit_none": "本期没攒到抽查对账样本",
+    "proposal.silence_renew.mark_overturned": "⚠翻案 ",
+    "proposal.silence_renew.mark_failed": "✗失败 ",
+    "proposal.silence_renew.review_item": "{mark}「{gist}」",
+    "proposal.silence_renew.review_disp": "。本期风险最高的 {n} 条(翻案/失败/最贵优先):{gists}",
+    "proposal.silence_renew.summary": (
+        "「{kind}」{dom}的静音授权满 30 天到期 —— 上月替你静音 {silenced_n} 次,"
+        "{audit};要续 30 天吗?"
+    ),
+    "proposal.silence_renew.basis_head": (
+        "静音授权只有 30 天,到期必须你亲手续 —— 没人看的对账不算数,不点就停"
+        "(这类卡已恢复逐张问你)。本期账:静音 {silenced_n} 次、{audit}"
+    ),
+    "proposal.silence_renew.basis_oldest": "、最老一条留痕 {pid}",
+    "proposal.silence_renew.basis_tail": (
+        ";每条都在台账/运行记录里可查,逐条看完再决定。ACCEPT=续 30 天(规则不变:"
+        "只办押你会 ACCEPT 且把握 ≥{min_conf}% 的,"
+        "继续不定期抽查,押错一次立即收回);REJECT=不续,每张都问你。"
+    ),
+    "proposal.silence_revoked.summary": "已自动收回「{kind}」{dom}的静音授权 —— 这类卡恢复逐张问你",
+    "proposal.silence_revoked.reason_default": "我押错了一次你的拍板",
+    "proposal.silence_revoked.basis": (
+        "{reason}。挣来的静音只在命中率兑现时有效 —— "
+        "押错一次立即收回(保守边界);要重新拿授权,得吊销之后重新攒新鲜对账"
+        "(95% 置信下界 ≥{min_lb}%,至少 {min_n} 次)我才会再问你。ACCEPT=知悉。"
+    ),
+    # cocreate_finalize(cocreation)
+    "proposal.cocreate.summary_template": "共创定稿:一键开出模板域「{name}」",
+    "proposal.cocreate.basis_template": (
+        "共创会话里你选定了现成模板「{name}」。ACCEPT = 走既有 instantiate 路径"
+        "真开出该域和配好灵魂的角色(幂等:同名活跃域已存在会被拒并如实说)。"
+    ),
+    "proposal.cocreate.summary_custom": "共创定稿:建业务域「{name}」+ {n} 个角色",
+    "proposal.cocreate.basis_custom": (
+        "这是共创会话的最终草案(S1/S2 期间没写过任何东西 —— 零副作用)。"
+        "ACCEPT 才真建:角色走 RoleRegistry.create(尽责契约 COMMITMENT 统一 seed,"
+        "与系统默认/导入同一份),域落 value.md + deontic 真护栏。"
+        "卡上任何字段不对,可直接改了再批。"
+    ),
+    # weekly_digest
+    "proposal.weekly_digest.gist_quiet": "这周很安静(无任务/无消耗)",
+    "proposal.weekly_digest.gist": "跑了 {runs} 次任务(成 {ok}/败 {fail}),烧了 {tokens} tokens",
+    "proposal.weekly_digest.summary": "周报 {start}→{end}:{gist}",
+    "proposal.weekly_digest.basis": (
+        "数字全部从 Trace / tokens.db / 决策流水确定性汇总,零 LLM、可回链"
+        "(每条带 trace_ref/id)。ACCEPT 仅表示已读,不触发任何执行。"
+    ),
+    # archive_stale(knowledge_tick)
+    "proposal.archive_stale.summary": "🗄️ {n} 条知识一年没用了,归档?",
+    "proposal.archive_stale.basis": (
+        "这 {n} 条知识超过一年没被召回过(也没更新),疑似过时:{shown}。"
+        "ACCEPT = 打失效标记归档(**失效不删**:仍留库可审计、可翻案,只是不再进召回);"
+        "REJECT = 留着继续参与召回。"
+    ),
+    # promote_experience(promotion_tick)
+    "proposal.promote_exp.line": "原(域内):{before}\n升(通用):{content}",
+    "proposal.promote_exp.line_why": "\n  ↳ 为什么泛化:{why}",
+    "proposal.promote_exp.summary": "📜 「{role}」有 {n} 条域内经验可升为通用兵法,升吗?",
+    "proposal.promote_exp.basis": (
+        "「{role}」在域「{domain}」的这些经验通过了泛化判定与脱敏改写。"
+        "ACCEPT = 升为该角色的通用兵法(跨域可用;将来对外可见面也只有这一层);"
+        "REJECT = 这轮不升,域内照用(这批经验没有新变化就不再重提)。升层后删域不再自动撤——"
+        "要撤在记忆面板单条失效。\n\n{lines}"
+    ),
+    # route_to_role
+    "proposal.route.summary": "把「{requirement}」转给业务域「{domain_name}」的「{role}」",
+    "proposal.route.basis": (
+        "这件事属于业务域「{domain_name}」的职责;我不越界自己做,"
+        "而是委派给「{role}」在该域 value.md 治理下执行。你 ACCEPT 才真正转过去。"
+    ),
+    # roundtable
+    "proposal.roundtable.who_default": "群里的角色",
+    "proposal.roundtable.summary": "在「{group}」开圆桌,叫上 {who} 讨论「{topic}」",
+    "proposal.roundtable.basis": (
+        "你想让多个角色一起讨论,这是**圆桌**(几个人坐一起),不是把活交给一个人(委派)。"
+        "我会在群「{group}」拉上 {who},先和你对齐目标再开始讨论。你 ACCEPT 才真正开桌。"
+    ),
+    # ops_fix
+    "proposal.ops_fix.fallback_summary": "运维诊断",
+    "proposal.ops_fix.cause": "可能原因:{cause}",
+    "proposal.ops_fix.fix": "建议修法:{fix}",
+    "proposal.ops_fix.auto": "ACCEPT 将执行**确定性可逆修复**(先备份再重置,可从 .corrupt.bak 找回),不调模型改系统。",
+    "proposal.ops_fix.manual": "这是 LLM 诊断、**未经验证**;ACCEPT 只表示你认可,系统**不会自动改**——请按上面步骤手动处理。",
+    # merge_atoms
+    "proposal.merge_atoms.head": "把 {n} 个近义原子合并成规范原子「{canon}」:{members}。",
+    "proposal.merge_atoms.reason": "判断依据:{reason}",
+    "proposal.merge_atoms.why": "合并 = 减少重复、提升复用(护城河:批量导入的原子常因近义不并而 reuse 偏低)。",
+    "proposal.merge_atoms.accept": (
+        "ACCEPT 会 **rewire-before-delete**:先把所有引用这些原子的角色改写到规范原子,"
+        "再删冗余,**绝不留悬空引用**;不动也安全(只是不并)。"
+    ),
+    "proposal.merge_atoms.summary": "合并 {n} 个近义原子 → 「{canon}」",
+    # fs_access
+    "proposal.fs_access.op_read": "读取",
+    "proposal.fs_access.op_write": "写入",
+    "proposal.fs_access.op_read_write": "读写",
+    "proposal.fs_access.who_role": "角色「{role}」",
+    "proposal.fs_access.who_default": "执行中的角色",
+    "proposal.fs_access.summary": "{who}请求{op}工作区外路径:{path}",
+    "proposal.fs_access.basis": (
+        "它在干活时需要碰这个路径,但该路径在你的工作区之外 —— 按最小权限原则默认关闭。"
+        "ACCEPT=永久放行该路径(能力总览随时可撤);密钥/凭据类路径永远不会出现在这里(硬地板)。"
+    ),
+    # merge_knowledge
+    "proposal.merge_knowledge.head": "这 {n} 条知识点讲的基本是同一件事:{shown}。",
+    "proposal.merge_knowledge.reason": "判断依据:{reason}",
+    "proposal.merge_knowledge.accept": (
+        "建议合并成一条「{label}」。ACCEPT = 先写入合并条、再删被并旧条(中途失败不丢数据);"
+        "不动也安全(只是库里留着近重复)。"
+    ),
+    "proposal.merge_knowledge.summary": "🧹 合并 {n} 条近重复知识 → 「{label}」",
+    # confirm_result
+    "proposal.confirm_result.default_role": "角色",
+    "proposal.confirm_result.default_req": "这个任务",
+    "proposal.confirm_result.basis": (
+        "「{role}」为完成「{req}」临时造了 {n} 个新能力:{lines}。"
+        "你认可这次结果 → 由 {role} 综合裁哪些值得留进自己的工具箱(被别的角色复用才正式转正);"
+        "不处理 / 不认可 → 它们留作试用,长期没人用会被自动清掉。"
+    ),
+    "proposal.confirm_result.summary": "「{role}」做完「{req}」,新造了 {n} 个能力 —— 认可结果就留有用的?",
+    # infeasible_report
+    "proposal.infeasible.default_goal": "(未命名目标)",
+    "proposal.infeasible.default_role": "角色",
+    "proposal.infeasible.attempt_unfinished": "未完成",
+    "proposal.infeasible.attempt_line": "第 {i} 次:{term}",
+    "proposal.infeasible.attempt_note": "（{note}）",
+    "proposal.infeasible.no_trail": "（无轨迹）",
+    "proposal.infeasible.basis": (
+        "「{role}」为完成「{goal}」自助重规划了 {n} 次仍没成。轨迹:{trail}。"
+        "系统靠自动重规划突破不了 —— 这是带证据的结论,不是问你「怎么办」:"
+        "请你定夺(接纳并放下 / 暂缓 / 我来调整目标或补资源再试)。"
+    ),
+    "proposal.infeasible.summary": "「{role}」追求「{goal}」未达成(自助重规划 {n} 次)",
+    # inbox(邮件管道)
+    "proposal.inbox.no_body": "(无正文)",
+    "proposal.inbox_decision.default_reason": "分诊判定需要你拍板",
+    "proposal.inbox_decision.default_action": "(见邮件)",
+    "proposal.inbox_decision.summary": "📧 需要拍板:{sender} 「{subject}」",
+    "proposal.inbox_decision.basis": (
+        "这封邮件被分诊为**需要你拍板**({reason})。建议动作:{action}。"
+        "正文摘要:{snippet}。"
+        "本管道只通知与建议 —— 未经你确认绝不对外发信;ACCEPT 也只是记录你的决定,"
+        "不会自动回信或执行任何外部动作。"
+    ),
+    "proposal.inbox_reply.default_reason": "分诊判定可以先代拟回复",
+    "proposal.inbox_reply.summary": "✉️ 代拟回复待批:{sender} 「{subject}」",
+    "proposal.inbox_reply.basis": (
+        "这封邮件被分诊为**需要回复**({reason}),已代拟草稿(可就地修改后再批)。"
+        "ACCEPT = 把草稿存进台账并显示给你,由你**自行复制发送** —— "
+        "系统不代发任何邮件(未经确认绝不对外发信是硬规矩)。"
+    ),
+    # revise_skill(crystallize/revision)
+    "proposal.revise_skill.summary": "技能「{skill}」近几次客观信号差,建议大幅修订方法(重写/删步骤过半,需你过目)",
+    "proposal.revise_skill.basis": (
+        "触发依据:{trigger};失败样本 traces: {traces}。"
+        "改动幅度过大(方法重写/删步骤过半),按问责链升 H2A,不静默换方法。"
+    ),
+    "proposal.revise_skill.traces_rolled": "(原文已滚动)",
+    "proposal.revise_skill.trigger": "confidence={conf}(<{thresh}触发) bad={n_bad}/{total}(≥{min_bad}触发)",
+    # external_adopt(external_collab)
+    "proposal.external_adopt.default_citizen": "外部同事",
+    "proposal.external_adopt.summary": "采纳 {badge} 「{cid}」的产出?(外部执行体·不可信数据)",
+    "proposal.external_adopt.basis_head": "这是外部执行体「{badge} {cid}」的产出——**不可信数据**(它不担你的责、无问责链)。",
+    "proposal.external_adopt.basis_ctx": "背景:{ctx}",
+    "proposal.external_adopt.basis_tail": (
+        "ACCEPT = 你拍板采纳这份产出,它才穿过来源边界(可进记忆/当结论/交给下游角色);"
+        "REJECT/不处理 = 只当参考,永不自动进记忆、不触发别人。原始产出:\n{preview}"
+    ),
+    "proposal.external_adopt.empty": "(空)",
+    # spend_budget 提醒卡(llm/spend_budget + console/entry 兜底)
+    "proposal.spend.period_month": "本月",
+    "proposal.spend.period_day": "今天",
+    "proposal.spend.summary_blocked": (
+        "预算已用满:{period}已花 {used} / 上限 {limit}（{pct}%）"
+        "—— 后台自动任务已暂停,前台照常。要继续请提高上限或改 on_limit。"
+    ),
+    "proposal.spend.summary_warn": "花费提醒:{period}已花 {used} / 上限 {limit}（{pct}%,达 {tier}%）",
+    "proposal.spend.fallback_summary": "花费提醒",
+    # resolve_conflict(domain/skill_conflict → proposal_from_conflict)
+    "conflict.rule_forbid": "禁止项",
+    "conflict.rule_oblige": "强制项",
+    "conflict.rule_value": "价值观",
+    "conflict.rule_generic": "规则",
+    "conflict.summary": "技能「{skill}」可能违反域「{domain}」的{label}「{rule}」({role})",
+    "conflict.judge_reason": "技能用途文本命中{label}关键词,疑似冲突,请确认",
+    # crystallize_skill ACCEPT 回执(proposal_handlers)
+    "receipt.crystallize.default_habit": "这个习惯",
+    "receipt.crystallize.accepted": "已采纳「{summary}」— 你继续这样用,系统会自动把它结晶成技能",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

@@ -75,20 +75,19 @@ def _domain_display(app: Any, domain_id: str) -> str:
 
 def _build_card(role: str, domain_id: str, items: list[dict], befores: dict, now: float):
     """攒批卡:改写前后对照(源域名只在本机管理面出现;对外通道永远看不到卡)。"""
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     stable = "\n".join(sorted(it["origin_key"] for it in items))
     pid = "promote_exp-" + hashlib.sha1((role + "\0" + stable).encode("utf-8")).hexdigest()[:8]
     lines = []
     for it in items:
         before = (befores.get(it["origin_key"], "") or "")[:120]
-        lines.append(f"原(域内):{before}\n升(通用):{it['content']}"
-                     + (f"\n  ↳ 为什么泛化:{it['why']}" if it.get("why") else ""))
-    basis = (f"「{role}」在域「{domain_id}」的这些经验通过了泛化判定与脱敏改写。"
-             f"ACCEPT = 升为该角色的通用兵法(跨域可用;将来对外可见面也只有这一层);"
-             f"REJECT = 这轮不升,域内照用(这批经验没有新变化就不再重提)。升层后删域不再自动撤——"
-             f"要撤在记忆面板单条失效。\n\n" + "\n\n".join(lines))
+        lines.append(i18n.t("proposal.promote_exp.line", before=before, content=it["content"])
+                     + (i18n.t("proposal.promote_exp.line_why", why=it["why"]) if it.get("why") else ""))
+    basis = i18n.t("proposal.promote_exp.basis", role=role, domain=domain_id,
+                   lines="\n\n".join(lines))
     p = Proposal(
-        summary=f"📜 「{role}」有 {len(items)} 条域内经验可升为通用兵法,升吗?",
+        summary=i18n.t("proposal.promote_exp.summary", role=role, n=len(items)),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=0.5, evidence_refs=(), habit_id=0, model_ref="", ts=now,
         kind=KIND_PROMOTE_EXPERIENCE,

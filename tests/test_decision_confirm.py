@@ -118,12 +118,29 @@ def test_confirm_handler_missing_pref_fails_honestly():
 
 
 def test_proposal_for_confirm_shape():
+    from karvyloop import i18n
     b = make_decision_pref_belief("输出默认用表格", "taste", strength=0.7, now=1.0)
     p = proposal_for_confirm_decision(b, now=5.0)
     assert p.kind == KIND_CONFIRM_DECISION_PREF
     assert p.payload["content"] == "输出默认用表格"
-    assert "记成你的默认偏好" in p.summary
+    # 卡文案走 i18n(按当前 locale 定稿):模板取表,用户数据原样在
+    assert p.summary == i18n.t("proposal.confirm_pref.summary",
+                               label=i18n.t("proposal.confirm_pref.kind_taste"),
+                               content="输出默认用表格")
+    assert "输出默认用表格" in p.summary
     assert p.proposal_id   # __post_init__ 派生稳定 id
+
+
+def test_proposal_for_confirm_localized_zh():
+    from karvyloop import i18n
+    b = make_decision_pref_belief("输出默认用表格", "taste", strength=0.7, now=1.0)
+    try:
+        i18n.set_locale("zh")
+        assert "记成你的默认偏好" in proposal_for_confirm_decision(b, now=5.0).summary
+        i18n.set_locale("en")
+        assert "default preference" in proposal_for_confirm_decision(b, now=5.0).summary
+    finally:
+        i18n.set_locale(None)
 
 
 # ---- 结晶流自动弹确认 ----

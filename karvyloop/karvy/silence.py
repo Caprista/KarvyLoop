@@ -598,15 +598,16 @@ def proposal_for_silence_grant(*, kind: str, domain: str = "", n: int, hits: int
                                accept_n: int = 0, accept_hits: int = 0, reject_n: int = 0):
     """授权卡:达门的桶 → 问人"要不要以后这类替你静音处理?"。稳定 id 按桶派生(同桶收敛一张)。
     分向数据(accept_*/reject_*)进 payload —— 成绩单两向都摆,不只报整体(修正③可核)。"""
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     d = _norm_domain(domain)
     b = bucket_key(kind, d)
     digest = hashlib.sha1(b.encode("utf-8")).hexdigest()[:8]
-    dom_disp = f"(域「{d}」)" if d else ""
+    dom_disp = i18n.t("proposal.silence.domain_suffix", d=d) if d else ""
     lb = wilson_lb or wilson_lower_bound(hits, n)
     return Proposal(
-        summary=(f"「{kind}」{dom_disp}这类板,我最近 {n} 次押中 {hits} 次"
-                 f"(95% 置信下界 {int(lb * 100)}%)—— 要不要以后这类替你静音处理?"),
+        summary=i18n.t("proposal.silence_grant.summary", kind=kind, dom=dom_disp,
+                       n=n, hits=hits, lb=int(lb * 100)),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=0.6, evidence_refs=(), habit_id=0, model_ref="", ts=ts,
         kind=KIND_SILENCE_GRANT,
@@ -615,17 +616,10 @@ def proposal_for_silence_grant(*, kind: str, domain: str = "", n: int, hits: int
                  "accept_n": int(accept_n), "accept_hits": int(accept_hits),
                  "reject_n": int(reject_n)},
         proposal_id=f"{KIND_SILENCE_GRANT}-0-{digest}",
-        basis=(f"这不是要更多权限 —— 是同类卡上我 {n} 次押中 {hits} 次的成绩单,按 95% 置信"
-               f"下界算也 ≥{int(SILENCE_MIN_WILSON_LB * 100)}%(不是碰巧连中,批/拒两向"
-               f"各自过线),其中我押"
-               f"你会拒 {reject_n or reject_correct} 次、押对 {reject_correct} 次"
-               f"(证明我能替你挡坏的,不只会点头)。"
-               f"ACCEPT 后 30 天内:这类卡我**只**替你办「我押你会 ACCEPT 且把握 ≥"
-               f"{int(SILENCE_MIN_CONFIDENCE * 100)}%」的;押 REJECT 或没把握的照旧问你;"
-               f"我还会不定期抽一部分照常出卡对答案(哪张是抽查不告诉你);删除/外发/付款/"
-               f"上线这类不可逆的永远问你。每次静音处理完整留痕(运行记录+台账)、满 30 天"
-               f"要你亲手续期;我**押错一次立即自动收回**授权,你也随时可撤。"
-               f"REJECT=保持现状,每张都问你。"),
+        basis=i18n.t("proposal.silence_grant.basis", n=n, hits=hits,
+                     min_lb=int(SILENCE_MIN_WILSON_LB * 100),
+                     reject_pred=(reject_n or reject_correct), reject_correct=reject_correct,
+                     min_conf=int(SILENCE_MIN_CONFIDENCE * 100)),
     )
 
 
@@ -636,24 +630,27 @@ def proposal_for_silence_renewal(*, kind: str, domain: str = "", granted_at: flo
     """续期卡(docs/52 §2 修正⑤):授权满 30 天到期 → 带上月对账数据 + **风险加权复核抽样**
     (本期留痕里翻案/失败/最贵优先的 ≤5 条,payload.review_items,逐条看完再续)问人续不续。
     id 按 桶+granted_at 派生:同一期授权只收敛一张,下一期是新卡(不撞已拍过的)。"""
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     d = _norm_domain(domain)
     b = bucket_key(kind, d)
     digest = hashlib.sha1(f"renew|{b}|{int(granted_at)}".encode("utf-8")).hexdigest()[:8]
-    dom_disp = f"(域「{d}」)" if d else ""
-    audit_disp = (f"抽查对账 {audit_n} 次中 {audit_hits} 次" if audit_n
-                  else "本期没攒到抽查对账样本")
+    dom_disp = i18n.t("proposal.silence.domain_suffix", d=d) if d else ""
+    audit_disp = (i18n.t("proposal.silence_renew.audit_some", audit_n=audit_n, audit_hits=audit_hits)
+                  if audit_n else i18n.t("proposal.silence_renew.audit_none"))
     review = list(review_items or [])
     review_disp = ""
     if review:
         gists = ";".join(
-            f"{'⚠翻案 ' if it.get('overturned') else ('✗失败 ' if not it.get('ok', True) else '')}"
-            f"「{(it.get('summary') or it.get('proposal_id') or '')[:40]}」"
+            i18n.t("proposal.silence_renew.review_item",
+                   mark=(i18n.t("proposal.silence_renew.mark_overturned") if it.get("overturned")
+                         else (i18n.t("proposal.silence_renew.mark_failed") if not it.get("ok", True) else "")),
+                   gist=(it.get("summary") or it.get("proposal_id") or "")[:40])
             for it in review[:5])
-        review_disp = f"。本期风险最高的 {len(review)} 条(翻案/失败/最贵优先):{gists}"
+        review_disp = i18n.t("proposal.silence_renew.review_disp", n=len(review), gists=gists)
     return Proposal(
-        summary=(f"「{kind}」{dom_disp}的静音授权满 30 天到期 —— 上月替你静音 {silenced_n} 次,"
-                 f"{audit_disp};要续 30 天吗?"),
+        summary=i18n.t("proposal.silence_renew.summary", kind=kind, dom=dom_disp,
+                       silenced_n=silenced_n, audit=audit_disp),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=0.6, evidence_refs=(), habit_id=0, model_ref="", ts=ts,
         kind=KIND_SILENCE_GRANT,
@@ -664,34 +661,32 @@ def proposal_for_silence_renewal(*, kind: str, domain: str = "", granted_at: flo
                  "prev_granted_at": float(granted_at),
                  "review_items": review},
         proposal_id=f"{KIND_SILENCE_GRANT}-1-{digest}",
-        basis=(f"静音授权只有 30 天,到期必须你亲手续 —— 没人看的对账不算数,不点就停"
-               f"(这类卡已恢复逐张问你)。本期账:静音 {silenced_n} 次、{audit_disp}"
-               + (f"、最老一条留痕 {oldest_pid}" if oldest_pid else "")
+        basis=(i18n.t("proposal.silence_renew.basis_head", silenced_n=silenced_n, audit=audit_disp)
+               + (i18n.t("proposal.silence_renew.basis_oldest", pid=oldest_pid) if oldest_pid else "")
                + review_disp
-               + ";每条都在台账/运行记录里可查,逐条看完再决定。ACCEPT=续 30 天(规则不变:"
-                 f"只办押你会 ACCEPT 且把握 ≥{int(SILENCE_MIN_CONFIDENCE * 100)}% 的,"
-                 f"继续不定期抽查,押错一次立即收回);REJECT=不续,每张都问你。"),
+               + i18n.t("proposal.silence_renew.basis_tail",
+                        min_conf=int(SILENCE_MIN_CONFIDENCE * 100))),
     )
 
 
 def proposal_for_silence_revoked(*, kind: str, domain: str = "", ts: float, reason: str = ""):
     """吊销告知卡:押错/翻案 → 授权已自动收回。带时间戳派生 id(多次吊销不撞已拍过的卡)。"""
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     d = _norm_domain(domain)
     b = bucket_key(kind, d)
     digest = hashlib.sha1(f"{b}|{int(ts)}".encode("utf-8")).hexdigest()[:8]
-    dom_disp = f"(域「{d}」)" if d else ""
+    dom_disp = i18n.t("proposal.silence.domain_suffix", d=d) if d else ""
     return Proposal(
-        summary=f"已自动收回「{kind}」{dom_disp}的静音授权 —— 这类卡恢复逐张问你",
+        summary=i18n.t("proposal.silence_revoked.summary", kind=kind, dom=dom_disp),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=0.7, evidence_refs=(), habit_id=0, model_ref="", ts=ts,
         kind=KIND_SILENCE_REVOKED,
         payload={"kind": kind, "domain": d, "bucket": b, "reason": (reason or "")[:200]},
         proposal_id=f"{KIND_SILENCE_REVOKED}-0-{digest}",
-        basis=(f"{reason or '我押错了一次你的拍板'}。挣来的静音只在命中率兑现时有效 —— "
-               f"押错一次立即收回(保守边界);要重新拿授权,得吊销之后重新攒新鲜对账"
-               f"(95% 置信下界 ≥{int(SILENCE_MIN_WILSON_LB * 100)}%,至少 "
-               f"{SILENCE_MIN_N} 次)我才会再问你。ACCEPT=知悉。"),
+        basis=i18n.t("proposal.silence_revoked.basis",
+                     reason=(reason or i18n.t("proposal.silence_revoked.reason_default")),
+                     min_lb=int(SILENCE_MIN_WILSON_LB * 100), min_n=SILENCE_MIN_N),
     )
 
 

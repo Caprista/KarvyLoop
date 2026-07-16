@@ -25,14 +25,21 @@ def test_kind_registered():
 
 
 def test_card_basis_is_built_from_real_trail():
-    """§15.7:回头必带尝试轨迹 —— basis 里要见到真实 attempt 轨迹,不是空话。"""
-    p = proposal_for_infeasible_report(goal="生成季度报表", role="分析师", attempts=_TRAIL, ts=1.0)
+    """§15.7:回头必带尝试轨迹 —— basis 里要见到真实 attempt 轨迹,不是空话。
+
+    卡文案走 i18n(按当前 locale 定稿)→ 锁 zh 断言中文原文;轨迹数据 locale 无关。"""
+    from karvyloop import i18n
+    try:
+        i18n.set_locale("zh")
+        p = proposal_for_infeasible_report(goal="生成季度报表", role="分析师", attempts=_TRAIL, ts=1.0)
+        # 轨迹进 basis(带证据)
+        assert "第 1 次" in p.basis and "max_turns" in p.basis
+        assert "第 2 次" in p.basis and "circuit_open" in p.basis
+        # 不是裸问题:明说"带证据的结论,不是问你怎么办"
+        assert "不是问你" in p.basis or "带证据" in p.basis
+    finally:
+        i18n.set_locale(None)
     assert p.kind == KIND_INFEASIBLE_REPORT
-    # 轨迹进 basis(带证据)
-    assert "第 1 次" in p.basis and "max_turns" in p.basis
-    assert "第 2 次" in p.basis and "circuit_open" in p.basis
-    # 不是裸问题:明说"带证据的结论,不是问你怎么办"
-    assert "不是问你" in p.basis or "带证据" in p.basis
     # payload 留全轨迹给溯源
     assert p.payload["attempts"] == _TRAIL
     assert p.payload["terminal_reasons"] == ["circuit_open", "max_turns"]
@@ -74,7 +81,8 @@ def test_handler_records_but_executes_nothing():
 
 def test_empty_trail_still_safe():
     """边角:空轨迹不崩(虽然调用方应保证非空)—— basis 退化但不假装有证据。"""
+    from karvyloop import i18n
     p = proposal_for_infeasible_report(goal="g", role="r", attempts=[], ts=1.0)
     assert p.kind == KIND_INFEASIBLE_REPORT
-    assert "无轨迹" in p.basis
+    assert i18n.t("proposal.infeasible.no_trail") in p.basis   # 按当前 locale 取表(locale 无关)
     assert p.payload["attempts"] == []

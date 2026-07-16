@@ -64,7 +64,11 @@ def test_proposal_for_roundtable_builder():
     assert p.kind == KIND_ROUNDTABLE
     assert p.payload["group_domain_id"] == "l0"
     assert p.payload["topic"] == "分析本届世界杯筹办"
-    assert "圆桌" in p.summary and "世界杯" in p.summary
+    # 卡文案走 i18n(按当前 locale 定稿):模板取表断言(locale 无关),主题数据原样在
+    from karvyloop import i18n
+    assert p.summary == i18n.t("proposal.roundtable.summary", group="Karvy World",
+                               who="分析师(数据组A)、分析师(数据组B)", topic="分析本届世界杯筹办")
+    assert "世界杯" in p.summary
 
 
 # ---- RT2: ≥2 角色 → 圆桌(跨域 → l0) ----

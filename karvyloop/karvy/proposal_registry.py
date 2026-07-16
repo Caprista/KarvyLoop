@@ -356,9 +356,11 @@ def proposal_for_route(
     payload:目标 Address(domain_id/role/agent_id)+ 域名 + 需求(原 intent)。
     ACCEPT 兑现 = route_to_role handler 让该 role 在其域治理下执行 requirement。
     """
+    from karvyloop import i18n
     from .atoms import Proposal  # 局部 import 避免模块级循环
     return Proposal(
-        summary=f"把「{requirement}」转给业务域「{domain_name}」的「{role}」",
+        summary=i18n.t("proposal.route.summary", requirement=requirement,
+                       domain_name=domain_name, role=role),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),
@@ -374,8 +376,7 @@ def proposal_for_route(
             "requirement": requirement,
         },
         # 决策依据(为什么):让决策卡的"怎么解的"区不空 —— 说清这是委派、归谁治理、ACCEPT 才落地。
-        basis=(f"这件事属于业务域「{domain_name}」的职责;我不越界自己做,"
-               f"而是委派给「{role}」在该域 value.md 治理下执行。你 ACCEPT 才真正转过去。"),
+        basis=i18n.t("proposal.route.basis", domain_name=domain_name, role=role),
     )
 
 
@@ -395,10 +396,11 @@ def proposal_for_roundtable(
     ACCEPT 兑现 = roundtable handler 切到该群 + 拉这些成员开一场圆桌(目标对齐式开场)。
     单点委派(route_to_role)是"交给一个人干";圆桌是"几个人坐一起讨论"—— 两种不同的编排。
     """
+    from karvyloop import i18n
     from .atoms import Proposal  # 局部 import 避免模块级循环
-    who = "、".join(participant_names) if participant_names else "群里的角色"
+    who = "、".join(participant_names) if participant_names else i18n.t("proposal.roundtable.who_default")
     return Proposal(
-        summary=f"在「{group_name}」开圆桌,叫上 {who} 讨论「{topic}」",
+        summary=i18n.t("proposal.roundtable.summary", group=group_name, who=who, topic=topic),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),
@@ -413,8 +415,7 @@ def proposal_for_roundtable(
             "participant_names": list(participant_names),
             "topic": topic,
         },
-        basis=(f"你想让多个角色一起讨论,这是**圆桌**(几个人坐一起),不是把活交给一个人(委派)。"
-               f"我会在群「{group_name}」拉上 {who},先和你对齐目标再开始讨论。你 ACCEPT 才真正开桌。"),
+        basis=i18n.t("proposal.roundtable.basis", group=group_name, who=who),
     )
 
 
@@ -440,21 +441,23 @@ def proposal_for_ops_fix(
     幂等:proposal_id 按 `key`(默认 = 排序后的 finding_codes)稳定派生 → 同一坏态多次诊断
     收敛成同一张卡,不刷屏(registry.register 同 id 覆盖)。
     """
+    from karvyloop import i18n
     from .atoms import Proposal  # 局部 import 避免模块级循环
 
-    summary = (diagnosis.get("summary") or "").strip() or "运维诊断"
+    # summary 是 LLM 诊断产出(数据,原样带);兜底与 basis 骨架是模板 → 走 i18n。
+    summary = (diagnosis.get("summary") or "").strip() or i18n.t("proposal.ops_fix.fallback_summary")
     cause = (diagnosis.get("cause") or "").strip()
     fix = (diagnosis.get("fix") or "").strip()
     risk = diagnosis.get("risk", "needs_approval")
     parts: List[str] = []
     if cause:
-        parts.append(f"可能原因:{cause}")
+        parts.append(i18n.t("proposal.ops_fix.cause", cause=cause))
     if fix:
-        parts.append(f"建议修法:{fix}")
+        parts.append(i18n.t("proposal.ops_fix.fix", fix=fix))
     if auto_fixable:
-        parts.append("ACCEPT 将执行**确定性可逆修复**(先备份再重置,可从 .corrupt.bak 找回),不调模型改系统。")
+        parts.append(i18n.t("proposal.ops_fix.auto"))
     else:
-        parts.append("这是 LLM 诊断、**未经验证**;ACCEPT 只表示你认可,系统**不会自动改**——请按上面步骤手动处理。")
+        parts.append(i18n.t("proposal.ops_fix.manual"))
     basis = "  ".join(parts)
 
     stable = (key or ",".join(sorted(finding_codes)) or summary)
@@ -496,6 +499,7 @@ def proposal_for_merge_atoms(
     - basis 诚实交代"合并谁、为什么、ACCEPT 会发生什么"。
     - 幂等:proposal_id 按 canonical + 排序成员稳定派生 → 同一簇重复建议收敛成一张卡,不刷屏。
     """
+    from karvyloop import i18n
     from .atoms import Proposal  # 局部 import 避免模块级循环
 
     members = [str(m).strip() for m in (member_ids or []) if str(m).strip()]
@@ -503,18 +507,18 @@ def proposal_for_merge_atoms(
     canon = (canonical_id or "").strip() or (members[0] if members else "")
     tools = [str(t).strip() for t in (merged_tools or []) if str(t).strip()]
 
-    parts: List[str] = [f"把 {len(members)} 个近义原子合并成规范原子「{canon}」:{', '.join(members)}。"]
+    parts: List[str] = [i18n.t("proposal.merge_atoms.head", n=len(members), canon=canon,
+                               members=", ".join(members))]
     if reason:
-        parts.append(f"判断依据:{reason}")
-    parts.append("合并 = 减少重复、提升复用(护城河:批量导入的原子常因近义不并而 reuse 偏低)。")
-    parts.append("ACCEPT 会 **rewire-before-delete**:先把所有引用这些原子的角色改写到规范原子,"
-                 "再删冗余,**绝不留悬空引用**;不动也安全(只是不并)。")
+        parts.append(i18n.t("proposal.merge_atoms.reason", reason=reason))
+    parts.append(i18n.t("proposal.merge_atoms.why"))
+    parts.append(i18n.t("proposal.merge_atoms.accept"))
     basis = "  ".join(parts)
 
     stable = f"{canon}:{','.join(sorted(members))}"
     pid = "merge_atoms-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
     return Proposal(
-        summary=f"合并 {len(members)} 个近义原子 → 「{canon}」",
+        summary=i18n.t("proposal.merge_atoms.summary", n=len(members), canon=canon),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),
@@ -541,13 +545,16 @@ def proposal_for_fs_access(*, path: str, ops: list, role: str = "", ts: float,
     role 干活碰壁(读/写工作区外文件被拒)→ 这张卡问你:"放行吗?"。ACCEPT → 授权台账
     落一条(能力总览可见、可撤);REJECT → 不放行(同路径短期内靠稳定 id 不重复骚扰)。
     敏感路径(密钥/凭据)在 note_denied 就被滤掉,**永远走不到这张卡**。"""
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     clean_ops = sorted({o for o in (ops or []) if o in ("read", "write")}) or ["read"]
-    op_disp = "读写" if clean_ops == ["read", "write"] else ("写入" if clean_ops == ["write"] else "读取")
-    who = f"角色「{role}」" if role else "执行中的角色"
+    op_disp = (i18n.t("proposal.fs_access.op_read_write") if clean_ops == ["read", "write"]
+               else (i18n.t("proposal.fs_access.op_write") if clean_ops == ["write"]
+                     else i18n.t("proposal.fs_access.op_read")))
+    who = i18n.t("proposal.fs_access.who_role", role=role) if role else i18n.t("proposal.fs_access.who_default")
     digest = hashlib.sha1(f"{path}|{','.join(clean_ops)}".encode("utf-8")).hexdigest()[:8]
     return Proposal(
-        summary=f"{who}请求{op_disp}工作区外路径:{path}",
+        summary=i18n.t("proposal.fs_access.summary", who=who, op=op_disp, path=path),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),
@@ -557,8 +564,7 @@ def proposal_for_fs_access(*, path: str, ops: list, role: str = "", ts: float,
         kind=KIND_FS_ACCESS,
         payload={"path": path, "ops": clean_ops, "role": role or ""},
         proposal_id=f"{KIND_FS_ACCESS}-0-{digest}",
-        basis=(f"它在干活时需要碰这个路径,但该路径在你的工作区之外 —— 按最小权限原则默认关闭。"
-               f"ACCEPT=永久放行该路径(能力总览随时可撤);密钥/凭据类路径永远不会出现在这里(硬地板)。"),
+        basis=i18n.t("proposal.fs_access.basis"),
     )
 
 
@@ -575,6 +581,7 @@ def proposal_for_merge_knowledge(
     """知识库整理建议卡(daily 慢侧自动升;手动按钮路径不经此)。ACCEPT → apply_belief_merge。
 
     proposal_id 由成员内容稳定哈希 → 同簇幂等(registry 同 id 覆盖;tick 层再加冷却防唠叨)。"""
+    from karvyloop import i18n
     from .atoms import Proposal
 
     members = [str(c).strip() for c in (member_contents or []) if str(c).strip()]
@@ -584,17 +591,16 @@ def proposal_for_merge_knowledge(
     titles = [str(x).strip() for x in (member_titles or []) if str(x).strip()]
     label = merged_title.strip() or merged[:24]
     shown = "、".join((titles or [m[:18] for m in members])[:4])
-    parts: List[str] = [f"这 {len(members)} 条知识点讲的基本是同一件事:{shown}。"]
+    parts: List[str] = [i18n.t("proposal.merge_knowledge.head", n=len(members), shown=shown)]
     if reason:
-        parts.append(f"判断依据:{reason}")
-    parts.append(f"建议合并成一条「{label}」。ACCEPT = 先写入合并条、再删被并旧条(中途失败不丢数据);"
-                 "不动也安全(只是库里留着近重复)。")
+        parts.append(i18n.t("proposal.merge_knowledge.reason", reason=reason))
+    parts.append(i18n.t("proposal.merge_knowledge.accept", label=label))
     basis = "  ".join(parts)
 
     stable = "\n".join(sorted(members))
     pid = "merge_knowledge-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
     return Proposal(
-        summary=f"🧹 合并 {len(members)} 条近重复知识 → 「{label}」",
+        summary=i18n.t("proposal.merge_knowledge.summary", n=len(members), label=label),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),
@@ -629,21 +635,19 @@ def proposal_for_confirm_result(
     (LLM 站 role 视角)综合裁每个自造 atom 留不留。不处理/拒 → atom 留作 provisional,没人复用会被
     ④ 巡检自动清(孤儿撤),所以**不显式处理 REJECT** 也安全。`minted` = [{"id","purpose"}]。
     """
+    from karvyloop import i18n
     from .atoms import Proposal
 
-    r = (role or "").strip() or "角色"
-    req = (requirement or "").strip() or "这个任务"
+    r = (role or "").strip() or i18n.t("proposal.confirm_result.default_role")
+    req = (requirement or "").strip() or i18n.t("proposal.confirm_result.default_req")
     ids = [str(m.get("id", "")).strip() for m in minted if str(m.get("id", "")).strip()]
     lines = [f"{m.get('id', '')}:{(m.get('purpose') or '').strip()[:80]}" for m in minted if m.get("id")]
-    basis = (
-        f"「{r}」为完成「{req}」临时造了 {len(ids)} 个新能力:" + ";".join(lines) + "。"
-        f"你认可这次结果 → 由 {r} 综合裁哪些值得留进自己的工具箱(被别的角色复用才正式转正);"
-        f"不处理 / 不认可 → 它们留作试用,长期没人用会被自动清掉。"
-    )
+    basis = i18n.t("proposal.confirm_result.basis", role=r, req=req, n=len(ids),
+                   lines=";".join(lines))
     stable = f"{r}:{req}:{','.join(sorted(ids))}"
     pid = "confirm_result-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
     return Proposal(
-        summary=f"「{r}」做完「{req}」,新造了 {len(ids)} 个能力 —— 认可结果就留有用的?",
+        summary=i18n.t("proposal.confirm_result.summary", role=r, req=req, n=len(ids)),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),
@@ -676,28 +680,26 @@ def proposal_for_infeasible_report(
     - 逼判断:ACCEPT(接纳此结论 / 放下)、DEFER(暂缓)、REJECT(我来改目标或补资源再试)。
     - 幂等:proposal_id 按 role+goal+终止原因集合稳定派生 → 同一卡住的目标收敛成一张卡,不刷屏。
     """
+    from karvyloop import i18n
     from .atoms import Proposal  # 局部 import 避免模块级循环
 
-    g = (goal or "").strip() or "(未命名目标)"
-    r = (role or "").strip() or "角色"
+    g = (goal or "").strip() or i18n.t("proposal.infeasible.default_goal")
+    r = (role or "").strip() or i18n.t("proposal.infeasible.default_role")
     terminals = [str(a.get("terminal") or "").strip() for a in attempts if a.get("terminal")]
     n = len(attempts)
 
-    # basis 由真实轨迹拼(§15.7:回头必带尝试轨迹)
+    # basis 由真实轨迹拼(§15.7:回头必带尝试轨迹);terminal/note 是运行数据原样带
     trail_lines: List[str] = []
     for a in attempts:
         i = a.get("attempt", "?")
-        term = (a.get("terminal") or "").strip() or "未完成"
+        term = (a.get("terminal") or "").strip() or i18n.t("proposal.infeasible.attempt_unfinished")
         note = (a.get("note") or "").strip()
-        trail_lines.append(f"第 {i} 次:{term}" + (f"（{note}）" if note else ""))
-    trail = ";".join(trail_lines) if trail_lines else "（无轨迹）"
-    basis = (
-        f"「{r}」为完成「{g}」自助重规划了 {n} 次仍没成。轨迹:{trail}。"
-        f"系统靠自动重规划突破不了 —— 这是带证据的结论,不是问你「怎么办」:"
-        f"请你定夺(接纳并放下 / 暂缓 / 我来调整目标或补资源再试)。"
-    )
+        trail_lines.append(i18n.t("proposal.infeasible.attempt_line", i=i, term=term)
+                           + (i18n.t("proposal.infeasible.attempt_note", note=note) if note else ""))
+    trail = ";".join(trail_lines) if trail_lines else i18n.t("proposal.infeasible.no_trail")
+    basis = i18n.t("proposal.infeasible.basis", role=r, goal=g, n=n, trail=trail)
 
-    summary = f"「{r}」追求「{g}」未达成(自助重规划 {n} 次)"
+    summary = i18n.t("proposal.infeasible.summary", role=r, goal=g, n=n)
     stable = f"{r}:{g}:{','.join(sorted(set(terminals)))}"
     pid = "infeasible-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
     return Proposal(

@@ -105,6 +105,7 @@ def _spend_card_to_proposal(card: dict):
     由 ratio 折算 / ts)。**纯提醒**:kind=spend_budget_alert 无兑现 handler(登记在 ALL_KINDS),
     用户 ACCEPT/REJECT 都只关卡。basis 用 summary(决策卡"为什么"区不空)。"""
     import time as _t
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     payload = dict(card.get("payload") or {})
     ratio = payload.get("ratio")
@@ -113,7 +114,7 @@ def _spend_card_to_proposal(card: dict):
     except (TypeError, ValueError):
         strength = 0.9
     return Proposal(
-        summary=str(card.get("summary") or "花费提醒"),
+        summary=str(card.get("summary") or i18n.t("proposal.spend.fallback_summary")),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=max(0.0, min(1.0, strength)),
         evidence_refs=(),

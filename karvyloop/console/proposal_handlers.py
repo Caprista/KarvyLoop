@@ -31,9 +31,10 @@ logger = logging.getLogger(__name__)
 
 
 def _crystallize_skill_handler(proposal) -> Tuple[bool, str]:
-    """采纳"把常做的事结晶成技能"的建议(docs/30 crystallize_skill)。"""
-    summary = getattr(proposal, "summary", "") or "这个习惯"
-    return True, f"已采纳「{summary}」— 你继续这样用,系统会自动把它结晶成技能"
+    """采纳"把常做的事结晶成技能"的建议(docs/30 crystallize_skill)。回执走 i18n。"""
+    from karvyloop import i18n
+    summary = getattr(proposal, "summary", "") or i18n.t("receipt.crystallize.default_habit")
+    return True, i18n.t("receipt.crystallize.accepted", summary=summary)
 
 
 def _governance_for(app: Any, payload: dict) -> str:

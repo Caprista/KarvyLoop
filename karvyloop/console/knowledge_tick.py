@@ -96,18 +96,17 @@ def _stale_candidates(beliefs: list, mem: Any, now: float) -> list:
 
 def _stale_card(cands: list, now: float):
     """把一批过时候选升成一张 H2A 卡(Proposal;稳定 id=成员内容哈希,幂等+冷却可用)。"""
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     members = [getattr(b, "content", "") or "" for b in cands]
     titles = [((getattr(b, "provenance", {}) or {}).get("title", "") or m[:18])
               for b, m in zip(cands, members)]
     shown = "、".join(titles[:4]) + ("…" if len(titles) > 4 else "")
-    basis = (f"这 {len(members)} 条知识超过一年没被召回过(也没更新),疑似过时:{shown}。"
-             "ACCEPT = 打失效标记归档(**失效不删**:仍留库可审计、可翻案,只是不再进召回);"
-             "REJECT = 留着继续参与召回。")
+    basis = i18n.t("proposal.archive_stale.basis", n=len(members), shown=shown)
     stable = "\n".join(sorted(members))
     pid = "archive_stale-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
     return Proposal(
-        summary=f"🗄️ {len(members)} 条知识一年没用了,归档?",
+        summary=i18n.t("proposal.archive_stale.summary", n=len(members)),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=0.4,
         evidence_refs=(), habit_id=0, model_ref="", ts=now,

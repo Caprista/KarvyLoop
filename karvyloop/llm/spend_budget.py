@@ -239,19 +239,22 @@ class SpendBudget:
 
         **不**构造 Proposal 对象、**不**碰 routes —— 只给数据(kind=spend_budget_alert)。
         proposal_id 含 day + dimension + tier → 同级一天稳定同 id(前端去重/幂等登记)。"""
+        from karvyloop import i18n
         used, limit, unit = verdict["used"], verdict["limit"], verdict["unit"]
         dim, ratio = verdict["dimension"], verdict["ratio"]
         tier = self._warn_tier(ratio)
         blocked = verdict["action"] == ACTION_BLOCK
-        period = "本月" if dim.startswith("monthly") else "今天"
+        period = (i18n.t("proposal.spend.period_month") if dim.startswith("monthly")
+                  else i18n.t("proposal.spend.period_day"))
         day_label = time.strftime("%Y-%m-%d", time.localtime(self._clock()))
         used_s, limit_s = self._fmt_amount(used, unit), self._fmt_amount(limit, unit)
         pct = int(ratio * 100)
         if blocked:
-            summary = (f"预算已用满:{period}已花 {used_s} / 上限 {limit_s}（{pct}%）"
-                       f"—— 后台自动任务已暂停,前台照常。要继续请提高上限或改 on_limit。")
+            summary = i18n.t("proposal.spend.summary_blocked", period=period,
+                             used=used_s, limit=limit_s, pct=pct)
         else:
-            summary = f"花费提醒:{period}已花 {used_s} / 上限 {limit_s}（{pct}%,达 {tier}%）"
+            summary = i18n.t("proposal.spend.summary_warn", period=period,
+                             used=used_s, limit=limit_s, pct=pct, tier=tier)
         return {
             "kind": "spend_budget_alert",
             "summary": summary,

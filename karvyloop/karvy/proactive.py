@@ -24,19 +24,20 @@ def resume_proposal_for(t: dict, *, now: Optional[float] = None) -> Optional[Pro
     两个调用方共用一份卡形态(单一真理源):① propose_from_tasks(开机兜底,扫第一条 error);
     ② task_monitor(持续,监控发现某条 running 陈旧/中断)。source 标区分来源。
     """
+    from karvyloop import i18n
     intent = (t.get("intent") or "").strip()
     if not intent:
         return None
     short = intent if len(intent) <= 40 else intent[:40] + "…"
     # ch4 决策依据:说清"何时、谁、发生了什么、为什么提" + 跳转去那条任务看全貌。
-    err = (t.get("result") or t.get("error") or "出错/中断").strip().replace("\n", " ")
+    # 卡文案走 i18n(出卡时按当前 locale 定稿);intent/err 是运行数据原样带。
+    err = (t.get("result") or t.get("error") or i18n.t("proposal.run_task.default_error")).strip().replace("\n", " ")
     if len(err) > 80:
         err = err[:80] + "…"
-    who = t.get("who") or "小卡"
-    basis = (f"「{who}」执行的任务「{short}」状态 = error(出错/中断),没跑完。"
-             f"原因/最后输出:{err}。重试 = 用同样的意图再跑一遍。")
+    who = t.get("who") or i18n.t("proposal.run_task.default_who")
+    basis = i18n.t("proposal.run_task.basis", who=who, intent=short, err=err)
     return Proposal(
-        summary=f"上次「{short}」没跑完(出错/中断)—— 要我重试吗?",
+        summary=i18n.t("proposal.run_task.summary", intent=short),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=0.8,
         evidence_refs=(),

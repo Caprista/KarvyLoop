@@ -374,12 +374,13 @@ def proposal_for_inbox_decision(mail: InboxMail, triage: dict, *, ts: float,
 
     幂等:proposal_id 按 thread_key 稳定派生 → 同一 thread 收敛成一张卡,不刷屏。
     """
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal  # 局部 import 避免模块级循环
-    reason = triage.get("reason") or "分诊判定需要你拍板"
-    action = triage.get("suggested_action") or "(见邮件)"
+    reason = triage.get("reason") or i18n.t("proposal.inbox_decision.default_reason")
+    action = triage.get("suggested_action") or i18n.t("proposal.inbox_decision.default_action")
     digest = hashlib.sha1(mail.thread_key.encode("utf-8")).hexdigest()[:8]
     return Proposal(
-        summary=f"📧 需要拍板:{mail.sender} 「{mail.subject}」",
+        summary=i18n.t("proposal.inbox_decision.summary", sender=mail.sender, subject=mail.subject),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),
@@ -389,10 +390,8 @@ def proposal_for_inbox_decision(mail: InboxMail, triage: dict, *, ts: float,
         kind=KIND_INBOX_DECISION,
         payload=_card_payload(mail, triage),
         proposal_id=f"{KIND_INBOX_DECISION}-0-{digest}",
-        basis=(f"这封邮件被分诊为**需要你拍板**({reason})。建议动作:{action}。"
-               f"正文摘要:{_snippet(mail) or '(无正文)'}。"
-               f"本管道只通知与建议 —— 未经你确认绝不对外发信;ACCEPT 也只是记录你的决定,"
-               f"不会自动回信或执行任何外部动作。"),
+        basis=i18n.t("proposal.inbox_decision.basis", reason=reason, action=action,
+                     snippet=(_snippet(mail) or i18n.t("proposal.inbox.no_body"))),
     )
 
 
@@ -402,13 +401,14 @@ def proposal_for_inbox_reply(mail: InboxMail, triage: dict, *, ts: float,
 
     payload["draft"] 是 str → 走 registry 的「改了再批」edits 白名单(用户可就地改草稿再批)。
     """
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal  # 局部 import 避免模块级循环
-    reason = triage.get("reason") or "分诊判定可以先代拟回复"
+    reason = triage.get("reason") or i18n.t("proposal.inbox_reply.default_reason")
     digest = hashlib.sha1(mail.thread_key.encode("utf-8")).hexdigest()[:8]
     payload = _card_payload(mail, triage)
     payload["draft"] = triage.get("draft") or ""
     return Proposal(
-        summary=f"✉️ 代拟回复待批:{mail.sender} 「{mail.subject}」",
+        summary=i18n.t("proposal.inbox_reply.summary", sender=mail.sender, subject=mail.subject),
         options=("ACCEPT", "DEFER", "REJECT"),
         strength=strength,
         evidence_refs=(),
@@ -418,9 +418,7 @@ def proposal_for_inbox_reply(mail: InboxMail, triage: dict, *, ts: float,
         kind=KIND_INBOX_REPLY,
         payload=payload,
         proposal_id=f"{KIND_INBOX_REPLY}-0-{digest}",
-        basis=(f"这封邮件被分诊为**需要回复**({reason}),已代拟草稿(可就地修改后再批)。"
-               f"ACCEPT = 把草稿存进台账并显示给你,由你**自行复制发送** —— "
-               f"系统不代发任何邮件(未经确认绝不对外发信是硬规矩)。"),
+        basis=i18n.t("proposal.inbox_reply.basis", reason=reason),
     )
 
 

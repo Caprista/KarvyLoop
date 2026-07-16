@@ -161,9 +161,10 @@ def test_empty_week_is_honestly_quiet():
     assert d["pending"]["count"] == 0 and d["pending"]["oldest_age_days"] is None
     md = render_digest_markdown(d)
     assert "这周很安静" in md
-    # 空周也能成卡(不崩、不吹)
+    # 空周也能成卡(不崩、不吹);卡文案走 i18n → 按当前 locale 取表断言(locale 无关)
+    from karvyloop import i18n
     card = build_weekly_digest_proposal(d, now=NOW)
-    assert "这周很安静" in card.summary
+    assert i18n.t("proposal.weekly_digest.gist_quiet") in card.summary
 
 
 def test_empty_stores_but_wired_are_available_and_zero(tmp_path):

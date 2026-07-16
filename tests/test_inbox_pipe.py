@@ -254,9 +254,16 @@ def _mail(subject="报价确认", body=LONG_BODY, msg_id="<m1@x>") -> InboxMail:
 
 class TestCardShapes:
     def test_decision_card_shape(self):
+        # 卡文案走 i18n(按当前 locale 定稿)→ 锁 zh 断言中文原文(模板层),数据字段 locale 无关
+        from karvyloop import i18n
         triage = {"category": CATEGORY_DECISION, "reason": "涉及付款",
                   "suggested_action": "确认后回复对方", "draft": ""}
-        p = proposal_for_inbox_decision(_mail(), triage, ts=T0)
+        try:
+            i18n.set_locale("zh")
+            p = proposal_for_inbox_decision(_mail(), triage, ts=T0)
+            assert "涉及付款" in p.basis and "绝不对外发信" in p.basis
+        finally:
+            i18n.set_locale(None)
         assert p.kind == KIND_INBOX_DECISION
         assert p.options == ("ACCEPT", "DEFER", "REJECT")
         assert p.payload["from"] == "alice@example.test"
@@ -264,19 +271,23 @@ class TestCardShapes:
         assert p.payload["message_id"] == "<m1@x>"
         assert p.payload["suggested_action"] == "确认后回复对方"
         assert len(p.payload["snippet"]) <= SNIPPET_MAX + 1  # +1 = 省略号
-        assert "涉及付款" in p.basis and "绝不对外发信" in p.basis
         assert p.proposal_id.startswith(f"{KIND_INBOX_DECISION}-0-")
 
     def test_reply_card_carries_editable_draft(self):
+        from karvyloop import i18n
         triage = {"category": CATEGORY_REPLY, "reason": "普通答疑",
                   "suggested_action": "回复对方", "draft": "您好,收到,明天回复您。"}
-        p = proposal_for_inbox_reply(_mail(), triage, ts=T0)
+        try:
+            i18n.set_locale("zh")
+            p = proposal_for_inbox_reply(_mail(), triage, ts=T0)
+            assert "自行复制发送" in p.basis and "不代发" in p.basis
+        finally:
+            i18n.set_locale(None)
         assert p.kind == KIND_INBOX_REPLY
         assert p.payload["draft"] == "您好,收到,明天回复您。"
         # draft 是 payload 里的 str → 走「改了再批」白名单,用户可就地改草稿再批
         edited = apply_payload_edits(p, {"draft": "改过的草稿"})
         assert edited.payload["draft"] == "改过的草稿"
-        assert "自行复制发送" in p.basis and "不代发" in p.basis
 
     def test_full_body_never_enters_card(self):
         """隐私分级:正文全文不进卡 —— payload/basis/summary 任何角落都没有。"""

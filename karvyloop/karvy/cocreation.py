@@ -434,23 +434,20 @@ def _match_template(intent: str) -> str:
 def proposal_for_cocreate_finalize(*, draft: dict, ts: float, strength: float = 0.85):
     """共创定稿卡。payload = 草案卡全字符串字段(H2A「改了再批」apply_payload_edits
     只认已有 str 键 —— 这就是天然的字段级终改 + 白名单)。"""
+    from karvyloop import i18n
     from karvyloop.karvy.atoms import Proposal
     payload = {k: str(v) for k, v in (draft or {}).items()}
     if payload.get("template_id"):
         from karvyloop.domain.templates import get_template
         t = get_template(payload["template_id"]) or {}
         name = t.get("name", payload["template_id"])
-        summary = f"共创定稿:一键开出模板域「{name}」"
-        basis = (f"共创会话里你选定了现成模板「{name}」。ACCEPT = 走既有 instantiate 路径"
-                 f"真开出该域和配好灵魂的角色(幂等:同名活跃域已存在会被拒并如实说)。")
+        summary = i18n.t("proposal.cocreate.summary_template", name=name)
+        basis = i18n.t("proposal.cocreate.basis_template", name=name)
     else:
         name = payload.get("domain_name", "")
         n_roles = sum(1 for i in range(1, MAX_DRAFT_ROLES + 1) if payload.get(f"role{i}_id"))
-        summary = f"共创定稿:建业务域「{name}」+ {n_roles} 个角色"
-        basis = ("这是共创会话的最终草案(S1/S2 期间没写过任何东西 —— 零副作用)。"
-                 "ACCEPT 才真建:角色走 RoleRegistry.create(尽责契约 COMMITMENT 统一 seed,"
-                 "与系统默认/导入同一份),域落 value.md + deontic 真护栏。"
-                 "卡上任何字段不对,可直接改了再批。")
+        summary = i18n.t("proposal.cocreate.summary_custom", name=name, n=n_roles)
+        basis = i18n.t("proposal.cocreate.basis_custom")
     stable = "|".join(f"{k}={payload.get(k, '')}" for k in sorted(payload))
     pid = KIND_COCREATE_FINALIZE + "-0-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
     return Proposal(

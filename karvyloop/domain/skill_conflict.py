@@ -62,10 +62,10 @@ class Conflict:
     value_version: str
 
     def summary(self) -> str:
-        return (
-            f"技能「{self.skill_name}」可能违反域「{self.domain_id}」"
-            f"的{_rule_label(self.rule_type)}「{self.rule}」({self.role})"
-        )
+        # 卡文案走 i18n(resolve_conflict Proposal 的 summary,出卡时按当前 locale 定稿)
+        from karvyloop import i18n
+        return i18n.t("conflict.summary", skill=self.skill_name, domain=self.domain_id,
+                      label=_rule_label(self.rule_type), rule=self.rule, role=self.role)
 
     def to_proposal_payload(self) -> dict:
         """resolve_conflict Proposal 的 payload(含处置选项)。"""
@@ -84,7 +84,10 @@ class Conflict:
 
 
 def _rule_label(rule_type: str) -> str:
-    return {RULE_FORBID: "禁止项", RULE_OBLIGE: "强制项", RULE_VALUE: "价值观"}.get(rule_type, "规则")
+    from karvyloop import i18n
+    key = {RULE_FORBID: "conflict.rule_forbid", RULE_OBLIGE: "conflict.rule_oblige",
+           RULE_VALUE: "conflict.rule_value"}.get(rule_type, "conflict.rule_generic")
+    return i18n.t(key)
 
 
 def _is_cjk(s: str) -> bool:
@@ -121,7 +124,8 @@ def _default_judge(skill: SkillView, rule: Rule) -> Tuple[bool, str]:
     SC-5 哲学:冲突只出 PROPOSE 不拦,false-positive 由用户一键忽略 —— 宁可多问一次,
     不漏掉"合规域里用了违规技能"。需要更细 → 注入 LLM judge。
     """
-    return True, f"技能用途文本命中{_rule_label(rule.rule_type)}关键词,疑似冲突,请确认"
+    from karvyloop import i18n
+    return True, i18n.t("conflict.judge_reason", label=_rule_label(rule.rule_type))
 
 
 class SkillDomainConflictDetector:
