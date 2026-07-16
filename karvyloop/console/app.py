@@ -58,6 +58,43 @@ logger = logging.getLogger(__name__)
 # 静态资源目录(与本文件同包下)
 STATIC_DIR = Path(__file__).parent / "static"
 
+# --- 对外只读分享(x-karvy-audience: external)全局白名单门(P0 安全) ---
+# read-scope 分享方(**别人**,不是我自己的设备)经 relay 隧道带 `x-karvy-audience: external`
+# ——由 console 侧咽喉 relay/client.py 注入,远端伪造进不来(见该文件 _FWD_REQ_HEADERS 白名单)。
+# 此前 audience 门是**每端点手工挂**(deny-list):只有 routes_memory 两个裸 dump + routes_mesh 全部
+# 挂了,其余 /api 端点全裸奔 → 决策画像 / 文件区 / 对话 / 决策审计 / 待办卡… 一个 GET 全量外泄
+# (docs/73 §9.6 侦察实证)。翻成**默认拒(allow-list)**:external 请求默认 403 拒所有 /api,
+# 只放行下面这份**极小**白名单——read-scope 分享方合法需要的非敏感只读面:
+#   - /api/memory/recall:docs/73 §9.6 唯一意图 —— 经 audience 刀(deny-by-default)只看被访角色的
+#     通用兵法。核心放行面。
+#   - /api/lang(GET):当前 UI 语言({"lang":"en"}),零敏感;留给未来共享层前端渲染。
+# **拿不准一律不放行(默认拒=安全侧)**:/api/health 会泄 log_path / doctor findings(系统拓扑)→ 不放;
+# /api/proposals/pending、/api/h2a_decide 等是**自有设备**(full scope)的面 —— 自有设备不带 external 标、
+# 天然不过此门,故无须(也绝不该)进白名单给外人。full-scope / 本机 / LAN / loopback / CLI / 测试
+# 一律不带 external 标 → 此门对它们**零作用零回归**。
+_EXTERNAL_AUDIENCE_ALLOW = frozenset({
+    "/api/memory/recall",   # audience 刀召回(docs/73 §9.6 唯一合法外部面)
+    "/api/lang",            # 当前语言(仅 GET,见下方方法限制);零敏感
+})
+# external 即便到了非只读方法也拒(与 relay/pairing.READ_ONLY_METHODS 对齐)——双保险,防
+# /api/lang 的 POST(改语言写 config.yaml)之类被外部借白名单路径做写操作。
+_EXTERNAL_AUDIENCE_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _is_external_audience(headers) -> bool:
+    """本请求是否来自对外只读分享方(relay/client.py 注入的 external 标;可测纯函数)。"""
+    return headers.get("x-karvy-audience", "").strip().lower() == "external"
+
+
+def _external_audience_allowed(method: str, path: str) -> bool:
+    """external 分享方能否打这个 (method, path)(可测纯函数,门逻辑真理来源):
+    - 非 /api 面(静态/HTML/healthz)→ 放行(本就公开、karvy.chat 也托管);
+    - /api 面 → 只读方法 且 命中极小白名单才放,否则默认拒(allow-list)。"""
+    if not path.startswith("/api"):
+        return True
+    return (method.upper() in _EXTERNAL_AUDIENCE_READ_METHODS
+            and path in _EXTERNAL_AUDIENCE_ALLOW)
+
 # 自适应质量评节奏(dev-report #7):固定 24h 太慢——活跃用户(每天几十任务)差技能要污染召回排序
 # 最多 24h。在 daily 整套维护之外,插入**积压触发**的质量评:每 _ACTIVE_TICK_S 看一眼待质量评积压,
 # 攒够 _QUALITY_BACKLOG_TRIGGER 就提前评(只评质量、不跑整套;单轮仍 QUALITY_JUDGE_LIMIT 封顶成本)。
@@ -758,6 +795,24 @@ def build_console_app(
         if request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache"
         return response
+
+    # 对外只读分享全局门(P0:默认拒 /api,只放极小白名单)。**执行于 _access_gate 之后**:
+    # 本装饰器登记在 _access_gate 之前 → Starlette「后登记先执行」→ _access_gate(同源/token 门)
+    # 先跑、本门紧随其后(与本文件既有 static/access 两门"源序倒序=执行序"的约定一致)。
+    # 只在**分享方标(external)在场**时生效;不带标的一切请求(full-scope 自有设备 / 本机 /
+    # loopback / LAN / CLI / 测试)完全不受影响(零回归)。routes_memory / routes_mesh 原有的
+    # 细粒度门(还带 audience_role 逻辑)**保留不删** —— 双保险(深度防御)。
+    @app.middleware("http")
+    async def _external_audience_gate(request, call_next):  # type: ignore[no-untyped-def]
+        if _is_external_audience(request.headers) and not _external_audience_allowed(
+                request.method, request.url.path):
+            from starlette.responses import JSONResponse
+            return JSONResponse(
+                {"ok": False,
+                 "reason": ("external share is read-scope: this endpoint is not shared "
+                            "(a shared role's general playbook is reachable via /api/memory/recall)")},
+                status_code=403)
+        return await call_next(request)
 
     # 访问令牌门:本机(loopback)免 token;非本机必须带 token(?token= / cookie / header)。
     # 未设 app.state.access_token(编程式/测试)→ 不启用(TestClient 来源非 loopback 但无 token → 放行)。
