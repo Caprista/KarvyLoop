@@ -2,12 +2,13 @@
 
 dev-report #4 slice 1:render 已迁到 TypeScript(源 console/frontend/src/render.ts),markdown-it +
 DOMPurify 由 npm 打包进**构建产物** static/render.js(不再 vendored 两个 .min.js);highlight.js
-仍 vendored。内容锁查**源**(render.ts),存在/契约查**构建产物**(render.js)。
+仍 vendored,但 T5(docs/83)后不再首屏常驻 —— render.ts 首次遇到代码块才注入(_ensureHighlight)。
+内容锁查**源**(render.ts),存在/契约查**构建产物**(render.js)。
 
 AC:
 - AC1: 构建产物 render.js 存在且非空,且暴露 window.KarvyRender 契约
 - AC2: TS 源 render.ts 存在(增量迁移的真相源)
-- AC3: index.html 在 app.js 前加载 render.js(+ 仍 vendored 的 highlight)
+- AC3: index.html 在 app.js 前加载 render.js(highlight 懒加载另锁于 test_console_static)
 - AC4: render.ts 源走 markdown-it + DOMPurify + sanitize + 暴露 renderEvents/appendMarkdown/renderMarkdown
 - AC5: app.js 用 KarvyRender(appendMarkdown / renderEvents)渲染,不再裸 textContent 回显
 """
@@ -425,10 +426,17 @@ def test_lite_mode_toggle_wired():
 
 
 def test_body_scripts_all_defer():
-    """T6:24 个 body 外链脚本全 defer(保序,render→app / desktop→app 依赖不变)。"""
+    """T6:body 外链脚本全 defer(保序,render→app / desktop→app 依赖不变)。
+    T4/T5(docs/83)后首屏只剩 8 个必需脚本:dom/modal/ui_widgets/unlock_panel/
+    render/i18n/desktop/app —— 面板脚本走 _ensurePanelScript 懒加载、highlight 走
+    render.js _ensureHighlight 懒加载,不再在这批里。"""
     html = _read("index.html")
     tags = _re.findall(r"<script\b[^>]*\bsrc=\"([^\"]+)\"[^>]*>", html)
-    assert len(tags) == 24, f"外链脚本应 24 个,实际 {len(tags)}(变了要同步 docs/83 清单)"
+    assert tags == [
+        "/static/dom.js", "/static/modal.js", "/static/ui_widgets.js",
+        "/static/unlock_panel.js", "/static/render.js", "/static/i18n.js",
+        "/static/desktop.js", "/static/app.js",
+    ], f"首屏脚本清单/顺序漂了(变了要同步 docs/83 清单): {tags}"
     for m in _re.finditer(r"<script\b[^>]*\bsrc=\"([^\"]+)\"[^>]*>", html):
         assert " defer" in m.group(0), f"{m.group(1)} 缺 defer"
     # 执行序锁不变:render.js / i18n.js / desktop.js 都在 app.js 前(defer 按文档序执行)

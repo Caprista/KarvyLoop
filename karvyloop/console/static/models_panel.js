@@ -71,7 +71,10 @@ var KarvyModelsPanelBundle = (function(exports) {
       body.appendChild(list);
     }
     _renderReasoningConfig(body, data || {});
-    body.appendChild(_modelForm({}, t("models.add_title")));
+    body.appendChild(el("div", { class: "mgmt-section-title", text: t("models.add_title") }));
+    const addWrap = el("div", { class: "mgmt-form models-add-guided" });
+    body.appendChild(addWrap);
+    void _guidedSetup(addWrap, () => renderModelsPanel(), { setDefault: false });
     await _renderSearchConfig(body);
     _renderVoiceConfig(body);
   }
@@ -258,12 +261,12 @@ var KarvyModelsPanelBundle = (function(exports) {
     b.appendChild(_modelForm(m, t("models.edit_title")));
     b.appendChild(el("button", { class: "mgmt-inline-link", text: t("models.back"), onclick: () => open() }));
   }
-  async function _guidedSetup(container, onDone) {
+  async function _guidedSetup(container, onDone, opts) {
     const resp = await _getJSON("/api/providers/presets");
     const presets = resp && resp.presets || [];
-    _onbPicker(container, presets, onDone);
+    _onbPicker(container, presets, onDone, opts);
   }
-  function _onbPicker(wrap, presets, onDone) {
+  function _onbPicker(wrap, presets, onDone, opts) {
     wrap.innerHTML = "";
     wrap.appendChild(el("div", { class: "mgmt-hint", text: t("onb.pick_provider") }));
     const ollamaSlot = el("div", { class: "onb-ollama-slot" });
@@ -287,7 +290,7 @@ var KarvyModelsPanelBundle = (function(exports) {
             messages_path: "",
             context_window: 32768,
             max_tokens: 4096
-          }, "ollama", msg, onDone);
+          }, "ollama", msg, onDone, opts);
         }
       }));
     }).catch(() => {
@@ -296,7 +299,7 @@ var KarvyModelsPanelBundle = (function(exports) {
     presets.forEach((p) => picker.appendChild(el("button", {
       class: "onb-prov" + (p.is_local ? " onb-prov-local" : ""),
       text: p.name,
-      onClick: () => _onbProvider(wrap, presets, p, onDone)
+      onClick: () => _onbProvider(wrap, presets, p, onDone, opts)
     })));
     wrap.appendChild(picker);
     wrap.appendChild(el("button", {
@@ -308,12 +311,12 @@ var KarvyModelsPanelBundle = (function(exports) {
       }
     }));
   }
-  function _onbProvider(wrap, presets, p, onDone) {
+  function _onbProvider(wrap, presets, p, onDone, opts) {
     wrap.innerHTML = "";
     wrap.appendChild(el("button", {
       class: "mgmt-inline-link",
       text: t("onb.back"),
-      onClick: () => _onbPicker(wrap, presets, onDone)
+      onClick: () => _onbPicker(wrap, presets, onDone, opts)
     }));
     wrap.appendChild(el("div", { class: "onb-prov-title", text: p.name }));
     const msg = _formMsg();
@@ -322,7 +325,7 @@ var KarvyModelsPanelBundle = (function(exports) {
       wrap.appendChild(el("button", {
         class: "mgmt-submit",
         text: t("onb.use_local"),
-        onClick: () => _onbSave(p, "", msg, onDone)
+        onClick: () => _onbSave(p, "", msg, onDone, opts)
       }));
       wrap.appendChild(msg);
       return;
@@ -342,11 +345,11 @@ var KarvyModelsPanelBundle = (function(exports) {
     wrap.appendChild(el("button", {
       class: "mgmt-submit",
       text: t("onb.save_validate"),
-      onClick: () => _onbSave(p, keyIn.value, msg, onDone)
+      onClick: () => _onbSave(p, keyIn.value, msg, onDone, opts)
     }));
     wrap.appendChild(msg);
   }
-  async function _onbSave(p, key, msg, onDone) {
+  async function _onbSave(p, key, msg, onDone, opts) {
     if (!p.is_local && !key.trim()) {
       _setMsg(msg, false, t("onb.key_required"));
       return;
@@ -370,6 +373,12 @@ var KarvyModelsPanelBundle = (function(exports) {
     });
     if (!(r.ok && r.data && r.data.ok)) {
       _setMsg(msg, false, t("mgmt.failed", { err: tB(r.data && (r.data.reason || r.data.detail) || r.status) }));
+      return;
+    }
+    if (opts && opts.setDefault === false) {
+      if (r.data && r.data.hint) window.alert(tB(r.data.hint));
+      _setMsg(msg, true, t("onb.saved_no_default"));
+      if (onDone) await onDone();
       return;
     }
     await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });

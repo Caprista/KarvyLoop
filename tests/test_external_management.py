@@ -194,10 +194,12 @@ def test_frontend_wired():
         assert api in src, f"面板没接 {api}"
     built = (static / "external_panel.js").read_text(encoding="utf-8")
     assert "/api/external/citizens" in built, "构建产物没带外部面板(没 npm run build?)"
-    # index.html 装了面板脚本 + nav 入口
+    # nav 入口在;面板脚本 T4(docs/83)后懒加载 —— 不再首屏常驻,由 app.js _PANEL_SCRIPTS 注册
     html = (static / "index.html").read_text(encoding="utf-8")
-    assert "external_panel.js" in html
+    assert "external_panel.js" not in html, "T4 后 external_panel.js 不该首屏常驻"
     assert 'data-panel="external"' in html
+    app_js_reg = (static / "app.js").read_text(encoding="utf-8")
+    assert '"/static/external_panel.js"' in app_js_reg, "app.js _PANEL_SCRIPTS 缺 external 注册"
     # app.js nav 派发 + 直聊外部 peer 通道
     app_js = (static / "app.js").read_text(encoding="utf-8")
     assert "KarvyExternalPanel" in app_js and "openExternalPanel" in app_js

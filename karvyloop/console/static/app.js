@@ -109,10 +109,11 @@
       pollStats();
       pollTasks();   // 9.5 P2:任务看板(料/谁在忙)
       pollKnowledge();  // 抽屉:又懂了你
-      window.KarvyTokens.pollMeter();     // ch4:token 成本表(已迁 TS)
+      // ch4:token 成本表(已迁 TS)。T4 懒加载:boot 已 ensure(tokens),首拍可能还在载入 → 守空
+      if (window.KarvyTokens) window.KarvyTokens.pollMeter();
     }, 2000);
     pollKnowledge();    // 首屏立即拉一次
-    window.KarvyTokens.pollMeter();
+    if (window.KarvyTokens) window.KarvyTokens.pollMeter();
   }
 
   // 9.4b:用户已滚到底部附近才自动跟随;上滚看历史时**绝不**强拉到底。
@@ -142,6 +143,59 @@
       document.head.appendChild(s);
     });
     return _wfCanvasLoading;
+  }
+
+  // ============ T4(docs/83):面板脚本懒加载 ============
+  // 首屏脚本里,面板脚本(devices 63K / memory 51K / skills 38K / models / external / …
+  // 合计 ~250KB)只有开对应面板才用 —— 弱机上白吃解析/编译。照 _ensureWorkflowCanvas /
+  // _ensureDriverJs 同一范式:面板首开时注入,以**全局契约真出现**为准(不是 onload 就信),
+  // 失败清缓存可重试(网络恢复后再点就好)。
+  // 注册表:name(=data-panel 名)→ { src, global(载入后必须出现的 window.* 契约),
+  //   deps(该面板内部会直调的兄弟面板脚本,先载齐 —— 全局函数是脚本载入后才有的) }。
+  const _PANEL_SCRIPTS = {
+    domains: { src: "/static/domains_panel.js", global: "KarvyDomainsPanel", deps: ["roles"] },  // 「新建角色」直调 KarvyRolesPanel
+    roles: { src: "/static/roles_panel.js", global: "KarvyRolesPanel" },
+    atoms: { src: "/static/atoms_panel.js", global: "KarvyAtomsPanel" },
+    agents: { src: "/static/agents_panel.js", global: "KarvyAgentsPanel" },
+    external: { src: "/static/external_panel.js", global: "KarvyExternalPanel" },
+    devices: { src: "/static/devices_panel.js", global: "KarvyDevicesPanel" },
+    memory: { src: "/static/memory_panel.js", global: "KarvyMemoryPanel" },
+    decision_prefs: { src: "/static/decision_prefs_panel.js", global: "KarvyDecisionPrefs" },
+    skills: { src: "/static/skills_panel.js", global: "KarvySkillsPanel" },
+    models: { src: "/static/models_panel.js", global: "KarvyModelsPanel" },   // boot 也 ensure(无 Key 强制引导)
+    diagnose: { src: "/static/diagnose_panel.js", global: "KarvyDiagnosePanel" },
+    files: { src: "/static/files_panel.js", global: "KarvyFilesPanel" },
+    schedules: { src: "/static/schedules_panel.js", global: "KarvySchedulesPanel" },
+    demo: { src: "/static/demo_panel.js", global: "KarvyDemoPanel" },     // 👀 顶栏入口(脚本载入时自绑 #demo-open)
+    tokens: { src: "/static/tokens_panel.js", global: "KarvyTokens" },    // 💰 顶栏 meter:boot 即 ensure,meter 不长睡
+  };
+  const _panelScriptLoading = {};   // name → Promise(载入中缓存;失败清空可重试)
+  function _ensurePanelScript(name) {
+    const spec = _PANEL_SCRIPTS[name];
+    if (!spec) return Promise.reject(new Error("unknown panel script: " + name));
+    const deps = (spec.deps || []).map(_ensurePanelScript);
+    let own;
+    if (window[spec.global]) own = Promise.resolve();
+    else if (_panelScriptLoading[name]) own = _panelScriptLoading[name];
+    else {
+      own = _panelScriptLoading[name] = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.id = "panel-js-" + name;   // 防重复注入锚(载入中重入由上面的 Promise 缓存挡)
+        s.src = spec.src;
+        s.onload = () => (window[spec.global] ? resolve() : reject(new Error(spec.global + " global missing")));
+        s.onerror = () => { _panelScriptLoading[name] = null; s.remove(); reject(new Error(spec.src + " load failed")); };
+        document.head.appendChild(s);
+      });
+    }
+    return Promise.all(deps.concat([own]));
+  }
+  // 面板打开统一走它:先 ensure、回调里才取全局(提前解引用必 undefined)。
+  // 加载失败给人话提示(不留静默死按钮);fn 自身的错误不吞,照旧往上冒。
+  function _openLazyPanel(name, fn) {
+    return _ensurePanelScript(name).then(fn, (e) => {
+      console.error("[panel] " + name + " script load failed", e);
+      alert(t("panel.load_failed", { name: name }));
+    });
   }
 
   // ============ Server message handler ============
@@ -283,7 +337,11 @@
         btn.disabled = true; btn.textContent = t("ops.diagnosing");
         try {
           const d = await _getJSON("/api/ops/diagnose");
-          if (d && d.diagnosis) window.KarvyDiagnosePanel.renderOpsDiagnosis(log, d.diagnosis);
+          // T4 懒加载:诊断卡渲染住在懒加载的 diagnose 面板脚本里,用前先 ensure
+          if (d && d.diagnosis) {
+            await _ensurePanelScript("diagnose");
+            window.KarvyDiagnosePanel.renderOpsDiagnosis(log, d.diagnosis);
+          }
           else if (d && d.healthy) pushChatLine("system", t("ops.healthy"));
           else if (d && d.reason === "no_model") pushChatLine("system", t("ops.no_model"));
           else pushChatLine("system", t("ops.failed"));
@@ -1654,7 +1712,7 @@
     yes.addEventListener("click", () => {
       box.remove();
       _ceClear();   // 这句话跟着去知识库,主聊天不再发它
-      if (window.KarvyMemoryPanel) window.KarvyMemoryPanel.open();
+      _openLazyPanel("memory", () => window.KarvyMemoryPanel.open());   // T4:面板脚本按需注入
       // 面板异步渲染 → 轮几拍把原话预填进「聊知识」输入框(带话入场,按发送即开聊)
       let tries = 0;
       const carry = () => {
@@ -1833,6 +1891,23 @@
       if (_KModal.backdropCloseEnabled && !_KModal.backdropCloseEnabled()) return;
       closeMgmtModal();
     });
+    // T4 懒加载:openers 全是**惰性箭头**(点开时才解引用 window.Karvy* —— 全局函数是
+    // 面板脚本载入后才有的,提前取必 undefined);派发统一走 _openLazyPanel(先 ensure 再调)。
+    const _panelOpeners = {
+      atoms: () => window.KarvyAtomsPanel.open(),
+      roles: () => openRolesPanel(),
+      domains: () => openDomainsPanel(),
+      agents: () => window.KarvyAgentsPanel.open({ refreshPeers }),
+      external: () => openExternalPanel(),
+      devices: () => window.KarvyDevicesPanel.open(),
+      memory: () => window.KarvyMemoryPanel.open(),
+      decision_prefs: () => window.KarvyDecisionPrefs.open(),
+      skills: () => window.KarvySkillsPanel.open(),
+      models: () => window.KarvyModelsPanel.open(),
+      diagnose: () => openDiagnosePanel(),
+      files: () => window.KarvyFilesPanel.open(),
+      schedules: () => window.KarvySchedulesPanel.open(),
+    };
     let _lastPanel = "";
     document.querySelectorAll(".nav-item[data-panel]").forEach((btn) => {
       if (btn.disabled) return;
@@ -1845,19 +1920,7 @@
           _lastPanel = p;
           _mb.classList.remove("panel-swap"); void _mb.offsetWidth; _mb.classList.add("panel-swap");
         }
-        if (p === "atoms") window.KarvyAtomsPanel.open();
-        else if (p === "roles") openRolesPanel();
-        else if (p === "domains") openDomainsPanel();
-        else if (p === "agents") window.KarvyAgentsPanel.open({ refreshPeers });
-        else if (p === "external") openExternalPanel();
-        else if (p === "devices") window.KarvyDevicesPanel.open();
-        else if (p === "memory") window.KarvyMemoryPanel.open();
-        else if (p === "decision_prefs") window.KarvyDecisionPrefs.open();
-        else if (p === "skills") window.KarvySkillsPanel.open();
-        else if (p === "models") window.KarvyModelsPanel.open();
-        else if (p === "diagnose") openDiagnosePanel();
-        else if (p === "files") window.KarvyFilesPanel.open();
-        else if (p === "schedules") window.KarvySchedulesPanel.open();
+        if (_panelOpeners[p]) _openLazyPanel(p, _panelOpeners[p]);
       });
     });
   }
@@ -2920,21 +2983,25 @@
       box.appendChild(row);
     }
   }
-  // 点技能料 → 打开技能库面板并定位/高亮那张技能卡
-  async function _ambientOpenSkill(hit) {
-    await window.KarvySkillsPanel.open();
-    _locateMgmtCard(hit.name || "");
+  // 点技能料 → 打开技能库面板并定位/高亮那张技能卡(T4:面板脚本先 ensure,失败有人话提示)
+  function _ambientOpenSkill(hit) {
+    return _openLazyPanel("skills", async () => {
+      await window.KarvySkillsPanel.open();
+      _locateMgmtCard(hit.name || "");
+    });
   }
-  // 点知识料 → 打开知识库面板,用列表自带搜索过滤到该条并高亮
-  async function _ambientOpenBelief(hit) {
-    await window.KarvyMemoryPanel.open();
-    const q = (hit.name || hit.summary || "").trim();
-    const search = document.querySelector("#mgmt-body .paged-search");
-    if (search && q) {
-      search.value = q;
-      search.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    _locateMgmtCard(q);
+  // 点知识料 → 打开知识库面板,用列表自带搜索过滤到该条并高亮(T4:同上)
+  function _ambientOpenBelief(hit) {
+    return _openLazyPanel("memory", async () => {
+      await window.KarvyMemoryPanel.open();
+      const q = (hit.name || hit.summary || "").trim();
+      const search = document.querySelector("#mgmt-body .paged-search");
+      if (search && q) {
+        search.value = q;
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      _locateMgmtCard(q);
+    });
   }
   // 在管理面板里按名字找卡 → 滚过去 + 脉冲高亮(复用 turn-locate-flash 动画)
   function _locateMgmtCard(name) {
@@ -3904,7 +3971,8 @@
       // 诚实引导:没配模型演示跑不了 → 先配模型(不演假戏)。不聚光:强制配 Key
       // 弹窗(checkSetupGate)才是这一态的主角,旅程条只是回声。
       bar.appendChild(el("div", { class: "journey-desc", text: t("journey.need_model") }));
-      bar.appendChild(_journeyChip("journey.model_cta", () => window.KarvyModelsPanel.open()));
+      bar.appendChild(_journeyChip("journey.model_cta",
+        () => _openLazyPanel("models", () => window.KarvyModelsPanel.open())));
       return;
     }
     if (_journeyAwait) {
@@ -4324,9 +4392,20 @@
     // predict(你可能想做)手动刷新:现在就问一次(WS propose,回退 POST /api/propose)
     const predictRefreshBtn = document.getElementById("predict-refresh-btn");
     if (predictRefreshBtn) predictRefreshBtn.addEventListener("click", requestProposal);
-    // ch4 #4:点钱包 → token 统计弹窗
+    // ch4 #4:点钱包 → token 统计弹窗(T4:脚本按需注入;通常 boot ensure 早就载好了)
     const tokMeter = document.getElementById("token-meter");
-    if (tokMeter) tokMeter.addEventListener("click", () => window.KarvyTokens.open());
+    if (tokMeter) tokMeter.addEventListener("click", () => _openLazyPanel("tokens", () => window.KarvyTokens.open()));
+    // T4:💰 meter 是首屏常驻仪表(startPolling 每 2s 刷)—— tokens 脚本 boot 即 ensure,
+    // 只把它挪出首屏解析热路径,不改"成本常驻可见"的产品行为;失败只降级 meter,不弹窗打扰。
+    _ensurePanelScript("tokens").then(() => window.KarvyTokens.pollMeter())
+      .catch((e) => console.warn("[panel] tokens meter unavailable", e));
+    // T4:👀 demo 入口原由 demo_panel.js 载入时自绑 —— 懒加载后第一击由这里接:载脚本 + 开面板;
+    // 脚本载入后它自绑的 click 接手,这里看到全局已在就让位(避免一次点击双开)。
+    const demoBtn = document.getElementById("demo-open");
+    if (demoBtn) demoBtn.addEventListener("click", () => {
+      if (window.KarvyDemoPanel) return;   // 已载:demo_panel 自己的监听器负责
+      _openLazyPanel("demo", () => window.KarvyDemoPanel.open());
+    });
     // 9.1d:绑对话控件(➕新对话 / 🕘历史)
     const newBtn = document.getElementById("conv-new-btn");
     if (newBtn) newBtn.addEventListener("click", newConversation);
@@ -4353,7 +4432,9 @@
     fetchRecentDecisions();    // 最近拍板流水(只读回看)
     fetchUpdateStatus();       // 有新版 → 顶部横幅(绝不自动升级)
     fetchPendingResume();      // #54 逃生门:重启后中断的流程 → 顶部横幅让人续跑/丢弃
-    window.KarvyModelsPanel.checkSetupGate({ pollSnapshot });   // 无 Key → 强制引导录入模型(进系统就判)
+    // 无 Key → 强制引导录入模型(进系统就判)。T4:models 脚本懒加载,boot ensure 后再判 gate
+    // (异步注入不卡首绘;载入失败会人话报错 —— gate 是安全门,不许静默跳过)
+    _openLazyPanel("models", () => window.KarvyModelsPanel.checkSetupGate({ pollSnapshot }));
     // docs/46 S4:新手引导 —— 重看入口 + 空态行动链接 + placeholder 轮换 + 首启 tour
     const tourBtn = document.getElementById("tour-replay");
     if (tourBtn) tourBtn.addEventListener("click", () => startTour(true));

@@ -1,4 +1,5 @@
-/* models_panel_smoke.mjs — 验证抽出的模型面板:契约(open + checkSetupGate)+ 真渲染模型列表/表单
+/* models_panel_smoke.mjs — 验证抽出的模型面板:契约(open + checkSetupGate)+ 真渲染模型列表
+ * + 新增区引导式预设选择器(CFG-01②:与首配同一套,高级回退全字段表单,不抢默认 chat)
  * + 强制引导锁(checkSetupGate must_setup → setSetupLocked(true) + 引导)(jsdom)。 */
 import { JSDOM } from "jsdom";
 import { readFileSync } from "node:fs";
@@ -26,21 +27,52 @@ dom.window.KarvyDom.getJSON = async (url) => {
   if (url === "/api/providers/presets") return { presets: [{ id: "anthropic", name: "Anthropic", api: "anthropic-messages", model_id: "claude", get_key_url: "https://x", key_env: "ANTHROPIC_API_KEY" }] };
   return null;
 };
+// POST 记录仪(load 前挂 —— 模块捕获引用):CFG-01② 坑回归锁用(面板新增不许 set_default/validate)
+const posts = [];
+dom.window.KarvyDom.postJSON = async (url) => { posts.push(url); return { ok: true, status: 200, data: { ok: true } }; };
 load("models_panel.js");
 
 const M = dom.window.KarvyModelsPanel;
 assert.ok(M && typeof M.open === "function" && typeof M.checkSetupGate === "function",
   "window.KarvyModelsPanel.{open,checkSetupGate} 契约缺失");
 
-// 模型面板:渲染已配模型 + 新增表单 + 搜索配置
+// 模型面板:渲染已配模型 + 新增区(CFG-01② 引导式预设选择器)+ 搜索配置
 await M.open();
 const body = dom.window.document.getElementById("mgmt-body");
 assert.equal(dom.window.document.getElementById("mgmt-title").textContent, "models.title", "标题应是 models.title");
 assert.ok([...body.querySelectorAll(".mc-name")].some((n) => n.textContent.includes("anthropic/claude")), "应渲染已配模型");
-assert.ok(body.querySelector("form.mgmt-form"), "应有新增模型全字段表单(_modelForm)");
 assert.ok([...body.querySelectorAll(".mgmt-section-title")].some((n) => n.textContent === "search.title"), "应有联网搜索配置区");
 // CFG-01①:模型设置窗声明"点空白不关"(✕/Esc 仍可关 —— modal_smoke 验行为,这里验声明)
 assert.equal(dom.window.KarvyModal.backdropCloseEnabled(), false, "模型设置窗应禁点空白关闭");
+
+// ---- CFG-01②:新增区 = 首配同款 provider 预设选择器(presets 异步到位 → 等一拍)----
+await new Promise((r) => setTimeout(r, 0));
+const addWrap = body.querySelector(".models-add-guided");
+assert.ok(addWrap, "应有引导式新增区(.models-add-guided)");
+assert.ok(addWrap.querySelector(".onb-picker"), "新增区应渲染 provider 预设选择器(与首配同一套)");
+const advLink = [...addWrap.querySelectorAll("button")].find((b) => b.textContent === "onb.advanced");
+assert.ok(advLink, "应保留「高级/自定义」回退入口");
+advLink.click();
+assert.ok(addWrap.querySelector("form.mgmt-form"), "高级回退应回到全字段表单(_modelForm)");
+
+// CFG-01② 坑(前人评估点名):面板新增 = _onbSave(setDefault:false)→ 只 /api/model/save,
+// 绝不 set_default(不悄悄换你正在用的默认)、也不 validate(它只验默认模型,验了也是别人)。
+await M.open();                                   // 重渲回引导态
+await new Promise((r) => setTimeout(r, 0));
+const wrap2 = dom.window.document.querySelector("#mgmt-body .models-add-guided");
+const provBtn = wrap2.querySelector(".onb-prov");
+assert.ok(provBtn, "预设 provider 按钮应在");
+provBtn.click();
+const keyIn2 = wrap2.querySelector('input[type="password"]');
+keyIn2.value = "sk-FAKE-DO-NOT-LEAK";
+posts.length = 0;
+const saveBtn2 = [...wrap2.querySelectorAll("button")].find((b) => b.textContent === "onb.save_validate");
+saveBtn2.click();
+await new Promise((r) => setTimeout(r, 0));
+await new Promise((r) => setTimeout(r, 0));
+assert.ok(posts.includes("/api/model/save"), "面板新增应真保存(/api/model/save)");
+assert.ok(!posts.includes("/api/model/set_default"), "面板新增不许抢默认 chat(CFG-01② 坑)");
+assert.ok(!posts.includes("/api/model/validate"), "面板新增不跑 validate(只验默认模型 = 假验证)");
 
 // 强制引导:must_setup=false → 不弹;=true → setSetupLocked(true) + 引导 provider 选择
 let lockedTo = null;

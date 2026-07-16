@@ -52,14 +52,44 @@ function renderMarkdown(text: string): string {
   return _sanitize(md.render(text || ""));
 }
 
+// T5(docs/83 弱机):highlight.js(~122KB)+ GitHub 主题 CSS 不再首屏常驻 —— 首次真的遇到
+// 代码块才注入(同 driver/画布懒加载范式:载入以全局真出现为准、失败清缓存可重试)。
+// 无代码块的会话零加载;载入前已渲染的块在 promise 回调里补高亮(块引用已捕获,不闪不丢)。
+let _hlLoading: Promise<void> | null = null;
+function _ensureHighlight(): Promise<void> {
+  if (_hljs()) return Promise.resolve();
+  if (_hlLoading) return _hlLoading;
+  if (!document.getElementById("hljs-css")) {
+    const l = document.createElement("link");
+    l.id = "hljs-css";
+    l.rel = "stylesheet";
+    l.href = "/static/vendor/highlight-github.min.css";
+    document.head.appendChild(l);
+  }
+  _hlLoading = new Promise<void>((resolve, reject) => {
+    const s = document.createElement("script");
+    s.id = "hljs-js";
+    s.src = "/static/vendor/highlight.min.js";
+    s.onload = () => (_hljs() ? resolve() : reject(new Error("hljs global missing")));
+    s.onerror = () => { _hlLoading = null; s.remove(); reject(new Error("highlight.min.js load failed")); };
+    document.head.appendChild(s);
+  });
+  return _hlLoading;
+}
+
 // 代码高亮:在**已消毒的 DOM** 上跑 highlight.js(只加 hljs 样式 span,不注入脚本 → 安全)。
 function _highlight(div: HTMLElement): void {
-  const hl = _hljs();
-  if (!hl || typeof hl.highlightElement !== "function") return;
   const blocks = div.querySelectorAll("pre code");
-  for (let i = 0; i < blocks.length; i++) {
-    try { hl.highlightElement(blocks[i]); } catch { /* 单块失败不影响其余 */ }
-  }
+  if (!blocks.length) return;   // 无代码块 → highlight.js 一个字节不拉
+  const run = (): void => {
+    const hl = _hljs();
+    if (!hl || typeof hl.highlightElement !== "function") return;
+    for (let i = 0; i < blocks.length; i++) {
+      try { hl.highlightElement(blocks[i]); } catch { /* 单块失败不影响其余 */ }
+    }
+  };
+  if (_hljs()) { run(); return; }
+  _ensureHighlight().then(run).catch(() => { /* 可选增强:加载失败静默降级(代码无色但仍可读) */ });
 }
 
 // 把文本以 markdown 渲染进容器;失败安全回退裸文本节点(永不裸 innerHTML 未消毒内容)

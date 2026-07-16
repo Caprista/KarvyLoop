@@ -6721,16 +6721,50 @@ var KarvyRenderBundle = (function(exports) {
   function renderMarkdown(text2) {
     return _sanitize(md.render(text2 || ""));
   }
-  function _highlight(div) {
-    const hl = _hljs();
-    if (!hl || typeof hl.highlightElement !== "function") return;
-    const blocks = div.querySelectorAll("pre code");
-    for (let i = 0; i < blocks.length; i++) {
-      try {
-        hl.highlightElement(blocks[i]);
-      } catch {
-      }
+  let _hlLoading = null;
+  function _ensureHighlight() {
+    if (_hljs()) return Promise.resolve();
+    if (_hlLoading) return _hlLoading;
+    if (!document.getElementById("hljs-css")) {
+      const l = document.createElement("link");
+      l.id = "hljs-css";
+      l.rel = "stylesheet";
+      l.href = "/static/vendor/highlight-github.min.css";
+      document.head.appendChild(l);
     }
+    _hlLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.id = "hljs-js";
+      s.src = "/static/vendor/highlight.min.js";
+      s.onload = () => _hljs() ? resolve() : reject(new Error("hljs global missing"));
+      s.onerror = () => {
+        _hlLoading = null;
+        s.remove();
+        reject(new Error("highlight.min.js load failed"));
+      };
+      document.head.appendChild(s);
+    });
+    return _hlLoading;
+  }
+  function _highlight(div) {
+    const blocks = div.querySelectorAll("pre code");
+    if (!blocks.length) return;
+    const run = () => {
+      const hl = _hljs();
+      if (!hl || typeof hl.highlightElement !== "function") return;
+      for (let i = 0; i < blocks.length; i++) {
+        try {
+          hl.highlightElement(blocks[i]);
+        } catch {
+        }
+      }
+    };
+    if (_hljs()) {
+      run();
+      return;
+    }
+    _ensureHighlight().then(run).catch(() => {
+    });
   }
   function appendMarkdown(container, text2, cls) {
     const html2 = renderMarkdown(text2);

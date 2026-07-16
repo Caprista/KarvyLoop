@@ -82,9 +82,30 @@ def test_no_unwired_backend_endpoints():
 
 
 def test_every_nav_panel_has_handler():
+    """T4(docs/83)后 nav 派发 = setupMgmtPanels 里的 _panelOpeners 表(键即 data-panel 名)
+    + _openLazyPanel 先 ensure 再调;同时每个面板要在 _PANEL_SCRIPTS 注册(否则 ensure 直接 reject)。"""
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     appjs = (STATIC / "app.js").read_text(encoding="utf-8")
     panels = set(re.findall(r'data-panel="([a-z_]+)"', html))
-    handled = set(re.findall(r'p === "([a-z_]+)"', appjs))
-    dead = panels - handled
+
+    def _block_keys(anchor: str) -> set:
+        i = appjs.find(anchor)
+        assert i != -1, f"app.js 缺 {anchor}"
+        start = appjs.find("{", i)
+        depth = 0
+        for j in range(start, len(appjs)):
+            if appjs[j] == "{":
+                depth += 1
+            elif appjs[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    return set(re.findall(r'^\s*([a-z_]+):', appjs[start:j], re.M))
+        raise AssertionError(f"{anchor} 块括号不配平")
+
+    openers = _block_keys("_panelOpeners = {")
+    registry = _block_keys("_PANEL_SCRIPTS = {")
+    assert "_openLazyPanel(p, _panelOpeners[p])" in appjs, "nav 派发应统一走 _openLazyPanel(先 ensure)"
+    dead = panels - openers
     assert not dead, f"导航按钮没有分派处理(死按钮):{sorted(dead)}"
+    unregistered = panels - registry
+    assert not unregistered, f"导航面板没在 _PANEL_SCRIPTS 注册(ensure 会直接拒):{sorted(unregistered)}"

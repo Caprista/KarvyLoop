@@ -1633,6 +1633,10 @@ var KarvyDevicesPanelBundle = (function(exports) {
   const el = _KD.el, _getJSON = _KD.getJSON, _postJSON = _KD.postJSON;
   const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
+  const _tB = (s) => {
+    const i18nAny = window.KarvyI18n;
+    return i18nAny && i18nAny.tBackend ? i18nAny.tBackend(s) : s;
+  };
   function _agoText(lastSeen) {
     if (!lastSeen) return t("devices.never_seen");
     const s = Math.max(0, Date.now() / 1e3 - lastSeen);
@@ -1699,7 +1703,43 @@ var KarvyDevicesPanelBundle = (function(exports) {
     }
     await render(host);
   }
-  function _deviceCard(d, host) {
+  function _leaseLeftText(remainS) {
+    const sec = Math.max(0, Math.floor(remainS));
+    if (sec < 90) return t("devices.board.left_lt_min");
+    const min = Math.round(sec / 60);
+    if (min < 120) return t("devices.board.left_min", { n: min });
+    return t("devices.board.left_hour", { n: Math.round(min / 60) });
+  }
+  function _boardRow(r) {
+    let label;
+    let warn = false;
+    if (r.status === "claimed") {
+      label = t("devices.board.running", { left: _leaseLeftText(r.lease_remaining_s || 0) });
+    } else if (r.status === "reclaimable") {
+      label = t("devices.board.stalled");
+      warn = true;
+    } else {
+      label = t("devices.board.queued");
+    }
+    return el(
+      "div",
+      { class: "mc-meta dev-board-task", title: String(r.task_id || "") },
+      el("span", { class: "dev-board-intent", text: r.intent || t("devices.board.no_intent") }),
+      " — ",
+      el("span", { class: "dev-board-status" + (warn ? " dev-board-warn" : ""), text: label })
+    );
+  }
+  function _boardInto(main, rows) {
+    if (!rows || !rows.length) return;
+    const det = el("details", { class: "dev-board" });
+    det.appendChild(el("summary", {
+      class: "mc-meta dev-board-summary",
+      text: t("devices.board.summary", { n: rows.length })
+    }));
+    for (const r of rows) det.appendChild(_boardRow(r));
+    main.appendChild(det);
+  }
+  function _deviceCard(d, host, boardRows) {
     const card = el("div", { class: "mgmt-card dev-card" });
     const name = d.label || (d.device_id ? d.device_id.slice(0, 19) + "…" : "?");
     const main = el(
@@ -1728,6 +1768,7 @@ var KarvyDevicesPanelBundle = (function(exports) {
       caps.appendChild(el("span", { text: t("devices.caps_none") }));
     }
     main.appendChild(caps);
+    _boardInto(main, boardRows);
     const actions = el("div", { class: "dpref-actions" });
     actions.appendChild(el("button", {
       class: "mc-del",
@@ -1821,7 +1862,7 @@ var KarvyDevicesPanelBundle = (function(exports) {
       data = await _getJSON("/api/pair/devices");
     } catch (e) {
     }
-    const paired = data && data.devices || [];
+    const paired = (data && data.devices || []).filter((p) => p && p.scope !== "read");
     if (!paired.length) {
       box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.empty") }));
       return;
@@ -1897,6 +1938,134 @@ var KarvyDevicesPanelBundle = (function(exports) {
     box.appendChild(_copyRow("devices.guide.cmd_label_label", 'karvyloop devices --label "my-desk-pc"'));
     host.appendChild(box);
   }
+  async function _shareScene(host) {
+    const box = el("div", { class: "ext-onboarding" });
+    box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.share.title") }));
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.hint") }));
+    let data = null;
+    try {
+      data = await _getJSON("/api/pair/devices");
+    } catch (e) {
+    }
+    if (!data) {
+      box.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.share.unavailable") }));
+      host.appendChild(box);
+      return;
+    }
+    if (data.ok === false) {
+      box.appendChild(el("div", {
+        class: "mgmt-hint ext-boundary",
+        text: data.reason ? _tB(String(data.reason)) : t("devices.share.local_only")
+      }));
+      host.appendChild(box);
+      return;
+    }
+    const sel = el("select", { class: "dev-share-role" });
+    sel.appendChild(el("option", { value: "", text: t("devices.share.role_none") }));
+    try {
+      const rd = await _getJSON("/api/roles");
+      for (const r of rd && rd.roles || []) {
+        const name = String(r.display_name || r.nickname || r.id || "").trim();
+        if (name) sel.appendChild(el("option", { value: name, text: name }));
+      }
+    } catch (e) {
+    }
+    box.appendChild(el(
+      "div",
+      { class: "mgmt-hint dev-share-rolerow" },
+      el("span", { text: t("devices.share.role_label") + " " }),
+      sel
+    ));
+    const btn = el("button", { class: "mgmt-add-btn", text: t("devices.share.btn") });
+    const out = el("div");
+    btn.addEventListener("click", async () => {
+      out.innerHTML = "";
+      let r;
+      try {
+        r = await _postJSON("/api/pair/issue", { scope: "read", role: sel.value || "" });
+      } catch (e) {
+        out.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.pair2.no_relay") }));
+        return;
+      }
+      const d = r && r.data || null;
+      if (!(d && d.ok)) {
+        out.appendChild(el("div", {
+          class: "mgmt-hint ext-boundary",
+          text: d && d.reason ? _tB(String(d.reason)) : t("devices.share.fail")
+        }));
+        return;
+      }
+      if (d.scope !== "read") {
+        out.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.share.not_read") }));
+        return;
+      }
+      const link = "karvy-pair:" + _b64urlEncode(JSON.stringify({
+        relay: d.relay,
+        room: d.room,
+        fingerprint: d.fingerprint,
+        code: d.code
+      }));
+      const qr = qrcode(0, "M");
+      qr.addData(link);
+      qr.make();
+      const holder = el("div", { class: "devices-qr" });
+      holder.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+      out.appendChild(holder);
+      out.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.qr_hint") }));
+      out.appendChild(_copyRow("devices.share.copy_label", link));
+      out.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.code_hint") }));
+      if (d.role) {
+        out.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.role_bound_note", { role: d.role }) }));
+      } else if (sel.value) {
+        out.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.share.role_unbound_note") }));
+      }
+    });
+    box.appendChild(btn);
+    box.appendChild(out);
+    const shared = (data.devices || []).filter((p) => p && p.scope === "read");
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.list_title") }));
+    if (!shared.length) {
+      box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.list_empty") }));
+    } else {
+      const list = el("div", { class: "mgmt-list" });
+      for (const p of shared) {
+        const when = p.granted_at ? new Date(p.granted_at * 1e3).toLocaleDateString() : "";
+        const card = el(
+          "div",
+          { class: "mgmt-card" },
+          el(
+            "div",
+            { class: "mc-main" },
+            el("div", { class: "mc-name", text: "🤝 " + (p.label || p.fingerprint || "?") }),
+            el(
+              "div",
+              { class: "mc-meta" },
+              el("span", { class: "mc-tag", text: t("devices.paired.scope_read") }),
+              " · ",
+              el("span", { text: p.role ? t("devices.share.role_bound", { role: p.role }) : t("devices.share.role_unbound") }),
+              when ? " · " + t("devices.paired.granted", { d: when }) : ""
+            )
+          ),
+          el("button", {
+            class: "mc-del",
+            text: t("devices.paired.revoke"),
+            onclick: async () => {
+              if (!window.confirm(t("devices.share.revoke_confirm", { f: p.fingerprint }))) return;
+              const rr = await _postJSON("/api/pair/revoke", { ident: p.fingerprint });
+              if (!(rr && rr.ok && rr.data && rr.data.ok)) {
+                window.alert(t("devices.paired.revoke_failed"));
+                return;
+              }
+              void render(host);
+            }
+          })
+        );
+        list.appendChild(card);
+      }
+      box.appendChild(list);
+    }
+    host.appendChild(box);
+  }
   function _advancedScene(host) {
     const away = el("div", { class: "ext-onboarding" });
     away.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.remote.title") }));
@@ -1909,10 +2078,16 @@ var KarvyDevicesPanelBundle = (function(exports) {
     body.innerHTML = "";
     body.appendChild(el("div", { class: "mgmt-hint", text: t("devices.intro") }));
     let data = null;
+    let board = null;
     try {
       data = await _getJSON("/api/mesh/devices");
     } catch (e) {
     }
+    try {
+      board = await _getJSON("/api/mesh/board");
+    } catch (e) {
+    }
+    const tasksByDev = board && board.tasks_by_device || {};
     const devices = data && data.devices || [];
     if (data && data.has_identity === false) {
       body.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.no_identity") }));
@@ -1922,11 +2097,12 @@ var KarvyDevicesPanelBundle = (function(exports) {
       body.appendChild(el("div", { class: "mgmt-empty", text: t("devices.empty") }));
     } else {
       const list = el("div", { class: "mgmt-list" });
-      for (const d of devices) list.appendChild(_deviceCard(d, body));
+      for (const d of devices) list.appendChild(_deviceCard(d, body, tasksByDev[d.device_id] || []));
       body.appendChild(list);
     }
     await _phoneScene(body);
     _pcScene(body);
+    await _shareScene(body);
     _advancedScene(body);
   }
   async function open() {

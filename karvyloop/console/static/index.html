@@ -16,8 +16,8 @@
   </script>
   <link rel="icon" type="image/png" href="/static/assets/karvyloop-logo-64.png" />
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="stylesheet" href="/static/vendor/highlight-github.min.css" />
-  <!-- Drawflow 画布样式不再首屏常驻:与画布脚本同点按需注入(主逻辑 _ensureWorkflowCanvas) -->
+  <!-- highlight-github.min.css 不再首屏常驻(docs/83 T5):与 highlight.min.js 同点按需注入
+       (render.js _ensureHighlight,首次遇到代码块才拉);Drawflow 画布样式同理(_ensureWorkflowCanvas) -->
   <link rel="stylesheet" href="/static/desktop.css" />   <!-- 桌面视图(docs/51):须在 styles.css 之后,desk 规则压过对话视图规则 -->
 </head>
 <body>
@@ -80,10 +80,13 @@
       </div>
     </header>
 
-    <!-- 左导航:管理面入口 + 对话控件 + 统计 -->
+    <!-- 左导航:管理面入口 + 对话控件 + 统计。
+         docs/85 IA§1(Hardy 放行):13 入口按决策者心智分三组 —— 你的团队 / 它学到的你 / 引擎室。
+         纯 HTML 挪位:data-panel 委托绑定(setupMgmtPanels)与 desk dock 同构复用
+         (.sidebar .nav-item[data-panel])都按 selector 命中,零接线改动。 -->
     <nav class="sidebar">
       <div class="nav-group">
-        <div class="nav-group-title" data-i18n="nav.manage">Manage</div>
+        <div class="nav-group-title" data-i18n="nav.group.team">👥 Your Team</div>
         <!-- 界面灌输(docs/85 Part A ④):四个承担教学点的入口挂 tooltip(问责链/开公司/你的标准);
              tour 刻意不说「原子」—— 原子的教学点就在这里 -->
         <button class="nav-item" data-panel="domains" data-i18n-title="nav.domains.title">
@@ -104,6 +107,9 @@
         <button class="nav-item" data-panel="devices">
           <span class="nav-ico">🖥️</span><span data-i18n="nav.devices">My Devices</span>
         </button>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title" data-i18n="nav.group.learned">🧠 What it's learned about you</div>
         <button class="nav-item" data-panel="memory">
           <span class="nav-ico">🧠</span><span data-i18n="nav.memory">Knowledge</span>
         </button>
@@ -113,6 +119,9 @@
         <button class="nav-item" data-panel="skills">
           <span class="nav-ico">🧩</span><span data-i18n="nav.skills">Skill Library</span>
         </button>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title" data-i18n="nav.group.engine">🔧 Engine Room</div>
         <button class="nav-item" data-panel="models">
           <span class="nav-ico">🤖</span><span data-i18n="nav.models">Models (global)</span>
         </button>
@@ -285,30 +294,20 @@
     <div class="desk-dock" id="desk-dock" role="toolbar" data-i18n-title="desk.dock"></div>
   </div>
 
-  <!-- 渲染层:markdown-it + DOMPurify 现已打包进 render.js(Vite/TS,源在 console/frontend/);
-       highlight.js 仍 vendored(大、可选增强,后续 slice 再迁)。render.js 须在主逻辑脚本之前。
-       T6(docs/83):全部 defer —— 解析不再被 24 个脚本逐个卡住,首绘提前;defer 保证按
-       文档序执行(render→i18n→desktop→app 的依赖天然满足),且都在 DOMContentLoaded 前跑完。 -->
-  <script defer src="/static/vendor/highlight.min.js"></script>
+  <!-- 渲染层:markdown-it + DOMPurify 现已打包进 render.js(Vite/TS,源在 console/frontend/)。
+       render.js 须在主逻辑脚本之前。
+       T6(docs/83):全部 defer —— 首绘不被脚本逐个卡住;defer 保证按文档序执行
+       (render→i18n→desktop→app 的依赖天然满足),且都在 DOMContentLoaded 前跑完。
+       T4(docs/83):面板脚本(devices/memory/skills/models/… 合计 ~250KB)不再首屏常驻 ——
+       面板首开时由主逻辑的 _ensurePanelScript 按需注入(注册表 _PANEL_SCRIPTS);
+       tokens/models 是 boot 就 ensure(顶栏 💰 meter / 无 Key 强制引导),只挪出解析热路径。
+       T5(docs/83):highlight.js(~122KB)+ 其 CSS 由 render.js 首次遇到代码块时注入(_ensureHighlight)。
+       这里只留首屏必需 8 件:dom/modal/ui_widgets(叶子基建)、unlock(旅程收官直判全局)、
+       render/i18n(渲染与文案)、desktop(dock 须先于 setupMgmtPanels)、app(主逻辑)。 -->
   <script defer src="/static/dom.js"></script>
   <script defer src="/static/modal.js"></script>
   <script defer src="/static/ui_widgets.js"></script>
-  <script defer src="/static/files_panel.js"></script>
-  <script defer src="/static/schedules_panel.js"></script>
-  <script defer src="/static/diagnose_panel.js"></script>
-  <script defer src="/static/atoms_panel.js"></script>
-  <script defer src="/static/roles_panel.js"></script>
-  <script defer src="/static/domains_panel.js"></script>
-  <script defer src="/static/agents_panel.js"></script>
-  <script defer src="/static/external_panel.js"></script>
-  <script defer src="/static/devices_panel.js"></script>
-  <script defer src="/static/skills_panel.js"></script>
   <script defer src="/static/unlock_panel.js"></script>
-  <script defer src="/static/demo_panel.js"></script>
-  <script defer src="/static/memory_panel.js"></script>
-  <script defer src="/static/models_panel.js"></script>
-  <script defer src="/static/decision_prefs_panel.js"></script>
-  <script defer src="/static/tokens_panel.js"></script>
   <script defer src="/static/render.js"></script>
   <script defer src="/static/i18n.js"></script>
   <!-- 桌面视图(docs/51):须在 app.js 之前 —— dock 按钮要先于 setupMgmtPanels 存在(同一批绑定) -->

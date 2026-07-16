@@ -75,8 +75,13 @@ async function renderModelsPanel(): Promise<void> {
   }
   // 全局推理强度三档(Hardy ⑩ 可见面;当前档从 /api/model/config 顺势带出)
   _renderReasoningConfig(body, data || {});
-  // 新增表单
-  body.appendChild(_modelForm({}, t("models.add_title")));
+  // 新增模型(CFG-01②):与首配同一套 provider 预设选择器(点选预填、只粘 key;
+  // 「高级/自定义」回退到老的全字段表单)。面板新增 ≠ 首配:setDefault:false ——
+  // 加第二个模型不许悄悄抢默认 chat(要换默认走列表上的「设为chat默认」)。
+  body.appendChild(el("div", { class: "mgmt-section-title", text: t("models.add_title") }));
+  const addWrap = el("div", { class: "mgmt-form models-add-guided" });
+  body.appendChild(addWrap);
+  void _guidedSetup(addWrap, () => renderModelsPanel(), { setDefault: false });
   // 联网搜索配置(产品内配,默认 keyless,不必手改 yaml)
   await _renderSearchConfig(body);
   // 语音唤醒实验开关(纯前端 localStorage;识别逻辑在 app.js KarvyVoice)
@@ -242,12 +247,15 @@ function _openModelEdit(m: any): void {
 
 // ============ 引导式 onboarding:选 provider→预填→只粘 key→实时校验(零门槛入场)============
 // "无门槛=不需懂 agent;≠零配置"。自带 key 是一次性过路费,把它榨到最小:一屏、有"去拿 key"链接、当场验。
-async function _guidedSetup(container: HTMLElement, onDone: () => Promise<void> | void): Promise<void> {
+// CFG-01②:同一套选择器复用进 models 面板「新增」区 —— opts.setDefault 区分两个场景:
+//   首配/强制引导(缺省 true)= 设默认 chat + 当场真验;面板加模型(false)= 不抢默认、不误验别人。
+interface OnbOpts { setDefault?: boolean }
+async function _guidedSetup(container: HTMLElement, onDone: () => Promise<void> | void, opts?: OnbOpts): Promise<void> {
   const resp = await _getJSON("/api/providers/presets");
   const presets = (resp && resp.presets) || [];
-  _onbPicker(container, presets, onDone);
+  _onbPicker(container, presets, onDone, opts);
 }
-function _onbPicker(wrap: HTMLElement, presets: any[], onDone: () => Promise<void> | void): void {
+function _onbPicker(wrap: HTMLElement, presets: any[], onDone: () => Promise<void> | void, opts?: OnbOpts): void {
   wrap.innerHTML = "";
   wrap.appendChild(el("div", { class: "mgmt-hint", text: t("onb.pick_provider") }));
   // #42 优化②:探测本机 Ollama → 「零 key 直用本地模型」一键路径(探不到不打扰)
@@ -264,28 +272,28 @@ function _onbPicker(wrap: HTMLElement, presets: any[], onDone: () => Promise<voi
         _onbSave({ id: "ollama", model_id: "ollama/" + model, model_name: model,
                    api: "openai-completions", base_url: "http://127.0.0.1:11434/v1",
                    auth_header: "Authorization", messages_path: "",
-                   context_window: 32768, max_tokens: 4096 }, "ollama", msg, onDone);
+                   context_window: 32768, max_tokens: 4096 }, "ollama", msg, onDone, opts);
       } }));
   }).catch(() => {});
   const picker = el("div", { class: "onb-picker" });
   presets.forEach((p) => picker.appendChild(el("button", {
     class: "onb-prov" + (p.is_local ? " onb-prov-local" : ""), text: p.name,
-    onClick: () => _onbProvider(wrap, presets, p, onDone) })));
+    onClick: () => _onbProvider(wrap, presets, p, onDone, opts) })));
   wrap.appendChild(picker);
   // 高级/自定义 → 老的全字段表单(接没列出的端点 / 高手用)
   wrap.appendChild(el("button", { class: "mgmt-inline-link", text: t("onb.advanced"),
     onClick: () => { wrap.innerHTML = ""; wrap.appendChild(_modelForm({}, t("setup.add_model"), onDone)); } }));
 }
-function _onbProvider(wrap: HTMLElement, presets: any[], p: any, onDone: () => Promise<void> | void): void {
+function _onbProvider(wrap: HTMLElement, presets: any[], p: any, onDone: () => Promise<void> | void, opts?: OnbOpts): void {
   wrap.innerHTML = "";
   wrap.appendChild(el("button", { class: "mgmt-inline-link", text: t("onb.back"),
-    onClick: () => _onbPicker(wrap, presets, onDone) }));
+    onClick: () => _onbPicker(wrap, presets, onDone, opts) }));
   wrap.appendChild(el("div", { class: "onb-prov-title", text: p.name }));
   const msg = _formMsg();
   if (p.is_local) {
     wrap.appendChild(el("div", { class: "mgmt-hint", text: t("onb.local_hint", { hint: p.install_hint || "" }) }));
     wrap.appendChild(el("button", { class: "mgmt-submit", text: t("onb.use_local"),
-      onClick: () => _onbSave(p, "", msg, onDone) }));
+      onClick: () => _onbSave(p, "", msg, onDone, opts) }));
     wrap.appendChild(msg);
     return;
   }
@@ -297,10 +305,10 @@ function _onbProvider(wrap: HTMLElement, presets: any[], p: any, onDone: () => P
   const keyIn = el("input", { type: "password", placeholder: "sk-..." }) as HTMLInputElement;
   wrap.appendChild(keyIn);
   wrap.appendChild(el("button", { class: "mgmt-submit", text: t("onb.save_validate"),
-    onClick: () => _onbSave(p, keyIn.value, msg, onDone) }));
+    onClick: () => _onbSave(p, keyIn.value, msg, onDone, opts) }));
   wrap.appendChild(msg);
 }
-async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Promise<void> | void): Promise<void> {
+async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Promise<void> | void, opts?: OnbOpts): Promise<void> {
   // 云端 provider 空 key 连请求都不发(Hardy 实拍:不填也"保存并验证成功",
   // 实际写出空壳配置还盖掉原值 —— 后端同有此闸,这里是第一道)
   if (!p.is_local && !key.trim()) {
@@ -319,6 +327,15 @@ async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Pro
   });
   if (!(r.ok && r.data && r.data.ok)) {
     _setMsg(msg, false, t("mgmt.failed", { err: tB((r.data && (r.data.reason || r.data.detail)) || r.status) }));
+    return;
+  }
+  // CFG-01② 坑(前人评估点名):这里原本**无条件**把新模型设为默认 chat —— 首配对,
+  // models 面板加第二个模型不对(悄悄换掉你正在用的默认)。面板路径 setDefault:false:
+  // 不设默认、也不跑 /api/model/validate(它只验**默认**模型,不设默认验的是别人 = 假验证)。
+  if (opts && opts.setDefault === false) {
+    if (r.data && r.data.hint) window.alert(tB(r.data.hint));   // 诚实提示与 _modelForm 同待遇
+    _setMsg(msg, true, t("onb.saved_no_default"));
+    if (onDone) await onDone();
     return;
   }
   await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });  // 刚加的设为默认
