@@ -462,6 +462,33 @@ _EN = {
         "Every number is deterministically aggregated from Trace / tokens.db / the decision ledger — zero LLM, "
         "fully traceable (each item carries a trace_ref/id). ACCEPT only means “read”; nothing gets executed."
     ),
+    # weekly-digest (card body markdown skeleton — 骨架走 i18n,动态数据/gist/回链是数据不翻)
+    "weekly.md.title": "Weekly digest",
+    "weekly.md.quiet": "A quiet week: nothing ran, no tokens burned, nothing crystallized/revised, and nothing waiting on your call.",
+    "weekly.md.h_tasks": "Tasks",
+    "weekly.md.h_token": "Token",
+    "weekly.md.h_skills": "Skills",
+    "weekly.md.h_decisions": "Your calls",
+    "weekly.md.h_pending": "Still pending",
+    "weekly.md.h_summary": "In a sentence",
+    "weekly.md.tasks_line": "- Ran **{runs}**: {ok} ok / {fail} failed (success rate {rate})",
+    "weekly.md.recall_line": "- Fast-brain / recall hit rate {rate} (stable replays {replays} + skill-guided reruns {reruns})",
+    "weekly.md.failures_head": "- Failures (latest {n}{more}):",
+    "weekly.md.failures_more": ", {m} more not shown",
+    "weekly.md.token_unwired": "- Ledger not wired (no data, no guessing)",
+    "weekly.md.token_line": "- **{total}** tokens over {calls} call(s) (in {input} / out {output})",
+    "weekly.md.token_source": "  - {source}: {total} ({calls} call(s))",
+    "weekly.md.skills_new": "- **{n}** newly crystallized",
+    "weekly.md.crystallized_item": "  - {name} (sig {sig}, ref {ref})",
+    "weekly.md.revisions_line": "- Revisions: {landed} landed / {proposed} awaiting your call",
+    "weekly.md.revision_item": "  - {name} ({mode}, ref {ref})",
+    "weekly.md.decisions_unwired": "- Decision ledger not wired (no data, no guessing)",
+    "weekly.md.taste_line": "- Taste hit rate (rolling): **{rate}**{arrow} (n={n})",
+    "weekly.md.taste_insufficient": "- Taste hit rate: not enough samples (n={n} < {min}), percentage withheld",
+    "weekly.md.taste_unwired": "- Taste hit rate: taste betting not wired",
+    "weekly.md.pending_line": "- **{count}** card(s) awaiting your call{age}",
+    "weekly.md.pending_age": ", oldest pending {days} day(s)",
+    "weekly.md.pending_none": "- No cards pending",
     # archive_stale(knowledge_tick)
     "proposal.archive_stale.summary": "🗄️ {n} knowledge item(s) unused for a year — archive them?",
     "proposal.archive_stale.basis": (
@@ -656,6 +683,33 @@ _EN = {
     ),
     # ---- task-insight 段(docs/82 非任务认知沉淀:记忆面板来源列/kind 标签)----
     "memory.source.task_insight": "execution insight (auto-distilled from run traces, provisional)",
+    # ---- memory.source 人话标签(D2 冲突卡「旧那条的来源」+ 记忆面板)----
+    "memory.source.fed": "knowledge you fed & confirmed",
+    "memory.source.user_edit": "your manual edit",
+    "memory.source.cli": "added via CLI",
+    "memory.source.user_explicit": "you told me directly",
+    "memory.source.ingest": "material you ingested",
+    "memory.source.role_experience": "a role's learned experience",
+    # ---- D2 记忆冲突卡(memory_conflict:supersede 要推翻你钉住/人审的记忆 → 不自动,升卡让你裁)----
+    "proposal.memory_conflict.summary": (
+        "New info conflicts with something you confirmed — keep the old, adopt the new, or keep both? "
+        "(old: “{old}” / new: “{new}”)"
+    ),
+    "proposal.memory_conflict.origin_pinned": "you pinned it ({src}, {when})",
+    "proposal.memory_conflict.origin_reviewed": "{src}, {when}",
+    "proposal.memory_conflict.basis": (
+        "This conflicts with a memory you confirmed/pinned, so I won't overwrite it behind your back.\n"
+        "• Existing: “{old}” — {origin}\n"
+        "• New: “{new}”\n"
+        "Decide: keep the old (drop the new), adopt the new (retire the old — still archived, reversible), "
+        "or keep both (default — nothing is lost either way; nothing is invalidated unless you say so)."
+    ),
+    "receipt.memory_conflict.keep_both": "Kept both — nothing was invalidated.",
+    "receipt.memory_conflict.adopt_new": "Adopted the new one; retired the old (still archived, reversible). Kept: “{keep}”.",
+    "receipt.memory_conflict.keep_old": "Kept the old one; retired the new. Kept: “{keep}”.",
+    "receipt.memory_conflict.gone": "That memory is no longer around — nothing to do.",
+    "receipt.memory_conflict.already": "That one is already retired — nothing to do.",
+    "receipt.memory_conflict.bad_resolution": "Unknown resolution “{r}” — nothing changed.",
     "insight.kind.env": "environment fact",
     "insight.kind.correction": "correction lesson",
     "insight.kind.observation": "incidental observation",
@@ -1176,6 +1230,33 @@ _ZH = {
         "数字全部从 Trace / tokens.db / 决策流水确定性汇总,零 LLM、可回链"
         "(每条带 trace_ref/id)。ACCEPT 仅表示已读,不触发任何执行。"
     ),
+    # weekly-digest (card body markdown skeleton — 骨架走 i18n,动态数据/gist/回链是数据不翻)
+    "weekly.md.title": "周报",
+    "weekly.md.quiet": "这周很安静:没有任务运行、没烧 token、没有结晶/修订,也没有要你拍的板。",
+    "weekly.md.h_tasks": "任务",
+    "weekly.md.h_token": "Token",
+    "weekly.md.h_skills": "技能",
+    "weekly.md.h_decisions": "你拍的板",
+    "weekly.md.h_pending": "还挂着的",
+    "weekly.md.h_summary": "一句话",
+    "weekly.md.tasks_line": "- 跑了 **{runs}** 次:成 {ok} / 败 {fail}(成功率 {rate})",
+    "weekly.md.recall_line": "- 快脑/召回命中率 {rate}(stable 回放 {replays} + 技能制导重跑 {reruns})",
+    "weekly.md.failures_head": "- 失败清单(最近 {n} 条{more}):",
+    "weekly.md.failures_more": ",另有 {m} 条未列",
+    "weekly.md.token_unwired": "- 账本未接线(无数据,不猜)",
+    "weekly.md.token_line": "- 共 **{total}** tokens / {calls} 次调用(in {input} / out {output})",
+    "weekly.md.token_source": "  - {source}: {total}({calls} 次)",
+    "weekly.md.skills_new": "- 新结晶 **{n}** 个",
+    "weekly.md.crystallized_item": "  - {name}(sig {sig},回链 {ref})",
+    "weekly.md.revisions_line": "- 修订:落地 {landed} / 出卡待你拍 {proposed}",
+    "weekly.md.revision_item": "  - {name}({mode},回链 {ref})",
+    "weekly.md.decisions_unwired": "- 决策流水未接线(无数据,不猜)",
+    "weekly.md.taste_line": "- 口味命中率(滚动窗):**{rate}**{arrow}(n={n})",
+    "weekly.md.taste_insufficient": "- 口味命中率:样本不足(n={n} < {min}),不报百分比",
+    "weekly.md.taste_unwired": "- 口味命中率:口味押注未接线",
+    "weekly.md.pending_line": "- **{count}** 张卡等你拍{age}",
+    "weekly.md.pending_age": ",最老挂了 {days} 天",
+    "weekly.md.pending_none": "- 没有挂着的卡",
     # archive_stale(knowledge_tick)
     "proposal.archive_stale.summary": "🗄️ {n} 条知识一年没用了,归档?",
     "proposal.archive_stale.basis": (
@@ -1333,6 +1414,33 @@ _ZH = {
     "agent_import.note.v0_fallback": "未接 LLM 或拆解未成 → 走确定性 adapter(tools 仅列名,未出原子)",
     # ---- task-insight 段(docs/82 非任务认知沉淀:记忆面板来源列/kind 标签)----
     "memory.source.task_insight": "执行洞察(从运行记录自动沉淀,暂记待核)",
+    # ---- memory.source 人话标签(D2 冲突卡「旧那条的来源」+ 记忆面板)----
+    "memory.source.fed": "你喂料确认的知识",
+    "memory.source.user_edit": "你手动改的",
+    "memory.source.cli": "命令行添加的",
+    "memory.source.user_explicit": "你直接告诉我的",
+    "memory.source.ingest": "你摄入的材料",
+    "memory.source.role_experience": "某角色积累的经验",
+    # ---- D2 记忆冲突卡(memory_conflict:supersede 要推翻你钉住/人审的记忆 → 不自动,升卡让你裁)----
+    "proposal.memory_conflict.summary": (
+        "新信息和你确认过的记忆冲突了 —— 保留旧的、采纳新的,还是两条都留?"
+        "(旧:「{old}」/ 新:「{new}」)"
+    ),
+    "proposal.memory_conflict.origin_pinned": "你钉住的({src},{when})",
+    "proposal.memory_conflict.origin_reviewed": "{src},{when}",
+    "proposal.memory_conflict.basis": (
+        "这和一条你确认过/钉住的记忆冲突,我不会背着你悄悄改。\n"
+        "• 原有:「{old}」—— {origin}\n"
+        "• 新的:「{new}」\n"
+        "你裁:保留旧的(丢弃新的)、采纳新的(旧的失效不删、可翻案),或两条都留"
+        "(默认 —— 不管选哪个都不丢数据;你不发话就谁都不失效)。"
+    ),
+    "receipt.memory_conflict.keep_both": "两条都留了 —— 没有失效任何一条。",
+    "receipt.memory_conflict.adopt_new": "采纳了新的;旧的已失效(仍在考古层,可翻案)。留下:「{keep}」。",
+    "receipt.memory_conflict.keep_old": "保留了旧的;新的已失效。留下:「{keep}」。",
+    "receipt.memory_conflict.gone": "那条记忆已经不在了 —— 无需处理。",
+    "receipt.memory_conflict.already": "那条已经失效了 —— 无需处理。",
+    "receipt.memory_conflict.bad_resolution": "未知裁决「{r}」—— 没有改动。",
     "insight.kind.env": "环境事实",
     "insight.kind.correction": "纠错经验",
     "insight.kind.observation": "顺带观察",
