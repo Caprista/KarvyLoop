@@ -159,10 +159,11 @@ def test_empty_week_is_honestly_quiet():
     assert d["decisions"]["available"] is False
     assert d["decisions"]["taste"]["available"] is False
     assert d["pending"]["count"] == 0 and d["pending"]["oldest_age_days"] is None
-    md = render_digest_markdown(d)
-    assert "这周很安静" in md
-    # 空周也能成卡(不崩、不吹);卡文案走 i18n → 按当前 locale 取表断言(locale 无关)
     from karvyloop import i18n
+    md = render_digest_markdown(d)
+    # 正文骨架走 i18n(en+zh 双表)→ 按当前 locale 取表断言(locale 无关)
+    assert i18n.t("weekly.md.quiet") in md
+    # 空周也能成卡(不崩、不吹);卡文案走 i18n → 按当前 locale 取表断言(locale 无关)
     card = build_weekly_digest_proposal(d, now=NOW)
     assert i18n.t("proposal.weekly_digest.gist_quiet") in card.summary
 
@@ -218,8 +219,9 @@ def test_aggregation_matches_seeded_data(tmp_path):
     assert p["count"] == 1 and abs(p["oldest_age_days"] - 2.0) < 0.01
     assert p["oldest"]["kind"] == "run_task"
     assert d["quiet"] is False
+    from karvyloop import i18n
     md = render_digest_markdown(d)
-    assert "这周很安静" not in md
+    assert i18n.t("weekly.md.quiet") not in md
     assert "trace://b" in md and "skill_abc" in md      # 回链/事实进卡面
     trace.close()
 
@@ -312,7 +314,9 @@ def test_card_payload_shape(tmp_path):
     assert card.payload["digest"]["window"]["days"] == 7
     for section in ("tasks", "tokens", "skills", "decisions", "pending"):
         assert section in card.payload["digest"]
-    assert isinstance(card.payload["markdown"], str) and card.payload["markdown"].startswith("## 周报")
+    from karvyloop import i18n
+    assert isinstance(card.payload["markdown"], str)
+    assert card.payload["markdown"].startswith("## " + i18n.t("weekly.md.title"))
     assert card.model_ref == "" and card.strength == 1.0   # 零 LLM、确定性
     assert card.basis                                       # 决策卡必带依据(ch4)
     # 同周同数据 → proposal_id 稳定(幂等 register 覆盖);持久化 roundtrip 不丢
@@ -320,3 +324,62 @@ def test_card_payload_shape(tmp_path):
     assert card2.proposal_id == card.proposal_id
     back = Proposal.from_dict(card.to_dict())
     assert back.payload["digest"]["tasks"]["atom_runs"] == 2
+
+
+# ---------------------------------------------------------------- 6. 正文 i18n(双语硬规则)
+
+# 中文骨架 headers/固定措辞(zh 表专有;英文正文里绝不该出现,否则 = 漏翻)。
+# 用「小节标题 + 完整措辞」而非裸词 —— 裸词(如「周报」)可能出现在动态数据里(用户提案
+# summary),不能据此判漏翻;完整骨架短语只可能来自骨架本身。
+_ZH_SKELETON_HEADERS = ("## 周报 ·", "### 任务", "### 技能", "### 你拍的板", "### 还挂着的")
+_ZH_SKELETON_PHRASES = ("这周很安静", "账本未接线", "决策流水未接线", "口味押注未接线",
+                        "样本不足", "没有挂着的卡", "跑了 ", "成功率 ", "快脑/召回命中率",
+                        "失败清单", "新结晶 ", "张卡等你拍")
+
+
+def test_markdown_skeleton_localizes_en_zh(tmp_path):
+    """正文骨架按 locale 定稿:en → 英文骨架、零中文骨架短语;zh → 中文骨架。
+    动态数据(回链 trace_ref / 技能名 / 用户提案 summary)两语都原样保留(是数据,不翻)。"""
+    from karvyloop import i18n
+    trace = SqliteTraceStore(tmp_path / "trace.sqlite")
+    _seed_trace(trace)
+    d = build_weekly_digest(trace, _seed_ledger(tmp_path), _seed_taste(4),
+                            _pending_registry(), NOW, decision_log=_seed_decisions())
+    try:
+        # --- en:正文骨架出英文,不含任何硬编码中文骨架短语 ---
+        i18n.set_locale("en")
+        md_en = render_digest_markdown(d)
+        assert md_en.startswith("## Weekly digest ·")
+        for section in ("### Tasks", "### Skills", "### Your calls", "### Still pending"):
+            assert section in md_en, f"英文正文缺小节 {section}"
+        for zh in _ZH_SKELETON_HEADERS + _ZH_SKELETON_PHRASES:
+            assert zh not in md_en, f"英文正文漏中文骨架「{zh}」(违双语硬规则)"
+        # 动态数据是数据,不翻 → 两语都在(回链 + 技能名)
+        assert "trace://b" in md_en and "skill_abc" in md_en
+
+        # --- zh:正文骨架回中文 ---
+        i18n.set_locale("zh")
+        md_zh = render_digest_markdown(d)
+        for zh in _ZH_SKELETON_HEADERS:
+            assert zh in md_zh, f"中文正文缺骨架「{zh}」"
+        assert "trace://b" in md_zh and "skill_abc" in md_zh
+    finally:
+        i18n.set_locale(None)
+    trace.close()
+
+
+def test_quiet_and_unwired_lines_localize():
+    """空周 + 未接线三条固定措辞也走 i18n(en 无中文骨架短语)。"""
+    from karvyloop import i18n
+    d = build_weekly_digest(TraceStore(), None, None, None, NOW)  # 全 None → 各源未接线
+    try:
+        i18n.set_locale("en")
+        md = render_digest_markdown(d)
+        assert i18n.t("weekly.md.quiet") in md
+        assert "Ledger not wired" in md and "Decision ledger not wired" in md
+        assert "taste betting not wired" in md
+        # 空周无动态中文 → 完整骨架短语也全不该出现
+        for zh in _ZH_SKELETON_HEADERS + _ZH_SKELETON_PHRASES:
+            assert zh not in md, f"英文空周正文漏中文骨架「{zh}」"
+    finally:
+        i18n.set_locale(None)

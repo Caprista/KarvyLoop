@@ -227,72 +227,90 @@ def _pct(x: Optional[float]) -> str:
 
 
 def render_digest_markdown(d: dict) -> str:
-    """digest dict → 渲染友好的 markdown(卡片正文)。空周诚实:「这周很安静」。"""
+    """digest dict → 渲染友好的 markdown(卡片正文)。空周诚实:「这周很安静」。
+
+    骨架文案(标题/小节名/固定措辞)走 i18n.t(en+zh 双表,按当前 locale 定稿);
+    **动态数据**(任务名/数字/角色名/回链、LLM 生成的 summary)是数据,原样带,不翻。
+    口味那行从 taste 的结构化字段(enough/available/n)本地化渲染,不回显 build 阶段
+    baked 的中文 note —— 保证英文 locale 用户拿到全英文正文。
+    """
+    from karvyloop import i18n
     w = d.get("window", {})
-    lines = [f"## 周报 · {w.get('start_label', '')} → {w.get('end_label', '')}", ""]
+    lines = [f"## {i18n.t('weekly.md.title')} · {w.get('start_label', '')} → {w.get('end_label', '')}", ""]
     if d.get("quiet"):
-        lines.append("这周很安静:没有任务运行、没烧 token、没有结晶/修订,也没有要你拍的板。")
+        lines.append(i18n.t("weekly.md.quiet"))
     t = d.get("tasks", {})
     lines += [
-        "### 任务",
-        f"- 跑了 **{t.get('atom_runs', 0)}** 次:成 {t.get('succeeded', 0)} / 败 {t.get('failed', 0)}"
-        f"(成功率 {_pct(t.get('success_rate'))})",
-        f"- 快脑/召回命中率 {_pct(t.get('recall_hit_rate'))}"
-        f"(stable 回放 {t.get('fast_brain_hits', 0)} + 技能制导重跑 {t.get('skill_reruns', 0)})",
+        f"### {i18n.t('weekly.md.h_tasks')}",
+        i18n.t("weekly.md.tasks_line", runs=t.get("atom_runs", 0),
+               ok=t.get("succeeded", 0), fail=t.get("failed", 0),
+               rate=_pct(t.get("success_rate"))),
+        i18n.t("weekly.md.recall_line", rate=_pct(t.get("recall_hit_rate")),
+               replays=t.get("fast_brain_hits", 0), reruns=t.get("skill_reruns", 0)),
     ]
     fails = t.get("failures") or []
     if fails:
-        lines.append(f"- 失败清单(最近 {len(fails)} 条"
-                     + (f",另有 {t.get('failures_truncated')} 条未列" if t.get("failures_truncated") else "")
-                     + "):")
+        more = (i18n.t("weekly.md.failures_more", m=t.get("failures_truncated"))
+                if t.get("failures_truncated") else "")
+        lines.append(i18n.t("weekly.md.failures_head", n=len(fails), more=more))
         for f in fails:
             term = f" [{f['terminal']}]" if f.get("terminal") else ""
             lines.append(f"  - `{f.get('atom_id') or f.get('task_id')}`{term} → {f.get('trace_ref')}")
     tok = d.get("tokens", {})
-    lines += ["", "### Token"]
+    lines += ["", f"### {i18n.t('weekly.md.h_token')}"]
     if not tok.get("available"):
-        lines.append("- 账本未接线(无数据,不猜)")
+        lines.append(i18n.t("weekly.md.token_unwired"))
     else:
-        lines.append(f"- 共 **{tok.get('total', 0):,}** tokens / {tok.get('calls', 0)} 次调用"
-                     f"(in {tok.get('input', 0):,} / out {tok.get('output', 0):,})")
+        lines.append(i18n.t("weekly.md.token_line", total=f"{tok.get('total', 0):,}",
+                            calls=tok.get("calls", 0), input=f"{tok.get('input', 0):,}",
+                            output=f"{tok.get('output', 0):,}"))
         for s in (tok.get("by_source") or [])[:8]:
-            lines.append(f"  - {s.get('source') or 'unknown'}: {s.get('total', 0):,}({s.get('calls', 0)} 次)")
+            lines.append(i18n.t("weekly.md.token_source", source=s.get("source") or "unknown",
+                                total=f"{s.get('total', 0):,}", calls=s.get("calls", 0)))
     sk = d.get("skills", {})
-    lines += ["", "### 技能"]
-    lines.append(f"- 新结晶 **{sk.get('crystallized_count', 0)}** 个"
+    lines += ["", f"### {i18n.t('weekly.md.h_skills')}"]
+    lines.append(i18n.t("weekly.md.skills_new", n=sk.get("crystallized_count", 0))
                  + ("" if not sk.get("crystallized") else ":"))
     for c in sk.get("crystallized") or []:
-        lines.append(f"  - {c.get('name')}(sig {str(c.get('sig'))[:8]},回链 {c.get('trace_ref')})")
-    lines.append(f"- 修订:落地 {sk.get('revisions_landed', 0)} / 出卡待你拍 {sk.get('revisions_proposed', 0)}")
+        lines.append(i18n.t("weekly.md.crystallized_item", name=c.get("name"),
+                            sig=str(c.get("sig"))[:8], ref=c.get("trace_ref")))
+    lines.append(i18n.t("weekly.md.revisions_line", landed=sk.get("revisions_landed", 0),
+                        proposed=sk.get("revisions_proposed", 0)))
     for r in sk.get("revisions") or []:
-        lines.append(f"  - {r.get('skill_name')}({r.get('mode')},回链 {r.get('entry_ref')})")
+        lines.append(i18n.t("weekly.md.revision_item", name=r.get("skill_name"),
+                            mode=r.get("mode"), ref=r.get("entry_ref")))
     dec = d.get("decisions", {})
-    lines += ["", "### 你拍的板"]
+    lines += ["", f"### {i18n.t('weekly.md.h_decisions')}"]
     if not dec.get("available"):
-        lines.append("- 决策流水未接线(无数据,不猜)")
+        lines.append(i18n.t("weekly.md.decisions_unwired"))
     else:
+        # ACCEPT/REJECT/DEFER/REVOKE 是枚举 token(语言无关),计数是数据 → 留在码里,无中文
         lines.append(f"- ACCEPT {dec.get('accept', 0)} / REJECT {dec.get('reject', 0)}"
                      f" / DEFER {dec.get('defer', 0)}"
                      + (f" / REVOKE {dec.get('revoke', 0)}" if dec.get("revoke") else ""))
     taste = dec.get("taste") or {}
     if taste.get("enough"):
         trend = taste.get("trend")
-        arrow = "" if trend is None else(" ↑" if trend > 0 else (" ↓" if trend < 0 else " →"))
-        lines.append(f"- 口味命中率(滚动窗):**{_pct(taste.get('hit_rate'))}**{arrow}(n={taste.get('n', 0)})")
+        arrow = "" if trend is None else (" ↑" if trend > 0 else (" ↓" if trend < 0 else " →"))
+        lines.append(i18n.t("weekly.md.taste_line", rate=_pct(taste.get("hit_rate")),
+                            arrow=arrow, n=taste.get("n", 0)))
+    elif taste.get("available"):
+        lines.append(i18n.t("weekly.md.taste_insufficient", n=taste.get("n", 0), min=TASTE_MIN_N))
     else:
-        lines.append(f"- 口味命中率:{taste.get('note') or '样本不足'}")
+        lines.append(i18n.t("weekly.md.taste_unwired"))
     p = d.get("pending", {})
-    lines += ["", "### 还挂着的"]
+    lines += ["", f"### {i18n.t('weekly.md.h_pending')}"]
     if p.get("count"):
         age = p.get("oldest_age_days")
-        lines.append(f"- **{p.get('count')}** 张卡等你拍"
-                     + (f",最老挂了 {age:.1f} 天" if isinstance(age, (int, float)) else ""))
+        age_str = (i18n.t("weekly.md.pending_age", days=f"{age:.1f}")
+                   if isinstance(age, (int, float)) else "")
+        lines.append(i18n.t("weekly.md.pending_line", count=p.get("count"), age=age_str))
         for it in p.get("items") or []:
             lines.append(f"  - [{it.get('kind')}] {it.get('summary')}")
     else:
-        lines.append("- 没有挂着的卡")
+        lines.append(i18n.t("weekly.md.pending_none"))
     if d.get("summary"):
-        lines += ["", "### 一句话", d["summary"]]
+        lines += ["", f"### {i18n.t('weekly.md.h_summary')}", d["summary"]]
     return "\n".join(lines)
 
 

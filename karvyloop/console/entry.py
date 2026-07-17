@@ -244,6 +244,24 @@ def cmd_console(args: argparse.Namespace) -> int:
     # (显式只读模式不强制录模型;非 no_llm 但无可用 key → 网页强制引导)。
     app.state.no_llm = bool(no_llm)
 
+    # === 接线孤儿修(docs/87 §四):main_loop=None 时补独立 Trace 源到 app.state.trace ===
+    # 病根:--no-llm(以及 config 缺失/构造失败)→ main_loop=None → app.state.trace 从没被赋值。
+    # 决策校准埋点(decision_wire)/周报卡(weekly_digest)/执行洞察(insight_tick)读 Trace 的
+    # 兜底顺序都是 `main_loop.trace or app.state.trace` → 两者皆 None → 确定性维护(周报)静默
+    # 空转、决策埋点无处落,违背 app.py "确定性维护(周报…)照跑" 的承诺。
+    # 修:main_loop=None 时建独立 SqliteTraceStore,落盘同正常路径(~/.karvyloop/trace.sqlite),
+    # 让确定性维护有源可读、决策埋点有处写。**只在 main_loop=None 时补** —— 正常模式已有
+    # main_loop.trace(读点兜底顺序自然优先它),不重复挂,不与正常路径双写同一 sqlite。
+    if main_loop is None:
+        try:
+            from karvyloop.cognition.sqlite_trace import SqliteTraceStore
+            app.state.trace = SqliteTraceStore(Path.home() / ".karvyloop" / "trace.sqlite")
+            logger.info("[karvyloop console] main_loop 缺席:已补独立 Trace 源(app.state.trace)"
+                        "— 周报/决策校准埋点/执行洞察等确定性维护有源可读写")
+        except Exception as e:
+            app.state.trace = None
+            logger.warning(f"[karvyloop console] app.state.trace 接线失败(周报等确定性维护将跳过): {e}")
+
     # === 9.3a:接线 token 账本(测量层,全局注册;每次 LLM 调用记一条)===
     try:
         from pathlib import Path as _PathTok

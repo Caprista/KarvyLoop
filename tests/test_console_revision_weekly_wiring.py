@@ -158,7 +158,9 @@ def test_daily_tick_runs_revision_review_and_weekly_digest(monkeypatch, tmp_path
     # 空周诚实:卡 payload 带结构化 digest + markdown,quiet=True
     payload = getattr(weekly[0], "payload", {}) or {}
     assert payload.get("digest", {}).get("quiet") is True
-    assert "周报" in payload.get("markdown", "")
+    # 正文骨架走 i18n(en+zh 双表)→ 按当前 locale 取表断言标题(locale 无关)
+    from karvyloop import i18n
+    assert i18n.t("weekly.md.title") in payload.get("markdown", "")
     # 水位已落盘(7 天幂等防重的根)
     assert (tmp_path / ".karvyloop" / "weekly_digest_tick.json").exists()
 

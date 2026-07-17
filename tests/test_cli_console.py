@@ -141,6 +141,50 @@ def test_console_no_warn_on_localhost(monkeypatch, capsys):
     assert "受信" not in captured.err
 
 
+# ============ --no-llm 补 app.state.trace(接线孤儿修,docs/87 §四)============
+
+def test_no_llm_wires_app_state_trace(monkeypatch, tmp_path):
+    """--no-llm(main_loop=None)时 cmd_console 也建独立 Trace 源挂 app.state.trace,
+    让确定性维护(周报/决策校准埋点/洞察)有源可读写,不再静默空转。"""
+    import asyncio
+    import pathlib
+    from argparse import Namespace
+
+    import uvicorn
+    import karvyloop.console.entry as entry_mod
+    from karvyloop.cognition.sqlite_trace import SqliteTraceStore
+    from karvyloop.cognition.weekly_digest import weekly_digest_tick
+    from karvyloop.karvy.proposal_registry import PendingProposalRegistry
+    from karvyloop.llm.token_ledger import get_ledger, register_ledger
+
+    # 隔离真 HOME(cmd_console 往 ~/.karvyloop 写;补的 trace 也落这)+ mock 端口空闲(直达 uvicorn.run)
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(entry_mod, "_port_free", lambda *a, **k: True)
+
+    captured: list = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: captured.append(app))
+
+    args = Namespace(host="127.0.0.1", port=8766, config=None,
+                     no_browser=True, no_llm=True, lang=None)
+    _prev = get_ledger()
+    try:
+        rc = entry_mod.cmd_console(args)
+        assert rc == 0 and len(captured) == 1
+        app = captured[0]
+        # --no-llm → main_loop 缺席,但 app.state.trace 被补上(独立 SqliteTraceStore,落盘 trace.sqlite)
+        assert getattr(app.state, "main_loop", None) is None
+        assert app.state.trace is not None
+        assert isinstance(app.state.trace, SqliteTraceStore)
+        assert (tmp_path / ".karvyloop" / "trace.sqlite").exists()
+        # 备选 Trace 源可用 → 周报 tick 不再因"无 Trace 源"跳过(空周诚实:ran=True/quiet=True)
+        res = asyncio.run(weekly_digest_tick(
+            trace=app.state.trace, registry=PendingProposalRegistry(),
+            state_path=tmp_path / "wd.json"))
+        assert res["ran"] is True and res["quiet"] is True
+    finally:
+        register_ledger(_prev)
+
+
 # ============ build_console_parser 自测 ============
 
 def test_build_console_parser_registers_correctly():
