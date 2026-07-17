@@ -37,6 +37,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _serialize_ws_send(websocket: WebSocket) -> None:
+    """给单个 ws 连接的 send_json 套一把 per-connection 锁,串行化所有并发 send(稳定性修复)。
+
+    病根:一次 drive 进行中,同一个 ws 被多路并发打 —— drive_event(worker 线程经
+    run_coroutine_threadsafe 桥回本 loop)+ task_status / role_presence / ambient_recall /
+    system_error 各自 create_task。Starlette WebSocket.send_json **不是**并发安全的:交错写
+    抛错(ASGI 报文错序)→ _broadcast/broadcast_proposal/_ws_notify 的 except 把这条**活**
+    socket 当死连接 discard → 客户端此后静默收不到 push 直到重连。
+
+    为何在 ws 对象上"包一层"而不是每个调用点加锁:send 点散在 ws.py 各 handler +
+    task_events._broadcast + proposals.broadcast_proposal + silence._ws_notify 四处,
+    instance-level 覆盖 send_json → 全部自动经该连接的锁,未来新增广播路径结构性免疫。
+
+    防死锁:①send_json 自身不再触发 send_json(锁体内无重入)②每连接独立锁、锁在单次
+    send 内取放(无跨连接锁序)→ 不可能成环。真死连接仍正确剔除:send 真抛时锁已释放、
+    异常照常冒给各广播点的 except → discard(不是被并发误伤)。
+    """
+    lock = asyncio.Lock()
+    _orig_send_json = websocket.send_json
+
+    async def _locked_send_json(data: Any, mode: str = "text") -> None:
+        async with lock:
+            await _orig_send_json(data, mode=mode)
+
+    websocket.send_json = _locked_send_json   # type: ignore[method-assign]
+    websocket._send_lock = lock               # type: ignore[attr-defined]  # 留引用便于测试/调试
+
+
 @router.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
     """主 WebSocket 端点。"""
@@ -60,6 +88,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 await websocket.close(code=1008)   # policy violation
                 return
     await websocket.accept()
+    # 并发 send 串行化(稳定性修复,见 _serialize_ws_send docstring)。必须在注册进
+    # ws_clients **之前**挂好:一旦入册就可能被广播并发打到未加锁的 send。
+    _serialize_ws_send(websocket)
     # 注册 client
     clients: set = app.state.ws_clients
     clients.add(websocket)

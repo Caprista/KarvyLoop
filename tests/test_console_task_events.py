@@ -25,6 +25,7 @@ from karvyloop.console.task_events import (  # noqa: E402
     WS_TYPE_SYSTEM_ERROR,
     WS_TYPE_TASK_STATUS,
     WS_TYPE_TASK_STEP,
+    _broadcast,
     broadcast_system_error,
     broadcast_task_status,
     broadcast_task_step,
@@ -32,6 +33,7 @@ from karvyloop.console.task_events import (  # noqa: E402
     schedule_task_broadcast,
 )
 from karvyloop.console.tasks import TaskRegistry  # noqa: E402
+from karvyloop.console.ws import _serialize_ws_send  # noqa: E402
 
 
 class _FakeWs:
@@ -213,3 +215,77 @@ async def test_task_change_sink_writes_terminal_states_to_trace() -> None:
     reg2 = TaskRegistry(on_change=make_task_change_sink(app, None))
     t3 = reg2.start(who="x", intent="y")
     reg2.finish(t3, result="z")   # 不抛即过
+
+
+# ---- 稳定性:WS 并发 send 锁(活连接不被误剔;真死仍剔)----
+
+
+class _ConcurrencyWs:
+    """假 ws:send_json 里让出控制并记录并发深度,验证 per-connection 锁串行化。
+
+    fail=True 模拟真死连接(send 真抛)。inflight/max_inflight:同一时刻有几个 send
+    在跑 —— 加锁后恒为 1(串行);没锁并发 gather 会飙到 N。
+    """
+
+    def __init__(self, fail: bool = False) -> None:
+        self.sent: list = []
+        self.fail = fail
+        self.inflight = 0
+        self.max_inflight = 0
+
+    async def send_json(self, data, mode: str = "text") -> None:
+        self.inflight += 1
+        self.max_inflight = max(self.max_inflight, self.inflight)
+        try:
+            await asyncio.sleep(0)   # 让出:给并发交错的机会(没锁则此处飙 inflight)
+            if self.fail:
+                raise RuntimeError("dead client")
+            self.sent.append(data)
+        finally:
+            self.inflight -= 1
+
+
+@pytest.mark.asyncio
+async def test_ws_send_lock_serializes_concurrent_broadcasts() -> None:
+    """并发压测:同一 ws 被 20 路广播并发打(drive_event/task_status/... 同时到)。
+    _serialize_ws_send 挂锁后 send_json 串行(max_inflight==1),活连接绝不被误剔、全部送达。"""
+    app = _FakeApp()
+    ws = _ConcurrencyWs()
+    _serialize_ws_send(ws)                        # 与真实 ws_endpoint 同一处理:挂 per-conn 锁
+    app.state.ws_clients = {ws}
+    await asyncio.gather(*[
+        _broadcast(app, {"type": "drive_event", "payload": {"i": i}})
+        for i in range(20)
+    ])
+    assert ws.max_inflight == 1                   # 串行:任一时刻只有一个 send 在跑
+    assert len(ws.sent) == 20                     # 全部送达(无交错丢失)
+    assert ws in app.state.ws_clients             # 活连接没被并发误伤剔除
+
+
+@pytest.mark.asyncio
+async def test_ws_send_lock_still_evicts_truly_dead() -> None:
+    """真死连接仍正确剔除:send 真抛 → 广播 except → discard(不是被并发误伤),活的留。"""
+    app = _FakeApp()
+    live = _ConcurrencyWs()
+    dead = _ConcurrencyWs(fail=True)
+    _serialize_ws_send(live)
+    _serialize_ws_send(dead)
+    app.state.ws_clients = {live, dead}
+    await asyncio.gather(*[
+        _broadcast(app, {"type": "task_status", "payload": {"i": i}})
+        for i in range(10)
+    ])
+    assert dead not in app.state.ws_clients       # 真死 → 剔
+    assert live in app.state.ws_clients           # 活的留
+    assert live.max_inflight == 1                 # 活连接仍串行
+    assert len(live.sent) == 10
+
+
+@pytest.mark.asyncio
+async def test_ws_send_lock_no_reentrant_deadlock() -> None:
+    """防死锁自证:同一连接连续两次 send 各自取放锁不成环(锁体内不再触发 send)。"""
+    ws = _ConcurrencyWs()
+    _serialize_ws_send(ws)
+    await ws.send_json({"a": 1})
+    await ws.send_json({"a": 2})                  # 第二次能拿到锁(前一次已释放)= 不死锁
+    assert ws.sent == [{"a": 1}, {"a": 2}]

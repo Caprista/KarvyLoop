@@ -10,9 +10,35 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """原子写整份文件:tmp 写全 + flush + fsync + os.replace(照仓内 mesh/compact 先例)。
+
+    崩在 os.replace 前(进程被杀/断电正好写盘中途)→ 目标文件字节**原样**(不截断);
+    os.replace 是原子换名。残留 tmp 在 finally 清掉(replace 成功后 tmp 已不在,
+    unlink(missing_ok) 是空操作)。
+
+    修:此前 DecisionLog/RevocationStore 裸 write_text 覆盖整份 JSON,中途崩 → 文件截断 →
+    下次 json.loads 抛 → fail-soft 归空 → 最多 5000 条审计流水 / 撤回抑制表静默清零。
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001
+            pass
+
 
 _VALID = ("ACCEPT", "REJECT", "DEFER", "REVOKE")   # REVOKE=你主动撤回一条学到的偏好(可审计回看)
 _CAP = 50        # UI「最近拍板」默认回看窗(recent 的软上限)
@@ -86,9 +112,9 @@ class DecisionLog:
             return
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._entries, ensure_ascii=False), encoding="utf-8")
+            _atomic_write(self._path, json.dumps(self._entries, ensure_ascii=False))
         except Exception:
-            pass  # 落盘失败不阻塞决策(流水丢一点不致命)
+            pass  # 落盘失败不阻塞决策(流水丢一点不致命);原子写保证不半截截断
 
 
 _REVOKE_COOLDOWN_DAYS = 14.0   # 撤回后这么久内别自动结晶回来(给"撤回"装牙;过窗后能重学)
@@ -149,9 +175,9 @@ class RevocationStore:
             return
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._marks, ensure_ascii=False), encoding="utf-8")
+            _atomic_write(self._path, json.dumps(self._marks, ensure_ascii=False))
         except Exception:
-            pass
+            pass  # 原子写保证撤回抑制表不半截截断(崩→老表原样)
 
 
 __all__ = ["DecisionLog", "RevocationStore"]

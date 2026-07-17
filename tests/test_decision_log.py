@@ -80,6 +80,61 @@ def test_corrupt_file_starts_empty(tmp_path):
     assert log.recent(10) == []
 
 
+# ---- 稳定性:原子写(tmp + fsync + os.replace)—— 崩溃即丢的洞已堵 ----
+
+
+def test_persist_uses_atomic_write_no_tmp_left(tmp_path):
+    """正常落盘:目标文件写成 + 不留 .tmp 残渣(replace 后 tmp 已换名)。"""
+    p = tmp_path / "decision_log.json"
+    log = DecisionLog(path=p)
+    log.record(decision="ACCEPT", summary="ok", now=1.0)
+    assert p.exists()
+    assert not (tmp_path / "decision_log.json.tmp").exists()   # tmp 已清
+
+
+def test_decision_log_crash_mid_write_keeps_old_file(tmp_path, monkeypatch):
+    """写盘中途崩溃(os.replace 抛,模拟被杀/断电正好换名前)→ 老文件字节原样、不截断,
+    下次启动仍能读出全部旧流水(此前裸 write_text 会截断 → 5000 条审计静默清零)。"""
+    import karvyloop.console.decision_log as dl
+    p = tmp_path / "decision_log.json"
+    log = DecisionLog(path=p)
+    log.record(decision="ACCEPT", summary="第一条", now=1.0)
+    old_bytes = p.read_bytes()
+
+    def _boom(*a, **k):
+        raise OSError("simulated crash mid-write (before rename)")
+
+    monkeypatch.setattr(dl.os, "replace", _boom)
+    log.record(decision="REJECT", summary="第二条-会崩", now=2.0)   # _persist 内被吞,不抛
+    assert p.read_bytes() == old_bytes                            # 老文件原样,没被截断/破坏
+    assert not (tmp_path / "decision_log.json.tmp").exists()      # 崩后 tmp 也清掉
+
+    monkeypatch.undo()
+    log2 = DecisionLog(path=p)                                    # 重启:从盘恢复
+    assert [x["summary"] for x in log2.recent(10)] == ["第一条"]  # 旧流水完好(没被清零)
+
+
+def test_revocation_store_atomic_and_crash_keeps_old(tmp_path, monkeypatch):
+    """RevocationStore 同样原子:崩在 replace 前 → 老抑制表原样,被撤销偏好不会因崩溃复活。"""
+    from karvyloop.console.decision_log import RevocationStore
+    import karvyloop.console.decision_log as dl
+    p = tmp_path / "revocations.json"
+    store = RevocationStore(path=p)
+    store.mark("老婆生日3月5日", now=1000.0)
+    assert not (tmp_path / "revocations.json.tmp").exists()       # 正常:无 tmp 残渣
+    old_bytes = p.read_bytes()
+
+    monkeypatch.setattr(dl.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("crash")))
+    store.mark("新加一条-会崩", now=2000.0)                        # 被吞,不抛
+    assert p.read_bytes() == old_bytes                            # 老表原样
+    monkeypatch.undo()
+
+    store2 = RevocationStore(path=p)                              # 重启恢复
+    assert store2.is_suppressed("老婆生日3月5日", now=1000.0) is True    # 旧撤回仍在
+    assert store2.is_suppressed("新加一条-会崩", now=2000.0) is False   # 崩掉那条没写进去
+
+
 # ---- 端点 ----
 def _client():
     from fastapi.testclient import TestClient
