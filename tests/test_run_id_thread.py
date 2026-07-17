@@ -51,6 +51,73 @@ def test_new_run_id_short_hex():
     int(rid, 16)  # 是 hex
 
 
+# ---- 可重入(docs/87 J1):嵌套 auto scope 复用外层 id,不铸新 ----
+
+def test_run_scope_reentrant_auto_reuses_outer():
+    """J1 修:外层已开 scope、内层 auto(空参)嵌套 → 复用外层 id(此前无条件铸新,断链)。"""
+    assert current_run_id() == ""
+    with run_scope() as outer:
+        assert outer and current_run_id() == outer
+        with run_scope() as inner:          # auto,无显式 id
+            assert inner == outer            # 复用,不铸新
+            assert current_run_id() == outer
+            with run_scope() as inner2:      # 三层照样复用
+                assert inner2 == outer
+        assert current_run_id() == outer     # 内层退出后外层 id 完好(内层没碰 contextvar)
+    assert current_run_id() == ""            # 外层退出复位
+
+
+def test_run_scope_no_outer_mints_fresh():
+    """无外层 scope 时 auto 正常铸新;两个顺序(非嵌套)顶层 scope 相互独立。"""
+    with run_scope() as a:
+        assert a and len(a) == 12
+    with run_scope() as b:
+        assert b and len(b) == 12
+    assert a != b                            # 顶层顺序 run 各自独立(drive 之间不串)
+
+
+def test_run_scope_force_mints_new_inside_outer():
+    """force=True 是安全阀:即便外层已开 scope 也铸独立新 id,退出复位回外层。"""
+    with run_scope() as outer:
+        with run_scope(force=True) as forced:
+            assert forced != outer and len(forced) == 12
+            assert current_run_id() == forced
+        assert current_run_id() == outer     # force scope 退出 → 恢复外层
+    assert current_run_id() == ""
+
+
+def test_run_scope_explicit_id_still_overrides_inside_outer():
+    """显式 run_id 仍照旧铸新覆盖(保 test_run_scope_explicit_id_and_nesting 语义,可重入不吃它)。"""
+    with run_scope() as outer:
+        with run_scope("explicit-inner") as inner:
+            assert inner == "explicit-inner"
+            assert current_run_id() == "explicit-inner"
+        assert current_run_id() == outer
+    assert current_run_id() == ""
+
+
+def test_query_run_spans_nested_reuse_j1_repro():
+    """J1 生产缝的最小复现:dispatch 外层开 scope(记 run_id A)→ drive 内层嵌套 auto scope →
+    深层 atom_run 写在**另一个 task** 下。可重入后 query_run(A) 必须跨 task 捞到那条深层 atom_run
+    (修前内层铸新 id B → query_run(A)=[] → 生命线🔧执行步永远空)。"""
+    store = TraceStore(clock=lambda: 100.0)
+    with run_scope() as outer_rid:                       # dispatch_decision 外层(run_id A)
+        store.append(TraceEntry(task_id="proposal-1", kind="decision_dispatched",
+                                payload={"run_id": outer_rid}))
+        with run_scope():                                # ml.drive 内层(auto,复用 A)
+            # drive 深处的工具步写在 drive 自己的 task 名下(≠ proposal task)
+            store.append(TraceEntry(task_id="drive-task", kind="atom_run",
+                                    payload={"atom_id": "a1", "tool_calls": [{"name": "web"}]}))
+            store.append(TraceEntry(task_id="drive-task", kind="tool_call",
+                                    payload={"name": "shell"}))
+    got = store.query_run(outer_rid)
+    kinds = {e.kind for e in got}
+    assert {"decision_dispatched", "atom_run", "tool_call"} <= kinds, \
+        f"query_run(外层 id) 应跨嵌套+跨 task 捞到深层工具步,实得: {[(e.task_id, e.kind, e.run_id) for e in got]}"
+    # 深层事件确实盖的是外层 id(不是新铸的 B)
+    assert all(e.run_id == outer_rid for e in got)
+
+
 # ---- Trace 写入咽喉盖戳(内存版)----
 
 def test_inmemory_append_stamps_run_id_and_query_run():

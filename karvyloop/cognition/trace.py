@@ -41,11 +41,31 @@ def current_run_id() -> str:
 
 
 @contextlib.contextmanager
-def run_scope(run_id: str = ""):
+def run_scope(run_id: str = "", *, force: bool = False):
     """在 with 块内标记一次 run(空参 = 自动生成)。随块退出复位,绝不跨 run 泄漏。
 
-    yield 生成的 run_id,入口方(drive/daily)可回传给调用者做串联。
+    **可重入(docs/87 J1 修复)**:若当前 contextvar 里**已有** run_id(外层入口已开
+    scope)、本层又未显式指定 run_id、也未 `force` —— 则**复用外层 id、不铸新、不动
+    contextvar**。这样"外层入口开 scope、内层深处再开 scope"的链(dispatch_decision 外
+    → ml.drive 内)写的 Trace 条目 + token 账本行**同属一个 run**,`query_run(外层 id)`
+    才能捞到内层的 atom_run/tool_call(生命线🔧执行步)。此前嵌套无条件铸新 id → 外→内链
+    断 → 时间线执行步永远空(J1)。
+
+    为什么复用安全(核过所有 run_id 消费方,docs/87 J1):run_id 的消费方
+    ——`query_run`(生命线 routes_system + `replay --run`)、token 账本
+    `run_totals`(replay 摘要)——都把一次 run 当作"**一顶伞下的全部工作**",没有任何
+    消费方依赖"每次嵌套 run_scope 都铸独立新 id";记账只在 gateway 咽喉每次调用记一条
+    (复用只改盖哪个 id、绝不重复记),故不会误合并/双计。**显式 run_id 或 force=True 仍照
+    旧铸新并在退出复位**(保 `test_run_scope_explicit_id_and_nesting` 的显式嵌套覆盖语义)。
+
+    yield 生成或复用的 run_id,入口方(drive/daily)可回传给调用者做串联。
     """
+    existing = _RUN_ID.get()
+    if existing and not run_id and not force:
+        # 可重入:外层已开 scope 且本层未显式/未 force → 复用外层 id,不铸新、不碰 contextvar
+        # (无 set 即无需 reset;body 抛异常也无残留,外层 scope 的 id 全程不变)。
+        yield existing
+        return
     rid = run_id or new_run_id()
     token = _RUN_ID.set(rid)
     try:
