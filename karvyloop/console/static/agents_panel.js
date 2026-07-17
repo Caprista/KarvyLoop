@@ -6,6 +6,15 @@ var KarvyAgentsPanelBundle = (function(exports) {
   const openMgmtModal = _KM.openMgmtModal, mgmtBody = _KM.mgmtBody;
   const _formMsg = _KM.formMsg, _setMsg = _KM.setMsg;
   const t = (k, vars) => window.KarvyI18n.t(k, vars);
+  const _lang = () => {
+    var _a, _b;
+    return ((_b = (_a = window.KarvyI18n).getLang) == null ? void 0 : _b.call(_a)) || "en";
+  };
+  const _L = (en, zh) => _lang() === "zh" ? zh : en;
+  const _setNeutral = (m, text) => {
+    m.className = "mgmt-msg";
+    m.textContent = text;
+  };
   let _deps = { refreshPeers: () => {
   } };
   const KINDS = ["decision", "hybrid", "executor", "skill"];
@@ -48,10 +57,12 @@ var KarvyAgentsPanelBundle = (function(exports) {
     const promptIn = el("textarea", {});
     const toolsIn = el("input", { type: "text", placeholder: "read_file, run_command" });
     const msg = _formMsg();
+    const detail = el("div", { class: "agent-import-detail" });
     const submit = el("button", {
       class: "mgmt-submit",
       text: t("agent.import_btn"),
       onclick: async () => {
+        detail.innerHTML = "";
         const tools = toolsIn.value.split(",").map((s) => s.trim()).filter(Boolean);
         const res = await _postJSON("/api/agent/import", {
           role_id: idIn.value.trim(),
@@ -59,10 +70,8 @@ var KarvyAgentsPanelBundle = (function(exports) {
           system_prompt: promptIn.value,
           tools
         });
-        if (res.ok) {
-          _setMsg(msg, true, t("agent.imported", { id: res.data.role_id }));
-          _deps.refreshPeers();
-        } else _setMsg(msg, false, t("mgmt.failed", { err: res.data.detail || res.data.reason || res.status }));
+        if (res.ok) _renderImportResult(msg, detail, res.data);
+        else _setMsg(msg, false, t("mgmt.failed", { err: res.data.detail || res.data.reason || res.status }));
       }
     });
     body.appendChild(el(
@@ -78,7 +87,85 @@ var KarvyAgentsPanelBundle = (function(exports) {
       el("label", { text: t("atom.tools_label") }),
       toolsIn,
       submit,
-      msg
+      msg,
+      detail
+    ));
+  }
+  function _renderImportResult(msg, detail, data) {
+    detail.innerHTML = "";
+    const ik = String(data.import_kind || "");
+    const note = String(data.note || "");
+    const rid = String(data.role_id || "");
+    if (ik === "skill_like") {
+      _setNeutral(msg, note || _L("This is a skill, not a role.", "这是一段技能,不是角色。"));
+      _renderSkillsRecognized(detail, data);
+      _skillLibJump(detail);
+      return;
+    }
+    if (ik === "pure_executor") {
+      _setNeutral(msg, note);
+      _renderAtomsLanded(detail, data);
+      _renderSkillsRecognized(detail, data);
+      return;
+    }
+    _setMsg(msg, true, t("agent.imported", { id: rid }));
+    if (note) detail.appendChild(el("div", { class: "mgmt-hint", text: note }));
+    _renderAtomsLanded(detail, data);
+    _renderSkillsRecognized(detail, data);
+    _deps.refreshPeers();
+  }
+  function _renderAtomsLanded(detail, data) {
+    const atoms = data.atoms || [];
+    if (!atoms.length) return;
+    const created = new Set(data.atoms_created || []);
+    detail.appendChild(el("div", {
+      class: "mgmt-hint",
+      text: _L(
+        `Atoms landed (${atoms.length}, ${created.size} new):`,
+        `落的公共原子(${atoms.length} 个,新建 ${created.size} 个):`
+      )
+    }));
+    for (const a of atoms) {
+      detail.appendChild(el("div", {
+        class: "mgmt-hint",
+        text: `· ${a}${created.has(a) ? _L(" (new)", "(新)") : ""}`
+      }));
+    }
+  }
+  function _renderSkillsRecognized(detail, data) {
+    const skills = data.skills_recognized || [];
+    if (!skills.length) return;
+    detail.appendChild(el("div", {
+      class: "mgmt-hint",
+      text: _L(
+        `Skills recognized: ${skills.join(", ")}`,
+        `识别出的技能:${skills.join("、")}`
+      )
+    }));
+  }
+  function _skillLibJump(detail) {
+    detail.appendChild(el(
+      "div",
+      { class: "dpref-actions" },
+      el("button", {
+        class: "mgmt-submit",
+        text: _L("Go to Skill Library →", "去技能库导入 →"),
+        onclick: async () => {
+          var _a, _b;
+          const w = window;
+          if (!w.KarvySkillsPanel) {
+            await new Promise((res, rej) => {
+              const s = document.createElement("script");
+              s.src = "/static/skills_panel.js";
+              s.onload = () => res();
+              s.onerror = () => rej(new Error("skills_panel.js load failed"));
+              document.head.appendChild(s);
+            }).catch(() => {
+            });
+          }
+          (_b = (_a = w.KarvySkillsPanel) == null ? void 0 : _a.open) == null ? void 0 : _b.call(_a);
+        }
+      })
     ));
   }
   function renderSystem(body) {

@@ -297,6 +297,21 @@ def test_workflow_distill_frontend_wired():
         assert i18n.count(f'"{k}"') == 2, f"i18n {k} 不是 en+zh 各一份"
 
 
+def test_agents_panel_import_result_honest_by_kind():
+    """J2:外部 agent 导入结果按 import_kind 如实显示 —— executor/skill 型不再假报"已进角色库 ✓"。
+    构建产物 agents_panel.js 必须:① 有按判型渲染的函数(不再无脑 imported✓);② 认 pure_executor /
+    skill_like 两个"没建 role"型;③ 读后端 note 与 import_kind;④ 有中性态(executor/skill 不给绿 ✓);
+    ⑤ skill_like 有指路技能库的跳转。"""
+    js = _read("agents_panel.js")
+    assert "_renderImportResult" in js, "缺按判型渲染导入结果的函数(仍可能无脑 imported✓)"
+    assert "pure_executor" in js and "skill_like" in js, "未按 executor/skill 型分流"
+    assert "import_kind" in js, "未读后端 import_kind 判型"
+    assert "_setNeutral" in js, "executor/skill 应走中性态(不给绿 ✓ 假成功)"
+    assert "KarvySkillsPanel" in js, "skill_like 应指路技能库(跳转按钮)"
+    # note(后端已本地化)必须被消费,而非丢弃
+    assert "data.note" in js or ".note" in js, "未展示后端诚实 note"
+
+
 def test_dcard_aligned_pref_kind_uses_i18n():
     """决策卡「你的标准(预对齐)」的 kind 标签走 i18n(dpref.kind_*,与偏好面板同键),
     服务端硬编码中文的 kind_label 只作兜底 —— 英文界面不冒中文([约束]→[constraint])。"""

@@ -347,6 +347,12 @@ async def api_agent_import(req: AgentImportRequest, request: Request) -> dict[st
                 if atom_reg.get(ap.id) is not None:
                     continue                     # 复用已有(甲:用不拥有)
                 try:
+                    # 导入原子刻意**不 provisional**(与 self_create/merge 相反)。理由(J2-次审计核过):
+                    # executor 型不建 role → 原子落库即 0 引用孤儿;若标 provisional,daily
+                    # review_provisional 会把 0 引用孤儿当"没人用"删掉(provisional.py:43),会在用户
+                    # 建 role 绑定前就摧毁"任何角色可组合"的承诺。decision/hybrid 型这些原子当场绑进
+                    # 新建 role(≥1 引用)本也不需要 provisional。故统一永久 + origin 留 provenance;
+                    # 真要 GC 走用户显式删,不靠 provisional 巡检(否则=按型该留的被静默删)。
                     atom_reg.create(ap.id, ap.kind, ap.purpose, tools=list(ap.tools),
                                     tags=list(getattr(ap, "tags", ()) or ()),
                                     origin=f"agent-import:{rid}")
