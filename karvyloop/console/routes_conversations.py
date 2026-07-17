@@ -278,11 +278,18 @@ async def api_knowledge_sediment(req: SedimentRequest, request: Request) -> dict
             content=content, layer=layer, why=(it.get("why") or "")[:300],
             when_hint=wh if isinstance(wh, str) and wh.strip() else None))
     accepted, engaged = apply_confirmation(cands, req.decisions)
-    res = {"written": 0, "extends": [], "ids": []}
+    res = {"written": 0, "extends": [], "ids": [], "conflicts": []}
     if accepted:
         res = await sediment_confirmed(
             accepted, mem=mem, gateway=rk.get("gateway"), model_ref=rk.get("model_ref", ""),
             trace=_conv_trace(request.app), learned_via=f"conversation:{conv.id}")
+        # D2:确认沉淀的高权威知识撞钉住/人审旧记忆 → 升 H2A 冲突卡由你裁(不自动失效)
+        if res.get("conflicts"):
+            try:
+                from karvyloop.console.proposals import raise_memory_conflict_cards
+                await raise_memory_conflict_cards(request.app, res["conflicts"])
+            except Exception:
+                pass  # 升卡失败不阻断沉淀(素材痕在 Trace memory_conflict_found,可审计)
     # 反投降闸(越深盲拍计分越重);服务级单例,重启清零可接受(闸是行为侦测不是账本)
     tracker = getattr(request.app.state, "sediment_tracker", None)
     if tracker is None:

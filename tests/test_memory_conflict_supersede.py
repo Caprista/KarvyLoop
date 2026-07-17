@@ -62,10 +62,13 @@ class ScriptedGW:
             yield TextDelta(self.ingest_reply)
 
 
-def belief(content, *, source="ingest", ts=1000.0, provisional=False, scope="personal"):
+def belief(content, *, source="ingest", ts=1000.0, provisional=False, scope="personal",
+           applies=None):
     prov = {"source": source, "agent": "test", "ts": ts, "trace_ref": ""}
     if provisional:
         prov["provisional"] = True
+    if applies is not None:
+        prov["applies"] = applies
     return Belief(content=content, provenance=prov, freshness_ts=ts, scope=scope)
 
 
@@ -120,15 +123,17 @@ def test_find_candidates_multichar_cjk_tag_matches():
 # ============ ①③④ 写入矛盾 → 旧失效不删 + 召回过滤(真 MemoryManager) ============
 
 def test_supersede_invalidates_old_keeps_audit_and_recall_filters(tmp_path):
+    # 用非人审来源(conversation,低权威)对局:D2 只保护钉住/人审记忆,低权威猜测互相
+    # 取代照旧默默 supersede —— 本例测的就是这条默默失效不删 + 召回过滤的核心路径。
     store = BeliefStore(tmp_path / "beliefs.json")
     mem = MemoryManager(store=store)
-    mem.write(belief("用户是素食主义者,平时吃素", source="ingest", ts=1000.0))
+    mem.write(belief("用户是素食主义者,平时吃素", source="conversation", ts=1000.0))
     gw = ScriptedGW(
         ingest_reply='[{"content":"用户现在吃肉了,不再吃素","kind":"fact"}]',
         supersede_reply='{"pairs":[{"new":0,"old":0,"relation":"update"}]}',
     )
     res = asyncio.run(I.ingest_material("我最近开始吃肉了", gateway=gw, mem=mem,
-                                        model_ref="m", now=2000.0))
+                                        model_ref="m", now=2000.0, source="conversation"))
     assert res.written == 1
     assert [k for k, _ in gw.calls] == ["ingest", "supersede"]   # 一次编译 + 一次审查
     old = mem.index.get("用户是素食主义者,平时吃素")
@@ -200,6 +205,151 @@ def test_no_candidates_means_zero_llm():
     gw = ScriptedGW()
     asyncio.run(run_supersede_pass([new], mem=mem, gateway=gw, now=2000.0))
     assert gw.calls == []   # 一个字面都不搭 → 不烧 LLM
+
+
+# ============ D1 回归:全部生产 source 必须在权威表有档(防第三次复发) ============
+
+# 生产里真实写进 Belief.provenance.source 的取值(自动扫描下方核对;新增 Belief 源不在档即红)。
+# decision_pref 不参与知识 supersede(_is_decision_pref 排除),外部标签跟数据走 rank 即可。
+def test_source_alias_covers_production_sources():
+    import re
+    import pathlib
+    from karvyloop.cognition.conflict import provenance_rank
+    pkg = pathlib.Path(I.__file__).resolve().parents[1]   # karvyloop 包根
+    found: set = set()
+    # ① provenance 字典字面量里的 "source": "X"(Belief provenance 专用:带引号 key + 冒号;
+    #    TraceEntry / token_source 用 source= 关键字[无引号无冒号],不会误中)
+    prov_re = re.compile(r'"source"\s*:\s*"([a-z_]+)"')
+    ctx_re = re.compile(r'(provenance|prov|Belief)\b')
+    # ② Belief 源常量 *_SOURCE = "X"(role_experience / task_insight / decision_pref…);
+    #    排除 TOKEN_SOURCE(token_ledger 记账源,非 Belief provenance)
+    const_re = re.compile(r'(?<!TOKEN)_SOURCE\s*=\s*"([a-z_]+)"')
+    for py in pkg.rglob("*.py"):
+        txt = py.read_text(encoding="utf-8", errors="ignore")
+        for m in prov_re.finditer(txt):
+            pre = txt[max(0, m.start() - 240):m.start()]   # 前 240 字含 provenance/prov/Belief 才算 Belief 源
+            if ctx_re.search(pre):
+                found.add(m.group(1))
+        found.update(const_re.findall(txt))
+    # ingest/feed 流的来源是调用点字面量 / ingest 默认参数(不在 provenance 字典里,自动扫描抓不到)——
+    # 这三条是稳定的固定入口,显式补进(fed=/memory/feed 拍板沉淀,ingest/knowledge=ingest 默认档)
+    found.update({"fed", "ingest", "knowledge"})
+    assert found, "扫描没找到任何生产 source —— 扫描逻辑坏了"
+    excluded = {"decision_pref"}   # 决策偏好独立问责层,不参与知识 supersede(rank 无关)
+    missing = sorted(s for s in found if s not in excluded and provenance_rank({"source": s}) <= 0)
+    assert not missing, (
+        f"生产 Belief source 未在 conflict.PROVENANCE_RANK/_SOURCE_ALIAS 登记(rank=0,会被机器"
+        f"猜的合法推翻,D1 第三次复发):{missing} —— 去 conflict.py 给它定合理档位")
+
+
+# ============ D2:钉住/人审的旧记忆被 supersede 撞上 → 升冲突卡,不自动失效(核心) ============
+
+def test_pinned_old_not_auto_invalidated_raises_conflict():
+    mem = MemoryManager()
+    old = belief("我在 Google 工作", source="fed", ts=1000.0)
+    mem.write(old, pinned=True)
+    new = belief("我现在在 Meta 工作", source="fed", ts=2000.0)
+    mem.write(new)
+    gw = ScriptedGW(supersede_reply='{"pairs":[{"new":0,"old":0,"relation":"update"}]}')
+    out = asyncio.run(run_supersede_pass([new], mem=mem, gateway=gw, now=2000.0))
+    # 旧条**没被自动失效**(你钉的东西系统绝不背着你改)
+    assert old.invalid_at is None and new.invalid_at is None
+    assert out["invalidated_old"] == 0
+    # 冲突收进返回值供 console 升 H2A 卡:含旧/新原文 + 旧来源/时间 + pin 标记
+    assert len(out["conflicts"]) == 1
+    c = out["conflicts"][0]
+    assert c["old"] == "我在 Google 工作" and c["new"] == "我现在在 Meta 工作"
+    assert c["old_source"] == "fed" and c["old_ts"] == 1000.0 and c["old_pinned"] is True
+    assert c["idem_key"].startswith("memory_conflict-")
+
+
+def test_human_reviewed_old_conflict_no_pin():
+    # 非 pin,但人审来源(ingest)—— 同样升卡不自动失效
+    mem = MemoryManager()
+    old = belief("老婆生日 3 月 5 日", source="ingest", ts=1000.0)
+    mem.write(old)
+    new = belief("老婆生日 3 月 6 日", source="ingest", ts=2000.0)
+    mem.write(new)
+    gw = ScriptedGW(supersede_reply='{"pairs":[{"new":0,"old":0,"relation":"contradict"}]}')
+    out = asyncio.run(run_supersede_pass([new], mem=mem, gateway=gw, now=2000.0))
+    assert old.invalid_at is None
+    assert len(out["conflicts"]) == 1 and out["conflicts"][0]["old_pinned"] is False
+
+
+def test_low_authority_pair_still_silently_supersedes():
+    # 低权威猜测互相取代 → 照旧默默 supersede,不弹卡
+    mem = MemoryManager()
+    old = belief("用户可能喜欢茶", source="conversation", ts=1000.0, provisional=True)
+    mem.write(old)
+    new = belief("用户其实喜欢咖啡", source="conversation", ts=2000.0, provisional=True)
+    mem.write(new)
+    gw = ScriptedGW(supersede_reply='{"pairs":[{"new":0,"old":0,"relation":"contradict"}]}')
+    out = asyncio.run(run_supersede_pass([new], mem=mem, gateway=gw, now=2000.0))
+    assert old.invalid_at == 2000.0 and out["conflicts"] == []
+
+
+def test_invalidate_choke_point_refuses_protected_without_force():
+    mem = MemoryManager()
+    fed = belief("人审记忆", source="fed", ts=1000.0)
+    mem.write(fed)
+    assert mem.invalidate(fed, reason="x") is False        # 咽喉挡住(D2)
+    assert fed.invalid_at is None
+    assert mem.invalidate(fed, reason="x", force=True) is True   # 人拍过板 → force 旁路
+    assert fed.invalid_at is not None
+    # pin 的低权威条也受保护
+    mem2 = MemoryManager()
+    pinned = belief("钉住的猜测", source="conversation", ts=1000.0)
+    mem2.write(pinned, pinned=True)
+    assert mem2.invalidate(pinned, reason="x") is False
+    assert mem2.is_protected_memory(pinned) is True
+
+
+# ============ D3:同批已判死的新条不再继续杀活旧条 ============
+
+def test_d3_dead_new_stops_killing_live_old():
+    mem = MemoryManager()
+    old_high = belief("用户对花生过敏", source="user_explicit", ts=1000.0)
+    old_low = belief("用户喜欢薯片", source="conversation", ts=900.0, provisional=True)
+    mem.write(old_high)
+    mem.write(old_low)
+    new = belief("用户零食相关猜测", source="conversation", ts=2000.0, provisional=True)
+    mem.write(new)
+    # 第一对:new 反被 user_explicit 判死;第二对:同一 new 又想更新 old_low
+    gw = ScriptedGW(supersede_reply=(
+        '{"pairs":[{"new":0,"old":0,"relation":"contradict"},'
+        '{"new":0,"old":1,"relation":"update"}]}'))
+    out = asyncio.run(run_supersede_pass([new], mem=mem, gateway=gw, now=2000.0))
+    assert new.invalid_at == 2000.0            # new 被反杀
+    assert old_low.invalid_at is None          # 死 new 不再拿去杀活的 old_low(D3)
+    assert out["invalidated_old"] == 0
+
+
+# ============ P1a:(域,角色)隔离在失效层 —— A 域绝不改写 B 域记忆 ============
+
+def test_p1a_cross_domain_role_not_superseded():
+    mem = MemoryManager()
+    old_b = belief("B域方法", source="role_experience", ts=1000.0, scope="domain",
+                   applies={"domain": "sales", "role": "销售"})
+    mem.write(old_b)
+    new = belief("A域方法", source="role_experience", ts=2000.0, scope="domain",
+                 applies={"domain": "finance", "role": "审计师"})
+    mem.write(new)
+    gw = ScriptedGW(supersede_reply='{"pairs":[{"new":0,"old":0,"relation":"update"}]}')
+    out = asyncio.run(run_supersede_pass([new], mem=mem, gateway=gw, now=2000.0))
+    assert old_b.invalid_at is None            # 跨(域,角色)不比对(候选筛选阶段就跳过)
+    assert gw.calls == []                       # 跨分区无候选 → 零 LLM
+
+    # 对照:同(域,角色)仍正常比对(此处两条都是人审档 role_experience → 走 D2 冲突卡)
+    mem2 = MemoryManager()
+    ob = belief("finance旧方法X", source="role_experience", ts=1000.0, scope="domain",
+                applies={"domain": "finance", "role": "审计师"})
+    mem2.write(ob)
+    nb = belief("finance新方法Y", source="role_experience", ts=2000.0, scope="domain",
+                applies={"domain": "finance", "role": "审计师"})
+    mem2.write(nb)
+    gw2 = ScriptedGW(supersede_reply='{"pairs":[{"new":0,"old":0,"relation":"update"}]}')
+    out2 = asyncio.run(run_supersede_pass([nb], mem=mem2, gateway=gw2, now=2000.0))
+    assert len(out2["conflicts"]) == 1 and ob.invalid_at is None
 
 
 # ============ ⑥ 使用信号:召回刷 + 批量落盘 ============

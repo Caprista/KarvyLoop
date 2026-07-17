@@ -46,7 +46,7 @@ def test_list_excludes_invalid_by_default():
     dead = _b("我在旧公司", 90.0)
     mem.write(live)
     mem.write(dead)
-    mem.invalidate(dead, reason="superseded(update) by newer belief [ingest]: 我在 A 公司")
+    mem.invalidate(dead, reason="superseded(update) by newer belief [ingest]: 我在 A 公司", force=True)
     lst = _client_with(mem).get("/api/memory").json()["beliefs"]
     contents = {b["content"] for b in lst}
     assert "我在 A 公司" in contents
@@ -61,7 +61,7 @@ def test_list_include_invalid_returns_archaeology_layer():
     mem.write(live)
     mem.write(dead)
     now = 12345.0
-    mem.invalidate(dead, reason="superseded(update) by newer belief [ingest]: 我在 A 公司", now=now)
+    mem.invalidate(dead, reason="superseded(update) by newer belief [ingest]: 我在 A 公司", now=now, force=True)
     lst = _client_with(mem).get("/api/memory?include_invalid=1").json()["beliefs"]
     by_content = {b["content"]: b for b in lst}
     # 活条:invalid_at 为空
@@ -103,7 +103,7 @@ def test_recall_as_of_endpoint_filters_by_time_point():
     new = _b("我在 B 公司工作", 200.0, valid_from=200.0)
     mem.write(old)
     mem.write(new)
-    mem.invalidate(old, reason="superseded(update) by newer belief [ingest]: 我在 B 公司工作", now=200.0)
+    mem.invalidate(old, reason="superseded(update) by newer belief [ingest]: 我在 B 公司工作", now=200.0, force=True)
     c = _client_with(mem)
     # as_of=150(A 公司时期):应召回 A、不召回 B(B 那时还没成立)
     r = c.get("/api/memory/recall?q=公司&as_of=150").json()
@@ -130,7 +130,7 @@ def test_recall_without_as_of_is_current():
     dead = _b("过时事实", 90.0)
     mem.write(live)
     mem.write(dead)
-    mem.invalidate(dead, reason="superseded(update) by newer belief [ingest]: 当前事实")
+    mem.invalidate(dead, reason="superseded(update) by newer belief [ingest]: 当前事实", force=True)
     r = _client_with(mem).get("/api/memory/recall?q=事实").json()
     assert r["ok"] is True
     assert r["as_of"] is None

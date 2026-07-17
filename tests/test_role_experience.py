@@ -164,27 +164,30 @@ def test_cross_role_isolation_same_domain():
     assert "审计师私有经验" not in blk_other_role
 
 
-# ============ ⑧ 矛盾经验走 supersede(复用冲突消解)============
+# ============ ⑧ 矛盾经验走 supersede(D2:角色经验是人审档 → 不自动失效,升冲突卡由你裁)============
 
-def test_conflicting_experience_supersede():
+def test_conflicting_experience_raises_conflict_not_auto_invalidate():
     mem = MemoryManager()
     # 库里已有旧经验
     old = E.make_experience_belief("finance分页从1开始", "pitfall",
                                    domain="finance", role="审计师")
     mem.write(old)
-    # 新任务沉出矛盾经验;supersede 审查器判 update → 旧条被打 invalid
+    # 新任务沉出矛盾经验;supersede 审查器判 update —— 但 role_experience 受 D2 保护:
+    # **不自动失效旧经验**,把冲突收进 conflict_sink 供 console 升 H2A 冲突卡由你裁。
     gw = ScriptedGW(exp_reply='[{"content":"finance分页从0开始","kind":"pitfall"}]',
                     supersede_reply='{"pairs":[{"new":0,"old":0,"relation":"update"}]}')
+    conflicts: list = []
     written = _run(E.sediment_experience(
-        _sig(correction="分页从0开始"), mem=mem, gateway=gw))
+        _sig(correction="分页从0开始"), mem=mem, gateway=gw, conflict_sink=conflicts))
     assert len(written) == 1
-    # 旧条被失效不删(仍在库,invalid_at 置)
+    # 旧经验**没被自动失效**(受保护,你钉/确认过的系统绝不背着你改),两条都在库
     olds = [b for b in mem.index.all("domain") if b.content == "finance分页从1开始"]
-    assert len(olds) == 1
-    assert olds[0].invalid_at is not None
-    # 召回默认过滤失效条 → 只召到新经验
-    blk = E.collect_role_experiences(mem, domain="finance", role="审计师", query="分页")
-    assert "从0开始" in blk and "从1开始" not in blk
+    assert len(olds) == 1 and olds[0].invalid_at is None
+    # 冲突收进 sink:含旧/新原文 + 旧来源=role_experience(console 侧升 memory_conflict 卡)
+    assert len(conflicts) == 1
+    assert conflicts[0]["old"] == "finance分页从1开始"
+    assert conflicts[0]["old_source"] == "role_experience"
+    assert conflicts[0]["idem_key"].startswith("memory_conflict-")
 
 
 # ============ ⑨ 可见 + 可删(走既有通用路径)============

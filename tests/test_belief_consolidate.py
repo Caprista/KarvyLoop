@@ -61,6 +61,36 @@ def test_apply_rejects_when_fewer_than_two_present():
     assert {b.content for b in mem.index.all("personal")} == {"only one真实"}
 
 
+# ---- P1c:失效成员不复活、不毁墓碑 ----
+def test_apply_skips_dead_member_preserves_tombstone():
+    # 卡素材里某成员在 ACCEPT 前已被 supersede 打 invalid → 死版**不并、不删**(墓碑保留,不复活)
+    mem = MemoryManager()
+    mem.write(_b("活条一:loop 自运转"))
+    mem.write(_b("活条二:loop 无人参与"))
+    mem.write(_b("死条:旧说法"))
+    mem.invalidate(mem.index.get("死条:旧说法"), reason="superseded", force=True)   # 变成墓碑
+    res = apply_belief_merge(["活条一:loop 自运转", "活条二:loop 无人参与", "死条:旧说法"],
+                             "loop 自运转、无人参与", mem=mem)
+    assert res["ok"] is True and res["removed"] == 2 and res.get("dead_skipped") == 1
+    tomb = mem.index.get("死条:旧说法")
+    assert tomb is not None and tomb.invalid_at is not None   # 墓碑仍在(失效不删的审计层没被物理删)
+
+
+def test_apply_rejects_when_only_one_live_member():
+    # 三成员但两个已死 → 活成员 < 2 → 不动(不写合并条、不删活条、墓碑都保留)
+    mem = MemoryManager()
+    mem.write(_b("唯一活条"))
+    mem.write(_b("死一"))
+    mem.write(_b("死二"))
+    mem.invalidate(mem.index.get("死一"), reason="x", force=True)
+    mem.invalidate(mem.index.get("死二"), reason="x", force=True)
+    res = apply_belief_merge(["唯一活条", "死一", "死二"], "merged", mem=mem)
+    assert res["ok"] is False and res.get("dead_skipped") == 2
+    assert mem.index.get("死一") is not None and mem.index.get("死二") is not None
+    assert mem.index.get("唯一活条") is not None
+    assert {b.content for b in mem.index.all("personal")} == {"唯一活条", "死一", "死二"}
+
+
 def test_apply_rejects_empty_merged():
     mem = MemoryManager()
     mem.write(_b("x")); mem.write(_b("y"))

@@ -140,6 +140,8 @@ HIGH_RISK_KINDS = frozenset({
     "inbox_reply",           # 收件箱"需要回复":外发(邮件)语义的入口 + 信息送达(静音=漏报杀信任)
     "revise_skill",          # 改写既有 SKILL.md —— 对护城河资产的生产写,与 merge_atoms/confirm_result 同口径
     "mesh_takeover",         # 跨设备接活重跑(docs/74 §6.3):设备"判死"是 lease 推断不是事实,自动接=双跑风险;产品裁决=H2A 确认才动,永不自动
+    "memory_conflict",       # D2:推翻你钉住/人审记忆的冲突卡 —— 静音=系统背着你改你确认过的东西(你钉的东西系统绝不背着你改),永不自动
+    "schedule_catchup",      # J5:离线追赶补跑卡(同 mesh_takeover 先例)—— 骑 run_task 会被"挣来的静音"自动兑现,独立 kind 硬排除,必人拍
     # crystallize_skill 留池:纯新增、provisional、可删,非破坏性(与上面的"改/删"不同类)
 })
 

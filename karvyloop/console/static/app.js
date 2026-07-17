@@ -997,6 +997,41 @@
         box.appendChild(el("div", { class: "butler-plan-hint", text: t("butler.plan_hint") }));
         card.appendChild(box);
       }
+    } else if (payload.kind === "memory_conflict") {
+      // D2 记忆冲突卡:supersede 要推翻你钉住/人审的记忆 → 描述冲突(旧 vs 新原文),你三选一裁。
+      // 你的选择存 card.dataset.mcResolution,ACCEPT 时随「改了再批」edits 带上 resolution 字段。
+      const box = el("div", { class: "mconflict-card" });
+      const oldRow = el("div", { class: "mconflict-row mconflict-old" },
+        el("span", { class: "mconflict-label", text: t("memory.conflict.old_label") }),
+        el("span", { class: "mconflict-text", text: String(p.old_content || "") }));
+      const newRow = el("div", { class: "mconflict-row mconflict-new" },
+        el("span", { class: "mconflict-label", text: t("memory.conflict.new_label") }),
+        el("span", { class: "mconflict-text", text: String(p.new_content || "") }));
+      box.appendChild(oldRow);
+      box.appendChild(newRow);
+      const chooseWrap = el("div", { class: "mconflict-choose" });
+      chooseWrap.appendChild(el("span", { class: "mconflict-choose-label",
+        text: t("proposal.memory_conflict.choose") }));
+      card.dataset.mcResolution = "keep_both";   // 默认维持现状(两条都留)
+      const opts = [["keep_old", "proposal.memory_conflict.keep_old"],
+                    ["adopt_new", "proposal.memory_conflict.adopt_new"],
+                    ["keep_both", "proposal.memory_conflict.keep_both"]];
+      const optBtns = [];
+      opts.forEach(function (pair) {
+        const b = el("button", {
+          class: "mconflict-opt" + (pair[0] === "keep_both" ? " active" : ""),
+          text: t(pair[1]),
+          onClick: function () {
+            card.dataset.mcResolution = pair[0];
+            optBtns.forEach(function (x) { x.classList.remove("active"); });
+            b.classList.add("active");
+          },
+        });
+        optBtns.push(b);
+        chooseWrap.appendChild(b);
+      });
+      box.appendChild(chooseWrap);
+      card.appendChild(box);
     }
   }
   function _butlerFmtBytes(n) {
@@ -1205,6 +1240,14 @@
       if (decision === "ACCEPT" && editArea && editArea.value.trim() &&
           editArea.value.trim() !== _editSrc.trim()) {
         _edits = {}; _edits[_editField] = editArea.value.trim();
+        judgeState.engaged = true;
+      }
+      // D2 记忆冲突卡:你选的裁决(keep_old/adopt_new/keep_both)随 ACCEPT 带上 edits.resolution
+      // (「改了再批」白名单式覆盖 payload.resolution 既有字段);选/看过 = 真判断,标 engaged。
+      if (decision === "ACCEPT" && payload.kind === "memory_conflict") {
+        const _res = card.dataset.mcResolution || "keep_both";
+        _edits = _edits || {};
+        _edits.resolution = _res;
         judgeState.engaged = true;
       }
       // 逼判断闸(过度判断=没判断的反面:稀有的高价值/已投降 streak 别被橡皮图章)。

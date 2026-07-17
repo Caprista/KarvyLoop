@@ -88,6 +88,7 @@ async def api_memory_ingest(req: MemoryIngestRequest, request: Request) -> dict[
         logger.warning(f"[memory/ingest] 摄入失败: {e}")
         return {"ok": False, "reason": f"摄入失败: {e}"}
     await _raise_extends(request.app, res)
+    await _raise_memory_conflicts(request.app, res)   # D2:撞钉住/人审记忆 → 升冲突卡
     return {"ok": True, "written": res.written, "skipped": res.skipped,
             "beliefs": [b.content for b in res.beliefs],
             "skip_reasons": res.skip_reasons[:5]}
@@ -114,6 +115,20 @@ async def _raise_extends(app: Any, res: Any) -> None:
                 logger.info(f"[memory] 摄入调和:升 {n} 张 extends 合并建议卡")
     except Exception as e:
         logger.warning(f"[memory] extends 升卡失败(摄入不受影响): {e}")
+
+
+async def _raise_memory_conflicts(app: Any, res: Any) -> None:
+    """D2:IngestResult.conflicts(supersede 要推翻钉住/人审旧记忆)→ 升 H2A「记忆冲突」卡。
+    失败不阻断摄入回执(素材痕在产生端 Trace memory_conflict_found,升卡崩了也可审计)。"""
+    try:
+        conflicts = getattr(res, "conflicts", None) or []
+        if conflicts:
+            from karvyloop.console.proposals import raise_memory_conflict_cards
+            n = await raise_memory_conflict_cards(app, conflicts)
+            if n:
+                logger.info(f"[memory] supersede 撞钉住/人审记忆:升 {n} 张记忆冲突卡(H2A 由你裁)")
+    except Exception as e:
+        logger.warning(f"[memory] 记忆冲突升卡失败(摄入不受影响): {e}")
 
 
 # ---- 认知库沉淀工作流(Hardy):喂料→抓取分析→知识自生长框架结构化→交流→你拍板沉淀/拒绝 ----
@@ -347,6 +362,7 @@ async def api_memory_distill_decide(req: DistillDecideRequest, request: Request)
     # 写成功 → 删掉本次之前该来源的旧版(supersede;只删 ts<_t0 的旧,保住刚写的新)
     superseded = mem.purge_source_ref(sref, before_ts=_t0) if sref else 0
     await _raise_extends(app, res)   # 摄入调和:extends 升合并建议卡(人拍板)
+    await _raise_memory_conflicts(app, res)   # D2:撞钉住/人审记忆 → 升冲突卡
     store.close()
     return {"ok": True, "decision": "persist", "written": res.written, "superseded": superseded}
 
@@ -580,12 +596,16 @@ def api_memory_edit(req: MemoryEditRequest, request: Request) -> dict[str, Any]:
     # sync_id 同剥("同 content 同 id"不变量由钩子按新内容重算)。
     prov.pop("origin_device", None)
     prov.pop("sync_id", None)
+    # D1/D2:手改是**人审**动作 → 新条落人审档(user_edit=user_explicit 100),绝不带旧条的
+    # provisional(auto 蒸)封顶标记 —— 否则手改后的知识被降权、又能被闲聊猜测反杀。
+    prov.pop("provisional", None)
     prov.update({"source": "user_edit", "ts": now})
     was_pinned = mem.index.is_pinned(old)
     nb = Belief(content=new_c, provenance=prov, freshness_ts=now, scope=old.scope)
     written = mem.write(nb, pinned=was_pinned)
+    # 用户手改是显式动作(人拍过板)→ force 旁路 D2 咽喉(旧条 user_edit 也是人审来源)
     mem.invalidate(old, reason=f"superseded(user-edit) by newer belief [user_edit]: {new_c}",
-                   now=now)
+                   now=now, force=True)
     return {"ok": bool(written), "written": bool(written)}
 
 
@@ -666,6 +686,7 @@ async def maybe_auto_distill(app: Any, mgr: Any) -> Optional[dict]:
                 await raise_extends_cards(app, res.extends)
             except Exception as e:
                 logger.debug(f"[auto_distill] extends 升卡失败(不影响蒸馏): {e}")
+        await _raise_memory_conflicts(app, res)   # D2:撞钉住/人审记忆 → 升冲突卡(conversation 蒸的极少命中,兜住)
         if decisions:
             try:
                 from karvyloop.console.decision_wire import crystallize_candidates

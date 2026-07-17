@@ -59,6 +59,8 @@ class IngestResult:
     raw: str = ""                      # 摘要(调试)
     extends: list = field(default_factory=list)   # 摄入调和 extends 半边:待升 H2A 合并卡的素材
                                                   # (run_supersede_pass 判的;console 侧升卡)
+    conflicts: list = field(default_factory=list)  # D2:supersede 要推翻钉住/人审旧记忆 → 待升 H2A
+                                                   # 「记忆冲突」卡的素材(console 侧 _raise_memory_conflicts)
 
 
 _BULLET_RE = re.compile(r"^([-*•]|\d+[.、)])\s+(.*)$")
@@ -214,7 +216,10 @@ async def ingest_material(
     material = (material or "").strip()
     if not material:
         return IngestResult(written=0, raw="(空材料)")
-    facts = await compile_material(material, gateway=gateway, model_ref=model_ref, system=system)
+    # P1b:摄入主编译 token 归到本次来源(此前记 unknown,docs/68 P0-9 长尾大头)。
+    from karvyloop.llm.token_ledger import token_source
+    with token_source(f"ingest:{source}" if source else "ingest"):
+        facts = await compile_material(material, gateway=gateway, model_ref=model_ref, system=system)
     written: list = []
     reasons: list = []
     for f in facts:
@@ -246,6 +251,7 @@ async def ingest_material(
             # 不静默吞:记下原因(否则 100% 跳过无从诊断,独立 checker 抓到的 MEDIUM)
             reasons.append(f"write failed: {type(e).__name__}: {e}")
     extends: list = []
+    conflicts: list = []
     if written:
         # 写入路径 supersede(核心接线):失败自吞(run_supersede_pass 内部宁空勿毒,原库不动)。
         # 摄入调和:duplicate 高置信自动合并(审计痕留 invalid_reason/Trace);extends 素材
@@ -254,6 +260,7 @@ async def ingest_material(
         sup = await run_supersede_pass(written, mem=mem, gateway=gateway,
                                        model_ref=model_ref, now=now, trace=trace)
         extends = list(sup.get("extends") or [])
+        conflicts = list(sup.get("conflicts") or [])   # D2:推翻钉住/人审旧记忆 → console 升冲突卡
         # 标签预计算(#61 研判①a + 反向标签):新条 reuse-first 打标入 ConceptCache —— 召回
         # 种子的语义层/supersede 候选筛选读的就是它。与 supersede 同节奏(写入侧异步,打字
         # 热路径零 LLM 铁律不动);失败自吞(标签是增益不是命脉,daily 慢侧 belief_tags_tick 会回填)。
@@ -269,7 +276,8 @@ async def ingest_material(
                 pass
     return IngestResult(written=len(written), beliefs=written,
                         skipped=len(reasons), skip_reasons=reasons,
-                        raw=f"compiled {len(facts)} fact(s)", extends=extends)
+                        raw=f"compiled {len(facts)} fact(s)", extends=extends,
+                        conflicts=conflicts)
 
 
 async def ingest_knowledge(material: str, *, gateway: Any, mem: Any, model_ref: str = "",

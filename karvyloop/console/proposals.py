@@ -186,6 +186,56 @@ async def raise_extends_cards(app: Any, extends: list, *, now: Optional[float] =
     return n
 
 
+async def raise_memory_conflict_cards(app: Any, conflicts: list, *,
+                                      now: Optional[float] = None) -> int:
+    """D2 记忆冲突升卡:supersede 要推翻你**钉住/人审的旧记忆** → 不自动失效,升 H2A「记忆冲突」卡
+    描述冲突(旧 vs 新原文 + 旧条来源/时间)让你裁(保留旧/采纳新/都留)。
+
+    素材来自 run_supersede_pass 的 `conflicts`(cognition 不依赖 console,升卡在这层,同 extends)。
+    走 broadcast_proposal 正门(register + 静音判定;memory_conflict ∈ HIGH_RISK_KINDS 硬排除静音)。
+    REJECT 记忆:你拒过的同对(proposal_id=idem_key,住 decision_log)不再唠叨。返回升卡数。
+    """
+    if not conflicts:
+        return 0
+    import time as _time
+    if now is None:
+        now = _time.time()
+    # REJECT 记忆(同 extends):拒过的同对不再弹(idem_key = 冲突卡 proposal_id,住 decision_log)
+    rejected: set = set()
+    log = getattr(app.state, "decision_log", None)
+    if log is not None:
+        try:
+            rejected = {str(e.get("proposal_id") or "")
+                        for e in log.query(decision="REJECT", limit=5000)}
+            rejected.discard("")
+        except Exception as e:
+            logger.debug(f"[proposals] 冲突卡 REJECT 记忆查询失败(不过滤): {e}")
+    n = 0
+    from karvyloop.karvy.proposal_registry import proposal_for_memory_conflict
+    for c in conflicts:
+        try:
+            old_c = str(c.get("old") or "").strip()
+            new_c = str(c.get("new") or "").strip()
+            if not old_c or not new_c or old_c == new_c:
+                continue
+            idem = str(c.get("idem_key") or "")
+            if idem and idem in rejected:
+                continue   # 你拒过这对冲突 → 不再唠叨(痕迹仍在 Trace,可审计)
+            card = proposal_for_memory_conflict(
+                old_content=old_c, new_content=new_c,
+                old_source=str(c.get("old_source") or ""),
+                old_ts=float(c.get("old_ts") or 0.0),
+                old_pinned=bool(c.get("old_pinned")),
+                new_source=str(c.get("new_source") or ""),
+                relation=str(c.get("relation") or "update"),
+                ts=now, idem_key=idem)
+            await broadcast_proposal(app, card)
+            n += 1
+        except Exception as ex:
+            logger.warning(f"[proposals] 记忆冲突升卡失败(跳过该对): {ex}")
+    return n
+
+
 async def proactive_from_state(app: Any):
     """loop-step2b:小卡基于**持久化状态**(任务看板)主动产一条建议并广播。
 

@@ -206,24 +206,30 @@ async def distill_experience(sig: TaskOutcomeSignal, *, gateway: Any,
     except Exception:
         ref = model_ref   # 解析不了用原值(测试桩 gateway 无 resolve_model 也能跑)
     material, _ = clip_to_tokens(material, LLM_MATERIAL_TOKENS)   # 基建天花板(防病态爆炸)
+    # P1b:角色经验蒸馏 token 归到 role_experience(此前记 unknown,docs/68 P0-9 长尾)
+    from karvyloop.llm.token_ledger import token_source
     out = ""
-    async for ev in gateway.complete(
-        [{"role": "user", "content": material}], [], ref,
-        system=SystemPrompt(static=[ROLE_EXPERIENCE_SYSTEM]),
-    ):
-        if type(ev).__name__ == "TextDelta":
-            out += getattr(ev, "text", "")
+    with token_source("role_experience"):
+        async for ev in gateway.complete(
+            [{"role": "user", "content": material}], [], ref,
+            system=SystemPrompt(static=[ROLE_EXPERIENCE_SYSTEM]),
+        ):
+            if type(ev).__name__ == "TextDelta":
+                out += getattr(ev, "text", "")
     return parse_experiences(out)
 
 
 async def sediment_experience(sig: TaskOutcomeSignal, *, mem: Any, gateway: Any,
-                              model_ref: str = "", now: Optional[float] = None) -> list[Belief]:
+                              model_ref: str = "", now: Optional[float] = None,
+                              conflict_sink: Optional[list] = None) -> list[Belief]:
     """**沉淀总入口**:一次角色任务收尾 → 保守门 → LLM 蒸馏 → 写 role-scoped Belief → supersede。
 
     - 保守门 `should_distill`:无信号(纯失败无纠正 / 无域)→ 零 LLM 零写入,返 []。
     - 蒸馏出 0 条(宁空勿毒 / LLM 判无可沉)→ 不写。
     - 写入走 `mem.write`(provenance/freshness/去重/落盘在那);写完跑一轮 supersede
       (同域同角色矛盾/更新的旧经验打失效,复用刚接线的冲突消解,不另造)。
+    - **D2**:角色经验是人审档(role_experience 受保护)—— 新经验要推翻旧经验时不自动失效,
+      supersede 把冲突收进 `conflict_sink`(调用方 console 层升 H2A 冲突卡让你裁;沉淀本身不依赖 console)。
     - 全程 fail-soft:任何异常吞掉只打日志(沉淀是增益,绝不拖垮任务收尾主流程)。
     返回写入的经验 Belief 列表(供调用方 log / 面板;空 = 没沉)。
     """
@@ -256,8 +262,11 @@ async def sediment_experience(sig: TaskOutcomeSignal, *, mem: Any, gateway: Any,
             # 但为稳妥,写入的都是 scope="domain",supersede 只比 domain scope 内的条)。
             try:
                 from karvyloop.cognition.conflict import run_supersede_pass
-                await run_supersede_pass(written, mem=mem, gateway=gateway,
-                                         model_ref=model_ref, now=now)
+                sup = await run_supersede_pass(written, mem=mem, gateway=gateway,
+                                               model_ref=model_ref, now=now)
+                # D2:角色经验受保护 → 推翻旧经验的冲突收给调用方升 H2A 卡(不自动失效)
+                if conflict_sink is not None:
+                    conflict_sink.extend(sup.get("conflicts") or [])
             except Exception as e:
                 logger.warning(f"[role_experience] supersede 失败(原库不动): {e}")
         if written:

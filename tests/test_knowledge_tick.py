@@ -85,6 +85,25 @@ def test_tick_suggests_then_watermark_skips(tmp_path, monkeypatch):
     assert r2["ran"] is False and "watermark" in r2["reason"] and calls["n"] == 1
 
 
+def test_tick_excludes_invalid_from_candidate_pool(tmp_path, monkeypatch):
+    # P1c:失效条不进整理候选池 —— 否则死版+新版一起聚类 → 合并复活失效知识 + consolidate 毁墓碑。
+    captured = {}
+    async def fake(beliefs, *, gateway, model_ref=""):
+        captured["contents"] = [getattr(b, "content", "") for b in beliefs]
+        return []
+    import karvyloop.cognition.consolidate as mod
+    monkeypatch.setattr(mod, "suggest_consolidation", fake)
+    beliefs = [_belief(f"活知识{i}") for i in range(MIN_BELIEFS)]
+    dead = SimpleNamespace(content="失效的旧知识",
+                           provenance={"source": "fed", "kind": "knowledge"}, invalid_at=123.0)
+    beliefs.append(dead)
+    app = _app(beliefs)
+    asyncio.run(knowledge_consolidate_tick(app, state_path=tmp_path / "t.json", now=1000.0))
+    assert "contents" in captured
+    assert "失效的旧知识" not in captured["contents"]     # 死条被排除
+    assert len(captured["contents"]) == MIN_BELIEFS       # 只喂活条
+
+
 def test_tick_cooldown_no_nag(tmp_path, monkeypatch):
     """库变了、但同一簇冷却窗内建议过 → 不重复升卡。"""
     beliefs = [_belief(f"知识点{i}") for i in range(MIN_BELIEFS)]

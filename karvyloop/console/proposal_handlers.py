@@ -24,7 +24,8 @@ from karvyloop.karvy.proposal_registry import (
     KIND_CONFIRM_DECISION_PREF, KIND_CONFIRM_RESULT, KIND_CRYSTALLIZE_SKILL,
     KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
     KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
-    KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER,
+    KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER, KIND_MEMORY_CONFLICT,
+    KIND_SCHEDULE_CATCHUP,
 )
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,19 @@ def _schedule_role_experience(app: Any, *, role: str, domain: str, requirement: 
             return
     except Exception:
         return
-    coro = sediment_experience(sig, mem=mem, gateway=gw, model_ref=rk.get("model_ref", ""))
+    async def _sediment_and_raise() -> None:
+        conflicts: list = []
+        await sediment_experience(sig, mem=mem, gateway=gw, model_ref=rk.get("model_ref", ""),
+                                  conflict_sink=conflicts)
+        # D2:角色经验是人审档 —— 新经验要推翻旧经验时不自动失效,升 H2A 冲突卡由你裁(fail-soft)
+        if conflicts:
+            try:
+                from karvyloop.console.proposals import raise_memory_conflict_cards
+                await raise_memory_conflict_cards(app, conflicts)
+            except Exception as e:
+                logger.warning(f"[role_experience] 经验冲突升卡失败(不阻断): {e}")
+
+    coro = _sediment_and_raise()
     import asyncio
     try:
         loop = asyncio.get_running_loop()
@@ -394,6 +407,48 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
                            problem=intent, approach=f"重跑「{intent[:40]}」")
         return True, f"已重跑「{intent[:30]}」:{short or '(无输出)'}{(' ' + suffix) if suffix else ''}"
 
+    return handler
+
+
+def _memory_conflict_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """D2 记忆冲突卡 ACCEPT 兑现:按你的裁决(payload.resolution)处置钉住/人审记忆的冲突。
+
+    - `adopt_new`:采纳新条 → 失效旧条(force=True,失效不删,reason 对齐 supersede 考古层格式)。
+    - `keep_old`:保留旧条 → 失效**新**条(那条刚写入的更新)。
+    - `keep_both`(默认):维持现状,谁都不失效。
+    REJECT/DEFER 走 registry 通用语义(不进这里)= 维持现状(两条都留)。K5:只在你 ACCEPT 后被调。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        from karvyloop import i18n
+        mem = getattr(app.state, "memory", None)
+        if mem is None:
+            return False, "未接 memory —— 无法处置记忆冲突"
+        payload = getattr(proposal, "payload", None) or {}
+        old_c = (payload.get("old_content") or "").strip()
+        new_c = (payload.get("new_content") or "").strip()
+        resolution = (payload.get("resolution") or "keep_both").strip()
+        if resolution == "keep_both":
+            return True, i18n.t("receipt.memory_conflict.keep_both")
+        if resolution == "adopt_new":
+            victim_c, keep_c = old_c, new_c
+            src = payload.get("new_source", "") or "?"
+            reason = f"superseded(memory-conflict; you adopted new) by newer belief [{src}]: {new_c[:80]}"
+            done_key = "receipt.memory_conflict.adopt_new"
+        elif resolution == "keep_old":
+            victim_c, keep_c = new_c, old_c
+            src = payload.get("old_source", "") or "?"
+            reason = f"rejected(memory-conflict; you kept old) [{src}]: {old_c[:80]}"
+            done_key = "receipt.memory_conflict.keep_old"
+        else:
+            return False, i18n.t("receipt.memory_conflict.bad_resolution", r=resolution)
+        b = mem.index.get(victim_c) or mem.index.get(victim_c.strip())
+        if b is None:
+            return True, i18n.t("receipt.memory_conflict.gone")
+        if getattr(b, "invalid_at", None) is not None:
+            return True, i18n.t("receipt.memory_conflict.already")
+        import time as _t
+        ok = mem.invalidate(b, reason=reason, now=_t.time(), force=True)   # 你拍过板 → force 旁路 D2 咽喉
+        return bool(ok), i18n.t(done_key, keep=keep_c[:40])
     return handler
 
 
@@ -848,6 +903,8 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_ROUTE_TO_ROLE: _route_to_role_handler(app),
         KIND_ROUNDTABLE: _roundtable_handler(app),
         KIND_RUN_TASK: _run_task_handler(app),
+        KIND_SCHEDULE_CATCHUP: _run_task_handler(app),           # J5:独立 kind,复用 run_task 重跑逻辑
+        KIND_MEMORY_CONFLICT: _memory_conflict_handler(app),     # D2:按你的裁决处置钉住/人审记忆冲突
         KIND_MESH_TAKEOVER: make_mesh_takeover_handler(app),     # mesh 接活:claim→重跑→complete
         KIND_CONFIRM_DECISION_PREF: _confirm_decision_pref_handler(app),
         KIND_OPS_FIX: _ops_fix_handler,

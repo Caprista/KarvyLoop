@@ -60,7 +60,9 @@ _NOW = 1_700_000_000.0
 
 
 def _belief(content: str, ts: float = _NOW) -> Belief:
-    return Belief(content=content, provenance={"source": "ingest", "ts": ts},
+    # source=conversation(低权威):这些是召回/摄入调和(auto-merge/extends)的测试,不测 D2 人审保护;
+    # 用非人审来源让 supersede 走默默失效路径(D2 只保护钉住/人审记忆,ingest 会被路由去冲突卡)。
+    return Belief(content=content, provenance={"source": "conversation", "ts": ts},
                   freshness_ts=ts, scope="personal")
 
 

@@ -136,22 +136,44 @@ async def suggest_consolidation(beliefs: list, *, gateway: Any, model_ref: str =
 def apply_belief_merge(member_contents: list, merged_content: str, *, merged_title: str = "",
                        mem, scope: str = "personal", now: Optional[float] = None) -> dict:
     """把一簇知识点合并成一条:**先写合并条、再删被并的旧条**(避免中途失败丢数据)。
-    返回 {ok, removed, merged}。真实存在的成员 < 2 或 merged 为空 → ok=False 不动。"""
+    返回 {ok, removed, merged, dead_skipped}。真实**活**成员 < 2 或 merged 为空 → ok=False 不动。
+
+    **P1c 失效知识不复活/不毁墓碑**:卡上素材从产生到 ACCEPT 之间某成员可能已被 supersede 打
+    invalid_at(死版)。此时只并**活版**;死成员**不并、不删**(remove_by_content 按 content 精确删
+    会连墓碑一起物理删 = 失效不删的审计层被销毁,且把死知识揉进新合并条 = 复活失效知识)。"""
     from karvyloop.schemas.cognition import Belief
     if now is None:
         now = time.time()
     members = [str(c).strip() for c in (member_contents or []) if str(c).strip()]
     merged = (merged_content or "").strip()
-    present = mem.count_beliefs_by_content(set(members)) if hasattr(mem, "count_beliefs_by_content") else len(members)
+    # 逐成员查 invalid_at:只留活版(index 单 key=content,一个 content 至多一条)。缺 index 的
+    # 桩(无 .index / 无 get)→ 退回原 count 逻辑(不回归),但生产走真 MemoryManager 有 index。
+    idx = getattr(mem, "index", None)
+    dead_skipped = 0
+    if idx is not None and hasattr(idx, "get"):
+        live: list = []
+        for c in members:
+            b = idx.get(c) or idx.get(c.strip())
+            if b is None:
+                continue   # 已不在(被删/未写)
+            if getattr(b, "invalid_at", None) is not None:
+                dead_skipped += 1
+                continue   # 死条:不并、不删(保墓碑,不复活)
+            live.append(c)
+        members = live
+        present = len(members)
+    else:
+        present = mem.count_beliefs_by_content(set(members)) if hasattr(mem, "count_beliefs_by_content") else len(members)
     if len(members) < 2 or present < 2 or not merged:
-        return {"ok": False, "reason": "真实成员 < 2 或合并内容为空,不动", "removed": 0, "merged": ""}
+        return {"ok": False, "reason": "真实活成员 < 2 或合并内容为空,不动",
+                "removed": 0, "merged": "", "dead_skipped": dead_skipped}
     # ① 先写合并条(source=consolidated,带标题)
     mem.write(Belief(content=merged, freshness_ts=now, scope=scope,
                      provenance={"source": "consolidated", "agent": "user", "ts": now,
                                  "kind": "knowledge", "title": (merged_title or "").strip()}))
-    # ② 再删被并的旧条(按内容精确匹配;合并条内容不同 → 不会误删自己)
+    # ② 再删被并的**活**旧条(按内容精确匹配;死墓碑不在 members 里 → 保留可审计)
     removed = mem.remove_by_content(set(members))
-    return {"ok": True, "removed": removed, "merged": merged}
+    return {"ok": True, "removed": removed, "merged": merged, "dead_skipped": dead_skipped}
 
 
 __all__ = ["KNOWLEDGE_CONSOLIDATE_SYSTEM", "parse_belief_clusters",

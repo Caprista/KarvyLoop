@@ -133,7 +133,9 @@ def _archive_stale_handler(app: Any):
             if b is None or getattr(b, "invalid_at", None) is not None:
                 missing += 1
                 continue
-            mem.invalidate(b, reason="stale-archived (H2A ACCEPT: 一年未用)", now=now)
+            # H2A ACCEPT 的归档是显式人拍板 → force 旁路 D2 咽喉(否则 pin 的已被 _stale_candidates
+            # 跳过,但人审 source 的过时条会被咽喉挡住失效不了)
+            mem.invalidate(b, reason="stale-archived (H2A ACCEPT: 一年未用)", now=now, force=True)
             done += 1
         if done == 0:
             return False, "没有可归档的条目(可能已被删除或已失效)"
@@ -155,7 +157,10 @@ async def knowledge_consolidate_tick(app: Any, *, state_path: Optional[Path] = N
         return {"ran": False, "suggested": 0, "stale_suggested": 0,
                 "reason": "memory/gateway/proposal_registry 未接"}
     from karvyloop.crystallize.decision_pref import is_decision_pref
-    beliefs = [b for b in mem.index.all("personal") if not is_decision_pref(b)]
+    # P1c:候选池排除**已失效**条(invalid_at 置)—— 否则死版+新版一起聚类,合并会复活失效知识、
+    # 且 consolidate 物理删连墓碑一起毁(失效不删的审计层被销毁)。stale 候选另在 _stale_candidates 过滤。
+    beliefs = [b for b in mem.index.all("personal")
+               if not is_decision_pref(b) and getattr(b, "invalid_at", None) is None]
     if len(beliefs) < MIN_BELIEFS:
         return {"ran": False, "suggested": 0, "stale_suggested": 0,
                 "reason": f"知识 < {MIN_BELIEFS} 条,不值得整理"}

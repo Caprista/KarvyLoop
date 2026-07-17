@@ -52,6 +52,8 @@ KIND_MERGE_KNOWLEDGE = "merge_knowledge"  # 知识库自动整理(daily 慢侧):
 KIND_FS_ACCESS = "fs_access"  # fs_grants:role 碰壁工作区外路径 → 授权卡;ACCEPT=台账放行(敏感路径永不出卡)
 KIND_EXTERNAL_ADOPT = "external_adopt"  # M2(#71 §7.3):外部公民供稿的 H2A 采纳门——ACCEPT 才让 untrusted 产出穿来源边界(升记忆/当结论/并入共享状态);无采纳=只当参考数据。永不自动进记忆、不占决策席、不担责
 KIND_MESH_TAKEOVER = "mesh_takeover"  # docs/74 §6.2/§6.3 mesh 任务板:别机任务 lease 过期(设备掉线没续租)→ 接活卡;ACCEPT = claim 上账 + 本地从头重跑(骑 run_task 语义)+ complete 上账。绝不 auto-execute
+KIND_MEMORY_CONFLICT = "memory_conflict"  # D2:supersede 要推翻你钉住/人审的记忆 → 不自动失效,升冲突卡描述冲突(旧vs新+旧来源时间)让你裁(保留旧/采纳新/都留)。走 HIGH_RISK_KINDS 硬排除静音
+KIND_SCHEDULE_CATCHUP = "schedule_catchup"  # J5:离线追赶补跑卡 —— **独立 kind**(不再骑 run_task),进 HIGH_RISK_KINDS 绝不被静音自动兑现,必人拍;handler 内部复用 run_task 重跑逻辑
 # 花费预算提醒(llm/spend_budget.build_card 产出):**纯提醒卡,无副作用 handler**——
 # 达 75/90/100% 阈值时经 emit_card→broadcast 出一张告警卡,用户 ACCEPT/REJECT 都只关卡(无兑现)。
 # 这里登记 kind 常量让它进 ALL_KINDS(前端/registry 认得它、不当未知 kind);handler 有意不注册。
@@ -72,6 +74,8 @@ ALL_KINDS = (
     KIND_FS_ACCESS,
     KIND_EXTERNAL_ADOPT,
     KIND_MESH_TAKEOVER,
+    KIND_MEMORY_CONFLICT,
+    KIND_SCHEDULE_CATCHUP,
     KIND_SPEND_BUDGET_ALERT,
 )
 
@@ -651,6 +655,76 @@ def proposal_for_merge_knowledge(
     )
 
 
+def proposal_for_memory_conflict(
+    *,
+    old_content: str,
+    new_content: str,
+    old_source: str = "",
+    old_ts: float = 0.0,
+    old_pinned: bool = False,
+    new_source: str = "",
+    relation: str = "update",
+    ts: float,
+    idem_key: str = "",
+    strength: float = 0.85,
+):
+    """D2 记忆冲突卡:supersede 要让**钉住/人审的旧记忆**失效 → 不自动执行,升这张卡描述冲突让你裁。
+
+    Hardy 原话:「要描述冲突给我,告诉我这和我曾经的哪个决策/记忆冲突了」。卡上三态:
+    ①冲突了什么(旧内容 vs 新内容原文,进 payload)②旧那条来源+时间(它是你哪次确认的)
+    ③让你裁 —— resolution 默认 "keep_both"(维持现状:两条都留),你可「改了再批」成
+    "adopt_new"(采纳新、失效旧)/ "keep_old"(保留旧、失效新)。ACCEPT 按 resolution 执行;
+    REJECT/DEFER = 维持现状,谁都不失效。幂等:proposal_id 按 (old,new) 稳定派生,同对收敛一张。
+    """
+    from karvyloop import i18n
+    from .atoms import Proposal
+    old_c = (old_content or "").strip()
+    new_c = (new_content or "").strip()
+    if not old_c or not new_c:
+        raise ValueError("memory_conflict 需要 old_content + new_content")
+    # 旧条来源人话标签(en/zh 双表);查不到 key 回退裸 source(i18n.t 缺 key 返回 key 本身)
+    src_label = i18n.t(f"memory.source.{old_source}") if old_source else "?"
+    if src_label.startswith("memory.source."):
+        src_label = old_source or "?"
+    when = "-"
+    if old_ts:
+        try:
+            import datetime
+            when = datetime.datetime.fromtimestamp(float(old_ts)).strftime("%Y-%m-%d")
+        except Exception:
+            when = "-"
+    origin = (i18n.t("proposal.memory_conflict.origin_pinned", src=src_label, when=when)
+              if old_pinned else
+              i18n.t("proposal.memory_conflict.origin_reviewed", src=src_label, when=when))
+    basis = i18n.t("proposal.memory_conflict.basis", old=old_c[:120], new=new_c[:120],
+                   origin=origin)
+    pid = idem_key or ("memory_conflict-" + hashlib.sha1(
+        "\n".join(sorted((old_c, new_c))).encode("utf-8")).hexdigest()[:8])
+    return Proposal(
+        summary=i18n.t("proposal.memory_conflict.summary", old=old_c[:40], new=new_c[:40]),
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_MEMORY_CONFLICT,
+        payload={
+            "old_content": old_c,
+            "new_content": new_c,
+            "old_source": old_source or "",
+            "old_ts": float(old_ts or 0.0),
+            "old_pinned": bool(old_pinned),
+            "new_source": new_source or "",
+            "relation": relation or "update",
+            # 你的裁决(「改了再批」可覆盖成 adopt_new / keep_old / keep_both);默认维持现状
+            "resolution": "keep_both",
+        },
+        proposal_id=pid,
+        basis=basis,
+    )
+
+
 def proposal_for_confirm_result(
     *,
     role: str,
@@ -770,8 +844,11 @@ __all__ = [
     "proposal_for_infeasible_report",
     "proposal_for_merge_atoms",
     "proposal_for_merge_knowledge",
+    "proposal_for_memory_conflict",
     "proposal_for_fs_access",
     "KIND_FS_ACCESS",
+    "KIND_MEMORY_CONFLICT",
+    "KIND_SCHEDULE_CATCHUP",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",

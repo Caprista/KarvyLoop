@@ -15,7 +15,7 @@ import time
 from typing import Optional
 
 from .atoms import Proposal
-from .proposal_registry import KIND_RUN_TASK
+from .proposal_registry import KIND_RUN_TASK, KIND_SCHEDULE_CATCHUP
 
 
 def resume_proposal_for(t: dict, *, now: Optional[float] = None) -> Optional[Proposal]:
@@ -61,8 +61,11 @@ def catchup_proposal_for(t, missed_count: int, latest_missed: Optional[float], *
     """给一条离线期间错过场次的定时任务造一张「要补跑一次吗」H2A 卡(骑 run_task)。
 
     - **聚合**:一个 schedule 一张卡;N 场错过只补跑**一次**(关机三天的 hourly=72 场,
-      逐场重放才是错的)。绝不 auto-execute:卡只是问,ACCEPT 才由既有 run_task handler
-      真跑 intent(payload 带 schedule_id → handler 顺手把结果记回 schedule 看板)。
+      逐场重放才是错的)。绝不 auto-execute:卡只是问,ACCEPT 才由 schedule_catchup handler
+      真跑 intent(handler 内部复用 run_task 重跑逻辑,payload 带 schedule_id → 结果记回看板)。
+    - **J5 独立 kind**:kind=KIND_SCHEDULE_CATCHUP(不再骑 run_task)+ 进 silence.HIGH_RISK_KINDS →
+      **绝不被"挣来的静音"自动兑现**(骑 run_task 时良性追赶卡会命中 run_task|域 静音授权被自动跑,
+      违背"绝不 auto"承诺;独立 kind 硬排除堵死)。
     - **幂等**:proposal_id 按 schedule id 稳定 → 同 schedule 收敛一张卡,不重弹。
     - `t` duck type:需 id/intent/title/target_domain/target_role(karvy.scheduler.ScheduledTask)。
     """
@@ -86,7 +89,7 @@ def catchup_proposal_for(t, missed_count: int, latest_missed: Optional[float], *
         habit_id=0,
         model_ref="",
         ts=(now if now is not None else time.time()),
-        kind=KIND_RUN_TASK,
+        kind=KIND_SCHEDULE_CATCHUP,   # J5:独立 kind(不再骑 run_task)→ silence 硬排除,必人拍
         payload={
             "intent": intent,
             "domain_id": getattr(t, "target_domain", "") or "l0",

@@ -240,13 +240,14 @@ async def sediment_confirmed(
             ids.append(_cid(content))
         except Exception:
             continue
-    result = {"written": len(written), "extends": [], "ids": ids}
+    result = {"written": len(written), "extends": [], "ids": ids, "conflicts": []}
     if written and gateway is not None:
         try:
             from karvyloop.cognition.conflict import run_supersede_pass
             sup = await run_supersede_pass(written, mem=mem, gateway=gateway,
                                            model_ref=model_ref, now=now, trace=trace)
             result["extends"] = list(sup.get("extends") or [])
+            result["conflicts"] = list(sup.get("conflicts") or [])   # D2:撞钉住/人审旧记忆 → 升卡
         except Exception:
             pass
         cc = getattr(mem, "concept_cache", None)

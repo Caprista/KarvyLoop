@@ -162,7 +162,26 @@ class MemoryManager:
                     pass   # Trace 是审计不是命脉:落不进不改变返回契约
             return False
 
-    def invalidate(self, belief: Belief, *, reason: str = "", now: Optional[float] = None) -> bool:
+    def is_protected_memory(self, belief: Belief) -> bool:
+        """D2:一条记忆是否「钉住(pinned)或人审来源」—— 是则 supersede/invalidate 绝不背着你自动失效它。
+
+        单一真相源(supersede 侧 conflict._is_protected_old 委托到这里,别造第二套):
+        - 钉住(index.is_pinned):你亲手锁的,防归档也防自动失效;
+        - 人审来源(provenance.source ∈ HUMAN_REVIEWED_SOURCES:fed/user_edit/cli/user_explicit/
+          ingest/role_experience):你确认过/亲手喂的,被推翻要你拍板(升 H2A 冲突卡)。
+        低权威猜测(conversation/task_insight/roundtable…)不受保护,互相取代照旧默默 supersede。
+        """
+        try:
+            if self._index.is_pinned(belief):
+                return True
+        except Exception:
+            pass
+        from karvyloop.cognition.conflict import HUMAN_REVIEWED_SOURCES
+        src = str((getattr(belief, "provenance", None) or {}).get("source", "") or "")
+        return src in HUMAN_REVIEWED_SOURCES
+
+    def invalidate(self, belief: Belief, *, reason: str = "", now: Optional[float] = None,
+                   force: bool = False) -> bool:
         """**失效不删**(Graphiti 式):给一条 Belief 打 `invalid_at` 标记 + 落盘。
 
         条目**留在库里**(recent/审计面还查得到、可翻案),但召回(recall_block/recall/
@@ -170,9 +189,18 @@ class MemoryManager:
         物理删除只保留给 purge/remove_by_content 等既有显式路径。返回落盘是否成功(断⑥)。
         失败语义(P0②):内存态**不回滚**(进程内召回立即看不见它),但已响(log/Trace/返 False)
         + 标脏 —— flush_usage(daily)或下次任意写路径重试,盘恢复后失效标记自动补上盘。
+
+        **D2 咽喉保护**:`force=False`(默认)时,钉住/人审来源的记忆(`is_protected_memory`)
+        **拒绝失效**(返 False,不打标)—— 任何路径想悄悄推翻你确认过/钉住的东西都在这道咽喉被挡;
+        真正该失效的走 `force=True`(supersede 已把 protected-old 路由去 H2A 冲突卡、只对允许自动
+        失效的输方 force;H2A 归档卡 ACCEPT / 用户手改亦 force —— 都是人拍过板的显式动作)。
         """
         if now is None:
             now = time.time()
+        if not force and self.is_protected_memory(belief):
+            logger.info("[memory] invalidate 拒绝:钉住/人审记忆不自动失效(D2;需 force 或走 H2A 冲突卡)"
+                        " — %s", (getattr(belief, "content", "") or "")[:60])
+            return False
         with self._lock:
             belief.invalid_at = float(now)
             belief.invalid_reason = (reason or "").strip()[:300]

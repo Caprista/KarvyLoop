@@ -39,6 +39,8 @@ PROVENANCE_RANK = {
     "user_explicit": 100,    # 用户明确告知(打字 / 文件)
     "trace_verified": 80,   # Trace + 通过验证门
     "trace_observed": 60,   # Trace 投影出来(默认)
+    "role_experience": 50,  # 角色经验(过 should_distill 保守门 = 验证过的成功/用户纠正):
+                            # **独立档**,高于 auto 蒸(40)、低于人明说(100);(域,角色)隔离
     "distill_extracted": 40,  # 后台蒸馏小模型抽取
     "imported": 20,         # 导入
     "unknown": 0,
@@ -47,17 +49,33 @@ PROVENANCE_RANK = {
 # 生产里真实写进 provenance.source 的取值 → 权威档位别名。
 # (雷达实锤:原表只有抽象档位名,而 ingest/auto_distill 写的是 "ingest"/"conversation"…
 # → provenance_rank 对所有真实数据一律返 0,权威表形同虚设。)
+# **D1(内测前必修)**:补齐**全部**生产 source —— 漏一个就让人拍板的被机器猜的合法推翻。
+# 回归测 test_source_alias_covers_production_sources 枚举全仓 Belief provenance source
+# 逐个核对在档(防第三次复发)。
 _SOURCE_ALIAS = {
-    "ingest": "user_explicit",        # 用户显式喂料(/memory/feed 摄入编译)
-    "knowledge": "user_explicit",     # 喂料蒸馏流人审后 persist 的通用知识
+    "ingest": "user_explicit",        # 用户显式喂料(/memory/ingest 摄入编译)
+    "knowledge": "user_explicit",     # 喂料蒸馏流人审后 persist 的通用知识(ingest_knowledge 默认)
+    "fed": "user_explicit",           # /memory/feed 你拍板沉淀的知识(与 ingest 同是人喂料;D1)
+    "user_edit": "user_explicit",     # 记忆面板 ✏️ 手改(账本式取代;D1)
+    "cli": "user_explicit",           # `karvyloop memory add` 手动写入(D1)
     "user": "user_explicit",
+    "karvy_chat": "user_explicit",    # 聊天里让小卡「记住这句」= 用户显式指令(D1)
     "consolidated": "trace_verified",  # 知识合并条(人 ACCEPT 过 = 过了人审门)
     "roundtable": "trace_observed",   # 圆桌沉淀(系统观察产物)
     "conversation": "distill_extracted",  # 对话自动蒸馏(猜的,低权威)
     "task_insight": "distill_extracted",  # 执行洞察(docs/82 daily tick 自动蒸的,auto 档:
                                           # 永掀不翻 user_explicit;provisional 再封顶一道)
+    "role_experience": "role_experience",  # 角色经验(独立档,见 PROVENANCE_RANK;D1)
+    "external_runtime": "imported",   # 外部公民供稿经 H2A 采纳(external-origin,低权威但在档;D1)
     "import": "imported",
 }
+
+# ---- D2:钉住 / 人审来源的记忆,supersede 绝不背着你悄悄失效(升 H2A 冲突卡)----
+# 只列**人审来源**(pin 态另在 memory.is_protected_memory 里查):这些是「你确认过/亲手喂的」,
+# 被推翻要你拍板。低权威猜测(conversation/task_insight)不在此列 —— 它们互相取代照旧默默 supersede。
+HUMAN_REVIEWED_SOURCES = frozenset({
+    "fed", "user_edit", "cli", "user_explicit", "ingest", "role_experience",
+})
 
 
 def provenance_rank(provenance: dict) -> int:
@@ -232,12 +250,18 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
       **新条反被打失效**(蒸馏猜的掀不翻人明说的),两条都留库可审计。
     - 摄入调和(同一次调用,不加次数):duplicate 高置信 → 自动合并(失效不删输方,审计痕
       invalid_reason + Trace);extends / 低置信 duplicate → 收进返回值 `extends`,console 升卡。
+    - **D2 钉住/人审记忆保护**:当要让**输的旧条**失效、而旧条钉住或人审来源(`_is_protected_old`)
+      时,**绝不自动失效** —— 收进返回值 `conflicts`,console 升 H2A「记忆冲突」卡由你裁
+      (保留旧/采纳新/都留)。低权威猜测互相取代不受影响(照旧默默 supersede)。
+    - **P1a (域,角色)隔离**:候选只在**同一 applies 分区**内配对(通用↔通用、同域同角色↔同域同角色)——
+      A 域沉淀绝不改写 B 域记忆状态(与召回侧同一隔离语义,不造第二套)。
+    - **D3 同批对称**:新条在某对里已被反杀(nb.invalid_at 置)→ 后续对里不再拿它当胜者杀活旧条。
     - 任何异常吞掉只打日志(写入主流程不因审查挂掉),返回摘要 dict。
     """
     if now is None:
         now = time.time()
     empty = {"checked": 0, "invalidated_old": 0, "invalidated_new": 0,
-             "auto_merged": 0, "extends": [], "pairs": []}
+             "auto_merged": 0, "extends": [], "pairs": [], "conflicts": []}
     news = [b for b in (new_beliefs or []) if getattr(b, "content", "").strip()]
     if not news or mem is None or gateway is None:
         return empty
@@ -277,8 +301,11 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
         cand_idx: list[int] = []
         pair_score: dict = {}   # (new_idx, old_pool_idx) → score
         for ni, nb in enumerate(news):
+            nb_key = _applies_key(nb)   # P1a:(域,角色)分区键
             for s, j in _scored_supersede_candidates(nb.content, olds,
                                                      old_concepts)[:max(0, top_k)]:
+                if _applies_key(olds[j]) != nb_key:
+                    continue   # P1a:跨分区(A域↔B域 / 通用↔域私有)不比对,失效层不漏
                 pair_score[(ni, j)] = s
                 if j not in cand_idx:
                     cand_idx.append(j)
@@ -291,6 +318,7 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
         inv_old = inv_new = auto_merged = 0
         applied: list[dict] = []
         extends_out: list[dict] = []
+        conflicts_out: list[dict] = []
         for p in pairs:
             nb, ob = news[p["new"]], cands[p["old"]]
             rel = p["relation"]
@@ -301,7 +329,9 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                 _trace_extends(trace, rec)   # P0⑤:产生即留痕(console 升卡失败素材不失踪)
                 continue
             if getattr(ob, "invalid_at", None) is not None:
-                continue   # 同批里已被失效过
+                continue   # 同批里已被失效过(旧条)
+            if getattr(nb, "invalid_at", None) is not None:
+                continue   # D3:新条已在某对里被反杀 → 不再拿死人当胜者杀活旧条(与 ob 对称)
             if rel == "duplicate":
                 score = pair_score.get((p["new"], cand_idx[p["old"]]), 0.0)
                 if score < _DUPLICATE_AUTO_MIN_SCORE:
@@ -314,13 +344,22 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                 # (审计痕:invalid_reason 全文可查 + Trace belief_auto_merged;两条都留库可翻案)
                 if provenance_rank(nb.provenance) >= provenance_rank(ob.provenance):
                     winner, loser = nb, ob
-                    inv_old += 1
                 else:
                     winner, loser = ob, nb
+                # D2:要失效的是钉住/人审的**旧条** → 不自动合并,升 H2A 冲突卡(你钉的东西系统绝不背着你改)
+                if loser is ob and _is_protected_old(mem, ob):
+                    rec = _conflict_record(nb, ob, "duplicate", pinned=_pinned(mem, ob))
+                    conflicts_out.append(rec)
+                    _trace_conflict(trace, rec)
+                    continue
+                if loser is ob:
+                    inv_old += 1
+                else:
                     inv_new += 1
                 reason = (f"duplicate(auto-merged): same assertion as "
                           f"[{(winner.provenance or {}).get('source', '?')}]: {winner.content[:80]}")
-                ok = mem.invalidate(loser, reason=reason, now=now)
+                # force=True:protected-old 已在上面路由去冲突卡,到这里的输方都是允许自动失效的
+                ok = mem.invalidate(loser, reason=reason, now=now, force=True)
                 auto_merged += 1
                 applied.append({"loser": loser.content[:60], "winner": winner.content[:60],
                                 "relation": rel, "auto_merged": True, "persisted": bool(ok)})
@@ -336,6 +375,12 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                         pass
                 continue
             if provenance_rank(nb.provenance) >= provenance_rank(ob.provenance):
+                # D2:要失效的是钉住/人审的旧条 → 不自动失效,升 H2A 冲突卡由你裁(核心)
+                if _is_protected_old(mem, ob):
+                    rec = _conflict_record(nb, ob, rel, pinned=_pinned(mem, ob))
+                    conflicts_out.append(rec)
+                    _trace_conflict(trace, rec)
+                    continue
                 # 新条权威不低于旧条 → 旧条失效(Graphiti 式失效不删)。
                 # ④时间语义(docs/66:valid_from 只有明确来源才填,**绝不猜**):
                 # invalid_at 默认 = 发现时刻(now)。唯一例外:新条 provenance 带**明确来源**的
@@ -354,7 +399,7 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                           f"[{(nb.provenance or {}).get('source', '?')}]: {nb.content[:80]}")
                 if backfilled:
                     reason += f" [world-time backfilled from explicit valid_from; discovered@{now:.0f}]"
-                ok = mem.invalidate(ob, reason=reason, now=inv_ts)
+                ok = mem.invalidate(ob, reason=reason, now=inv_ts, force=True)
                 inv_old += 1
                 applied.append({"loser": ob.content[:60], "winner": nb.content[:60],
                                 "relation": rel, "persisted": bool(ok)})
@@ -362,13 +407,14 @@ async def run_supersede_pass(new_beliefs: list, *, mem: Any, gateway: Any,
                 # 新条权威更低(如 auto 蒸的 vs 人明说的)→ 新条反被失效,人明说的站住
                 reason = (f"rejected({rel}): lower provenance than existing belief "
                           f"[{(ob.provenance or {}).get('source', '?')}]: {ob.content[:80]}")
-                ok = mem.invalidate(nb, reason=reason, now=now)
+                # 输方=新条(刚写入的低权威猜测被人明说的挡下),不是「推翻你确认过的旧记忆」→ 照旧默默失效
+                ok = mem.invalidate(nb, reason=reason, now=now, force=True)
                 inv_new += 1
                 applied.append({"loser": nb.content[:60], "winner": ob.content[:60],
                                 "relation": rel, "persisted": bool(ok)})
         return {"checked": len(cands), "invalidated_old": inv_old,
                 "invalidated_new": inv_new, "auto_merged": auto_merged,
-                "extends": extends_out, "pairs": applied}
+                "extends": extends_out, "pairs": applied, "conflicts": conflicts_out}
     except Exception as e:
         # 审查是增益不是命脉:失败绝不拖垮写入主流程,也绝不半判乱改库
         logger.warning(f"[conflict] supersede 审查失败(原库不动): {e}")
@@ -421,6 +467,82 @@ def _trace_extends(trace: Any, rec: dict) -> None:
         pass
 
 
+def memory_conflict_idem_key(old_content: str, new_content: str) -> str:
+    """记忆冲突卡的幂等键(同一 (old,new) 对永远同键;registry 同 id 覆盖去重)。"""
+    members = sorted(((old_content or "").strip(), (new_content or "").strip()))
+    return "memory_conflict-" + hashlib.sha1("\n".join(members).encode("utf-8")).hexdigest()[:8]
+
+
+def _applies_key(b: Belief) -> tuple:
+    """一条 Belief 的(域,角色)分区键 —— P1a 失效层隔离用。无 applies = 通用层 ("","")。"""
+    ap = (getattr(b, "provenance", None) or {}).get("applies") or {}
+    return (str(ap.get("domain", "") or ""), str(ap.get("role", "") or ""))
+
+
+def _pinned(mem: Any, b: Belief) -> bool:
+    """旧条是否钉住(冲突卡展示用;桩/异常 → False)。"""
+    try:
+        idx = getattr(mem, "index", None)
+        return bool(idx is not None and idx.is_pinned(b))
+    except Exception:
+        return False
+
+
+def _is_protected_old(mem: Any, b: Belief) -> bool:
+    """D2:旧条是否「钉住 / 人审来源」—— 是则 supersede 不自动失效它,升 H2A 冲突卡。
+
+    pin 态问 mem.is_protected_memory(单一真相源,同时查 pin + 人审 source);老 mem 桩没这方法
+    → 退回只看 source(HUMAN_REVIEWED_SOURCES),不误伤(fail-open 到「不保护」= 旧默认行为)。"""
+    fn = getattr(mem, "is_protected_memory", None)
+    if callable(fn):
+        try:
+            return bool(fn(b))
+        except Exception:
+            pass
+    return str((getattr(b, "provenance", None) or {}).get("source", "") or "") in HUMAN_REVIEWED_SOURCES
+
+
+def _conflict_record(nb: Belief, ob: Belief, rel: str, *, pinned: bool = False) -> dict:
+    """D2 冲突卡素材:①冲突了什么(旧 vs 新原文)②旧条来源+时间③给人裁(console 升卡)。"""
+    ob_prov = getattr(ob, "provenance", None) or {}
+    nb_prov = getattr(nb, "provenance", None) or {}
+    old_c = getattr(ob, "content", "") or ""
+    new_c = getattr(nb, "content", "") or ""
+    try:
+        old_ts = float(ob_prov.get("ts", 0.0) or 0.0) or float(getattr(ob, "freshness_ts", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        old_ts = 0.0
+    return {
+        "old": old_c,
+        "new": new_c,
+        "relation": rel,
+        "old_source": str(ob_prov.get("source", "") or ""),
+        "old_ts": old_ts,
+        "old_pinned": bool(pinned),
+        "new_source": str(nb_prov.get("source", "") or ""),
+        "idem_key": memory_conflict_idem_key(old_c, new_c),
+    }
+
+
+def _trace_conflict(trace: Any, rec: dict) -> None:
+    """冲突素材**产生即落 Trace**(kind=memory_conflict_found)—— 同 _trace_extends:console 升卡
+    失败/崩了,冲突证据仍可审计、可恢复(两边原文本就都在库里,没被动过)。失败自吞。"""
+    if trace is None:
+        return
+    try:
+        from karvyloop.cognition.trace import TraceEntry
+        trace.append(TraceEntry(
+            task_id="memory_reconcile", kind="memory_conflict_found",
+            payload={"idem_key": rec.get("idem_key", ""),
+                     "old": (rec.get("old") or "")[:120],
+                     "new": (rec.get("new") or "")[:120],
+                     "old_source": rec.get("old_source", ""),
+                     "relation": rec.get("relation", "")},
+            source="conflict"))
+    except Exception:
+        pass
+
+
 def _is_decision_pref(b: Belief) -> bool:
     """决策偏好条不参与知识 supersede(问责链不同层)。import 失败当 False(不误伤)。"""
     try:
@@ -444,19 +566,22 @@ async def _judge(news: list, olds: list, *, gateway: Any, model_ref: str = "") -
     lines.append("旧条目:")
     lines += [f"[{j}] {str(getattr(b, 'content', ''))[:200]}" for j, b in enumerate(olds)]
     material, _ = clip_to_tokens("\n".join(lines), LLM_MATERIAL_TOKENS)
+    # P1b:supersede 判官的 token 归到 supersede_judge(此前记 unknown,docs/68 P0-9 长尾大头)
+    from karvyloop.llm.token_ledger import token_source
     out = ""
-    async for ev in gateway.complete(
-        [{"role": "user", "content": material}], [], ref,
-        system=SystemPrompt(static=[SUPERSEDE_SYSTEM]),
-    ):
-        if type(ev).__name__ == "TextDelta":
-            out += getattr(ev, "text", "")
+    with token_source("supersede_judge"):
+        async for ev in gateway.complete(
+            [{"role": "user", "content": material}], [], ref,
+            system=SystemPrompt(static=[SUPERSEDE_SYSTEM]),
+        ):
+            if type(ev).__name__ == "TextDelta":
+                out += getattr(ev, "text", "")
     return out
 
 
 __all__ = [
-    "PROVENANCE_RANK", "provenance_rank",
+    "PROVENANCE_RANK", "provenance_rank", "HUMAN_REVIEWED_SOURCES",
     "ConflictReport", "resolve", "detect_conflict",
     "SUPERSEDE_SYSTEM", "parse_supersede_pairs", "find_supersede_candidates",
-    "run_supersede_pass", "extends_idem_key",
-]   # _scored_supersede_candidates/_extends_record/_trace_extends 是内部件,不出模块
+    "run_supersede_pass", "extends_idem_key", "memory_conflict_idem_key",
+]   # _scored_supersede_candidates/_extends_record/_trace_extends/_conflict_record 是内部件,不出模块

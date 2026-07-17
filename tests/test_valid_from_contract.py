@@ -53,7 +53,9 @@ class ScriptedGW:
             yield TextDelta(self.ingest_reply)
 
 
-def _belief(content: str, *, source: str = "ingest", ts: float = T1,
+# 默认用低权威来源(conversation):这些是 supersede 时间语义(invalid_at/valid_from 回填)的测试,
+# 不是 D2 人审保护的测试——D2 只保护钉住/人审记忆(fed/ingest/user_explicit…),低权威条照旧默默失效。
+def _belief(content: str, *, source: str = "conversation", ts: float = T1,
             valid_from=None) -> Belief:
     prov = {"source": source, "agent": "t", "ts": ts, "trace_ref": ""}
     if valid_from is not None:

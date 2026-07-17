@@ -16,7 +16,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from karvyloop.karvy.proactive import catchup_proposal_for  # noqa: E402
-from karvyloop.karvy.proposal_registry import KIND_RUN_TASK, PendingProposalRegistry  # noqa: E402
+from karvyloop.karvy.proposal_registry import (  # noqa: E402
+    KIND_RUN_TASK, KIND_SCHEDULE_CATCHUP, PendingProposalRegistry,
+)
 from karvyloop.karvy.scheduler import CATCHUP_CAP, SchedulerStore, missed_between  # noqa: E402
 
 import datetime as _dt
@@ -117,13 +119,18 @@ def test_watermark_persists_across_reload(tmp_path):
 # ---- 卡形状(骑 run_task,H2A)----
 
 
-def test_catchup_card_rides_run_task_with_stable_id():
+def test_catchup_card_has_own_kind_hard_excluded_from_silence():
+    # J5:catchup 骑 run_task 时会被"挣来的静音"(run_task|域 授权)自动兑现 → 违背"绝不 auto"承诺。
+    # 修:独立 kind KIND_SCHEDULE_CATCHUP + 进 silence.HIGH_RISK_KINDS 硬排除,必人拍。
+    from karvyloop.karvy.silence import HIGH_RISK_KINDS
     now = _ts(2026, 6, 25, 9)
     st = SchedulerStore(clock=lambda: now)
     t = st.add("0 8 * * *", "汇总昨天进展", title="每日进展")
     p = catchup_proposal_for(t, 3, _ts(2026, 6, 25, 8), now=now)
     assert p is not None
-    assert p.kind == KIND_RUN_TASK                       # 骑既有 run_task handler,不造新 kind
+    assert p.kind == KIND_SCHEDULE_CATCHUP               # J5:独立 kind(不再骑 run_task)
+    assert p.kind != KIND_RUN_TASK
+    assert KIND_SCHEDULE_CATCHUP in HIGH_RISK_KINDS      # 硬排除静音:绝不被自动兑现,必人拍
     assert p.proposal_id == f"schedule_catchup-{t.id}"   # 按 schedule 幂等(防重弹)
     assert p.options == ("ACCEPT", "DEFER", "REJECT")    # H2A:问,不做
     assert p.payload["intent"] == "汇总昨天进展"
@@ -188,11 +195,27 @@ async def test_72_missed_raise_one_card_no_auto_execute(tmp_path):
     pending = app.state.proposal_registry.pending()
     assert len(pending) == 1
     card = pending[0]
-    assert card.kind == KIND_RUN_TASK and card.payload["schedule_id"] == t.id
+    assert card.kind == KIND_SCHEDULE_CATCHUP and card.payload["schedule_id"] == t.id
     assert card.payload["missed_count"] in (72, 73)
     assert str(card.payload["missed_count"]) in card.summary
     # 水位已推进:马上再扫一遍 = 零错过(同一批绝不二次弹)
     assert raised == 1 and await raise_schedule_catchup_cards(app) == 0
+
+
+def test_catchup_card_not_silenced_even_with_granted_bucket(tmp_path):
+    # J5 复现坐实:哪怕该桶有静音授权,追赶卡也绝不走静音路径(HIGH_RISK_KINDS 咽喉第一道挡)
+    from karvyloop.karvy import silence
+    now = _ts(2026, 6, 25, 9)
+    st = SchedulerStore(clock=lambda: now)
+    t = st.add("0 8 * * *", "汇总", title="汇总")
+    card = catchup_proposal_for(t, 3, _ts(2026, 6, 25, 8), now=now)
+    app = _FakeApp(tmp_path, st)
+    app.state.runtime_kwargs = {"gateway": object()}     # 有 LLM(否则 try_silence 早返)
+    app.state.proposal_handlers = {card.kind: lambda p: (True, "ok")}
+    # 就算给它的桶发了授权,HIGH_RISK_KINDS 也让 grant() 返 None + try_silence 首行拒
+    grant = silence.get_store(app).grant("schedule_catchup", "")
+    assert grant is None                                  # 高危 kind 授不出权(硬地板)
+    assert silence.try_silence(app, card) is False        # 绝不接管 → 走正常出卡问人
 
 
 async def test_pending_card_not_reraised(tmp_path):

@@ -208,12 +208,15 @@ async def distill_turns_with_decisions(
     msgs = [{"role": "user", "content": material}]
     sp = SystemPrompt(static=[DISTILL_COMBINED_SYSTEM])
     from karvyloop.gateway.structured import harvest_structured
-    try:
-        stream = gateway.complete(msgs, [], ref, system=sp, response_schema=_COMBINED_SCHEMA)
-    except TypeError:
-        stream = gateway.complete(msgs, [], ref, system=sp)
-    # 约束解码正身可能在工具入参(anthropic 方言)→ 统一收割,别把正身丢了
-    out += await harvest_structured(stream)
+    from karvyloop.llm.token_ledger import token_source
+    # P1b:轮后自动蒸馏 piggyback(最高频后台燃烧点)的 token 归到 auto_distill(此前记 unknown)
+    with token_source("auto_distill"):
+        try:
+            stream = gateway.complete(msgs, [], ref, system=sp, response_schema=_COMBINED_SCHEMA)
+        except TypeError:
+            stream = gateway.complete(msgs, [], ref, system=sp)
+        # 约束解码正身可能在工具入参(anthropic 方言)→ 统一收割,别把正身丢了
+        out += await harvest_structured(stream)
     facts, decisions = parse_combined(out)
     written: list = []
     for f in facts:
