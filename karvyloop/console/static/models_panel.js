@@ -32,7 +32,8 @@ var KarvyModelsPanelBundle = (function(exports) {
         const badges = [];
         if (m.is_default_chat) badges.push(el("span", { class: "dpref-badge confirmed", text: t("models.default_chat") }));
         if (m.is_default_embedding) badges.push(el("span", { class: "dpref-badge confirmed", text: t("models.default_embed") }));
-        const meta = m.provider + " · " + m.api + " · " + t("models.ctx", { n: m.context_window || "?" }) + " · " + (m.has_key ? "🔑 " + m.api_key_masked : t("models.no_key"));
+        const keyPart = m.has_key ? "🔑 " + m.api_key_masked + (m.env_unset ? " · " + t("models.env_unset") : "") : t("models.no_key");
+        const meta = m.provider + " · " + m.api + " · " + t("models.ctx", { n: m.context_window || "?" }) + " · " + keyPart;
         const actions = el(
           "div",
           { class: "dpref-actions" },
@@ -199,6 +200,8 @@ var KarvyModelsPanelBundle = (function(exports) {
     ctxIn.value = String(m.context_window || 2e5);
     const maxIn = el("input", { type: "number" });
     maxIn.value = String(m.max_tokens || 8192);
+    const reasoningChk = el("input", { type: "checkbox" });
+    reasoningChk.checked = !!m.reasoning;
     const msg = _formMsg();
     const submit = el("button", {
       class: "mgmt-submit",
@@ -214,7 +217,10 @@ var KarvyModelsPanelBundle = (function(exports) {
           api_key: keyIn.value,
           auth_header: authSel.value,
           context_window: Number(ctxIn.value) || 2e5,
-          max_tokens: Number(maxIn.value) || 8192
+          max_tokens: Number(maxIn.value) || 8192,
+          reasoning: reasoningChk.checked,
+          // 每模型推理落参表:UI 不编辑,但保存时原样带回已有值 → 不整段丢(§3-③)。
+          reasoning_styles: m.reasoning_styles || null
         });
         if (r.ok && r.data && r.data.ok) {
           if (r.data.hint) window.alert(tB(r.data.hint));
@@ -249,6 +255,8 @@ var KarvyModelsPanelBundle = (function(exports) {
       ctxIn,
       el("label", { text: t("models.f_max") }),
       maxIn,
+      el("label", { class: "models-reasoning-fld" }, reasoningChk, " ", t("models.f_reasoning")),
+      el("div", { class: "mgmt-hint", text: t("models.f_reasoning_hint") }),
       submit,
       msg
     );
@@ -367,6 +375,9 @@ var KarvyModelsPanelBundle = (function(exports) {
       messages_path: p.messages_path || "",
       context_window: p.context_window || 2e5,
       max_tokens: p.max_tokens || 8192,
+      // preset 声明的深想标志(如 Kimi For Coding reasoning:true)—— 此前没传 → 首配即被丢成 False(§3-①)
+      reasoning: !!p.reasoning,
+      reasoning_styles: p.reasoning_styles || null,
       // preset 自带的静态请求头(如 Kimi For Coding 的 User-Agent 放行门)——
       // 此前这里没传 → preset 的 extra_headers 被静默丢掉,coding 端点必 403(Kimi 跑不通的一环)
       extra_headers: p.extra_headers || null

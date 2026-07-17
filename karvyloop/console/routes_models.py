@@ -60,7 +60,14 @@ class ModelSaveRequest(BaseModel):
     messages_path: str = Field(default="", max_length=128)
     context_window: int = Field(default=200000, ge=0)
     max_tokens: int = Field(default=8192, ge=0)
-    reasoning: bool = False
+    # 深想标志:None = 不承载 → 保留已有值(编辑任意字段不静默重置成 False);
+    # 显式 True/False = 覆写。审计 #87 §3-①:此前 `bool=False` 默认 + upsert 无条件重建 →
+    # 任何 reasoning:true 模型(如 Kimi For Coding 预设)一经控制台编辑即被打回 False,深想不注入。
+    # 照 extra_headers 那次"有值才覆盖"的守卫;新模型无旧值时落 False。
+    reasoning: Optional[bool] = None
+    # 每模型推理落参表(见 config_models.upsert_model)。None = 不承载 → 保留已有值
+    # (审计 #87 §3-③:此前完全没这字段 → upsert 重建 md 时整段丢失);显式 dict = 覆写(清洗)。
+    reasoning_styles: Optional[dict[str, Any]] = None
     # 额外静态请求头(如 Kimi For Coding 的 User-Agent 放行门)。None = 不碰已有配置;
     # 传 dict = 覆写(config_models 会剥掉任何鉴权头 —— 密钥唯一来源仍是 api_key)。
     # 此前 preset 带 extra_headers 但这层没字段 → 引导保存时被静默丢掉(Kimi 跑不通的一环)。

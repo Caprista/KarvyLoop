@@ -75,12 +75,40 @@ class TestBudget:
         assert abs(dt["ratio"] - 0.75) < 1e-6
 
     def test_post_budget_all_zero_removes_brake(self, client, cfg_path):
-        """四维全 0 = 关刹车(无限,零回归):删掉整个 budget 块。"""
+        """四维显式全 0 = 关刹车(无限,零回归):删掉整个 budget 块。"""
         client.post("/api/budget", json={"daily_tokens": 2000})
         assert "budget" in cfg_path.read_text(encoding="utf-8")
-        client.post("/api/budget", json={})   # 全空
+        # 显式把四维都传 0 = 显式清零(区别于"没传该维度"=保留,见下条)
+        client.post("/api/budget", json={"daily_usd": 0, "monthly_usd": 0,
+                                         "daily_tokens": 0, "monthly_tokens": 0})
         assert "budget" not in cfg_path.read_text(encoding="utf-8")
         assert client.get("/api/budget").json()["enabled"] is False
+
+    def test_post_budget_usd_save_preserves_config_token_limit(self, client, cfg_path):
+        """审计 #87 §3-②:手配 token 上限后,UI 只存 USD(不传 token 维度)→ token 上限不被抹掉。
+
+        这是"静默清零"的核心复现:此前前端硬塞 daily/monthly_tokens=0 + 后端把 0 当清零 →
+        一动 USD 表单,config.yaml 手配的 token 刹车就消失。修后:未承载的维度保留。"""
+        import yaml
+        # 用户在 config.yaml 手配了 token 上限(文档路径)
+        cfg_path.write_text(
+            "budget:\n  daily_tokens: 2000000\n  monthly_tokens: 50000000\n  on_limit: pause\n",
+            encoding="utf-8")
+        # UI 存 USD(前端新行为:不传 token 维度)
+        r = client.post("/api/budget", json={"daily_usd": 5.0, "monthly_usd": 100.0,
+                                             "on_limit": "pause"})
+        assert r.status_code == 200 and r.json()["ok"] is True
+        b = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["budget"]
+        assert b["daily_tokens"] == 2000000     # 手配 token 上限没被抹掉(核心)
+        assert b["monthly_tokens"] == 50000000
+        assert b["daily_usd"] == 5.0 and b["monthly_usd"] == 100.0   # USD 也写进去了
+        assert b["on_limit"] == "pause"
+
+    def test_post_budget_empty_body_is_noop(self, client, cfg_path):
+        """空 body(没承载任何维度)= 不动已有配置(保留),不再当"全清"。"""
+        client.post("/api/budget", json={"daily_tokens": 2000})
+        client.post("/api/budget", json={})   # 什么都没传
+        assert client.get("/api/budget").json()["enabled"] is True   # 保留,brake 仍在
 
     def test_get_budget_never_leaks_key(self, client, cfg_path):
         """预算响应体绝不含密钥字面量。"""

@@ -263,9 +263,6 @@ var KarvyTokensBundle = (function(exports) {
         const payload = {
           daily_usd: Number(inDaily.value) || 0,
           monthly_usd: Number(inMonthly.value) || 0,
-          daily_tokens: 0,
-          monthly_tokens: 0,
-          // token 维度先只留 USD 表单(常用);token 上限走 config
           on_limit: onLimit.value
         };
         const r = await _postJSON("/api/budget", payload);

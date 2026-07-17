@@ -181,7 +181,11 @@ class OpenAICompletionsAdapter:
         # .../api/v3,旧的「只认 /v1」会拼出 .../api/v3/v1/chat/completions → 404。
         if not path or path == "/v1/messages":
             import re as _re
-            has_version_root = bool(_re.search(r"/v\d+$", base))
+            # 版本根识别放宽(审计 #87 §3-SUSPECTED①):除 /v1../v3(deepseek/openai/Ark)外,
+            # 也认 /v1beta·/v1alpha(Gemini OpenAI 兼容形态 .../v1beta/openai)与 /openai 结尾根
+            # (显式配置的兼容挂载点)—— 否则给它们再补 /v1/... 会拼出 .../v1beta/v1/... 404。
+            # 仍有歧义端点走显式 messages_path 兜底(它优先,这里只是没设时的自愈)。
+            has_version_root = bool(_re.search(r"/(v\d+[a-z]*|openai)$", base))
             path = "/chat/completions" if has_version_root else "/v1/chat/completions"
         url = base + path
         tools_acc: dict = {}   # index → {id,name,args}(工具流式累积)

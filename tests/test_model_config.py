@@ -65,6 +65,114 @@ def test_upsert_masked_key_keeps(tmp_path):
     assert yaml.safe_load(p.read_text(encoding="utf-8"))["models"]["providers"]["anthropic"]["api_key"] == "sk-ant-SECRET12345"
 
 
+# ---- 审计 #87 §3-①③:编辑保存不静默丢 reasoning / reasoning_styles(与 extra_headers 同模具) ----
+
+def _w_reasoning(tmp):
+    """写一个 reasoning:true + 带 reasoning_styles 的模型配置。"""
+    import textwrap
+    p = tmp / "config.yaml"
+    p.write_text(textwrap.dedent("""
+    models:
+      providers:
+        kimi-coding:
+          base_url: https://api.kimi.com/coding/v1
+          api_key: sk-kimi-FAKE-DO-NOT-LEAK-1
+          models:
+            - id: kimi-coding/kimi-for-coding
+              name: Kimi For Coding
+              api: openai-completions
+              context_window: 256000
+              max_tokens: 8192
+              reasoning: true
+              reasoning_styles:
+                deep:
+                  reasoning_effort: high
+    agents:
+      defaults:
+        model: kimi-coding/kimi-for-coding
+    """), encoding="utf-8")
+    return p
+
+
+def _md(p):
+    import yaml
+    cfg = yaml.safe_load(p.read_text(encoding="utf-8"))
+    return cfg["models"]["providers"]["kimi-coding"]["models"][0]
+
+
+def test_reasoning_flag_preserved_when_not_carried(tmp_path):
+    """§3-①:编辑别的字段(reasoning 键缺席=None)→ reasoning:true 不被重置成 False。"""
+    p = _w_reasoning(tmp_path)
+    ok, _ = cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                             "model_name": "renamed", "api": "openai-completions",
+                             "base_url": "https://api.kimi.com/coding/v1", "api_key": ""}, p)
+    assert ok
+    md = _md(p)
+    assert md["reasoning"] is True          # 核心:没被静默重置
+    assert md["name"] == "renamed"          # 改名生效
+
+
+def test_reasoning_flag_explicit_false_overwrites(tmp_path):
+    """显式传 reasoning=False → 覆写(用户真想关时能关)。"""
+    p = _w_reasoning(tmp_path)
+    cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                     "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
+                     "api_key": "", "reasoning": False}, p)
+    assert _md(p)["reasoning"] is False
+
+
+def test_reasoning_flag_new_model_defaults_false(tmp_path):
+    """新模型(无旧值)+ 未承载 reasoning → 落 False(零回归)。"""
+    p = _w(tmp_path)
+    cm.upsert_model({"provider": "openai", "model_id": "openai/gpt", "api": "openai-completions",
+                     "base_url": "https://api.openai.com", "api_key": "sk-x"}, p)
+    import yaml
+    m = yaml.safe_load(p.read_text(encoding="utf-8"))["models"]["providers"]["openai"]["models"][0]
+    assert m["reasoning"] is False
+
+
+def test_reasoning_styles_preserved_when_not_carried(tmp_path):
+    """§3-③:编辑别的字段(reasoning_styles 键缺席=None)→ 整段落参表不丢。"""
+    p = _w_reasoning(tmp_path)
+    cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                     "model_name": "renamed2", "api": "openai-completions",
+                     "base_url": "https://api.kimi.com/coding/v1", "api_key": ""}, p)
+    assert _md(p)["reasoning_styles"] == {"deep": {"reasoning_effort": "high"}}
+
+
+def test_reasoning_styles_explicit_overwrites(tmp_path):
+    """显式传新表 → 覆写(只留合法档位)。"""
+    p = _w_reasoning(tmp_path)
+    cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                     "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
+                     "api_key": "", "reasoning_styles": {"fast": {"reasoning_effort": "low"},
+                                                         "bogus": {"x": 1}}}, p)
+    assert _md(p)["reasoning_styles"] == {"fast": {"reasoning_effort": "low"}}   # bogus 档被清洗掉
+
+
+# ---- 审计 #87 §3-SUSPECTED②:`${VAR}` 未设 → 面板诚实标 env_unset,别冒充"已配置" ----
+
+def test_env_unset_flag_true_when_env_missing(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(CFG.replace("sk-ant-SECRET12345", "${ANTHROPIC_KEY_MISSING}"), encoding="utf-8")
+    monkeypatch.delenv("ANTHROPIC_KEY_MISSING", raising=False)
+    m = cm.list_models(p)["models"][0]
+    assert m["env_unset"] is True                 # 引用了没设的 env → 标未设
+    assert m["api_key_masked"] == "${ANTHROPIC_KEY_MISSING}"   # 引用原样(非秘密)
+
+
+def test_env_unset_flag_false_when_env_set(tmp_path, monkeypatch):
+    p = tmp_path / "config.yaml"
+    p.write_text(CFG.replace("sk-ant-SECRET12345", "${ANTHROPIC_KEY_SET}"), encoding="utf-8")
+    monkeypatch.setenv("ANTHROPIC_KEY_SET", "sk-real")
+    assert cm.list_models(p)["models"][0]["env_unset"] is False
+
+
+def test_env_unset_flag_false_for_literal_key(tmp_path):
+    """字面量 key(非 ${VAR})→ env_unset 恒 False。"""
+    assert cm.list_models(_w(tmp_path))["models"][0]["env_unset"] is False
+
+
 def test_delete_default_blocked(tmp_path):
     p = _w(tmp_path)
     ok, reason = cm.delete_model("anthropic/claude", p)

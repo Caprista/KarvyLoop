@@ -176,6 +176,47 @@ def test_model_save_without_extra_headers_keeps_existing(tmp_path):
     assert cfg["models"]["providers"]["kimi-coding"]["extra_headers"] == {"User-Agent": "UA-1"}
 
 
+# ============ 审计 #87 §3-①③:route 层 reasoning / reasoning_styles 编辑不静默丢 ============
+
+def test_model_save_route_reasoning_preserved_on_edit(tmp_path):
+    """ModelSaveRequest.reasoning 现为 Optional(默认 None)→ 编辑请求不带 reasoning 字段时,
+    upsert 保留已有 reasoning:true(此前默认 False + 无条件重建 → 一编辑就被打回 False)。"""
+    p = _w(tmp_path)
+    # 先建一个 reasoning:true 的模型(带 reasoning_styles)
+    ok, _ = cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                             "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
+                             "api_key": "sk-kimi-FAKE-DO-NOT-LEAK-1", "reasoning": True,
+                             "reasoning_styles": {"deep": {"reasoning_effort": "high"}}}, p)
+    assert ok
+    c = TestClient(_app(p))
+    # 编辑 max_tokens(前端表单现在会带 reasoning=checked;这里模拟"就是不带"最坏情况)
+    r = c.post("/api/model/save", json={
+        "provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+        "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
+        "api_key": "", "max_tokens": 4096}).json()
+    assert r["ok"] is True
+    md = yaml.safe_load(p.read_text(encoding="utf-8"))["models"]["providers"]["kimi-coding"]["models"][0]
+    assert md["reasoning"] is True                                    # §3-① 保住
+    assert md["reasoning_styles"] == {"deep": {"reasoning_effort": "high"}}   # §3-③ 保住
+    assert md["max_tokens"] == 4096                                   # 改的字段生效
+
+
+def test_model_save_route_reasoning_toggle_off(tmp_path):
+    """前端深想开关显式关(reasoning=false)→ 覆写生效。"""
+    p = _w(tmp_path)
+    cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                     "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
+                     "api_key": "sk-kimi-FAKE-DO-NOT-LEAK-1", "reasoning": True}, p)
+    c = TestClient(_app(p))
+    r = c.post("/api/model/save", json={
+        "provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+        "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
+        "api_key": "", "reasoning": False}).json()
+    assert r["ok"] is True
+    md = yaml.safe_load(p.read_text(encoding="utf-8"))["models"]["providers"]["kimi-coding"]["models"][0]
+    assert md["reasoning"] is False
+
+
 def _sse(*chunks: str) -> str:
     return "".join(f"data: {c}\n\n" for c in chunks) + "data: [DONE]\n\n"
 
@@ -240,6 +281,35 @@ async def test_v1_base_url_path_heal_unchanged():
                                                        [], model, prov):
         pass
     assert seen["url"] == "https://api.moonshot.cn/v1/chat/completions"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_v1beta_and_openai_version_roots_healed():
+    """审计 #87 §3-SUSPECTED①:Gemini OpenAI 兼容形态 base 末尾是 /v1beta 或 /openai —— 识别为
+    版本根,只补 /chat/completions,不再错拼 .../v1beta/v1/chat/completions(404)。"""
+    from karvyloop.gateway.providers.openai_completions import OpenAICompletionsAdapter
+    from karvyloop.schemas import ModelDefinition, ProviderConfig
+
+    for base, want in [
+        ("https://generativelanguage.googleapis.com/v1beta/openai", "openai/chat/completions"),
+        ("https://generativelanguage.googleapis.com/v1beta", "v1beta/chat/completions"),
+    ]:
+        seen = {}
+
+        def _resp(req, _seen=seen):
+            _seen["url"] = str(req.url)
+            return httpx.Response(200, text=_sse('{"choices":[{"delta":{},"finish_reason":"stop"}]}'))
+
+        respx.post(base + "/chat/completions").mock(side_effect=_resp)
+        model = ModelDefinition(id="g/gemini-2.0-flash", name="m", api="openai-completions",
+                                context_window=0, max_tokens=64)
+        prov = ProviderConfig(name="g", base_url=base, api_key="FAKE-DO-NOT-LEAK",
+                              auth="api-key", auth_header="Authorization", models=[])
+        async for _ in OpenAICompletionsAdapter().complete([{"role": "user", "content": "hi"}],
+                                                           [], model, prov):
+            pass
+        assert seen["url"] == base + "/chat/completions", f"{base} 应只补 /chat/completions"
 
 
 # ============ ② CFG-04(a):下拉/写入不给 stub ============

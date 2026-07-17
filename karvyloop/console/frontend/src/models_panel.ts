@@ -52,8 +52,12 @@ async function renderModelsPanel(): Promise<void> {
       const badges: HTMLElement[] = [];
       if (m.is_default_chat) badges.push(el("span", { class: "dpref-badge confirmed", text: t("models.default_chat") }));
       if (m.is_default_embedding) badges.push(el("span", { class: "dpref-badge confirmed", text: t("models.default_embed") }));
+      // key 部分:`${VAR}` 引用但 env 未设 → 标"env 未设",别把没设的引用冒充"已配置"(SUSPECTED②)
+      const keyPart = m.has_key
+        ? "🔑 " + m.api_key_masked + (m.env_unset ? " · " + t("models.env_unset") : "")
+        : t("models.no_key");
       const meta = m.provider + " · " + m.api + " · " + t("models.ctx", { n: m.context_window || "?" }) +
-        " · " + (m.has_key ? "🔑 " + m.api_key_masked : t("models.no_key"));
+        " · " + keyPart;
       const actions = el("div", { class: "dpref-actions" },
         el("button", { class: "dpref-edit", text: t("models.edit"), onclick: () => _openModelEdit(m) }),
         el("button", { class: "dpref-confirm", text: t("models.set_chat"),
@@ -205,6 +209,9 @@ function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void)
   const authSel = el("select", null, el("option", { value: "x-api-key", text: "x-api-key", selected: m.auth_header !== "Authorization" }), el("option", { value: "Authorization", text: "Authorization", selected: m.auth_header === "Authorization" })) as HTMLSelectElement;
   const ctxIn = el("input", { type: "number" }) as HTMLInputElement; ctxIn.value = String(m.context_window || 200000);
   const maxIn = el("input", { type: "number" }) as HTMLInputElement; maxIn.value = String(m.max_tokens || 8192);
+  // 深想开关(审计 #87 §3-①):带上已有值 + 让用户可改 —— 编辑其它字段不再把 reasoning:true 静默重置。
+  const reasoningChk = el("input", { type: "checkbox" }) as HTMLInputElement;
+  reasoningChk.checked = !!m.reasoning;
   const msg = _formMsg();
   const submit = el("button", { class: "mgmt-submit", text: t("mgmt.save"),
     onclick: async () => {
@@ -213,6 +220,9 @@ function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void)
         api: apiSel.value, role: roleSel.value, base_url: baseIn.value.trim(),
         api_key: keyIn.value, auth_header: authSel.value,
         context_window: Number(ctxIn.value) || 200000, max_tokens: Number(maxIn.value) || 8192,
+        reasoning: reasoningChk.checked,
+        // 每模型推理落参表:UI 不编辑,但保存时原样带回已有值 → 不整段丢(§3-③)。
+        reasoning_styles: m.reasoning_styles || null,
       });
       if (r.ok && r.data && r.data.ok) {
         // 诚实提示(如 sk-kimi- key 配在 moonshot 聊天端点):alert 弹一次,重渲染也不丢
@@ -234,6 +244,8 @@ function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void)
     el("label", { text: t("models.f_auth") }), authSel,
     el("label", { text: t("models.f_ctx") }), ctxIn,
     el("label", { text: t("models.f_max") }), maxIn,
+    el("label", { class: "models-reasoning-fld" }, reasoningChk, " ", t("models.f_reasoning")),
+    el("div", { class: "mgmt-hint", text: t("models.f_reasoning_hint") }),
     submit, msg);
 }
 
@@ -321,6 +333,9 @@ async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Pro
     api: p.api, role: "chat", base_url: p.base_url, api_key: key,
     auth_header: p.auth_header, messages_path: p.messages_path || "",
     context_window: p.context_window || 200000, max_tokens: p.max_tokens || 8192,
+    // preset 声明的深想标志(如 Kimi For Coding reasoning:true)—— 此前没传 → 首配即被丢成 False(§3-①)
+    reasoning: !!p.reasoning,
+    reasoning_styles: p.reasoning_styles || null,
     // preset 自带的静态请求头(如 Kimi For Coding 的 User-Agent 放行门)——
     // 此前这里没传 → preset 的 extra_headers 被静默丢掉,coding 端点必 403(Kimi 跑不通的一环)
     extra_headers: p.extra_headers || null,

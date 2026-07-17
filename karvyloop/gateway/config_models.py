@@ -68,6 +68,22 @@ def _mask_key(k) -> str:
     return ("****" + s[-4:]) if len(s) > 4 else "****"
 
 
+def _env_ref_unset(k) -> bool:
+    """`${VAR}` 引用了未设(或设成空)的环境变量 → True(展开后就是空串)。非引用/已设 → False。
+
+    审计 #87 §3-SUSPECTED②:config 写 `${OPENAI_API_KEY}` 但 env 没 export → registry 展开成
+    空串,而 _mask_key 原样回显 `${VAR}` + has_key=True → 面板显示"已配置",聊天时才 401。
+    这里对面板诚实标注"env 未设",别让"配了个没设的引用"冒充"已配好"。绝不 log/回显 env 值。
+    """
+    import os
+    import re
+    s = str(k or "")
+    refs = re.findall(r"\$\{([^}]+)\}", s)
+    if not refs:
+        return False
+    return any(not os.environ.get(r, "").strip() for r in refs)
+
+
 def _providers(cfg: dict) -> dict:
     return (cfg.get("models") or {}).get("providers") or {}
 
@@ -104,6 +120,8 @@ def list_models(cfg_path=None) -> dict:
                 "messages_path": p.get("messages_path", ""),
                 "api_key_masked": _mask_key(p.get("api_key")),
                 "has_key": bool(p.get("api_key")),
+                # `${VAR}` 引用但 env 未设 → 面板标"env 未设",别把它当"已配置"骗过用户(SUSPECTED②)。
+                "env_unset": _env_ref_unset(p.get("api_key")),
                 "is_default_chat": mid == dc,
                 "is_default_embedding": mid == de,
             })
@@ -169,16 +187,31 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
         if not has_existing and not is_local:
             return False, "云端模型必须先填 API Key(留空只在编辑已有配置时表示保留原值)"
     p.setdefault("models", [])
+    # 编辑既有模型:先抓旧条目,承载 reasoning / reasoning_styles 的"未提供 = 保留"语义
+    # (审计 #87 §3-①③,与 extra_headers 同模具:请求不带该字段 → 不静默重置/整段丢)。
+    existing_md = next(
+        (x for pp in provs.values() for x in (pp.get("models") or [])
+         if x.get("id") == mid), None)
+    # 深想标志:None(请求未承载)= 保留旧值(新模型则 False);显式 bool = 覆写。
+    # 此前无条件 `bool(spec.get("reasoning", False))` 把任意字段的编辑保存都重置成 False。
+    r = spec.get("reasoning")
+    reasoning_val = (bool(r) if r is not None
+                     else bool((existing_md or {}).get("reasoning", False)))
     md = {
         "id": mid, "name": str(spec.get("model_name") or mid), "api": api, "role": role,
         "context_window": int(spec.get("context_window") or 200000),
         "max_tokens": int(spec.get("max_tokens") or 8192),
-        "reasoning": bool(spec.get("reasoning", False)),
+        "reasoning": reasoning_val,
     }
-    # 推理强度落参表(可选,碎碎念⑩):{档: {原样注入请求体的参数}}。只收合法档位、值须是 dict;
-    # 空/不合法 → 不写(缺省走 gateway/reasoning.py 内置映射)。
+    # 推理强度落参表(可选,碎碎念⑩):{档: {原样注入请求体的参数}}。
+    # None(未承载)= 保留旧表(编辑其它字段不整段丢);显式 dict = 覆写(只收合法档位、值须是 dict;
+    # 全不合法/空 dict = 清空)。缺省走 gateway/reasoning.py 内置映射。
     rs = spec.get("reasoning_styles")
-    if isinstance(rs, dict):
+    if rs is None:
+        if existing_md and existing_md.get("reasoning_styles"):
+            md["reasoning_styles"] = {k: dict(v) for k, v in existing_md["reasoning_styles"].items()
+                                      if isinstance(v, dict)}
+    elif isinstance(rs, dict):
         clean_rs = {k: dict(v) for k, v in rs.items()
                     if k in VALID_REASONING and isinstance(v, dict)}
         if clean_rs:

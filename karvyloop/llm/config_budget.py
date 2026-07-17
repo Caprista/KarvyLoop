@@ -136,9 +136,11 @@ def load_spend_budget_config(config_path=None) -> SpendBudgetConfig:
 def save_spend_budget_config(spec: dict, config_path=None) -> tuple[bool, str]:
     """把 UI 提交的预算改写进 config.yaml 的 `budget:` 块(其余配置一字不动)。
 
-    spec 字段(全可选;None/空/<=0 → 清掉该维度上限):daily_usd / daily_tokens /
-    monthly_usd / monthly_tokens / on_limit(warn|pause)。
-    - 四个维度全空 → 删掉整个 `budget:` 块(= 关刹车 = 无限,零回归)。
+    spec 字段语义(审计 #87 §3-②:区分"未承载 vs 显式清零"):
+    - **键缺席** → 保留 config 里该维度已有值(前端只管 USD 时,手配的 token 上限不被抹掉)。
+    - **键在但 None/空/<=0** → 清掉该维度上限(显式清零)。
+    维度:daily_usd / daily_tokens / monthly_usd / monthly_tokens;on_limit(warn|pause,缺席则保留)。
+    - 合并后四维全空 → 删掉整个 `budget:` 块(= 关刹车 = 无限,零回归)。
     - on_limit 非法 → 回落 DEFAULT_ON_LIMIT(不 4xx,fail-soft;与解析侧同口径)。
     返回 (ok, reason)。绝不 log/print 任何密钥(本模块只碰 budget 块,不碰 models)。
     """
@@ -154,13 +156,18 @@ def save_spend_budget_config(spec: dict, config_path=None) -> tuple[bool, str]:
     if not isinstance(cfg, dict):
         cfg = {}
 
-    du = _pos_float(spec.get("daily_usd"))
-    dt = _pos_int(spec.get("daily_tokens"))
-    mu = _pos_float(spec.get("monthly_usd"))
-    mt = _pos_int(spec.get("monthly_tokens"))
-    on_limit = str(spec.get("on_limit") or DEFAULT_ON_LIMIT).strip().lower()
-    if on_limit not in VALID_ON_LIMIT:
-        on_limit = DEFAULT_ON_LIMIT
+    # 当前已配的四维 + on_limit,作为"未承载维度"的保留基线。
+    existing = spend_budget_config_from_dict(cfg)
+    du = _pos_float(spec["daily_usd"]) if "daily_usd" in spec else existing.daily_usd
+    dt = _pos_int(spec["daily_tokens"]) if "daily_tokens" in spec else existing.daily_tokens
+    mu = _pos_float(spec["monthly_usd"]) if "monthly_usd" in spec else existing.monthly_usd
+    mt = _pos_int(spec["monthly_tokens"]) if "monthly_tokens" in spec else existing.monthly_tokens
+    if "on_limit" in spec:
+        on_limit = str(spec.get("on_limit") or DEFAULT_ON_LIMIT).strip().lower()
+        if on_limit not in VALID_ON_LIMIT:
+            on_limit = DEFAULT_ON_LIMIT
+    else:
+        on_limit = existing.on_limit
 
     if not any(v is not None for v in (du, dt, mu, mt)):
         cfg.pop("budget", None)   # 全清 = 无刹车(无限,零回归)

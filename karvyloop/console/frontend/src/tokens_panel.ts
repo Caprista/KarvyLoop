@@ -231,10 +231,11 @@ async function _renderBudgetInto(host: HTMLElement): Promise<void> {
     onClick: async () => {
       (save as HTMLButtonElement).disabled = true;
       msg.textContent = "";
+      // token 维度**不传**(UI 只管 USD)→ 后端 exclude_unset 保留 config.yaml 手配的 token 上限,
+      // 不再一存 USD 就把它清零(审计 #87 §3-②:此前硬塞 daily/monthly_tokens=0 = 静默抹掉)。
       const payload = {
         daily_usd: Number(inDaily.value) || 0,
         monthly_usd: Number(inMonthly.value) || 0,
-        daily_tokens: 0, monthly_tokens: 0,   // token 维度先只留 USD 表单(常用);token 上限走 config
         on_limit: onLimit.value,
       };
       const r = await _postJSON("/api/budget", payload);
