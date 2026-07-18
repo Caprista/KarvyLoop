@@ -296,3 +296,55 @@ def test_maintenance_loop_wired():
     src = (ROOT / "karvyloop" / "console" / "app.py").read_text(encoding="utf-8")
     assert "from karvyloop.console.insight_tick import task_insight_tick" in src
     assert '_maintenance_item_failed(app, "insight_tick"' in src   # 单项失败不连坐兜底
+
+
+# ============ ⑪ ①:supersede 冲突不再整个丢弃 → 走冲突卡咽喉 ============
+
+def test_insight_tick_routes_supersede_conflicts_to_cards(tmp_path, monkeypatch):
+    # 修前:run_supersede_pass 返回**整个丢弃** → pinned 低权威 belief 只被保护、从不弹卡。
+    # 修后:收 conflicts → raise_memory_conflict_cards(H2A 由你裁)。
+    import karvyloop.cognition.conflict as conflict_mod
+    import karvyloop.console.proposals as proposals_mod
+
+    async def _fake_supersede(written, **kw):
+        return {"extends": [], "conflicts": [
+            {"old": "旧洞察:走官方源", "new": "新洞察:走镜像源", "relation": "contradict",
+             "old_source": "conversation", "old_ts": 1.0, "old_pinned": True,
+             "new_source": "task_insight", "idem_key": "memory_conflict-abc12345"}]}
+
+    seen: dict = {}
+
+    async def _capture(app, conflicts, **kw):
+        seen["conflicts"] = conflicts
+        return len(conflicts)
+
+    monkeypatch.setattr(conflict_mod, "run_supersede_pass", _fake_supersede)
+    monkeypatch.setattr(proposals_mod, "raise_memory_conflict_cards", _capture)
+    trace, mem = TraceStore(), MemoryManager()
+    gw = _GW(insight_reply=_echo_env())
+    app = _app(trace, mem, gw)
+    _seed_retry_run(trace, "t1", ts=10.0)
+    r = _run(task_insight_tick(app, state_path=tmp_path / "s.json", now=1000.0))
+    assert r["written"] == 1
+    assert seen.get("conflicts") and seen["conflicts"][0]["idem_key"] == "memory_conflict-abc12345"
+
+
+# ============ ⑫ ③:冷却台账驱逐过期项(防长跑无界) ============
+
+def test_cooldown_ledger_evicts_expired(tmp_path):
+    from karvyloop.console.insight_tick import COOLDOWN_EVICT_FACTOR, SIGNAL_COOLDOWN_S
+    sp = tmp_path / "insight_tick.json"
+    now = 5_000_000.0
+    old_ts = now - SIGNAL_COOLDOWN_S * (COOLDOWN_EVICT_FACTOR + 1)   # 远超驱逐门 → 该清
+    fresh_ts = now - SIGNAL_COOLDOWN_S / 2                           # 仍在冷却期 → 该留
+    sp.write_text(json.dumps({"pool_hash": "",
+                              "seen": {"old_ref": old_ts, "fresh_ref": fresh_ts}}),
+                  encoding="utf-8")
+    trace, mem = TraceStore(), MemoryManager()
+    gw = _GW(insight_reply=_echo_env())
+    app = _app(trace, mem, gw)
+    _seed_retry_run(trace, "t1", ts=10.0)   # 池变 → tick 真跑并落盘
+    _run(task_insight_tick(app, state_path=sp, now=now))
+    saved = json.loads(sp.read_text(encoding="utf-8"))
+    assert "old_ref" not in saved["seen"]        # 过期项被驱逐
+    assert "fresh_ref" in saved["seen"]          # 冷却期内的绝不误删

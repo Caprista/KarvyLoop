@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 MIN_BELIEFS = 8            # 库太小不值得整理(也别为 3 条知识烧一次 LLM)
 SUGGEST_COOLDOWN_S = 7 * 86400
 MAX_CARDS_PER_TICK = 3     # 单轮最多升 3 张卡(别一天糊你一脸建议)
+# 冷却台账驱逐门:早于 冷却窗×N 的 suggested 项清掉(过了冷却期本就允许重升,留着只涨体量)。
+# N 倍留余量,**绝不误删还在冷却期的**。防长跑无界增长(docs/87 §五)。
+COOLDOWN_EVICT_FACTOR = 4
 
 # ---- 时效侧(冲突消解接线③):一年没用/疑似过时 → 归档建议卡(零 LLM,纯时间信号)----
 STALE_AFTER_S = 365 * 86400   # "一年没用"阈值:max(最近召回, 沉淀时刻) 距今超一年
@@ -66,6 +69,22 @@ def _lib_hash(beliefs: list) -> str:
     for c in sorted((getattr(b, "content", "") or "") for b in beliefs):
         h.update(c.encode("utf-8")); h.update(b"\0")
     return h.hexdigest()
+
+
+def _evict_expired_cooldown(suggested: dict, now: float, *, window: float = SUGGEST_COOLDOWN_S,
+                            factor: float = COOLDOWN_EVICT_FACTOR) -> dict:
+    """驱逐早于 window×factor 的过期冷却项(now-ts >= 门 → 丢);仍在冷却期的一律保留。
+    坏值(非数)顺手丢。只保台账不无界增长,不改冷却语义。"""
+    cutoff = window * max(1.0, factor)
+    kept: dict = {}
+    for k, v in (suggested or {}).items():
+        try:
+            ts = float(v)
+        except (TypeError, ValueError):
+            continue
+        if now - ts < cutoff:
+            kept[k] = ts
+    return kept
 
 
 # ---- 过时归档建议(时效与使用信号的 daily 消费端) ----
@@ -165,6 +184,8 @@ async def knowledge_consolidate_tick(app: Any, *, state_path: Optional[Path] = N
         return {"ran": False, "suggested": 0, "stale_suggested": 0,
                 "reason": f"知识 < {MIN_BELIEFS} 条,不值得整理"}
     state = _load_state(state_path)
+    # ③ 读时顺手驱逐过期冷却项(防 suggested 台账长跑无界;仍在冷却期的保留)——落盘在下方各 _save_state。
+    state["suggested"] = _evict_expired_cooldown(state.get("suggested") or {}, now)
 
     # ---- ①' 时效侧:使用信号落盘 + "一年没用,归档?"建议卡(零 LLM,在 watermark 前——
     #      过时是时间的函数,库没变也会变老)。冷却复用同一 suggested 表,不唠叨。 ----
@@ -239,4 +260,4 @@ async def knowledge_consolidate_tick(app: Any, *, state_path: Optional[Path] = N
 
 
 __all__ = ["knowledge_consolidate_tick", "MIN_BELIEFS", "SUGGEST_COOLDOWN_S", "MAX_CARDS_PER_TICK",
-           "STALE_AFTER_S", "MAX_STALE_PER_CARD", "KIND_ARCHIVE_STALE"]
+           "STALE_AFTER_S", "MAX_STALE_PER_CARD", "KIND_ARCHIVE_STALE", "COOLDOWN_EVICT_FACTOR"]

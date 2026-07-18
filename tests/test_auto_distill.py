@@ -411,6 +411,89 @@ def test_schedule_no_running_loop_graceful():
 
 
 @pytest.mark.asyncio
+async def test_schedule_surfaces_task_exception(monkeypatch):
+    # ④ fire-and-forget:后台任务逃逸异常不被吞 → done-callback 上冒(schedule_system_error),
+    # 且 task 全程保引用防 GC,跑完清理。锁"不存引用/吞异常"的反模式不再复发(docs/87 §五)。
+    from karvyloop.console import routes_memory
+    import karvyloop.console.task_events as te
+
+    captured: dict = {}
+
+    def _cap_err(app, source, msg):
+        captured["source"] = source
+        captured["msg"] = msg
+
+    async def _boom(app, mgr):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(te, "schedule_system_error", _cap_err)
+    monkeypatch.setattr(routes_memory, "maybe_auto_distill", _boom)
+    app = types.SimpleNamespace(state=types.SimpleNamespace(memory=None))
+    routes_memory.schedule_auto_distill(app, _mgr(None))
+    assert len(app.state._distill_tasks) == 1            # 保引用(防 GC)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert captured.get("source") == "auto_distill" and "kaboom" in captured.get("msg", "")  # 异常上冒不吞
+    assert len(app.state._distill_tasks) == 0            # done_callback 清理
+
+
+# ---- ① 后台蒸馏路径漏发冲突卡(docs/87 结案跟进边角:auto_distill 漏 populate conflicts=)----
+
+
+@pytest.mark.asyncio
+async def test_distill_with_decisions_populates_conflicts(monkeypatch):
+    # 复现坐实:supersede 判出"要推翻钉住/人审旧记忆"的 conflicts,IngestResult 必须带回。
+    # 修前 distill_turns_with_decisions 只收 extends、漏 conflicts= → res.conflicts 恒空。
+    import karvyloop.cognition.conflict as conflict_mod
+
+    async def _fake_supersede(new_beliefs, **kw):
+        return {"checked": 1, "invalidated_old": 0, "invalidated_new": 0, "auto_merged": 0,
+                "extends": [], "pairs": [],
+                "conflicts": [{"old": "老婆生日3月5日", "new": "老婆生日3月6日",
+                               "relation": "contradict", "old_source": "fed", "old_ts": 1.0,
+                               "old_pinned": True, "new_source": "conversation",
+                               "idem_key": "memory_conflict-deadbeef"}]}
+
+    monkeypatch.setattr(conflict_mod, "run_supersede_pass", _fake_supersede)
+    gw = FakeGW('{"facts":[{"content":"老婆生日3月6日","kind":"fact"}],"decisions":[]}')
+    mem = FakeMem()
+    res, _dec = await AD.distill_turns_with_decisions(
+        [_Turn("老婆生日改到3月6日", "记住了")], gateway=gw, mem=mem, now=1.0)
+    assert res.written == 1
+    assert len(res.conflicts) == 1                                   # 冲突素材真带回(修前恒空)
+    assert res.conflicts[0]["idem_key"] == "memory_conflict-deadbeef"
+
+
+@pytest.mark.asyncio
+async def test_maybe_auto_distill_raises_conflict_cards(monkeypatch):
+    # ① 后台蒸馏撞钉住/人审记忆 → 走已建好的冲突卡咽喉(_raise_memory_conflicts →
+    # raise_memory_conflict_cards)。修前 res.conflicts 恒空 → 这条咽喉是死 no-op。
+    import karvyloop.cognition.conflict as conflict_mod
+    import karvyloop.console.proposals as proposals_mod
+    from karvyloop.console.routes import maybe_auto_distill
+
+    async def _fake_supersede(new_beliefs, **kw):
+        return {"extends": [], "conflicts": [
+            {"old": "老婆生日3月5日", "new": "老婆生日3月6日", "relation": "contradict",
+             "old_source": "fed", "old_ts": 1.0, "old_pinned": True,
+             "new_source": "conversation", "idem_key": "memory_conflict-deadbeef"}]}
+
+    seen: dict = {}
+
+    async def _capture(app, conflicts, **kw):
+        seen["conflicts"] = conflicts
+        return len(conflicts)
+
+    monkeypatch.setattr(conflict_mod, "run_supersede_pass", _fake_supersede)
+    monkeypatch.setattr(proposals_mod, "raise_memory_conflict_cards", _capture)
+    gw = FakeGW('{"facts":[{"content":"老婆生日3月6日","kind":"fact"}],"decisions":[]}')
+    conv = _conv("c1", [_Turn("老婆生日改到3月6日", "记住了")])
+    res = await maybe_auto_distill(_app(FakeMem(), gw), _mgr(conv))
+    assert res is not None and res["written"] == 1
+    assert seen.get("conflicts") and seen["conflicts"][0]["idem_key"] == "memory_conflict-deadbeef"
+
+
+@pytest.mark.asyncio
 async def test_maybe_auto_distill_passes_state_evidence(monkeypatch):
     # Q3 真机压测逮到的缺口:聊天显式陈述结晶时必须带 STATE 回执(何时/哪次会话),
     # 否则偏好面板"来自你的拍板"对聊天源永远空 —— 与 onboarding/H2A 卡路径同形。

@@ -27,6 +27,25 @@ SIGNAL_COOLDOWN_S = 7 * 86400   # 同一信号烧过 LLM 后的冷却窗
 MAX_SIGNALS_PER_TICK = 5        # 单批喂进 LLM 的信号封顶(候选 ≤5 同数量级)
 MAX_WRITES_PER_TICK = 3         # 单 tick 写入封顶(别一天糊一库 provisional)
 TICK_TASK_ID = "task_insight_tick"   # 回写 Trace 的 task_id(审计可查)
+# 冷却台账驱逐门:早于 冷却窗×N 的 seen 项清掉(过了冷却期本就不再抑制,留着只涨体量)。
+# 用 N 倍留安全余量,**绝不误删还在冷却期的**(now-ts < 冷却窗 的一定保留)。防长跑无界增长(docs/87 §五)。
+COOLDOWN_EVICT_FACTOR = 4
+
+
+def _evict_expired_cooldown(seen: dict, now: float, *, window: float,
+                            factor: float = COOLDOWN_EVICT_FACTOR) -> dict:
+    """驱逐早于 window×factor 的过期冷却项(now-ts >= 门 → 丢);仍在冷却期的一律保留。
+    坏值(非数)顺手丢。只保留台账不无界增长,不改冷却语义。"""
+    cutoff = window * max(1.0, factor)
+    kept: dict = {}
+    for k, v in (seen or {}).items():
+        try:
+            ts = float(v)
+        except (TypeError, ValueError):
+            continue   # 坏时间戳:留着也没意义,清掉
+        if now - ts < cutoff:
+            kept[k] = ts
+    return kept
 
 
 def _state_path() -> Path:
@@ -106,6 +125,8 @@ async def task_insight_tick(app: Any, *, state_path: Optional[Path] = None,
             entries.extend(trace.query(tid, kind=k))
 
     state = _load_state(state_path)
+    # ③ 读时顺手驱逐过期冷却项(防 seen 台账长跑无界;仍在冷却期的保留)——落盘在下方各 _save_state。
+    state["seen"] = _evict_expired_cooldown(state.get("seen") or {}, now, window=SIGNAL_COOLDOWN_S)
     ph = _pool_hash(entries)
     if ph == state.get("pool_hash"):
         return {"ran": False, "written": 0, "candidates": 0,
@@ -148,12 +169,22 @@ async def task_insight_tick(app: Any, *, state_path: Optional[Path] = None,
 
     if written:
         # 写后 supersede(auto 档掀不翻人确认的;失败自吞原库不动)+ 概念标签(增益,失败自吞)
+        sup: Optional[dict] = None
         try:
             from karvyloop.cognition.conflict import run_supersede_pass
-            await run_supersede_pass(written, mem=mem, gateway=gw,
-                                     model_ref=rk.get("model_ref", ""), now=now, trace=trace)
+            sup = await run_supersede_pass(written, mem=mem, gateway=gw,
+                                           model_ref=rk.get("model_ref", ""), now=now, trace=trace)
         except Exception as e:
             logger.warning(f"[insight_tick] supersede 失败(原库不动): {e}")
+        # D2:后台洞察 supersede 撞钉住/低权威 belief → 走已建好的冲突卡咽喉升 H2A 卡。
+        # 此前 run_supersede_pass 的返回**整个丢弃** → pinned 低权威 belief 只被保护、从不弹卡。
+        conflicts = list((sup or {}).get("conflicts") or [])
+        if conflicts:
+            try:
+                from karvyloop.console.proposals import raise_memory_conflict_cards
+                await raise_memory_conflict_cards(app, conflicts)
+            except Exception as e:
+                logger.warning(f"[insight_tick] 记忆冲突升卡失败(不影响 tick): {e}")
         cc = getattr(mem, "concept_cache", None)
         if cc is not None:
             try:
@@ -185,4 +216,5 @@ async def task_insight_tick(app: Any, *, state_path: Optional[Path] = None,
 
 
 __all__ = ["task_insight_tick", "SIGNAL_COOLDOWN_S",
-           "MAX_SIGNALS_PER_TICK", "MAX_WRITES_PER_TICK", "TICK_TASK_ID"]
+           "MAX_SIGNALS_PER_TICK", "MAX_WRITES_PER_TICK", "TICK_TASK_ID",
+           "COOLDOWN_EVICT_FACTOR"]

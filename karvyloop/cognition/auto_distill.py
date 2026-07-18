@@ -236,6 +236,7 @@ async def distill_turns_with_decisions(
         except Exception:
             pass
     extends: list = []
+    conflicts: list = []
     if written:
         # 写入路径 supersede(与 ingest_material 同一咽喉;失败内部自吞,原库不动)。
         # 摄入调和:duplicate 高置信自动并;extends 素材带回给 console 升卡。
@@ -243,6 +244,10 @@ async def distill_turns_with_decisions(
         sup = await run_supersede_pass(written, mem=mem, gateway=gateway,
                                        model_ref=model_ref, now=now, trace=trace)
         extends = list(sup.get("extends") or [])
+        # D2:supersede 要推翻你钉住/人审的旧记忆 → 收回冲突素材,由 console 侧升 H2A「记忆冲突」卡
+        # (与 ingest_material 同一处理:此前这里漏收 → routes_memory 的 _raise_memory_conflicts
+        # 对后台蒸馏路径恒空转,pinned 低权威 belief 在后台冲突时被保护但不弹卡)。
+        conflicts = list(sup.get("conflicts") or [])
         # 标签预计算(#61 研判①a + 反向标签,与 ingest_material 同一接缝):蒸馏产物措辞高度
         # 模板化,语义标签是同义改写召回的唯一救场层;失败自吞,daily 慢侧回填。
         cc = getattr(mem, "concept_cache", None)
@@ -256,7 +261,7 @@ async def distill_turns_with_decisions(
             except Exception:
                 pass
     return IngestResult(written=len(written), raw=f"facts={len(facts)} decisions={len(decisions)}",
-                        extends=extends), decisions
+                        extends=extends, conflicts=conflicts), decisions
 
 
 __all__ = [

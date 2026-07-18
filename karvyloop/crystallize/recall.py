@@ -379,6 +379,10 @@ def recall(
                 "all_tokens": c["all_tokens"],
                 "raw": c["raw"],
                 "sig": c.get("sig", ""),
+                # 与 SkillIndex 路径对齐(loader :122-135 本就有):漏这两个 → stable 技能恒被当
+                # dynamic 永不回放(result_reuse),user/system 破平失效(source 恒 "user")。
+                "result_reuse": c.get("result_reuse", "dynamic"),
+                "source": c.get("source", "user") or "user",
             })
 
     best: Optional[RecallHit] = None

@@ -148,6 +148,26 @@ def test_broken_state_file_failsafe(tmp_path, monkeypatch):
     assert r["ran"] is True and r["suggested"] == 1                  # 坏文件当空,不炸不锁死
 
 
+def test_cooldown_ledger_evicts_expired(tmp_path, monkeypatch):
+    # ③ suggested 台账驱逐早于 冷却窗×N 的过期项(仍在冷却期的保留),防长跑无界(docs/87 §五)。
+    import json
+    from karvyloop.console.knowledge_tick import COOLDOWN_EVICT_FACTOR, SUGGEST_COOLDOWN_S
+    sp = tmp_path / "tick.json"
+    now = 5_000_000.0
+    old_ts = now - SUGGEST_COOLDOWN_S * (COOLDOWN_EVICT_FACTOR + 1)   # 该清
+    fresh_ts = now - SUGGEST_COOLDOWN_S / 2                           # 仍在冷却期 → 该留
+    sp.write_text(json.dumps({"lib_hash": "",
+                              "suggested": {"old_pid": old_ts, "fresh_pid": fresh_ts}}),
+                  encoding="utf-8")
+    beliefs = [_belief(f"知识点{i}") for i in range(MIN_BELIEFS)]
+    app = _app(beliefs)
+    _patch_suggest(monkeypatch, [])   # 无新簇,但库变(lib_hash "" != 真hash)→ 跑并落盘
+    asyncio.run(knowledge_consolidate_tick(app, state_path=sp, now=now))
+    saved = json.loads(sp.read_text(encoding="utf-8"))
+    assert "old_pid" not in saved["suggested"]    # 过期项被驱逐
+    assert "fresh_pid" in saved["suggested"]      # 冷却期内的绝不误删
+
+
 def test_accept_handler_applies_merge():
     """ACCEPT merge_knowledge 卡 → apply_belief_merge 真合并(先写后删)。"""
     from karvyloop.console.proposal_handlers import build_proposal_handlers

@@ -686,7 +686,7 @@ async def maybe_auto_distill(app: Any, mgr: Any) -> Optional[dict]:
                 await raise_extends_cards(app, res.extends)
             except Exception as e:
                 logger.debug(f"[auto_distill] extends 升卡失败(不影响蒸馏): {e}")
-        await _raise_memory_conflicts(app, res)   # D2:撞钉住/人审记忆 → 升冲突卡(conversation 蒸的极少命中,兜住)
+        await _raise_memory_conflicts(app, res)   # D2:撞钉住/人审记忆 → 升冲突卡(res.conflicts 现由 distill_turns_with_decisions 真填,后台蒸馏路径不再空转)
         if decisions:
             try:
                 from karvyloop.console.decision_wire import crystallize_candidates
