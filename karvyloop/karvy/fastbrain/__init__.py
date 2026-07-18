@@ -10,8 +10,6 @@
 **子模块**(每个都对应 9.0 描述的"快脑 5 层"之一或多个):
 - `skills` — 技能库(已结晶技能的可检索接口;在 #2 crystallize 之上)
 - `qa` — QA 库(静态 / 规则类问答沉淀,"答过 N 次同样问题"复用)
-- `rules` — 规则集(手写逻辑 / 关键词 / 正则;0.1.0 MVP 主路径)
-- `model_selector` — 小模型选择抽象(0.1.0 留空,回头测再定)
 - `trace_index` — Trace 三层漏斗基础设施(原文 + 摘要双层 ring buffer,9.0a)
 - `trace_poll` — Trace 三层漏斗触发器(boot + daily,9.0a 骨架)
 - `trace_habit` — Trace 三层漏斗习惯层(HabitStore + ModelRef 铺路 + BehaviorPatternAnalyzer 骨架,9.0b)
@@ -28,8 +26,6 @@ from __future__ import annotations
 __all__ = [
     "skills",
     "qa",
-    "rules",
-    "model_selector",
     "trace_index",
     "trace_poll",
     "trace_habit",

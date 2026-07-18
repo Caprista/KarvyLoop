@@ -39,7 +39,6 @@ from .planner import (
 )
 from .applier import ApplyResult, apply_plan
 from .validator import validate_with_loader
-from .registry import AdapterRegistry, adapter_registry
 
 __all__ = [
     # source
@@ -64,7 +63,4 @@ __all__ = [
     "apply_plan",
     # validator
     "validate_with_loader",
-    # registry
-    "AdapterRegistry",
-    "adapter_registry",
 ]

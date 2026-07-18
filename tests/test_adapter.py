@@ -10,7 +10,6 @@ import pytest
 
 from karvyloop.adapter import (
     EXTERNAL_SOURCES,
-    AdapterRegistry,
     AdapterPlan,
     ApplyResult,
     ExternalManifest,
@@ -19,7 +18,6 @@ from karvyloop.adapter import (
     SLOT_NAMES,
     SlotAction,
     SlotPlan,
-    adapter_registry,
     apply_plan,
     build_plan,
     discover_manifest,
@@ -241,12 +239,6 @@ def test_protocol_invariants_and_parsers():
     assert len(EXTERNAL_SOURCES) >= 4
     for sid in ("claude", "codex", "agent-bundle", "generic-json"):
         assert sid in EXTERNAL_SOURCES
-    # registry 注**册**
-    assert adapter_registry.is_registered("claude")
-    assert adapter_registry.is_registered("codex")
-    assert adapter_registry.is_registered("agent-bundle")
-    assert adapter_registry.is_registered("generic-json")
-    assert len(adapter_registry.all_entries()) >= 4
     # 4 parser 都能产**合**法 manifest
     for parser, payload in [
         (parse_claude_manifest, _claude_payload()),
