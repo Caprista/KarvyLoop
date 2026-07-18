@@ -149,12 +149,20 @@ def test_ac3c_verify_gate_predicate_is_deterministic():
 
 
 def test_ac3d_verify_gate_test_pass_runs_subprocess():
-    """test_pass 门:跑子进程,exit 0 → True,非 0 / timeout → False。"""
-    # 跨平台:用 python 自检 — `python -c "exit(0)"`
-    import sys, shutil
+    """test_pass 门(沙箱化,第三刀):**有真隔离后端** → 沙箱内跑子进程,exit 0→True / 非0→False;
+    **无后端**(如 CI Linux 无 bwrap / degraded 档)→ fail-closed 拒跑(False + no_isolation 人话码),
+    绝不裸跑不可信命令。availability 决定行为——两条分支都是正确态,不是跳过。"""
+    import sys
+    from karvyloop.sandbox import default_sandbox
     py = sys.executable
-    assert eval_verify_gate({"type": "test_pass", "cmd": f'"{py}" -c "exit(0)"'}, {}) is True
-    assert eval_verify_gate({"type": "test_pass", "cmd": f'"{py}" -c "exit(1)"'}, {}) is False
+    if default_sandbox().available():
+        assert eval_verify_gate({"type": "test_pass", "cmd": f'"{py}" -c "exit(0)"'}, {}) is True
+        assert eval_verify_gate({"type": "test_pass", "cmd": f'"{py}" -c "exit(1)"'}, {}) is False
+    else:
+        # 无真隔离后端:拒跑不可信 gate(fail-closed),留人话原因码给用户可见处(真伤7)。
+        ctx: dict = {}
+        assert eval_verify_gate({"type": "test_pass", "cmd": f'"{py}" -c "exit(0)"'}, ctx) is False
+        assert ctx.get("_gate_note_code") == "no_isolation"
 
 
 def test_ac3e_verify_gate_unknown_type_raises():
