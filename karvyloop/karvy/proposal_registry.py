@@ -54,6 +54,10 @@ KIND_EXTERNAL_ADOPT = "external_adopt"  # M2(#71 §7.3):外部公民供稿的 H2
 KIND_MESH_TAKEOVER = "mesh_takeover"  # docs/74 §6.2/§6.3 mesh 任务板:别机任务 lease 过期(设备掉线没续租)→ 接活卡;ACCEPT = claim 上账 + 本地从头重跑(骑 run_task 语义)+ complete 上账。绝不 auto-execute
 KIND_MEMORY_CONFLICT = "memory_conflict"  # D2:supersede 要推翻你钉住/人审的记忆 → 不自动失效,升冲突卡描述冲突(旧vs新+旧来源时间)让你裁(保留旧/采纳新/都留)。走 HIGH_RISK_KINDS 硬排除静音
 KIND_SCHEDULE_CATCHUP = "schedule_catchup"  # J5:离线追赶补跑卡 —— **独立 kind**(不再骑 run_task),进 HIGH_RISK_KINDS 绝不被静音自动兑现,必人拍;handler 内部复用 run_task 重跑逻辑
+# docs/88 招牌"闭环完整性"外环 Pursuit(跨天持久目标)的两个决策点(承诺 / 修订)。
+# 都进 HIGH_RISK_KINDS 绝不被"挣来的静音"自动兑现(照 D2/J5 血教训:改方向/承诺是决策必人拍)。
+KIND_PURSUIT_COMMIT = "pursuit_commit"  # 建了跨天目标 → 升承诺卡:ACCEPT=committed(承诺成立,机器开始自跑几天)
+KIND_PURSUIT_REVISE = "pursuit_revise"  # revision_trigger 命中 → 升修订卡挂起等人拍(自动改方向=架空人,绝不)
 # 花费预算提醒(llm/spend_budget.build_card 产出):**纯提醒卡,无副作用 handler**——
 # 达 75/90/100% 阈值时经 emit_card→broadcast 出一张告警卡,用户 ACCEPT/REJECT 都只关卡(无兑现)。
 # 这里登记 kind 常量让它进 ALL_KINDS(前端/registry 认得它、不当未知 kind);handler 有意不注册。
@@ -76,6 +80,8 @@ ALL_KINDS = (
     KIND_MESH_TAKEOVER,
     KIND_MEMORY_CONFLICT,
     KIND_SCHEDULE_CATCHUP,
+    KIND_PURSUIT_COMMIT,
+    KIND_PURSUIT_REVISE,
     KIND_SPEND_BUDGET_ALERT,
 )
 
@@ -829,6 +835,85 @@ def proposal_for_infeasible_report(
     )
 
 
+def proposal_for_pursuit_commit(
+    *,
+    pursuit_id: str,
+    statement: str,
+    gate_desc: str,
+    level: str = "atom",
+    revision_triggers: Optional[List[str]] = None,
+    domain_id: str = "",
+    ts: float,
+    strength: float = 0.8,
+):
+    """建了跨天目标 → 「承诺卡」(docs/88 §5:承诺跨天目标是决策,必人拍)。
+
+    第一刀 commitment 简化为"人 ACCEPT=committed"(不做 commitment_condition DSL)。卡上人话化
+    展示验证门(算完成的确定性判据)+ 修订触发器 —— 你 ACCEPT = 承诺成立,机器开始自跑几天,
+    只在完成 / 修订 / (未来)不可行三个点再回来找你。proposal_id 按 pursuit_id 稳定派生(同目标一张)。
+    """
+    from karvyloop import i18n
+    from .atoms import Proposal  # 局部 import 避免模块级循环
+    trig = "、".join(revision_triggers or []) if revision_triggers else i18n.t("proposal.pursuit_commit.no_trigger")
+    return Proposal(
+        summary=i18n.t("proposal.pursuit_commit.summary", statement=statement),
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_PURSUIT_COMMIT,
+        payload={
+            "pursuit_id": pursuit_id,
+            "statement": statement,
+            "gate_desc": gate_desc,
+            "level": level or "atom",
+            "domain_id": domain_id,
+        },
+        proposal_id=f"{KIND_PURSUIT_COMMIT}-0-{hashlib.sha1(pursuit_id.encode('utf-8')).hexdigest()[:8]}",
+        basis=i18n.t("proposal.pursuit_commit.basis", gate=gate_desc, trigger=trig),
+    )
+
+
+def proposal_for_pursuit_revise(
+    *,
+    pursuit_id: str,
+    statement: str,
+    revision_reason: str,
+    domain_id: str = "",
+    ts: float,
+    strength: float = 0.85,
+):
+    """revision_trigger 命中 → 「修订卡」挂起等人拍(docs/88 §5:改方向是决策归人,系统不自动改)。
+
+    第一刀:系统**不**自动改方向 —— 只带修订原因把这张卡摆到你面前,ACCEPT/REJECT 由你定。
+    进 HIGH_RISK_KINDS 绝不被静音兑现。proposal_id 按 pursuit_id + 原因派生(同一次修订收敛一张)。
+    """
+    from karvyloop import i18n
+    from .atoms import Proposal  # 局部 import 避免模块级循环
+    reason = (revision_reason or "").strip() or i18n.t("proposal.pursuit_revise.reason_default")
+    stable = f"{pursuit_id}|{reason}"
+    return Proposal(
+        summary=i18n.t("proposal.pursuit_revise.summary", statement=statement),
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_PURSUIT_REVISE,
+        payload={
+            "pursuit_id": pursuit_id,
+            "statement": statement,
+            "revision_reason": reason,
+            "domain_id": domain_id,
+        },
+        proposal_id=f"{KIND_PURSUIT_REVISE}-0-{hashlib.sha1(stable.encode('utf-8')).hexdigest()[:8]}",
+        basis=i18n.t("proposal.pursuit_revise.basis", reason=reason),
+    )
+
+
 __all__ = [
     "PendingProposalRegistry",
     "AGING_THRESHOLD_S",
@@ -849,6 +934,10 @@ __all__ = [
     "KIND_FS_ACCESS",
     "KIND_MEMORY_CONFLICT",
     "KIND_SCHEDULE_CATCHUP",
+    "KIND_PURSUIT_COMMIT",
+    "KIND_PURSUIT_REVISE",
+    "proposal_for_pursuit_commit",
+    "proposal_for_pursuit_revise",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",

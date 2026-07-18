@@ -583,6 +583,29 @@ def cmd_console(args: argparse.Namespace) -> int:
             store=BeliefStore(_Path.home() / ".karvyloop" / "beliefs.json"),
             concept_cache=app.state.concept_cache,
         )
+        # docs/88 招牌"闭环完整性"第一刀:把外环 Pursuit(跨天持久目标)判定核**接上电** ——
+        # PursuitStore 持久活跃集(重启读回)+ PursuitManager(无状态状态机;memory 用于 done 记账,
+        # domain_root 供域级 Pursuit 落域 KB)。生产此前零实例化 = 招牌缺口,这里第一次真接线。
+        # 失败不挡 console(pursuit 是增益,不是地基)。
+        try:
+            from karvyloop.cognition.pursuit import PursuitManager
+            from karvyloop.cognition.pursuit_store import PursuitStore
+            app.state.pursuit_store = PursuitStore(
+                _Path.home() / ".karvyloop" / "pursuits.json")
+            app.state.pursuit_manager = PursuitManager(
+                memory=app.state.memory,
+                domain_root=_Path.home() / ".karvyloop" / "domains")
+            # 推进节拍(成本地板):确定性 verify(is_done)每 tick 都跑(完成能及时收官),但**烧 token 的
+            # pursue() 推进**默认 6h 一次/每个 pursuit —— 防"gate 长期不满足的 committed 目标"每 10min
+            # 维护 tick 都真跑一遍烧钱(footgun)。跨天目标一天推进几次足够;测试/demo 不设=每 tick 推进。
+            app.state.pursuit_advance_interval_s = 6 * 3600
+            logger.info(
+                "[karvyloop console] Pursuit 外环已接线(活跃集 %d)",
+                app.state.pursuit_store.active_count())
+        except Exception as _pe:  # noqa: BLE001
+            app.state.pursuit_store = None
+            app.state.pursuit_manager = None
+            logger.warning(f"[karvyloop console] Pursuit 外环接线失败(console 照常起): {_pe}")
         # mesh 认知同步(docs/74 slice2,outbox 式):写咽喉挂发事件钩子 + 启动对账
         # (把日志里还不在库的 belief 补回放——覆盖 CLI 离线 mesh-sync 合并的缝)。
         # 失败不挡 console(mesh 是增益不是地基);未跑过 relay-pair 的设备 device_id 退 "local"。

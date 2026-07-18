@@ -169,7 +169,15 @@ async def _send_snapshot(websocket: WebSocket, app) -> None:
     workbench: WorkbenchObserver = app.state.workbench
     from karvyloop.workbench.snapshot import snapshot_for_widgets
     from .serializers import widget_snapshot
-    snap = snapshot_for_widgets(workbench)
+    # docs/88 §6:pursuit_count 真数据源 = PursuitStore.active_count()(未接 → 0)。
+    _pstore = getattr(app.state, "pursuit_store", None)
+    _pcount = 0
+    if _pstore is not None:
+        try:
+            _pcount = _pstore.active_count()
+        except Exception:
+            _pcount = 0
+    snap = snapshot_for_widgets(workbench, pursuit_count=_pcount)
     await websocket.send_json({"type": "snapshot", "payload": widget_snapshot(snap)})
 
 

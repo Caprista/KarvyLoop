@@ -33,12 +33,15 @@ def snapshot_for_widgets(
     workbench: WorkbenchObserver,
     *,
     current_domain: str | None = None,
+    pursuit_count: int = 0,
 ) -> WidgetSnapshot:
     """拍 3a v0 简化版:无 TaskTracker/BoardAggregator 注入也能跑(返 0/False)。
 
     Args:
         workbench: 小卡工作台观察者。
         current_domain: 当前选中的 domain_id(None 时取 list_domains() 第一个)。
+        pursuit_count: 活跃 Pursuit 真数(docs/88 §6:接线层从 PursuitStore.active_count() 注入;
+            取代旧 broadcast_count 冒名。缺注入 = 0)。
 
     Returns:
         WidgetSnapshot — widget tree 的输入数据。
@@ -51,7 +54,7 @@ def snapshot_for_widgets(
         current_domain=chosen,
         broadcasts=broadcasts,
         task_count=0,
-        pursuit_count=0,
+        pursuit_count=int(pursuit_count or 0),
         unhealthy=False,
     )
 
@@ -65,10 +68,12 @@ def make_snapshot_with_mainloop(
     last_drive_text: str = "",
     last_error: str = "",
     last_intent: str = "",
+    pursuit_count: int = 0,
 ) -> WidgetSnapshot:
     """批 5:TUI 启动时构造 snapshot(包含 MainLoop 状态字段)。
 
     批 8.5-A:加 `last_error` / `last_intent` 字段供 L2Board 独立渲染。
+    docs/88 §6:`pursuit_count` 由接线层从 PursuitStore.active_count() 注入(取代 broadcast_count 冒名)。
     """
     domains = workbench.list_domains()
     chosen = current_domain or (domains[0] if domains else "")
@@ -78,7 +83,7 @@ def make_snapshot_with_mainloop(
         current_domain=chosen,
         broadcasts=broadcasts,
         task_count=0,
-        pursuit_count=0,
+        pursuit_count=int(pursuit_count or 0),
         unhealthy=False,
         crystallized_skills=crystallized_skills,
         last_fast_brain_skill=last_fast_brain_skill,
@@ -96,14 +101,21 @@ def snapshot_with_atoms(
     board_agg: BoardAggregator | None = None,
     overseer: Overseer | None = None,
     data_courier: DataCourier | None = None,
+    pursuit_count: int = 0,
 ) -> WidgetSnapshot:
-    """拍 3b 起的扩展版:原子 agent 注入 → 丰富字段。"""
-    base = snapshot_for_widgets(workbench, current_domain=current_domain)
+    """拍 3b 起的扩展版:原子 agent 注入 → 丰富字段。
+
+    docs/88 §6:`pursuit_count` 改成外环 Pursuit 真数(接线层从 PursuitStore.active_count() 注入)。
+    此前是 `board_agg.aggregate(...)["broadcast_count"]` —— 拿广播条数**冒名**充 Pursuit 数(假 UI),
+    项目敏感的病;删掉冒名,不接则 0(诚实空,不假装)。
+    """
+    base = snapshot_for_widgets(workbench, current_domain=current_domain,
+                                pursuit_count=pursuit_count)
     return WidgetSnapshot(
         domains=base.domains,
         current_domain=base.current_domain,
         broadcasts=base.broadcasts,
         task_count=len(task_tracker.tracked_tasks()) if task_tracker else 0,
-        pursuit_count=board_agg.aggregate(base.current_domain)["broadcast_count"] if board_agg else 0,
+        pursuit_count=int(pursuit_count or 0),
         unhealthy=(not overseer.is_healthy()) if overseer else False,
     )

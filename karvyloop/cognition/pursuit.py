@@ -106,6 +106,23 @@ def _gate_predicate(gate: dict, context: dict) -> bool:
     return eval_condition(expr, context)
 
 
+def split_test_pass_cmd(cmd: str) -> list:
+    """把 test_pass 的 cmd 拆成 argv —— **平台感知**(docs/88 真伤3)。单一真理来源:gate 求值
+    与 create 时的健全性校验共用它,口径一致。
+
+    - POSIX:直接 shlex.split(posix=True)(反斜杠是转义,符合 shell 习惯)。
+    - Windows:POSIX shlex 会把反斜杠路径(C:\\...\\x.py)当转义**拆碎** → 自然写法的 gate 静默永红;
+      而纯 `posix=False` 又会把 `-c "code"` 的引号原样留住 → Python 当字符串字面量、静默 exit 0(假过)。
+      故用 `posix=False` 先按空白/引号分组(保住反斜杠),再**逐 token 剥掉最外层成对双引号** ——
+      两头兼顾(反斜杠路径保真 + 引号参数正确剥壳)。
+    """
+    cmd = cmd or ""
+    if os.name != "nt":
+        return shlex.split(cmd, posix=True)
+    toks = shlex.split(cmd, posix=False)
+    return [t[1:-1] if len(t) >= 2 and t[0] == '"' and t[-1] == '"' else t for t in toks]
+
+
 def _gate_test_pass(gate: dict, context: dict) -> bool:
     """跑测试,exit 0 → True。timeout 由 gate.timeout_s 控制(默认 60s)。
 
@@ -118,8 +135,9 @@ def _gate_test_pass(gate: dict, context: dict) -> bool:
     timeout = float(gate.get("timeout_s", 60.0))
     cwd = gate.get("cwd", None)
     try:
-        # 防御:不接 stdin(防 prompt)
-        argv = shlex.split(cmd)
+        # 防御:不接 stdin(防 prompt)。平台感知拆分(docs/88 真伤3):POSIX shlex 在 Windows 会把
+        # 反斜杠路径(C:\...\x.py)当转义拆碎 → 自然写法的 gate 静默永红(FileNotFoundError 吞成 False)。
+        argv = split_test_pass_cmd(cmd)
         r = subprocess.run(
             argv, capture_output=True, timeout=timeout, cwd=cwd, check=False,
             stdin=subprocess.DEVNULL,
@@ -253,5 +271,5 @@ def _now() -> float:
 __all__ = [
     "PursuitManager",
     "eval_condition", "eval_verify_gate", "GateError",
-    "GATE_DISPATCH",
+    "GATE_DISPATCH", "split_test_pass_cmd",
 ]

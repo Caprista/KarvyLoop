@@ -809,6 +809,45 @@ _EN = {
         "This plan is in per-agent fallback mode (topology lost) — there is nothing to land as a "
         "system. Import each agent via the regular agent import."
     ),
+    # ---- docs/88 外环 Pursuit(招牌"闭环完整性":跨天持久目标)----
+    "proposal.pursuit_commit.no_trigger": "(none)",
+    "proposal.pursuit_commit.summary": "Commit to a multi-day goal: “{statement}”?",
+    "proposal.pursuit_commit.basis": (
+        "This is a persistent cross-day goal — I'll keep pushing it on my own and only come back to you at "
+        "commit / revise / done. Done gate (deterministic, never asks a model): {gate}. Revision triggers: "
+        "{trigger}. ACCEPT = you commit to it and I start running it for days; REJECT / DEFER = I don't."
+    ),
+    "proposal.pursuit_revise.reason_default": "a revision trigger fired",
+    "proposal.pursuit_revise.summary": "A pursuit hit a revision point — your call: “{statement}”",
+    "proposal.pursuit_revise.basis": (
+        "Reason: {reason}. Changing direction is your decision — I never re-aim a pursuit on my own. "
+        "ACCEPT = set this pursuit aside (create a new one to change direction; auto-replan is a later cut); "
+        "REJECT / DEFER = leave it paused, I won't run it automatically."
+    ),
+    "receipt.pursuit.no_store": "Pursuit isn't wired (started with --no-llm?) — can't act on it.",
+    "receipt.pursuit.gone": "That pursuit is gone (maybe already finished or dropped).",
+    "receipt.pursuit.terminal": "That pursuit is already {status} — nothing to do.",
+    "receipt.pursuit_commit.already": "Already committed — I'm running it for you.",
+    "receipt.pursuit_commit.ok": "Committed: “{statement}” — I'll keep pushing it and come back at done / revise.",
+    "receipt.pursuit_revise.dropped": (
+        "Set aside “{statement}” — create a new pursuit to change direction (auto-replan comes later)."
+    ),
+    "pursuit.progress.done": "done — the goal's verify gate passed",
+    "pursuit.receipt.done": "✅ Pursuit done: “{statement}” (its verify gate passed)",
+    "pursuit.revise.reason_trigger": "a revision trigger fired",
+    "pursuit.revise.reason_max_advances": (
+        "pushed {n} times and still hasn't passed its done gate — your call (keep going / change "
+        "direction / drop it)"
+    ),
+    "pursuit.err.gate_not_dict": "verify_gate must be an object with a type.",
+    "pursuit.err.gate_type": "First cut only supports these verify_gate types: {allowed}.",
+    "pursuit.err.gate_cmd": "test_pass gate needs a non-empty cmd (exit 0 = done).",
+    "pursuit.err.gate_cmd_unsplittable": "test_pass cmd doesn't parse into a runnable command: {cmd}",
+    "pursuit.err.gate_path": "file_exists gate needs a non-empty path.",
+    "pursuit.err.no_store": "Pursuit isn't wired (started with --no-llm?).",
+    "pursuit.err.bad_pursuit": "Couldn't build the pursuit: {error}",
+    "pursuit.gate_desc.test_pass": "command `{cmd}` exits 0",
+    "pursuit.gate_desc.file_exists": "file `{path}` exists",
 }
 
 # ---- 中文 ----
@@ -1522,6 +1561,42 @@ _ZH = {
         "这份 plan 是逐个导入的降级模式(拓扑已丢失)—— 没有可作为系统落地的内容。"
         "请走常规 agent 导入逐个导。"
     ),
+    # ---- docs/88 外环 Pursuit(招牌"闭环完整性":跨天持久目标)----
+    "proposal.pursuit_commit.no_trigger": "(无)",
+    "proposal.pursuit_commit.summary": "承诺一个跨天目标:「{statement}」?",
+    "proposal.pursuit_commit.basis": (
+        "这是个跨天的持久目标 —— 我会自己一直推进,只在 承诺 / 修订 / 完成 三个点回来找你。"
+        "完成判据(确定性,绝不问模型):{gate}。修订触发:{trigger}。"
+        "ACCEPT = 你承诺它、我开始替你自跑几天;REJECT / DEFER = 不承诺。"
+    ),
+    "proposal.pursuit_revise.reason_default": "命中了一个修订触发器",
+    "proposal.pursuit_revise.summary": "一个追求到了修订点 —— 要你拍板:「{statement}」",
+    "proposal.pursuit_revise.basis": (
+        "原因:{reason}。改方向是你的决策 —— 我绝不自己给追求改向。"
+        "ACCEPT = 把这个追求放下(想换方向就新建一条;自动重规划是后面的刀);"
+        "REJECT / DEFER = 留着挂起,我不自动跑它。"
+    ),
+    "receipt.pursuit.no_store": "Pursuit 未接线(--no-llm 启动?)—— 没法处理。",
+    "receipt.pursuit.gone": "这个追求已不在(可能已完成或放下)。",
+    "receipt.pursuit.terminal": "这个追求已是 {status} 态 —— 无需处理。",
+    "receipt.pursuit_commit.already": "已经承诺过了 —— 我正在替你跑。",
+    "receipt.pursuit_commit.ok": "已承诺:「{statement}」—— 我会一直推进,到 完成 / 修订 再回来找你。",
+    "receipt.pursuit_revise.dropped": (
+        "已放下「{statement}」—— 想换方向就新建一条追求(自动重规划是后面的刀)。"
+    ),
+    "pursuit.progress.done": "已完成 —— 目标的验证门通过了",
+    "pursuit.receipt.done": "✅ 追求达成:「{statement}」(验证门通过)",
+    "pursuit.revise.reason_trigger": "命中了一个修订触发器",
+    "pursuit.revise.reason_max_advances": "推进 {n} 次仍没过完成门 —— 你来定(继续 / 改方向 / 放弃)",
+    "pursuit.err.gate_not_dict": "verify_gate 必须是带 type 的对象。",
+    "pursuit.err.gate_type": "第一刀只支持这几种 verify_gate 类型:{allowed}。",
+    "pursuit.err.gate_cmd": "test_pass 门需要非空的 cmd(退出码 0 = 完成)。",
+    "pursuit.err.gate_cmd_unsplittable": "test_pass 的 cmd 解析不出可执行命令:{cmd}",
+    "pursuit.err.gate_path": "file_exists 门需要非空的 path。",
+    "pursuit.err.no_store": "Pursuit 未接线(--no-llm 启动?)。",
+    "pursuit.err.bad_pursuit": "建 Pursuit 失败:{error}",
+    "pursuit.gate_desc.test_pass": "命令 `{cmd}` 退出码为 0",
+    "pursuit.gate_desc.file_exists": "文件 `{path}` 存在",
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

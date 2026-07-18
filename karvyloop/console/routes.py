@@ -91,12 +91,21 @@ def api_snapshot(request: Request) -> dict[str, Any]:
     """当前 WidgetSnapshot JSON 视图(K4 只读)。"""
     workbench: WorkbenchObserver = request.app.state.workbench
     main_loop: Optional[MainLoop] = request.app.state.main_loop
+    # docs/88 §6:pursuit_count 真数据源 = PursuitStore.active_count()(取代 snapshot.py 旧
+    # broadcast_count 冒名;未接 store → 0,诚实空)。
+    _pstore = getattr(request.app.state, "pursuit_store", None)
+    _pcount = 0
+    if _pstore is not None:
+        try:
+            _pcount = _pstore.active_count()
+        except Exception:
+            _pcount = 0
     # 优先取 TUI 维护的 snapshot;若 App 不在,走 observer-only 路径
     if main_loop is not None and hasattr(main_loop, "_build_snapshot"):
         # 拍 8.5-A:WorkbenchApp 有 _build_snapshot(本拍暂不注入 App;走 fresh path)
-        snap = snapshot_for_widgets(workbench)
+        snap = snapshot_for_widgets(workbench, pursuit_count=_pcount)
     else:
-        snap = snapshot_for_widgets(workbench)
+        snap = snapshot_for_widgets(workbench, pursuit_count=_pcount)
     return widget_snapshot(snap)
 
 

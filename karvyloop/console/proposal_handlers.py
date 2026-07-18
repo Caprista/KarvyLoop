@@ -25,7 +25,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
     KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
     KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER, KIND_MEMORY_CONFLICT,
-    KIND_SCHEDULE_CATCHUP,
+    KIND_SCHEDULE_CATCHUP, KIND_PURSUIT_COMMIT, KIND_PURSUIT_REVISE,
 )
 
 logger = logging.getLogger(__name__)
@@ -869,6 +869,61 @@ def _silence_revoked_handler(proposal) -> Tuple[bool, str]:
     return True, f"已知悉 —— 「{kind}」这类卡已恢复逐张问你;要再静音得重新挣(攒新鲜命中)"
 
 
+def _pursuit_commit_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """KIND_PURSUIT_COMMIT 兑现(docs/88 §5):人 ACCEPT 承诺卡 → Pursuit 升 committed。
+
+    第一刀 commitment 简化为"人 ACCEPT=committed"(不做 commitment_condition DSL)。committed 后
+    维护 loop 的 pursuit_tick 才会开始自动推进它(每 tick:确定性 verify → 未完成则 pursue 一次)。
+    K5:只在你 ACCEPT 后被调。store 未接(--no-llm)→ 诚实回执不假装承诺了。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        from karvyloop import i18n
+        store = getattr(app.state, "pursuit_store", None)
+        if store is None:
+            return False, i18n.t("receipt.pursuit.no_store")
+        payload = getattr(proposal, "payload", None) or {}
+        pid = (payload.get("pursuit_id") or "").strip()
+        rec = store.get(pid) if pid else None
+        if rec is None:
+            return False, i18n.t("receipt.pursuit.gone")
+        if rec.status == "committed":
+            return True, i18n.t("receipt.pursuit_commit.already")
+        if rec.status in ("done", "dropped"):
+            return True, i18n.t("receipt.pursuit.terminal", status=rec.status)
+        rec.pursuit = rec.pursuit.model_copy(update={"status": "committed"})
+        rec.suspended = False
+        store.put(rec)
+        return True, i18n.t("receipt.pursuit_commit.ok", statement=rec.pursuit.statement[:60])
+    return handler
+
+
+def _pursuit_revise_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """KIND_PURSUIT_REVISE 兑现(docs/88 §5):修订是决策归人 —— ACCEPT = 你决定把这个追求**放下**。
+
+    第一刀**不做自动改方向**(auto-replan DSL 是 M3):revision_trigger 命中只把带原因的卡摆到你
+    面前,你 ACCEPT = 停止追求(标 dropped,退出活跃集);想换方向就用新 statement 重新 create 一条。
+    REJECT/DEFER 走 registry 通用语义(不进这里)= 卡关掉、Pursuit 留在挂起态(revised)不自动跑。
+    K5:只在你 ACCEPT 后被调。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        from karvyloop import i18n
+        store = getattr(app.state, "pursuit_store", None)
+        if store is None:
+            return False, i18n.t("receipt.pursuit.no_store")
+        payload = getattr(proposal, "payload", None) or {}
+        pid = (payload.get("pursuit_id") or "").strip()
+        rec = store.get(pid) if pid else None
+        if rec is None:
+            return True, i18n.t("receipt.pursuit.gone")
+        if rec.status in ("done", "dropped"):
+            return True, i18n.t("receipt.pursuit.terminal", status=rec.status)
+        rec.pursuit = rec.pursuit.model_copy(update={"status": "dropped"})
+        rec.suspended = True
+        store.put(rec)
+        return True, i18n.t("receipt.pursuit_revise.dropped", statement=rec.pursuit.statement[:60])
+    return handler
+
+
 def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool, str]]]:
     """构造 ACCEPT 兑现 handler 表(注入 app.state.proposal_handlers)。
 
@@ -917,6 +972,8 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_WEEKLY_DIGEST: _weekly_digest_handler,              # ACCEPT=归档(对齐前端承诺)
         KIND_SILENCE_GRANT: _silence_grant_handler(app),         # 挣来的静音:授权落台账(可撤)
         KIND_SILENCE_REVOKED: _silence_revoked_handler,          # 吊销告知:纯知悉
+        KIND_PURSUIT_COMMIT: _pursuit_commit_handler(app),       # docs/88:承诺跨天目标 → Pursuit 升 committed
+        KIND_PURSUIT_REVISE: _pursuit_revise_handler(app),       # docs/88:修订是决策归人 → ACCEPT=放下追求
         KIND_EXTERNAL_ADOPT: _external_adopt_handler(app),       # M2 采纳门:外部 untrusted 供稿 H2A 采纳才升记忆
         **_inbox,                                                # 收件箱管道:记台账/存草稿(只进不出)
     }

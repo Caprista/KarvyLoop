@@ -142,6 +142,8 @@ HIGH_RISK_KINDS = frozenset({
     "mesh_takeover",         # 跨设备接活重跑(docs/74 §6.3):设备"判死"是 lease 推断不是事实,自动接=双跑风险;产品裁决=H2A 确认才动,永不自动
     "memory_conflict",       # D2:推翻你钉住/人审记忆的冲突卡 —— 静音=系统背着你改你确认过的东西(你钉的东西系统绝不背着你改),永不自动
     "schedule_catchup",      # J5:离线追赶补跑卡(同 mesh_takeover 先例)—— 骑 run_task 会被"挣来的静音"自动兑现,独立 kind 硬排除,必人拍
+    "pursuit_commit",        # docs/88:承诺跨天目标是决策(照 J5)—— 静音=系统背着你承诺替你做几天事,永不自动
+    "pursuit_revise",        # docs/88:改方向/挂起是决策归人(照 D2)—— 静音=系统背着你改追求方向,永不自动
     # crystallize_skill 留池:纯新增、provisional、可删,非破坏性(与上面的"改/删"不同类)
 })
 

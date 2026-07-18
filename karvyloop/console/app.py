@@ -46,6 +46,7 @@ from .routes_ops import router as ops_router
 from .routes_mesh import router as mesh_router
 from .routes_pair import router as pair_router
 from .routes_peers import router as peers_router
+from .routes_pursuit import router as pursuit_router
 from .routes_workflow import router as workflow_router
 from .routes_roles import router as roles_router
 from .routes_schedules import router as schedules_router
@@ -316,6 +317,17 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 任务监控:{stalled} 条疑似中断 → 升重试卡")
                         except Exception as ie:
                             _maintenance_item_failed(app, "task_monitor", ie)
+                        # docs/88 招牌"闭环完整性"外环:committed Pursuit 每 tick 确定性 verify →
+                        # 过则自动 done+回执;未完成则 pursue 推进一拍(非热路径,慢侧维护节奏)。
+                        # 放在 idle 判断之前 = 不受 daily 节流影响(跨天目标要及时推进/收官)。
+                        try:
+                            from karvyloop.console.pursuit_tick import pursuit_tick
+                            pres = await pursuit_tick(app)
+                            if pres.get("done") or pres.get("revised") or pres.get("infeasible"):
+                                logger.info(f"[karvyloop console] Pursuit 推进:done {pres.get('done', 0)}、"
+                                            f"升修订卡 {pres.get('revised', 0)}、升不可行卡 {pres.get('infeasible', 0)}")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "pursuit_tick", ie)
                         _ml = getattr(app.state, "main_loop", None)
                         # 看一眼待质量评积压(纯计数、cap 提前停;线程里跑不阻塞 loop)。
                         backlog = 0
@@ -770,6 +782,10 @@ def build_console_app(
     # None → 圆桌/workflow 执行外部步时回退到内置 external_runtime.bridge_factory)。
     app.state.external_bridge_factory = None
     app.state.external_token_recorder = None
+    # docs/88 招牌"闭环完整性"第一刀:外环 Pursuit(跨天持久目标)。entry 接线时设真实例;
+    # 未接(测试/--no-llm 前)→ None,pursuit_tick / routes / snapshot 一律 getattr 兜 None(0 影响)。
+    app.state.pursuit_store = None
+    app.state.pursuit_manager = None
     app.state.ws_clients = set()  # 立即 set,lifespan 里也 set 同引用
 
     # mount routers
@@ -782,6 +798,7 @@ def build_console_app(
     app.include_router(workflow_router)    # /api/workflow/{pending_resume,resume,discard}(2026-07-11 从 routes.py carve 给红线头寸)
     app.include_router(mesh_router)        # /api/mesh/{frontier,sync}(设备 mesh 日志同步,docs/74)
     app.include_router(pair_router)        # /api/pair/*(📱 设备配对管理:颁发/列表/吊销,管理权本地锁)
+    app.include_router(pursuit_router)     # /api/pursuit*(docs/88 外环 Pursuit:跨天持久目标 create/列/详情)
     app.include_router(tokens_router)      # /api/tokens*(P2-② 从 routes.py 拆出)
     app.include_router(decision_prefs_router)  # /api/decision_prefs*(P2-② 从 routes.py 拆出)
     app.include_router(atoms_router)       # /api/atoms* + /api/atom/*(P2-② 从 routes.py 拆出)

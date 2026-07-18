@@ -21,7 +21,7 @@ from typing import Callable, Optional
 
 class TaskRecord:
     def __init__(self, task_id: str, who: str, domain_id: str, role: str, intent: str,
-                 proposal_id: str = "") -> None:
+                 proposal_id: str = "", pursuit_id: str = "") -> None:
         self.id = task_id
         self.who = who              # 显示名:"小卡" / 角色名
         self.domain_id = domain_id  # 关联 peer(点回去切聊天)
@@ -30,6 +30,9 @@ class TaskRecord:
         # docs/85 数据审计缺口:run_task 兑现的任务此前不存 proposal_id → 决策⑥执行段与提案
         # 无键可联。可选回链(加性兼容:老 tasks.json 无此键 → "",一切照旧)。
         self.proposal_id = proposal_id or ""
+        # docs/88 外环 Pursuit:每 tick 推进派生一条 task,回链到它的持久追求(加性兼容;
+        # 非 pursuit 派生的任务恒 "")。让"这条任务属于哪个跨天目标"可按 pursuit_id 过滤。
+        self.pursuit_id = pursuit_id or ""
         self.status = "running"     # running / done / error
         self.result = ""            # 结果摘要(卡片用,截断)
         self.result_full = ""       # 完整结果(结果文档用)
@@ -60,6 +63,7 @@ class TaskRecord:
             "result": self.result, "conversation_id": self.conversation_id,
             "trace_id": self.trace_id,
             "proposal_id": self.proposal_id,   # 决策回链(docs/85;老记录为 "")
+            "pursuit_id": self.pursuit_id,     # 外环 Pursuit 回链(docs/88;老记录为 "")
             "started": self.started, "finished": self.finished,
             # 看板卡直接可读:最新一条事件 + 是否卡着(最新事件是 blocked)→ 不点开也知道跑到哪/卡没卡
             "last_event": (self.events[-1] if self.events else None),
@@ -86,6 +90,7 @@ class TaskRecord:
         t.conversation_id = d.get("conversation_id", "") or ""
         t.trace_id = d.get("trace_id", "") or ""
         t.proposal_id = str(d.get("proposal_id", "") or "")   # 加性兼容:老文件无此键 → ""
+        t.pursuit_id = str(d.get("pursuit_id", "") or "")     # 加性兼容:老文件无此键 → ""
         ev = d.get("events")
         t.events = [e for e in ev if isinstance(e, dict)] if isinstance(ev, list) else []
         # 类型强制(手改坏文件里的字符串时间戳 → 抛 → load_all 丢掉该坏项,不污染前端排序)
@@ -152,9 +157,9 @@ class TaskRegistry:
                 self._by_id[t.id] = t
 
     def start(self, *, who: str, domain_id: str = "l0", role: str = "", intent: str = "",
-              proposal_id: str = "") -> str:
+              proposal_id: str = "", pursuit_id: str = "") -> str:
         t = TaskRecord(uuid.uuid4().hex[:12], who, domain_id, role, intent,
-                       proposal_id=proposal_id)
+                       proposal_id=proposal_id, pursuit_id=pursuit_id)
         t.add_event("start", intent)
         if len(self._tasks) == self._tasks.maxlen and self._tasks:
             oldest = self._tasks[-1]
