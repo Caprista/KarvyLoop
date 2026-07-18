@@ -146,7 +146,115 @@ var KarvyPursuitsPanelBundle = (function(exports) {
     body.appendChild(wrap);
   }
 
-  // ---- 详情:目标全文 + 状态 + 判据 + 派生 task(时间倒序)----
+  // 状态条一句人话(第三刀 #2 ①,**纯确定性零 LLM**):从状态/推进/连续失败/最近一轮派生。
+  // 只用人话(还没跑/正在跑/卡住了/推进中/完成),禁 trace/verify_gate/execution 内部词。
+  function _statusSentence(p, tasks) {
+    if (p.suspended) return t("pursuit.suspended");
+    if (p.status === "done") return t("pursuit.now.done");
+    const cf = p.consecutive_failures || 0;
+    if (cf >= 2) return t("pursuit.now.stuck", { n: cf });
+    if (tasks.some((tk) => tk.status === "running")) return t("pursuit.now.running");
+    if (cf > 0) return t("pursuit.now.last_fail");
+    if ((p.advances || 0) > 0) return t("pursuit.now.advancing", { n: p.advances });
+    return t("pursuit.now.none");
+  }
+
+  // 时间线一行(第三刀 #2 ②):第几轮 / 时间 / 成功·失败(人话);有内容才可展开该轮 task 摘要。
+  function _roundRow(tk, roundNo) {
+    const stKey = tk.status === "running" ? "pursuit.round.running"
+      : tk.status === "error" ? "pursuit.round.error" : "pursuit.round.done";
+    const badgeCls = tk.status === "done" ? "confirmed" : "provisional";
+    const detail = el("div", { class: "pursuit-round-detail hidden" });
+    if (tk.status === "error" && tk.result) {
+      detail.appendChild(el("div", { class: "mc-meta", text: t("pursuit.round.why", { reason: String(tk.result).slice(0, 240) }) }));
+    } else if (tk.result) {
+      detail.appendChild(el("div", { class: "mc-meta", text: String(tk.result).slice(0, 240) }));
+    }
+    if (tk.intent) detail.appendChild(el("div", { class: "mc-meta pursuit-round-intent", text: tk.intent }));
+    const expandable = detail.childElementCount > 0;
+    const name = el("div", { class: "mc-name" },
+      el("span", { text: t("pursuit.round.label", { n: roundNo }) }),
+      el("span", { class: "dpref-badge " + badgeCls, text: t(stKey) }),
+      expandable ? el("span", { class: "pursuit-round-caret", "aria-hidden": "true", text: "▾" }) : null);
+    const card = el("div", { class: "mgmt-card pursuit-round" },
+      el("div", { class: "mc-main" }, name,
+        el("div", { class: "mc-meta", text: _fmtWhen(tk.finished || tk.started) }),
+        detail));
+    if (expandable) {
+      card.setAttribute("role", "button");
+      card.setAttribute("tabindex", "0");
+      const toggle = () => { detail.classList.toggle("hidden"); card.classList.toggle("open"); };
+      card.addEventListener("click", toggle);
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+      });
+    }
+    return card;
+  }
+
+  // 挂起记录的出口(docs/88 真伤2):继续 / 放下 —— 只对挂起(或改方向)记录显示。给"永久僵尸"
+  // 一条真出口。人话按钮(i18n);后端 reason 经 textContent 落 DOM,不 innerHTML。
+  function _buildSuspendActions(pursuitId) {
+    const wrap = el("div", { class: "pursuit-suspend-actions" });
+    const row = el("div", { class: "dpref-actions" });
+    const note = el("div", { class: "mgmt-hint pursuit-note" });
+    const _fail = (r) => {
+      const reason = (r && r.data && r.data.reason) || "";
+      note.textContent = t("pursuit.action_fail", { reason: reason });
+    };
+    const resumeBtn = el("button", { class: "dpref-confirm", text: t("pursuit.resume_btn"),
+      onclick: async () => {
+        resumeBtn.disabled = true;
+        const r = await _postJSON("/api/pursuit/" + encodeURIComponent(pursuitId) + "/resume", {});
+        if (r.ok && r.data && r.data.ok) { renderPursuitDetail(pursuitId); }
+        else { _fail(r); resumeBtn.disabled = false; }
+      } });
+    const dropBtn = el("button", { class: "dpref-edit", text: t("pursuit.drop_btn"),
+      onclick: async () => {
+        if (typeof window.confirm === "function" && !window.confirm(t("pursuit.drop_confirm"))) return;
+        dropBtn.disabled = true;
+        const r = await _postJSON("/api/pursuit/" + encodeURIComponent(pursuitId) + "/drop", {});
+        if (r.ok && r.data && r.data.ok) { renderPursuitsPanel(t("pursuit.dropped_ok")); }
+        else { _fail(r); dropBtn.disabled = false; }
+      } });
+    row.appendChild(resumeBtn);
+    row.appendChild(dropBtn);
+    wrap.appendChild(row);
+    wrap.appendChild(note);
+    return wrap;
+  }
+
+  // 「让小卡讲讲」(第三刀 #2 ③):点了才 POST /api/pursuit/{id}/narrate —— LLM 叙述「我做了什么/
+  // 为什么/卡在哪」。**绝不自动烧**;后端无 gateway/失败/空回复会自动退确定性兜底(不 500)。
+  // 产出纯展示不落库,经 textContent 落 DOM;可再点重讲。
+  function _buildNarrateRow(pursuitId) {
+    const wrap = el("div", { class: "pursuit-narrate" });
+    const out = el("div", { class: "pursuit-narrate-out hidden" });
+    const btn = el("button", { class: "dpref-confirm pursuit-narrate-btn", text: t("pursuit.narrate_btn"),
+      onclick: async () => {
+        btn.disabled = true;
+        const label = btn.textContent;
+        btn.textContent = t("pursuit.narrating");
+        try {
+          const r = await _postJSON("/api/pursuit/" + encodeURIComponent(pursuitId) + "/narrate", {});
+          const text = (r.ok && r.data && r.data.ok && (r.data.narration || "").trim())
+            ? String(r.data.narration).trim() : t("pursuit.narrate_fail");
+          out.textContent = text;
+          out.classList.remove("hidden");
+        } catch (e) {
+          out.textContent = t("pursuit.narrate_fail");
+          out.classList.remove("hidden");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
+      } });
+    wrap.appendChild(btn);
+    wrap.appendChild(out);
+    return wrap;
+  }
+
+  // ---- 详情(Manus 式骨架,docs/88 第三刀 #2):①状态条 ②推进时间线 ③让小卡讲讲 ----
   async function renderPursuitDetail(pursuitId) {
     const body = mgmtBody();
     if (!body) return;
@@ -159,6 +267,8 @@ var KarvyPursuitsPanelBundle = (function(exports) {
       return;
     }
     const p = r.pursuit;
+    const tasks = (p.tasks || []).slice();
+    // 头卡:目标全文 + 状态 + 判据 + 推进/更新 + 进展/改方向
     const head = el("div", { class: "mgmt-card" },
       el("div", { class: "mc-main" },
         el("div", { class: "mc-name" },
@@ -173,25 +283,26 @@ var KarvyPursuitsPanelBundle = (function(exports) {
         p.revision_reason ? el("div", { class: "mc-meta", text: t("pursuit.revision", { reason: p.revision_reason }) }) : null,
       ));
     body.appendChild(head);
+    // 挂起/改方向记录的出口(真伤2):继续 / 放下(只挂起时显示)
+    if (p.suspended || p.status === "revised") {
+      body.appendChild(_buildSuspendActions(pursuitId));
+    }
+    // ① 状态条:一句人话现状(确定性,零 LLM)
+    body.appendChild(el("div", { class: "pursuit-statusbar" },
+      el("span", { class: "pursuit-statusbar-label", text: t("pursuit.now_label") }),
+      el("span", { class: "pursuit-statusbar-text", text: _statusSentence(p, tasks) })));
+    // ③ 让小卡讲讲(点了才烧 token)
+    body.appendChild(_buildNarrateRow(pursuitId));
+    // ② 推进时间线:每轮一行(时间正序编号 → 展示倒序,新的在前)
     body.appendChild(el("div", { class: "mgmt-section-title", text: t("pursuit.tasks_head") }));
-    const tasks = (p.tasks || []).slice().sort(
-      (a, b) => ((b.finished || b.started || 0) - (a.finished || a.started || 0)));
     if (!tasks.length) {
       body.appendChild(el("div", { class: "mgmt-empty", text: t("pursuit.tasks_empty") }));
       return;
     }
+    const asc = tasks.slice().sort((a, b) => ((a.finished || a.started || 0) - (b.finished || b.started || 0)));
     const wrap = el("div", { class: "mgmt-list" });
-    for (const tk of tasks) {
-      const stLbl = tk.status === "running" ? t("task.running")
-        : tk.status === "error" ? "⚠ " + t("task.error") : t("task.done");
-      wrap.appendChild(el("div", { class: "mgmt-card" },
-        el("div", { class: "mc-main" },
-          el("div", { class: "mc-name" },
-            el("span", { text: (tk.intent || tk.id || "?") }),
-            el("span", { class: "dpref-badge " + (tk.status === "done" ? "confirmed" : "provisional"), text: stLbl })),
-          el("div", { class: "mc-meta", text: _fmtWhen(tk.finished || tk.started) }),
-          tk.result ? el("div", { class: "mc-meta", text: String(tk.result).slice(0, 200) }) : null,
-        )));
+    for (let i = asc.length - 1; i >= 0; i--) {
+      wrap.appendChild(_roundRow(asc[i], i + 1));
     }
     body.appendChild(wrap);
   }

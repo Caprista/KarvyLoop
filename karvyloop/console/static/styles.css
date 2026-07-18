@@ -412,6 +412,30 @@ html, body {
 .pursuit-card { cursor: pointer; }
 .pursuit-card:hover { border-color: var(--accent); }
 .pursuit-note { margin-top: 6px; }
+/* 挂起记录的出口(docs/88 真伤2):继续 / 放下 —— 两个按钮横排 */
+.pursuit-suspend-actions { margin: 8px 0 2px; }
+.pursuit-suspend-actions .dpref-actions { flex-direction: row; gap: 8px; }
+/* 🎯 详情骨架(docs/88 第三刀 #2):①状态条 ②让小卡讲讲 ③推进时间线 */
+.pursuit-statusbar {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 10px 0 4px; padding: 9px 12px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.pursuit-statusbar-label { font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.pursuit-statusbar-text { font-size: 13px; color: var(--text); }
+.pursuit-narrate { margin: 6px 0 10px; }
+.pursuit-narrate-btn { font-size: 12px; }
+.pursuit-narrate-out {
+  margin-top: 8px; padding: 9px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5;
+  color: var(--text); background: var(--bg); border: 1px solid var(--accent);
+}
+.pursuit-round { cursor: default; }
+.pursuit-round[role="button"] { cursor: pointer; }
+.pursuit-round[role="button"]:hover { border-color: var(--accent); }
+.pursuit-round-caret { font-size: 10px; color: var(--text-dim); margin-left: 6px; transition: transform 0.15s; display: inline-block; }
+.pursuit-round.open .pursuit-round-caret { transform: rotate(180deg); }
+.pursuit-round-detail { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.pursuit-round-intent { color: var(--text-dim); }
 .col-sub { font-size: 11px; color: var(--text-dim); margin: 12px 0 4px; font-weight: 600; }
 .know-chip {
   font-size: 12px; color: var(--text); padding: 6px 9px; margin-bottom: 5px;

@@ -1,10 +1,12 @@
 """console.pursuit_tick — 外环 Pursuit(跨天持久目标)的推进 tick(docs/88 §4/§9 第一刀件④)。
 
-挂在慢侧维护 loop(**非热路径**,照 _maintenance_item_failed 兜异常):每次醒来遍历活跃、
-已 committed 的 Pursuit,对每个(**到推进节拍时才做工**,节流窗内整条跳过——含 verify 子进程):
+挂在慢侧维护 loop(**非热路径**,照 _maintenance_item_failed 兜异常):每次醒来遍历活跃 Pursuit
+(committed / revised),对每个(跑评分离 docs/88 真伤1——**只节流烧钱/贵计算**,不节流记账/完成判定):
 
-  ① 确定性 verify(招牌硬核):`PursuitManager.is_done` 求值 verify_gate —— **绝不触发 LLM**
-     (test_pass 跑子进程 / file_exists 查文件)。过了 → 自动 done + 完成回执 + 归档。
+  ① 确定性 verify(招牌硬核):`PursuitManager.is_done` 求值 verify_gate —— **绝不触发 LLM**。
+     **廉价门(file_exists / predicate)每 tick 都验**(零子进程/微秒级)→ 外部刚满足即刻 done;
+     **test_pass 门(走沙箱子进程,贵)受 `_due` 节流** + offload 到线程(不冻结事件循环)。
+     过了 → 自动 done + 完成回执 + 归档。
   ② 修订判定:revision_trigger 命中 → 升 KIND_PURSUIT_REVISE 卡挂起等人拍(**系统不自动改方向**)。
   ③ 都没有 → `pursue()` 推进一拍:派生一条 TaskRecord(who=owner,关联 pursuit_id + 回填 drive
      trace_id)+ 写 Trace(run_scope)。推进后**当拍再验一次**(drive 可能刚把它做完)→ 过则即刻
@@ -14,7 +16,7 @@
   - `advances` 累计**真推进**次数(outcome=None/异常不计),达 `PURSUIT_MAX_ADVANCES` → 挂起 + 升
     H2A 卡("推进 N 次仍没完成:你来定")—— 不靠用户 revision_trigger(DSL 弱、无 > 比较)。
   - 推进节拍 throttle 的时间戳 `last_advance_ts` **在异常路径也写**(pursue 抛异常绝不旁路节流,
-    否则每 10min 一次 =144 次/天)。verify 子进程随整条 tick 工作一起被节流。
+    否则每 10min 一次 =144 次/天)。**贵的 test_pass 子进程**随推进一起被节流;廉价门不受节流。
   - `consecutive_failures` 累计**连续失败**(pursue 抛异常/明确报错 +1;真推进成功清零;确定性
     infra 故障不计),达 `PURSUIT_MAX_CONSECUTIVE_FAILURES` → 同款挂起升卡 —— 堵"pursue 每拍都炸
     → advances 永不 +1 → 硬地板永不触发 → 以节流上限无限静默重试、人永远不知道"的静默洞
@@ -26,11 +28,24 @@ asyncio.run 独立验收)→ 必须下线程跑,不嵌套事件循环。
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# 门成本分层(docs/88 真伤1):廉价确定性门零 LLM/零子进程/微秒级 → **每 tick 都验**(完成能立刻收官);
+# 贵门(沙箱子进程)受 _due 节流 + offload 到线程(真伤6:别冻结 console 事件循环)。
+_CHEAP_GATE_TYPES = ("file_exists", "predicate")
+
+# 真伤7:cognition 层只出 GATE_NOTE_* 码,console 层(有 i18n)映射成人话写进 progress_note(分层)。
+_GATE_NOTE_I18N = {
+    "no_isolation": "pursuit.gate_note.no_isolation",
+    "net_downgrade": "pursuit.gate_note.net_downgrade",
+    "timed_out": "pursuit.gate_note.timed_out",
+    "net_suspect": "pursuit.gate_note.net_suspect",
+}
 
 # context 白名单(docs/88 §4「第一刀 context key 固定小白名单防漂移」):assemble_context 只喂这几个
 # 确定性信号(从 record 存的上次 outcome 探针 + 时间预算读),不开放式。revision_triggers 只能引它们。
@@ -223,7 +238,8 @@ def _complete(app: Any, rec: Any) -> None:
     try:
         mgr = getattr(app.state, "pursuit_manager", None)
         if mgr is not None:
-            mgr.persist(rec.pursuit)
+            # 真伤3:把**真域** rec.domain_id 线程进 persist(别让 domain 级完成归档进随机 uuid)。
+            mgr.persist(rec.pursuit, domain_id=getattr(rec, "domain_id", "") or "")
     except Exception as e:
         logger.debug(f"[pursuit_tick] 完成 persist 失败(不阻断): {e}")
     # ② 完成回执:落 Trace(周报 hook)+ 任务看板一条 done 记录(用户可见回执,复用任务账)。
@@ -253,17 +269,79 @@ async def _raise_revise(app: Any, rec: Any, *, reason: str, ts: float) -> None:
     await _raise_card(app, card)                    # 卡幂等(id 稳定),失败也不会重复升
 
 
-async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
-    """遍历活跃 committed Pursuit,到推进节拍时做工。返回计数 dict(供 log / 测试断言)。
+def _apply_gate_note(rec: Any, ctx: dict) -> None:
+    """真伤7:读 cognition 层写进 ctx 的 GATE_NOTE_* 码 → i18n 出人话进 rec.progress_note。
+    降级平台上 test_pass 门永不可完成,让"为什么"到用户可见处(下钻页渲染 progress_note),不只在日志。"""
+    from karvyloop.cognition.pursuit import GATE_NOTE_KEY
+    if not isinstance(ctx, dict):
+        return
+    code = ctx.get(GATE_NOTE_KEY)
+    key = _GATE_NOTE_I18N.get(code or "")
+    if key:
+        from karvyloop import i18n
+        rec.progress_note = i18n.t(key)
 
-    - active(待承诺)/ revised(挂起等人拍)→ **不动**(等人)。
-    - 节流窗内(距上次做工 < interval)→ 整条跳过(含 verify 子进程,防 144 次/天)。
-    - committed 未挂起且到点 → 确定性 verify(zero-LLM);revision_trigger 命中 → 升 REVISE 卡挂起;
-      否则 pursue() 推进一拍 → **推进后当拍再验一次**(过则即刻 done);达 PURSUIT_MAX_ADVANCES → 挂起升卡。
-    - committed 已挂起(infeasible/达上限)且到点 → 仅确定性验完成(外部可能已修好),不再 pursue。
+
+async def _is_done_safe(manager: Any, rec: Any, ctx: dict, *, offload: bool) -> tuple[bool, bool]:
+    """确定性 verify_gate 求值,返回 (done, errored)。
+
+    - offload=True(test_pass:走沙箱子进程,贵)→ `asyncio.to_thread` 下线程跑,**绝不冻结 console
+      事件循环**(真伤6:桥的 th.join 会阻塞调用线程整 gate 时长,聊天/HTTP/WS 全卡)。
+    - offload=False(廉价门:微秒级)→ 主线程直接跑(offload 开销 > 跑本身)。
+    - 任何异常 → (False, True):门求值绝不冒穿 tick(真伤4③);调用方据 errored 计一次失败 + 喂节流。
     """
-    import asyncio
+    try:
+        if offload:
+            done = await asyncio.to_thread(manager.is_done, rec.pursuit, ctx)
+        else:
+            done = manager.is_done(rec.pursuit, ctx)
+        return bool(done), False
+    except Exception as e:  # noqa: BLE001 — 门求值异常不冒穿 tick(真伤4③)
+        logger.warning(f"[pursuit_tick] verify_gate 求值异常({getattr(rec, 'id', '?')}): {e}")
+        return False, True
 
+
+async def _suspend_and_revise(app: Any, rec: Any, *, reason: str, ts: float, counts: dict) -> None:
+    """挂起 + 标 revised + 升 REVISE 卡(_raise_revise 内含 store.put 落盘)。"""
+    rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})
+    rec.suspended = True
+    await _raise_revise(app, rec, reason=reason, ts=ts)
+    counts["revised"] += 1
+
+
+async def _hit_cost_floor(app: Any, rec: Any, *, n_ts: float, counts: dict) -> bool:
+    """连败/推进 硬地板:命中任一 → 挂起升 H2A 卡,返回 True(调用方 continue,rec 已落盘)。
+
+    连败在前(堵"每拍都炸→advances 永不 +1→推进上限永不触发→节流上限无限静默重试");推进在后
+    (真推进达上限仍没过门 → 你来定:继续/改方向/放弃)。fail-loud:人只该拍板,不该当心跳。
+    """
+    from karvyloop import i18n
+    if rec.consecutive_failures >= PURSUIT_MAX_CONSECUTIVE_FAILURES:
+        await _suspend_and_revise(
+            app, rec, ts=n_ts, counts=counts,
+            reason=i18n.t("pursuit.revise.reason_consecutive_failures", n=rec.consecutive_failures))
+        logger.info(f"[pursuit_tick] Pursuit {rec.id} 连续失败 {rec.consecutive_failures} 次 → 挂起升 H2A 卡")
+        return True
+    if rec.advances >= PURSUIT_MAX_ADVANCES:
+        await _suspend_and_revise(
+            app, rec, ts=n_ts, counts=counts,
+            reason=i18n.t("pursuit.revise.reason_max_advances", n=rec.advances))
+        logger.info(f"[pursuit_tick] Pursuit {rec.id} 达推进上限 {rec.advances} → 挂起升 H2A 卡")
+        return True
+    return False
+
+
+async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
+    """遍历活跃 Pursuit(committed / revised),到节拍时做工。返回计数 dict(供 log / 测试断言)。
+
+    跑评分离的正形(docs/88 真伤1)——把节流从"记账/完成判定"上摘掉,**只节流烧钱/贵计算**:
+    - **廉价确定性门(file_exists / predicate)每 tick 都验**(零 LLM/零子进程/微秒级):committed /
+      revised / suspended 一视同仁 —— 外部世界可能刚满足它 → **立即 done**(不等 6h;revised 也不再
+      是永久僵尸,真伤2)。过了收官,门求值抛异常也计一次失败喂节流(真伤4③),绝不冒穿/每 10min 重炸。
+    - **只有 test_pass 门(走沙箱子进程,贵)和 pursue() 推进受 `_due` 节流**;且 test_pass 的求值 +
+      pursue offload 到线程,绝不冻结 console 事件循环(真伤6)。
+    - active(待承诺卡)→ 不动;revised / suspended → 只确定性验完成,**绝不再 pursue**(等人拍)。
+    """
     store = getattr(app.state, "pursuit_store", None)
     manager = getattr(app.state, "pursuit_manager", None)
     counts = {"checked": 0, "done": 0, "revised": 0, "advanced": 0, "infeasible": 0}
@@ -277,38 +355,77 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
         advance_interval = 0.0
 
     def _due(rec: Any) -> bool:
-        # 推进节拍 throttle(真伤1③:verify 子进程随整条 tick 工作一起节流,不再每 tick 都跑)。
+        # 推进节拍 throttle(真伤1:只节流贵计算 —— test_pass 子进程 + pursue;廉价门不受它辖)。
         return advance_interval <= 0 or (n_ts - float(getattr(rec, "last_advance_ts", 0.0) or 0.0)) >= advance_interval
 
     for rec in store.active():
         try:
-            if rec.pursuit.status != "committed":
-                continue   # active=等承诺卡 / revised=挂起等人拍 → 不自动动
-            if not _due(rec):
-                continue   # 节流窗内,整条跳过(含 verify 子进程)
-
+            status = rec.pursuit.status
+            if status not in ("committed", "revised"):
+                continue   # active = 等承诺卡 → 不自动动
             ctx = assemble_context(app, rec, now=n_ts)
+            gate_type = (rec.pursuit.verify_gate or {}).get("type")
+            cheap = gate_type in _CHEAP_GATE_TYPES
 
-            # 挂起(infeasible/达上限):到点仅确定性验完成(外部可能已修好),绝不再 pursue 烧 token。
-            if rec.suspended:
-                rec.last_advance_ts = n_ts   # 记一次"做工"以喂节流(verify 也算做工)
-                if manager.is_done(rec.pursuit, ctx):
+            # ── 真伤1 + 真伤2:廉价确定性门**每 tick 都验**(不受 _due 节流)──
+            # committed / revised / suspended 一视同仁:外部可能刚满足 → 立即 done(不等 6h、不留僵尸)。
+            if cheap:
+                done, errored = await _is_done_safe(manager, rec, ctx, offload=False)
+                if done:
                     _complete(app, rec)
+                    store.put(rec)
                     counts["done"] += 1
-                store.put(rec)
+                    continue
+                if errored:
+                    # 真伤4③:门求值抛异常 → 计一次失败 + 喂节流(廉价门不受节流、每 tick 都跑 →
+                    # 只在到点时记,否则每 tick 计一次失败会瞬间刷爆连败地板);地板兜得住,不静默每 10min 重炸。
+                    if _due(rec):
+                        rec.last_advance_ts = n_ts
+                        rec.consecutive_failures += 1
+                        if await _hit_cost_floor(app, rec, n_ts=n_ts, counts=counts):
+                            continue
+                        store.put(rec)
+                    continue
+
+            # ── revised / suspended(infeasible/达地板)→ 绝不再 pursue(等人拍)──
+            # 廉价门上面已每 tick 验过;test_pass 完成验证受节流(贵),到点 offload 验一次。
+            if rec.suspended or status == "revised":
+                if not cheap and _due(rec):
+                    rec.last_advance_ts = n_ts
+                    done, _err = await _is_done_safe(manager, rec, ctx, offload=True)
+                    _apply_gate_note(rec, ctx)
+                    if done:
+                        _complete(app, rec)
+                        counts["done"] += 1
+                    store.put(rec)
                 continue
 
-            counts["checked"] += 1
-            p2 = manager.step(rec.pursuit, ctx)   # is_done(gate,zero-LLM)→done;revise→revised;else 维持
-            if p2.status == "done" and rec.pursuit.status != "done":
-                _complete(app, rec)
-                store.put(rec)
-                counts["done"] += 1
+            # ── committed 未挂起:推进路径(受 _due 节流)──
+            if not _due(rec):
                 continue
-            if p2.status == "revised" and rec.pursuit.status != "revised":
-                # revision_trigger 命中:系统不自动改方向,升 REVISE 卡挂起等人拍(docs/88 §5)。
+            counts["checked"] += 1
+
+            # test_pass 完成门(贵):此处**节流** + offload 到线程(真伤6)。廉价门上面已每 tick 验过 → 跳过重复验。
+            if not cheap:
+                done, errored = await _is_done_safe(manager, rec, ctx, offload=True)
+                _apply_gate_note(rec, ctx)
+                if done:
+                    _complete(app, rec)
+                    store.put(rec)
+                    counts["done"] += 1
+                    continue
+                if errored:
+                    rec.last_advance_ts = n_ts
+                    rec.consecutive_failures += 1
+                    if await _hit_cost_floor(app, rec, n_ts=n_ts, counts=counts):
+                        continue
+                    store.put(rec)
+                    continue
+
+            # 修订判定(revision_trigger 命中 → 系统不自动改方向,升 REVISE 卡挂起等人拍,docs/88 §5)。
+            if manager.should_revise(rec.pursuit, ctx):
                 from karvyloop import i18n
-                rec.pursuit = p2
+                rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})
                 rec.suspended = True
                 await _raise_revise(app, rec,
                                     reason=(rec.revision_reason or i18n.t("pursuit.revise.reason_trigger")),
@@ -317,8 +434,8 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
                 logger.info(f"[pursuit_tick] Pursuit {rec.id} 命中修订触发 → 升 REVISE 卡挂起等人拍")
                 continue
 
-            # committed 维持:pursue() 推进一拍。**先记节流时间戳并落盘**(真伤1②:异常路径也已写,
-            # pursue 抛异常绝不旁路 6h 节流 → 不再每 10min 重试)。
+            # committed 维持:pursue() 推进一拍。**先记节流戳并落盘**(真伤1:异常路径也已写,
+            # pursue 抛异常绝不旁路节流 → 不再每 10min 重试)。pursue offload 到线程(真伤6)。
             rec.last_advance_ts = n_ts
             store.put(rec)
             try:
@@ -349,38 +466,17 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
                     logger.info(f"[pursuit_tick] Pursuit {rec.id} 不可行 → 升不可行报告卡挂起")
                     continue
                 # 推进后**当拍再验一次**:drive 可能刚把它做完 → 即刻 done(不必等下 tick)。
-                if manager.is_done(rec.pursuit, assemble_context(app, rec, now=n_ts)):
+                pctx = assemble_context(app, rec, now=n_ts)
+                done, _err = await _is_done_safe(manager, rec, pctx, offload=not cheap)
+                _apply_gate_note(rec, pctx)
+                if done:
                     _complete(app, rec)
                     store.put(rec)
                     counts["done"] += 1
                     continue
 
-            # 连续失败硬地板(P2 残余):pursue 每拍都炸 → advances 永不 +1 → 下面的推进上限永不触发
-            # → 以节流上限无限静默重试、人永远不知道。连败达上限 → 挂起 + 升**同款** REVISE 卡
-            # (fail-loud:人只该拍板,不该当心跳)。真推进成功会清零(见 _advance_sync)。
-            if rec.consecutive_failures >= PURSUIT_MAX_CONSECUTIVE_FAILURES:
-                from karvyloop import i18n
-                rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})
-                rec.suspended = True
-                await _raise_revise(app, rec,
-                                    reason=i18n.t("pursuit.revise.reason_consecutive_failures",
-                                                  n=rec.consecutive_failures),
-                                    ts=n_ts)
-                counts["revised"] += 1
-                logger.info(f"[pursuit_tick] Pursuit {rec.id} 连续失败 {rec.consecutive_failures} 次"
-                            f" → 挂起升 H2A 卡")
-                continue
-
-            # 成本硬地板(真伤1①):真推进达上限仍没过门 → 挂起 + 升 H2A 卡(你来定:继续/改方向/放弃)。
-            if rec.advances >= PURSUIT_MAX_ADVANCES:
-                from karvyloop import i18n
-                rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})
-                rec.suspended = True
-                await _raise_revise(app, rec,
-                                    reason=i18n.t("pursuit.revise.reason_max_advances", n=rec.advances),
-                                    ts=n_ts)
-                counts["revised"] += 1
-                logger.info(f"[pursuit_tick] Pursuit {rec.id} 达推进上限 {rec.advances} → 挂起升 H2A 卡")
+            # 连败/推进 硬地板(真伤1① + P2 残余):命中 → 挂起升 H2A 卡(rec 已落盘)。
+            if await _hit_cost_floor(app, rec, n_ts=n_ts, counts=counts):
                 continue
 
             store.put(rec)

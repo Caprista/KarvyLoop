@@ -162,6 +162,11 @@ def parse_pursuit_draft(text: str, *, intent: str = "") -> Optional[PursuitDraft
         path = str(gate_in.get("path") or "").strip()
         if not path:
             return None
+        # 真伤4:LLM 判型爱吐 `{date}` 之类模板路径 —— 含 `{...}` 占位符的 path 放弃判型(第一刀不做
+        # 路径模板;create 侧同口径 path_has_placeholder 兜底,宁空勿毒,绝不让"永不满足"的门进库)。
+        from karvyloop.cognition.pursuit import path_has_placeholder
+        if path_has_placeholder(path):
+            return None
         gate = {"type": "file_exists", "path": path}
     statement = str(obj.get("statement") or "").strip()[:_MAX_STATEMENT] or (intent or "").strip()[:_MAX_STATEMENT]
     if not statement:
@@ -263,9 +268,13 @@ async def maybe_pursuit_triage(app: Any, intent: str) -> Optional[dict]:
     if dup is not None:
         from karvyloop import i18n
         stmt = (getattr(dup.pursuit, "statement", "") or "")[:80]
+        # 真伤2:命中的若是**挂起/改方向**记录,别笼统回"已经在追"(它其实永不再跑)——指一条出路:
+        # 去面板点「继续」。让用户有路可走,不至于卡在"说已经在追、实际它僵着"的死角。
+        paused = bool(getattr(dup, "suspended", False)) or getattr(dup.pursuit, "status", "") == "revised"
+        dup_key = "pursuit.triage.duplicate_paused" if paused else "pursuit.triage.duplicate"
         return {"intent": intent, "brain": "SLOW", "fast_brain_hit": False,
                 "crystallized": False, "skill_name": "", "routed": True,
-                "text": i18n.t("pursuit.triage.duplicate", statement=stmt)}
+                "text": i18n.t(dup_key, statement=stmt)}
 
     # 复用第一刀唯一 create 路径(创建 + 升承诺卡;绝不另造第二套)。
     from karvyloop.console.routes_pursuit import create_pursuit_with_commit_card

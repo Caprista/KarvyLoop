@@ -832,6 +832,9 @@ _EN = {
     "receipt.pursuit_revise.dropped": (
         "Set aside “{statement}” — create a new pursuit to change direction (auto-replan comes later)."
     ),
+    "receipt.pursuit_revise.resumed": (
+        "Back on it: “{statement}” — I'll keep pushing it and come back at done / revise."
+    ),
     "pursuit.progress.done": "done — the goal's verify gate passed",
     "pursuit.receipt.done": "✅ Pursuit done: “{statement}” (its verify gate passed)",
     "pursuit.revise.reason_trigger": "a revision trigger fired",
@@ -847,15 +850,41 @@ _EN = {
         "Already on it — “{statement}” is in your pursuits, so I won't open a second one. "
         "If this really is a different goal, create it from the My Pursuits panel."
     ),
+    "pursuit.triage.duplicate_paused": (
+        "This goal is paused — “{statement}” is already in your pursuits, waiting on you. "
+        "Open My Pursuits and hit Continue to pick it back up (I won't open a second one)."
+    ),
     "pursuit.err.gate_not_dict": "verify_gate must be an object with a type.",
     "pursuit.err.gate_type": "First cut only supports these verify_gate types: {allowed}.",
     "pursuit.err.gate_cmd": "test_pass gate needs a non-empty cmd (exit 0 = done).",
     "pursuit.err.gate_cmd_unsplittable": "test_pass cmd doesn't parse into a runnable command: {cmd}",
     "pursuit.err.gate_path": "file_exists gate needs a non-empty path.",
+    "pursuit.err.gate_path_placeholder": (
+        "file_exists path can't contain {{...}} placeholders (no path templating): {path}"
+    ),
     "pursuit.err.no_store": "Pursuit isn't wired (started with --no-llm?).",
+    "pursuit.err.not_found": "That pursuit is gone (maybe already finished or dropped).",
+    "pursuit.err.terminal_no_resume": "That pursuit is already {status} — nothing to continue.",
+    "pursuit.err.terminal_no_drop": "That pursuit is already {status} — nothing to drop.",
     "pursuit.err.bad_pursuit": "Couldn't build the pursuit: {error}",
     "pursuit.gate_desc.test_pass": "command `{cmd}` exits 0",
     "pursuit.gate_desc.file_exists": "file `{path}` exists",
+    # docs/88 真伤7:test_pass 门 fail-loud 原因(cognition 层出稳定码 → 这里出人话进 progress_note)
+    "pursuit.gate_note.no_isolation": (
+        "This device has no real isolation sandbox, so I can't safely run this test-based done-check."
+    ),
+    "pursuit.gate_note.net_downgrade": (
+        "Ran the done-check without network isolation (this device can't isolate the network)."
+    ),
+    "pursuit.gate_note.timed_out": "The done-check ran too long and was stopped.",
+    "pursuit.gate_note.net_suspect": "The done-check likely couldn't reach the network (isolated).",
+    # docs/88 第三刀 #2:「让小卡讲讲」的确定性兜底(gateway 无/失败/空回复时用;零 LLM)
+    "pursuit.narrate.fb_advances": "Pushed this forward {n} time(s) so far.",
+    "pursuit.narrate.fb_last_ok": "The latest pass finished.",
+    "pursuit.narrate.fb_last_fail": "The latest pass got stuck: {err}",
+    "pursuit.narrate.fb_stuck": "Stuck {n} passes in a row — waiting on your call.",
+    "pursuit.narrate.fb_progress": "Where things stand: {note}",
+    "pursuit.narrate.fb_none": "Haven't started on this yet — I'll pick it up on the next pass.",
     # docs/88 第二刀:聊天判型 create(小卡识别跨天目标 → 升承诺卡)的聊天回执 + REJECT 清理回执
     "pursuit.triage.card_text": (
         "This sounds like a multi-day goal to keep pushing: “{statement}”. "
@@ -1604,21 +1633,41 @@ _ZH = {
     "receipt.pursuit_revise.dropped": (
         "已放下「{statement}」—— 想换方向就新建一条追求(自动重规划是后面的刀)。"
     ),
+    "receipt.pursuit_revise.resumed": (
+        "接着追:「{statement}」—— 我会继续推进,完成 / 需改方向时再来找你。"
+    ),
     "pursuit.progress.done": "已完成 —— 目标的验证门通过了",
     "pursuit.receipt.done": "✅ 追求达成:「{statement}」(验证门通过)",
     "pursuit.revise.reason_trigger": "命中了一个修订触发器",
     "pursuit.revise.reason_max_advances": "推进 {n} 次仍没过完成门 —— 你来定(继续 / 改方向 / 放弃)",
     "pursuit.revise.reason_consecutive_failures": "连续 {n} 轮推进都失败了,先暂停 —— 你来定(继续 / 改方向 / 放弃)",
     "pursuit.triage.duplicate": "已经在追这个了 ——「{statement}」就在你的追求里,不再开第二条。如果这真是个不同的新目标,去「我的追求」面板建。",
+    "pursuit.triage.duplicate_paused": "这个目标先前暂停了 ——「{statement}」就在你的追求里、等你拍板。去「我的追求」面板点「继续」把它接着跑起来(不再开第二条)。",
     "pursuit.err.gate_not_dict": "verify_gate 必须是带 type 的对象。",
     "pursuit.err.gate_type": "第一刀只支持这几种 verify_gate 类型:{allowed}。",
     "pursuit.err.gate_cmd": "test_pass 门需要非空的 cmd(退出码 0 = 完成)。",
     "pursuit.err.gate_cmd_unsplittable": "test_pass 的 cmd 解析不出可执行命令:{cmd}",
     "pursuit.err.gate_path": "file_exists 门需要非空的 path。",
+    "pursuit.err.gate_path_placeholder": "file_exists 的 path 不能含 {{...}} 占位符(第一刀不做路径模板):{path}",
     "pursuit.err.no_store": "Pursuit 未接线(--no-llm 启动?)。",
+    "pursuit.err.not_found": "这条追求已经不在了(可能刚完成或被放下)。",
+    "pursuit.err.terminal_no_resume": "这条追求已经是 {status} 了 —— 没什么可继续的。",
+    "pursuit.err.terminal_no_drop": "这条追求已经是 {status} 了 —— 没什么可放下的。",
     "pursuit.err.bad_pursuit": "建 Pursuit 失败:{error}",
     "pursuit.gate_desc.test_pass": "命令 `{cmd}` 退出码为 0",
     "pursuit.gate_desc.file_exists": "文件 `{path}` 存在",
+    # docs/88 真伤7:test_pass 门 fail-loud 原因(cognition 层出稳定码 → 这里出人话进 progress_note)
+    "pursuit.gate_note.no_isolation": "这台设备没有真正的隔离沙箱,无法安全地跑这个测试判据。",
+    "pursuit.gate_note.net_downgrade": "跑完成判据时没有网络隔离(这台设备做不出网络隔离)。",
+    "pursuit.gate_note.timed_out": "完成判据跑得太久,被中止了。",
+    "pursuit.gate_note.net_suspect": "完成判据大概连不上网(已被隔离)。",
+    # docs/88 第三刀 #2:「让小卡讲讲」的确定性兜底(gateway 无/失败/空回复时用;零 LLM)
+    "pursuit.narrate.fb_advances": "到现在已经推进了 {n} 次。",
+    "pursuit.narrate.fb_last_ok": "最近一轮跑完了。",
+    "pursuit.narrate.fb_last_fail": "最近一轮卡住了:{err}",
+    "pursuit.narrate.fb_stuck": "连着卡了 {n} 轮 —— 等你拍板。",
+    "pursuit.narrate.fb_progress": "现在的进展:{note}",
+    "pursuit.narrate.fb_none": "这条还没开始动 —— 下一轮我会带上它。",
     # docs/88 第二刀:聊天判型 create(小卡识别跨天目标 → 升承诺卡)的聊天回执 + REJECT 清理回执
     "pursuit.triage.card_text": (
         "听起来这是个要**跨几天一直推进**的目标:「{statement}」。"

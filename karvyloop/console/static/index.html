@@ -81,7 +81,8 @@
     </header>
 
     <!-- 左导航:管理面入口 + 对话控件 + 统计。
-         docs/85 IA§1(Hardy 放行):13 入口按决策者心智分三组 —— 你的团队 / 它学到的你 / 引擎室。
+         docs/85 IA§1(Hardy 放行):入口按决策者心智分三组 —— 你的团队 / 它学到的你 / 引擎室。
+         docs/88 第三刀(Hardy 拍"本程功能优先"):🎯我的追求进「你的团队」组 → 14 项。
          纯 HTML 挪位:data-panel 委托绑定(setupMgmtPanels)与 desk dock 同构复用
          (.sidebar .nav-item[data-panel])都按 selector 命中,零接线改动。 -->
     <nav class="sidebar">
@@ -106,6 +107,12 @@
         </button>
         <button class="nav-item" data-panel="devices">
           <span class="nav-ico">🖥️</span><span data-i18n="nav.devices">My Devices</span>
+        </button>
+        <!-- 🎯 我的追求进主导航第 14 项(docs/88 第三刀,Hardy 拍"本程功能优先先加,学习曲线专程再收"):
+             你交给系统、跨多天自己推进的长期目标 —— 归"你的团队"(团队替你在追的事)。
+             决策舱列头仍留一个就近入口(常驻导航 + 就近入口并存,和其它面板一致)。 -->
+        <button class="nav-item" data-panel="pursuits" data-i18n-title="nav.pursuits.title">
+          <span class="nav-ico">🎯</span><span data-i18n="nav.pursuits_side">My Pursuits</span>
         </button>
       </div>
       <div class="nav-group">
@@ -228,8 +235,8 @@
              桌面端 display:none(聊天已常驻/rail 放大态走 FAB)。 -->
         <button class="mobile-chat-entry" id="mobile-chat-open" data-i18n="chat.open">💬 跟小卡说…</button>
         <section class="cockpit-col col-intel">
-          <!-- 🎯 我的追求(Pursuit 第二刀):跨多天目标住在"料"这一列的头上 ——
-               左导航 13 项被 IA§1 契约锁死(test_sidebar_nav_three_groups),这里是任务板的近亲位。
+          <!-- 🎯 我的追求:决策舱列头的**就近入口**(第二刀落此)。第三刀已把它加进左导航第 14 项
+               (「你的团队」组);此处保留 = 常驻导航 + 就近入口并存(和其它面板一致,重复入口可接受)。
                class 带 nav-item → 与左导航同一套 data-panel 委托绑定(setupMgmtPanels)零新接线。 -->
           <h2 class="col-head"><span data-i18n="cockpit.intel">📥 流进来的料</span>
             <button id="pursuits-open" class="col-act nav-item" data-panel="pursuits" data-i18n="nav.pursuits" data-i18n-title="nav.pursuits.title">🎯 My Pursuits</button></h2>

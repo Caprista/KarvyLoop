@@ -113,17 +113,27 @@ def test_ac3_verify_gate_file_exists(tmp_path: Path):
     assert eval_verify_gate({"type": "file_exists", "path": str(tmp_path / "missing.txt")}, {}) is False
 
 
-def test_ac3b_verify_gate_file_exists_supports_var_substitution():
-    """file_exists 门 path 支持 {var} 替换(从 context 取)。"""
-    p = "/tmp/{name}_test.txt"  # 路径模板
-    # 路径不在 Windows 上跑通;我们直接走 isfile — 用 tmp_path
+def test_ac3b_verify_gate_file_exists_literal_no_format():
+    """真伤4:file_exists path **不再**做 `{var}` 替换,按**字面**判定。
+
+    旧实现 `path.format(**context)` 有两坑:未知占位符 `{date}` → KeyError / 单花括号 → ValueError
+    冒穿 tick(节流戳写不进 → 每 10min 重炸、6h 节流永不生效);且 `{x.__class__}` = 信息泄露面。
+    含 `{...}` 的 path 是**创建期**该拒的坏门(path_has_placeholder),run 期按字面判永不满足、绝不抛。
+    """
     import tempfile, os
+    from karvyloop.cognition.pursuit import path_has_placeholder
     with tempfile.TemporaryDirectory() as d:
         target = os.path.join(d, "alice_test.txt")
         open(target, "w").close()
         templ = os.path.join(d, "{name}_test.txt")
+        # 不再替换:`{name}` 当字面 → 匹配不到 alice_test.txt → False,且**不抛**
         assert eval_verify_gate({"type": "file_exists", "path": templ},
-                                {"name": "alice"}) is True
+                                {"name": "alice"}) is False
+        # 字面存在的路径仍 True(正常绝对/相对路径不受影响)
+        assert eval_verify_gate({"type": "file_exists", "path": target}, {}) is True
+    # 占位符指纹:含花括号 → 创建期该拒;正常路径不含
+    assert path_has_placeholder("/x/{date}/o.md") is True
+    assert path_has_placeholder("/x/reports/o.md") is False
 
 
 def test_ac3c_verify_gate_predicate_is_deterministic():
@@ -217,18 +227,35 @@ def test_ac5a_personal_pursuit_persists_to_belief():
 
 
 def test_ac5b_domain_pursuit_persists_to_domain_kb(tmp_path: Path):
-    """域 Pursuit(level=domain) → 落盘到 <domain_root>/<domain>/pursuits.md。"""
+    """真伤3:域 Pursuit(level=domain)→ 落盘到 <domain_root>/<domain_id>/pursuits.md。
+
+    真域从**运营层线程进来**(persist 的 domain_id 参数,由 pursuit_tick 传 rec.domain_id),
+    **不再**从 p.id 拆(p.id 是 `domain:<随机 12hex>`,拆它会把域级完成归档进随机 uuid 目录、真域丢失)。
+    """
     pm = PursuitManager(domain_root=tmp_path)
-    p = pursuit(id="domain:acme:auth", level="domain", statement="完成 SSO",
+    # 真实生产:p.id 是 domain:<随机hex>,真域 = 传入的 domain_id="invest"
+    p = pursuit(id=f"domain:{'a1b2c3d4e5f6'}", level="domain", statement="完成 SSO",
                 commitment_condition="phase == build", status="committed")
-    pm.persist(p)
-    path = tmp_path / "acme" / "pursuits.md"
-    assert path.exists()
+    pm.persist(p, domain_id="invest")
+    path = tmp_path / "invest" / "pursuits.md"
+    assert path.exists(), "域级完成没落到真域(invest)目录 —— 真伤3 回归"
+    # 绝不落到 p.id 的随机 hex 目录
+    assert not (tmp_path / "a1b2c3d4e5f6").exists()
     text = path.read_text(encoding="utf-8")
-    assert "domain:acme:auth" in text
+    assert "domain:a1b2c3d4e5f6" in text
     assert "完成 SSO" in text
     assert "status=committed" in text
     assert "verify_gate" in text
+
+
+def test_ac5b2_domain_pursuit_missing_domain_id_goes_to_unassigned(tmp_path: Path):
+    """真伤3:domain 级 Pursuit 缺 domain_id → 落到显式「_unassigned」目录(**绝不**落随机 uuid)。"""
+    pm = PursuitManager(domain_root=tmp_path)
+    p = pursuit(id="domain:deadbeef1234", level="domain", statement="无主域目标",
+                status="committed")
+    pm.persist(p)   # 不传 domain_id
+    assert (tmp_path / "_unassigned" / "pursuits.md").exists()
+    assert not (tmp_path / "deadbeef1234").exists()   # 不落 p.id 的随机段
 
 
 def test_ac5c_persist_personal_without_memory_is_noop():

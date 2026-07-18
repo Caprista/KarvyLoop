@@ -166,7 +166,7 @@
     diagnose: { src: "/static/diagnose_panel.js", global: "KarvyDiagnosePanel" },
     files: { src: "/static/files_panel.js", global: "KarvyFilesPanel" },
     schedules: { src: "/static/schedules_panel.js", global: "KarvySchedulesPanel" },
-    pursuits: { src: "/static/pursuits_panel.js", global: "KarvyPursuitsPanel" },  // 🎯 我的追求(col-intel 头部入口,非左导航——13 项 IA 契约锁死)
+    pursuits: { src: "/static/pursuits_panel.js", global: "KarvyPursuitsPanel" },  // 🎯 我的追求(左导航第 14 项「你的团队」组 + 决策舱列头就近入口,docs/88 第三刀)
     demo: { src: "/static/demo_panel.js", global: "KarvyDemoPanel" },     // 👀 顶栏入口(脚本载入时自绑 #demo-open)
     tokens: { src: "/static/tokens_panel.js", global: "KarvyTokens" },    // 💰 顶栏 meter:boot 即 ensure,meter 不长睡
   };

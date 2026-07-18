@@ -595,9 +595,10 @@ def cmd_console(args: argparse.Namespace) -> int:
             app.state.pursuit_manager = PursuitManager(
                 memory=app.state.memory,
                 domain_root=_Path.home() / ".karvyloop" / "domains")
-            # 推进节拍(成本地板):确定性 verify(is_done)每 tick 都跑(完成能及时收官),但**烧 token 的
-            # pursue() 推进**默认 6h 一次/每个 pursuit —— 防"gate 长期不满足的 committed 目标"每 10min
-            # 维护 tick 都真跑一遍烧钱(footgun)。跨天目标一天推进几次足够;测试/demo 不设=每 tick 推进。
+            # 推进节拍(跑评分离 docs/88 真伤1):**廉价确定性门(file_exists/predicate)每 tick 都验**
+            # (零子进程/微秒级 → 完成立刻收官,不等节流窗);受本节流的只有**烧钱/贵计算**——
+            # test_pass 门的沙箱子进程求值 + pursue() 推进,默认 6h 一次/每个 pursuit,防"gate 长期不满足
+            # 的 committed 目标"每 10min 维护 tick 都真跑一遍烧钱(footgun)。测试/demo 不设=每 tick 推进。
             app.state.pursuit_advance_interval_s = 6 * 3600
             logger.info(
                 "[karvyloop console] Pursuit 外环已接线(活跃集 %d)",

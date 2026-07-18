@@ -1,9 +1,9 @@
-"""test_pursuits_panel_static — 🎯「我的追求」Web 面板(Pursuit 第二刀,docs/88 §7)静态验收。
+"""test_pursuits_panel_static — 🎯「我的追求」Web 面板(Pursuit,docs/88 §7 + 第三刀)静态验收。
 
 锁四件事(纯文件+正则,CI 无浏览器也跑):
-1. 接线三件套:index.html 有 data-panel="pursuits" 入口(在 col-intel 头部,**不进左导航**——
-   左导航 13 项被 IA§1 契约 test_sidebar_nav_three_groups 锁死)+ app.js _PANEL_SCRIPTS/_panelOpeners
-   双注册 + 面板脚本真消费三个 pursuit 端点;
+1. 接线三件套:index.html 有 data-panel="pursuits" 入口 —— **左导航第 14 项**(docs/88 第三刀,
+   Hardy 拍本程功能优先;「你的团队」组)+ 决策舱列头就近入口(第二刀落此,并存)+ app.js
+   _PANEL_SCRIPTS/_panelOpeners 双注册 + 面板脚本真消费 pursuit 端点(列/详情/创建/讲讲);
 2. i18n:面板用到的 pursuit.* 字面键 en/zh 双表齐(AC8 同口径);入口文案走 data-i18n;
 3. 安全:pursuits_panel.js 落 DOM 全走 el()/textContent —— 不许 innerHTML 拼接后端文本
    (唯一豁免:清空用的 `.innerHTML = ""`);
@@ -23,17 +23,23 @@ def _read(name: str) -> str:
 
 # ---- 1. 接线三件套 ----
 
-def test_index_has_pursuits_entry_outside_sidebar():
+def test_index_has_pursuits_entry_in_sidebar_and_near():
+    """docs/88 第三刀:pursuits **进左导航第 14 项**(Hardy 拍本程功能优先),同时保留决策舱
+    列头就近入口(常驻导航 + 就近入口并存,和其它面板一致)。"""
     html = _read("index.html")
     assert 'data-panel="pursuits"' in html, "index.html 缺 pursuits 入口"
-    # 入口在侧栏之外(侧栏 13 项被 test_sidebar_nav_three_groups 锁死,别往里塞)
+    # ① 左导航里有一项(第 14 项,吃 setupMgmtPanels + desk dock 同构复用的 .sidebar .nav-item[data-panel])
     sidebar = html[html.find('<nav class="sidebar">'):html.find("</nav>")]
-    assert 'data-panel="pursuits"' not in sidebar, "pursuits 不该进左导航(13 项 IA 契约锁死)"
-    # 入口带 nav-item 类(吃 setupMgmtPanels 的 .nav-item[data-panel] 委托绑定)+ 文案走 i18n
-    m = re.search(r'<button[^>]*data-panel="pursuits"[^>]*>', html)
-    assert m, "pursuits 入口应是 <button>"
-    assert "nav-item" in m.group(0), "入口须带 nav-item 类,否则委托绑定不命中(死按钮)"
-    assert 'data-i18n="nav.pursuits"' in m.group(0), "入口文案应走 i18n"
+    assert 'data-panel="pursuits"' in sidebar, "pursuits 应进左导航(docs/88 第三刀,第 14 项)"
+    side_btn = re.search(r'<button class="nav-item"[^>]*data-panel="pursuits"[^>]*>[\s\S]*?</button>', sidebar)
+    assert side_btn, "侧栏 pursuits 应是 nav-item <button>"
+    assert 'data-i18n="nav.pursuits_side"' in side_btn.group(0), "侧栏入口文案应走 i18n(nav.pursuits_side)"
+    # ② 决策舱列头仍有就近入口(在侧栏之外),带 nav-item 类命中同一套委托绑定
+    outside = html[html.find("</nav>"):]
+    m = re.search(r'<button[^>]*data-panel="pursuits"[^>]*>', outside)
+    assert m, "决策舱列头就近入口应保留(<button data-panel=pursuits>)"
+    assert "nav-item" in m.group(0), "就近入口须带 nav-item 类,否则委托绑定不命中(死按钮)"
+    assert 'data-i18n="nav.pursuits"' in m.group(0), "就近入口文案应走 i18n"
 
 
 def test_app_js_registers_pursuits_both_tables():
@@ -48,8 +54,22 @@ def test_panel_consumes_all_three_endpoints():
     assert '"/api/pursuits"' in js, "列表端点没接"
     assert '"/api/pursuit/"' in js, "详情端点没接"
     assert re.search(r'_postJSON\(\s*"/api/pursuit"', js), "创建端点没接(POST /api/pursuit)"
+    # docs/88 第三刀 #2:「让小卡讲讲」真调 narrate 端点(前端真调 → 不进 API_ONLY 白名单)
+    assert '/narrate' in js, "讲讲端点没接(POST /api/pursuit/{id}/narrate)"
+    assert 'pursuit.narrate_btn' in js, "讲讲按钮文案没走 i18n"
     # 详情路径参数要编码(id 来自后端,但纪律统一)
     assert 'encodeURIComponent' in js
+
+
+def test_panel_has_resume_drop_for_suspended():
+    """docs/88 真伤2:详情页对**挂起/改方向**记录有「继续 / 放下」出口 —— 真调 resume/drop 端点 +
+    按钮文案走 i18n,让永久僵尸有路可走。"""
+    js = _read("pursuits_panel.js")
+    assert '/resume"' in js, "resume 端点没接(POST /api/pursuit/{id}/resume)"
+    assert '/drop"' in js, "drop 端点没接(POST /api/pursuit/{id}/drop)"
+    assert 'pursuit.resume_btn' in js and 'pursuit.drop_btn' in js, "继续/放下按钮文案没走 i18n"
+    assert re.search(r'p\.suspended\s*\|\|\s*p\.status\s*===\s*"revised"', js), \
+        "继续/放下应只对挂起/改方向记录显示"
 
 
 # ---- 2. i18n 双表齐 + 入口键在 ----
@@ -77,7 +97,9 @@ def test_pursuit_i18n_keys_en_zh_parity():
     used = set(re.findall(r'\bt\(\s*"([^"]+)"\s*[,)]', js))
     # 动态状态键 t("pursuit.st." + …) 正则天然抓不到 → 显式点名锁全五态
     used |= {f"pursuit.st.{s}" for s in ("active", "committed", "revised", "done", "dropped")}
-    used |= {"nav.pursuits", "nav.pursuits.title"}   # index.html 入口键
+    # 时间线行状态经 t(stKey) 变量分派(docs/88 第三刀 #2)→ 正则抓不到,显式点名
+    used |= {f"pursuit.round.{s}" for s in ("running", "error", "done")}
+    used |= {"nav.pursuits", "nav.pursuits.title", "nav.pursuits_side"}   # index.html 入口键(列头 + 侧栏第 14 项)
     missing_en = used - en
     missing_zh = used - zh
     assert not missing_en, f"en 表缺 pursuit 键: {sorted(missing_en)}"

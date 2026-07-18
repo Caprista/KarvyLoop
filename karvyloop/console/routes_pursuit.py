@@ -68,6 +68,11 @@ def _validate_gate(gate: Any) -> tuple[Optional[dict], str, str]:
     path = str(gate.get("path") or "").strip()
     if not path:
         return None, "", i18n.t("pursuit.err.gate_path")
+    # 真伤4:含 `{...}` 占位符的 path 是坏门(第一刀不做路径模板;run 期 file_exists 按字面判,永不满足
+    # → 白等到地板才升卡)。宁空勿毒:创建期就拒(400),不放行进库。LLM 判型爱吐 `{date}` 模板路径。
+    from karvyloop.cognition.pursuit import path_has_placeholder
+    if path_has_placeholder(path):
+        return None, "", i18n.t("pursuit.err.gate_path_placeholder", path=path)
     return {"type": "file_exists", "path": path}, i18n.t("pursuit.gate_desc.file_exists", path=path), ""
 
 
@@ -162,6 +167,32 @@ def api_pursuits_list(request: Request) -> dict[str, Any]:
     return {"pursuits": [r.summary() for r in recs], "active_count": store.active_count()}
 
 
+def _derive_tasks(app: Any, pursuit_id: str, rec: Any) -> list:
+    """一个 Pursuit 派生的 task(复用任务账,不另造平行账本 —— Trace/任务看板是唯一运行记录源)。
+
+    优先按 last_task_ids 精确取;再按 pursuit_id 全量过滤兜底。详情页时间线 + 讲讲组料都从这里取,
+    只碰**这条 pursuit 自己的** task(narrate 组料隔离)。
+    """
+    tasks: list = []
+    task_reg = getattr(app.state, "task_registry", None)
+    if task_reg is None:
+        return tasks
+    seen: set = set()
+    for tid in list(getattr(rec, "last_task_ids", []) or []):
+        d = task_reg.get(tid)
+        if d is not None and d.get("id") not in seen:
+            seen.add(d.get("id"))
+            tasks.append(d)
+    try:
+        for d in task_reg.list():
+            if d.get("pursuit_id") == pursuit_id and d.get("id") not in seen:
+                seen.add(d.get("id"))
+                tasks.append(d)
+    except Exception:
+        pass
+    return tasks
+
+
 @router.get("/pursuit/{pursuit_id}")
 def api_pursuit_detail(pursuit_id: str, request: Request) -> dict[str, Any]:
     """一个 Pursuit 详情 + 它派生的 task(按 pursuit_id 从任务看板回捞;K4 只读)。"""
@@ -173,25 +204,179 @@ def api_pursuit_detail(pursuit_id: str, request: Request) -> dict[str, Any]:
     if rec is None:
         return {"ok": False, "reason": "not found"}
     detail = rec.summary()
-    # 派生 task(复用任务账,不另造):优先按 last_task_ids 精确取;再按 pursuit_id 全量过滤兜底。
-    tasks: list = []
-    task_reg = getattr(app.state, "task_registry", None)
-    if task_reg is not None:
-        seen: set = set()
-        for tid in rec.last_task_ids:
-            d = task_reg.get(tid)
-            if d is not None and d.get("id") not in seen:
-                seen.add(d.get("id"))
-                tasks.append(d)
-        try:
-            for d in task_reg.list():
-                if d.get("pursuit_id") == pursuit_id and d.get("id") not in seen:
-                    seen.add(d.get("id"))
-                    tasks.append(d)
-        except Exception:
-            pass
-    detail["tasks"] = tasks
+    detail["tasks"] = _derive_tasks(app, pursuit_id, rec)
     return {"ok": True, "pursuit": detail}
 
 
-__all__ = ["router", "create_pursuit_with_commit_card"]
+# ---- 挂起记录的出口(docs/88 真伤2):恢复(继续)/ 放下 —— 给挂起(infeasible/达地板/revised)的
+# Pursuit 一条真出口,不再是"永久僵尸、无路可走"。REVISE 卡 REJECT 也复用 resume(不改方向=继续)。
+
+def resume_pursuit_record(rec: Any) -> bool:
+    """挂起/revised 的 Pursuit → 恢复成在跑(committed)。返回是否真改了(终态不动)。
+
+    - suspended=False、status 回 committed、清 revision 挂起态(revision_reason)。
+    - **重置成本地板计数**(advances / consecutive_failures = 0):用户明确"继续" = 再给一轮预算,
+      否则被 max_advances/连败地板挂起的记录下一 tick 立刻重撞同一地板、白恢复。
+    - 清节流戳(last_advance_ts=0)让它尽快接着推进。
+    """
+    p = rec.pursuit
+    if p.status in ("done", "dropped"):
+        return False
+    rec.pursuit = p.model_copy(update={"status": "committed"})
+    rec.suspended = False
+    rec.revision_reason = ""
+    rec.advances = 0
+    rec.consecutive_failures = 0
+    rec.last_advance_ts = 0.0
+    return True
+
+
+def drop_pursuit_record(rec: Any) -> bool:
+    """放下 Pursuit → 标 dropped(退出活跃集),suspended=True。返回是否真改了(终态不动)。"""
+    p = rec.pursuit
+    if p.status in ("done", "dropped"):
+        return False
+    rec.pursuit = p.model_copy(update={"status": "dropped"})
+    rec.suspended = True
+    return True
+
+
+@router.post("/pursuit/{pursuit_id}/resume")
+def api_pursuit_resume(pursuit_id: str, request: Request) -> dict[str, Any]:
+    """继续追一个先前暂停的目标(挂起/改方向 → 回 committed,机器接着自跑)。K5:用户主动点。"""
+    from karvyloop import i18n
+    store = getattr(request.app.state, "pursuit_store", None)
+    if store is None:
+        return {"ok": False, "reason": i18n.t("pursuit.err.no_store")}
+    rec = store.get(pursuit_id)
+    if rec is None:
+        return {"ok": False, "reason": i18n.t("pursuit.err.not_found")}
+    if not resume_pursuit_record(rec):
+        return {"ok": False, "reason": i18n.t("pursuit.err.terminal_no_resume", status=rec.status)}
+    store.put(rec)
+    return {"ok": True, "status": rec.status}
+
+
+@router.post("/pursuit/{pursuit_id}/drop")
+def api_pursuit_drop(pursuit_id: str, request: Request) -> dict[str, Any]:
+    """放下一个目标(标 dropped,退出活跃集)。K5:用户主动点。"""
+    from karvyloop import i18n
+    store = getattr(request.app.state, "pursuit_store", None)
+    if store is None:
+        return {"ok": False, "reason": i18n.t("pursuit.err.no_store")}
+    rec = store.get(pursuit_id)
+    if rec is None:
+        return {"ok": False, "reason": i18n.t("pursuit.err.not_found")}
+    if not drop_pursuit_record(rec):
+        return {"ok": False, "reason": i18n.t("pursuit.err.terminal_no_drop", status=rec.status)}
+    store.put(rec)
+    return {"ok": True, "status": rec.status}
+
+
+# ---- 「让小卡讲讲」(docs/88 第三刀 #2):LLM 叙述,点了才烧,产出不落库(纯展示)----
+# 状态条/时间线是确定性零 LLM;讲讲是唯一烧 token 的一层,且**必须人点**(绝不自动)。
+# 组料只含这条 pursuit 自己的数据(task/字段),走 gateway 咽喉 + token_source("pursuit_narrate")打标;
+# 无 gateway / 调用失败 / 空回复 → 确定性兜底文本,绝不 500(宁空勿毒:垃圾即空 → 兜底)。
+
+def _narrate_material(rec: Any, tasks: list) -> str:
+    """给模型的现场组料(英文中性标签;输出语言由 system prompt 定)。只喂这条 pursuit 自己的数据。"""
+    p = rec.pursuit
+    gate = dict(getattr(p, "verify_gate", None) or {})
+    lines = [f"Goal: {(p.statement or '').strip()}"]
+    if gate.get("type") == "test_pass" and gate.get("cmd"):
+        lines.append(f"Done when command `{gate.get('cmd')}` exits 0")
+    elif gate.get("type") == "file_exists" and gate.get("path"):
+        lines.append(f"Done when file `{gate.get('path')}` exists")
+    lines.append(
+        f"Status: {p.status}; advanced {rec.advances}x; "
+        f"{rec.consecutive_failures} failures in a row")
+    if rec.progress_note:
+        lines.append(f"Latest progress note: {str(rec.progress_note)[:200]}")
+    if rec.revision_reason:
+        lines.append(f"Direction-change reason: {str(rec.revision_reason)[:200]}")
+    ordered = sorted(tasks, key=lambda d: (d.get("finished") or d.get("started") or 0))
+    for i, d in enumerate(ordered[-6:], 1):
+        st = d.get("status") or "?"
+        res = str(d.get("result") or "")[:160]
+        intent = str(d.get("intent") or "")[:80]
+        lines.append(f"Run {i} [{st}] {intent}: {res}".rstrip())
+    return "\n".join(lines)[:2200]
+
+
+def _narrate_fallback(rec: Any, tasks: list) -> str:
+    """确定性兜底(零 LLM):从同一现场数据拼一句人话。gateway 无/失败/空回复时用它。"""
+    from karvyloop import i18n
+    parts: list = []
+    if rec.advances > 0:
+        parts.append(i18n.t("pursuit.narrate.fb_advances", n=rec.advances))
+    latest = None
+    if tasks:
+        latest = max(tasks, key=lambda d: (d.get("finished") or d.get("started") or 0))
+    if rec.consecutive_failures >= 2:
+        parts.append(i18n.t("pursuit.narrate.fb_stuck", n=rec.consecutive_failures))
+    elif latest is not None:
+        if latest.get("status") == "error":
+            parts.append(i18n.t("pursuit.narrate.fb_last_fail", err=str(latest.get("result") or "")[:80]))
+        else:
+            parts.append(i18n.t("pursuit.narrate.fb_last_ok"))
+    if not parts:
+        parts.append(i18n.t("pursuit.narrate.fb_none"))
+    if rec.progress_note:
+        parts.append(i18n.t("pursuit.narrate.fb_progress", note=str(rec.progress_note)[:80]))
+    return " ".join(parts).strip()[:200]
+
+
+@router.post("/pursuit/{pursuit_id}/narrate")
+async def api_pursuit_narrate(pursuit_id: str, request: Request) -> dict[str, Any]:
+    """「让小卡讲讲」:把这条 pursuit 的现场翻成「我做了什么/为什么/卡在哪」(≤150 字)。
+
+    产出**不落库**(纯展示)。无 gateway / 失败 / 空回复 → 确定性兜底(绝不 500)。
+    """
+    from karvyloop import i18n
+    app = request.app
+    store = getattr(app.state, "pursuit_store", None)
+    if store is None:
+        return {"ok": False, "reason": "pursuit store not wired"}
+    rec = store.get(pursuit_id)
+    if rec is None:
+        return {"ok": False, "reason": "not found"}
+    tasks = _derive_tasks(app, pursuit_id, rec)
+    fallback = _narrate_fallback(rec, tasks)
+
+    rk = getattr(app.state, "runtime_kwargs", None) or {}
+    gw = rk.get("gateway")
+    if gw is None:
+        return {"ok": True, "narration": fallback, "source": "fallback"}
+
+    from karvyloop.gateway import ResolveScope
+    from karvyloop.gateway.system import SystemPrompt
+    from karvyloop.llm.token_ledger import token_source
+    lang = "Chinese" if i18n.get_locale() == "zh" else "English"
+    sys_prompt = (
+        "You are Karvy, the user's personal copilot, reporting on a long-horizon goal to a "
+        "non-technical owner. In the first person, say plainly what you did, why, and where you're "
+        "stuck — concrete but jargon-free (never say 'verify_gate', 'trace', 'H2A', 'commit'). "
+        f"Keep it under 150 characters, one short paragraph. Reply in {lang}."
+    )
+    try:
+        ref = gw.resolve_model(ResolveScope(atom_model=rk.get("model_ref") or None))
+    except Exception:
+        ref = rk.get("model_ref", "")
+    out = ""
+    try:
+        with token_source("pursuit_narrate"):
+            async for ev in gw.complete([{"role": "user", "content": _narrate_material(rec, tasks)}],
+                                        [], ref, system=SystemPrompt(static=[sys_prompt])):
+                if type(ev).__name__ == "TextDelta":
+                    out += getattr(ev, "text", "")
+    except Exception as e:
+        logger.warning(f"[pursuit] narrate 失败,退兜底: {e}")
+        return {"ok": True, "narration": fallback, "source": "fallback"}
+    text = (out or "").strip()[:150]
+    if not text:   # 宁空勿毒:空/纯空白回复 → 确定性兜底,不硬塞
+        return {"ok": True, "narration": fallback, "source": "fallback"}
+    return {"ok": True, "narration": text, "source": "llm"}
+
+
+__all__ = ["router", "create_pursuit_with_commit_card",
+           "resume_pursuit_record", "drop_pursuit_record"]

@@ -13,11 +13,14 @@ from __future__ import annotations
 import asyncio
 import pathlib
 import sys
+import threading
 import time
 import types
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from karvyloop.sandbox import ExecResult  # noqa: E402
 
 from karvyloop.cognition.pursuit import PursuitManager  # noqa: E402
 from karvyloop.cognition.pursuit_store import (  # noqa: E402
@@ -597,3 +600,240 @@ def test_route_rejects_unsplittable_test_pass_cmd(tmp_path):
         "statement": "x", "verify_gate": {"type": "test_pass", "cmd": 'python "unclosed'}})
     assert r.status_code == 200
     assert r.json()["ok"] is False
+
+
+# ================= docs/88 第四刀:七真伤回归锁 =================
+
+class _NoopML:
+    """drive 成功但从不满足 gate —— 隔离出"推进但没完成"的稳态,不牵扯真 pursue。"""
+    trace = None
+
+    def __init__(self):
+        self.calls = 0
+
+    def drive(self, intent, slow_brain=None):
+        self.calls += 1
+
+        class _R:
+            terminal = "completed"; error = ""; text = "跑了一轮"; sig = ""; task_id = ""
+        return _R()
+
+
+class _CountingSandbox:
+    """可注入假沙箱:按 exit_code 定制 + 记 exec 次数/线程(验 test_pass 门节流 / offload)。"""
+
+    def __init__(self, *, exit_code=1, available=True, sleep=0.0):
+        self._exit = exit_code
+        self._available = available
+        self._sleep = sleep
+        self.execs = 0
+        self.threads: list = []
+
+    def available(self) -> bool:
+        return self._available
+
+    async def exec(self, argv, *, token, cwd, stdin=b"", timeout_s=120.0, max_output_bytes=30_000):
+        self.execs += 1
+        self.threads.append(threading.get_ident())
+        if self._sleep:
+            time.sleep(self._sleep)
+        return ExecResult(b"", b"", self._exit)
+
+
+# ---- 真伤1:廉价门每 tick 都验(不受 6h 节流);test_pass 门受节流 ----
+def test_wound1_cheap_gate_verifies_every_tick_not_throttled(tmp_path, monkeypatch):
+    """真伤1:file_exists(廉价确定性门)满足后**下一 tick 立即 done**,不被 6h 节流拖住(不等 6h)。"""
+    monkeypatch.setattr("karvyloop.runtime.main_loop.forge_slow_brain_factory",
+                        lambda **kw: (lambda *a, **k: ("", None)))
+    ml = _NoopML()
+    app = _fake_app(tmp_path, main_loop=ml)
+    app.state.pursuit_advance_interval_s = 6 * 3600   # 生产 6h 节流开
+    target = tmp_path / "done.txt"
+    rec = PursuitRecord(_pursuit({"type": "file_exists", "path": str(target)}),
+                        owner="karvy", domain_id="l0")
+    rec = _commit(app, rec)
+    t0 = time.time()
+    # 第一拍:gate 未满足 → 推进一次(drive noop),记节流戳
+    asyncio.run(pursuit_tick(app, now=t0))
+    assert app.state.pursuit_store.get(rec.id).pursuit.status == "committed"
+    assert ml.calls == 1
+    # 外部把 gate 满足(离 6h 还差得远)
+    target.write_text("ok", encoding="utf-8")
+    # 下一拍(仍在 6h 节流窗内)→ 廉价门每 tick 都验 → **立即 done**(旧行为要等 6h)
+    c = asyncio.run(pursuit_tick(app, now=t0 + 600))
+    assert c["done"] == 1
+    r = app.state.pursuit_store.get(rec.id)
+    assert r.pursuit.status == "done"
+    assert ml.calls == 1     # 完成先于推进,没有再 pursue
+
+
+def test_wound1_test_pass_gate_verify_is_throttled(tmp_path, monkeypatch):
+    """真伤1:test_pass 门(贵,走沙箱子进程)受 6h 节流 —— 6 拍/小时里只在到点那拍求值(≤2 次:
+    推进前 + 当拍再验),绝不是每 tick 一次(更不是 144 次/天)。"""
+    from karvyloop.cognition import pursuit as pursuit_mod
+    monkeypatch.setattr("karvyloop.runtime.main_loop.forge_slow_brain_factory",
+                        lambda **kw: (lambda *a, **k: ("", None)))
+    sb = _CountingSandbox(exit_code=1)   # gate 永不过
+    monkeypatch.setattr(pursuit_mod, "default_sandbox", lambda: sb)
+    ml = _NoopML()
+    app = _fake_app(tmp_path, main_loop=ml)
+    app.state.pursuit_advance_interval_s = 6 * 3600
+    rec = PursuitRecord(_pursuit({"type": "test_pass", "cmd": "pytest -q"}),
+                        owner="karvy", domain_id="l0")
+    rec = _commit(app, rec)
+    t0 = time.time()
+    for k in range(6):   # 1 小时 6 个 10min tick
+        asyncio.run(pursuit_tick(app, now=t0 + k * 600))
+    assert sb.execs <= 2, f"test_pass 门没被节流,求值 {sb.execs} 次(应 ≤2,只到点那拍)"
+    assert ml.calls == 1     # pursue 也被节流(只 1 次)
+
+
+# ---- 真伤2:revised 不再永久僵尸 + REVISE REJECT=resume ----
+def test_wound2_revised_record_gate_satisfied_completes(tmp_path):
+    """真伤2:status=revised 的挂起记录不再是永久僵尸 —— 外部满足 gate → 下 tick 确定性验完成 → done
+    (旧行为被 `status != committed: continue` 整条跳过,连"外部已满足→done"都不验)。"""
+    app = _fake_app(tmp_path)   # interval 0
+    target = tmp_path / "ext.txt"
+    rec = PursuitRecord(_pursuit({"type": "file_exists", "path": str(target)}),
+                        owner="karvy", domain_id="l0")
+    rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})   # 被地板挂起
+    rec.suspended = True
+    app.state.pursuit_store.put(rec)
+    target.write_text("ok", encoding="utf-8")   # 外部满足
+    c = asyncio.run(pursuit_tick(app))
+    assert c["done"] == 1
+    assert app.state.pursuit_store.get(rec.id).pursuit.status == "done"
+
+
+def test_wound2_revise_reject_resumes_pursuit(tmp_path):
+    """真伤2:REVISE 卡 REJECT = 不改方向 / 继续 → resume(挂起 revised → 回 committed,重置成本地板计数)。"""
+    app = _fake_app(tmp_path)
+    rec = PursuitRecord(_pursuit({"type": "file_exists", "path": str(tmp_path / "n")}),
+                        owner="karvy", domain_id="l0")
+    rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})
+    rec.suspended = True
+    rec.advances = 20
+    rec.consecutive_failures = 5
+    rec.revision_reason = "达上限"
+    app.state.pursuit_store.put(rec)
+    reg = app.state.proposal_registry
+    card = proposal_for_pursuit_revise(pursuit_id=rec.id, statement=rec.pursuit.statement,
+                                       revision_reason="达上限", ts=1.0)
+    reg.register(card)
+    res = reg.decide(card.proposal_id, "REJECT", handlers=app.state.proposal_handlers)
+    assert res.ok
+    r = app.state.pursuit_store.get(rec.id)
+    assert r.pursuit.status == "committed"       # resume 回 committed
+    assert r.suspended is False
+    assert r.advances == 0 and r.consecutive_failures == 0   # 地板计数重置(给新一轮预算)
+    assert r.revision_reason == ""
+
+
+def test_wound2_resume_and_drop_endpoints(tmp_path):
+    """真伤2:POST /resume 恢复挂起记录、POST /drop 放下;终态(dropped)再 resume → ok False。"""
+    app, client = _console_client(tmp_path)
+    rec = PursuitRecord(_pursuit({"type": "file_exists", "path": "/x"}), owner="karvy", domain_id="l0")
+    rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})
+    rec.suspended = True
+    rec.advances = 20
+    app.state.pursuit_store.put(rec)
+    # resume
+    r = client.post(f"/api/pursuit/{rec.id}/resume").json()
+    assert r["ok"] is True and r["status"] == "committed"
+    got = app.state.pursuit_store.get(rec.id)
+    assert got.suspended is False and got.advances == 0
+    # drop
+    r2 = client.post(f"/api/pursuit/{rec.id}/drop").json()
+    assert r2["ok"] is True and r2["status"] == "dropped"
+    assert app.state.pursuit_store.get(rec.id).pursuit.status == "dropped"
+    # 终态再 resume → 拒(ok False)
+    r3 = client.post(f"/api/pursuit/{rec.id}/resume").json()
+    assert r3["ok"] is False
+
+
+# ---- 真伤4:file_exists 占位符 path 创建被拒 + 运行期不炸 tick ----
+def test_wound4_route_rejects_placeholder_path(tmp_path):
+    """真伤4:含 `{date}` 占位符的 file_exists path 创建被拒(400 语义:ok False);正常路径不受影响。"""
+    app, client = _console_client(tmp_path)
+    r = client.post("/api/pursuit", json={
+        "statement": "x", "verify_gate": {"type": "file_exists", "path": "/out/{date}/o.md"}})
+    assert r.status_code == 200 and r.json()["ok"] is False
+    r2 = client.post("/api/pursuit", json={
+        "statement": "x", "verify_gate": {"type": "file_exists", "path": "/out/report.md"}})
+    assert r2.json()["ok"] is True
+
+
+def test_wound4_gate_eval_exception_does_not_crash_tick_and_floors(tmp_path):
+    """真伤4③:即便坏 gate 混进库、运行期门求值抛异常,也**不冒穿 tick**、计一次失败喂节流、连败
+    地板兜得住升卡(fail-loud,绝不静默每 10min 重炸)。"""
+    from karvyloop.console.pursuit_tick import PURSUIT_MAX_CONSECUTIVE_FAILURES
+    app = _fake_app(tmp_path)   # interval 0
+    # 直接构造一个坏 gate 记录(绕过 create 校验)——is_done 会抛 GateError
+    rec = PursuitRecord(_pursuit({"type": "bogus_gate"}), owner="karvy", domain_id="l0")
+    rec = _commit(app, rec)
+    for _ in range(PURSUIT_MAX_CONSECUTIVE_FAILURES):
+        asyncio.run(pursuit_tick(app))   # 全程不抛
+    r = app.state.pursuit_store.get(rec.id)
+    assert r.suspended is True and r.pursuit.status == "revised"
+    cards = [p for p in app.state.proposal_registry.pending()
+             if getattr(p, "kind", "") == KIND_PURSUIT_REVISE]
+    assert cards, "坏 gate 连败没升 REVISE 卡(fail-loud 断)"
+
+
+# ---- 真伤6:test_pass 门 offload,不冻结事件循环 ----
+def test_wound6_test_pass_gate_offloaded_off_event_loop(tmp_path, monkeypatch):
+    """真伤6:committed test_pass 门在 tick 里 offload 到线程 → gate(慢,模拟冷启)执行期间 console
+    事件循环不冻结(并发心跳协程持续推进),且 gate 真跑在别的线程。"""
+    from karvyloop.cognition import pursuit as pursuit_mod
+    monkeypatch.setattr("karvyloop.runtime.main_loop.forge_slow_brain_factory",
+                        lambda **kw: (lambda *a, **k: ("", None)))
+    sb = _CountingSandbox(exit_code=0, sleep=0.4)   # gate 通过但慢(模拟 46s 冷启的缩影)
+    monkeypatch.setattr(pursuit_mod, "default_sandbox", lambda: sb)
+    app = _fake_app(tmp_path, main_loop=_NoopML())
+    rec = PursuitRecord(_pursuit({"type": "test_pass", "cmd": "pytest -q"}),
+                        owner="karvy", domain_id="l0")
+    rec = _commit(app, rec)
+    main_thread = threading.get_ident()
+
+    async def _run():
+        beats = {"n": 0}
+
+        async def hb():
+            while True:
+                beats["n"] += 1
+                await asyncio.sleep(0.02)
+        h = asyncio.create_task(hb())
+        counts = await pursuit_tick(app)
+        h.cancel()
+        return counts, beats["n"]
+
+    counts, beats = asyncio.run(_run())
+    assert counts["done"] == 1                 # exit 0 → done(offload 后结果照样正确)
+    assert beats >= 3, f"事件循环被 gate 冻结了(心跳只跳 {beats} 次)"
+    assert sb.threads and all(tid != main_thread for tid in sb.threads)  # gate 跑在别的线程
+
+
+# ---- 真伤7:降级平台 fail-loud 原因到 progress_note(不只日志)----
+def test_wound7_degraded_test_pass_writes_human_progress_note(tmp_path, monkeypatch):
+    """真伤7:降级平台(无真隔离后端)→ 挂起的 test_pass 门每到点确定性验(仍拒跑)→ **progress_note
+    出现人话原因**(i18n),不只在日志。"""
+    from karvyloop import i18n
+    from karvyloop.cognition import pursuit as pursuit_mod
+
+    class _NoIso:
+        def available(self):
+            return False
+
+        async def exec(self, *a, **k):
+            raise AssertionError("不该执行不可信 gate(降级平台应 fail-loud 拒跑)")
+
+    monkeypatch.setattr(pursuit_mod, "default_sandbox", lambda: _NoIso())
+    app = _fake_app(tmp_path)
+    rec = PursuitRecord(_pursuit({"type": "test_pass", "cmd": "pytest -q"}),
+                        owner="karvy", domain_id="l0")
+    rec.pursuit = rec.pursuit.model_copy(update={"status": "committed"})
+    rec.suspended = True   # 降级平台 test_pass 门永不可完成 → 早被地板挂起
+    app.state.pursuit_store.put(rec)
+    asyncio.run(pursuit_tick(app))
+    r = app.state.pursuit_store.get(rec.id)
+    assert r.progress_note == i18n.t("pursuit.gate_note.no_isolation")   # 人话到 progress_note(不只日志)

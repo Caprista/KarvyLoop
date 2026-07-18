@@ -317,9 +317,9 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 任务监控:{stalled} 条疑似中断 → 升重试卡")
                         except Exception as ie:
                             _maintenance_item_failed(app, "task_monitor", ie)
-                        # docs/88 招牌"闭环完整性"外环:committed Pursuit 每 tick 确定性 verify →
-                        # 过则自动 done+回执;未完成则 pursue 推进一拍(非热路径,慢侧维护节奏)。
-                        # 放在 idle 判断之前 = 不受 daily 节流影响(跨天目标要及时推进/收官)。
+                        # docs/88 招牌"闭环完整性"外环(真伤1 跑评分离):committed/revised Pursuit —
+                        # **廉价门每 tick 确定性 verify**(过则自动 done+回执);贵的 test_pass 门求值 + pursue
+                        # 推进受 6h 节流(非热路径,慢侧维护节奏)。放在 idle 判断之前 = 不受 daily 节流影响。
                         try:
                             from karvyloop.console.pursuit_tick import pursuit_tick
                             pres = await pursuit_tick(app)

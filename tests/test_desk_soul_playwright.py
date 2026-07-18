@@ -339,7 +339,7 @@ def test_desk_first_open_default_layout(console_url):
         assert page.evaluate("document.getElementById('desk-board-btn') !== null"), "dock 应有 📋 看板图标"
         assert page.evaluate("document.querySelector('#desk-board-btn .dock-badge') !== null"), \
             "有待拍板卡 → 看板图标应有角标(新数据提示)"
-        assert page.evaluate("document.querySelectorAll('#desk-dock .dock-item').length") >= 13
+        assert page.evaluate("document.querySelectorAll('#desk-dock .dock-item').length") >= 14   # docs/88 第三刀:14 个左导航面板同构进 dock(+额外 dock 项)
         assert page.is_visible("#desk-dock")
         assert page.is_visible("#desk-karvy-pixel")
         assert page.evaluate("document.getElementById('desk-wall-btn') !== null"), "dock 应有 🌗 壁纸换挡"

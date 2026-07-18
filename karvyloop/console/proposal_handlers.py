@@ -927,11 +927,12 @@ def _pursuit_revise_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
 
     第一刀**不做自动改方向**(auto-replan DSL 是 M3):revision_trigger 命中只把带原因的卡摆到你
     面前,你 ACCEPT = 停止追求(标 dropped,退出活跃集);想换方向就用新 statement 重新 create 一条。
-    REJECT/DEFER 走 registry 通用语义(不进这里)= 卡关掉、Pursuit 留在挂起态(revised)不自动跑。
-    K5:只在你 ACCEPT 后被调。
+    **REJECT = 不改方向 / 继续 → resume**(见 _pursuit_revise_reject_handler:回 committed 接着跑);
+    DEFER = 卡留着下次再呈现、Pursuit 仍挂起。K5:只在你 ACCEPT 后被调。
     """
     def handler(proposal) -> Tuple[bool, str]:
         from karvyloop import i18n
+        from karvyloop.console.routes_pursuit import drop_pursuit_record
         store = getattr(app.state, "pursuit_store", None)
         if store is None:
             return False, i18n.t("receipt.pursuit.no_store")
@@ -942,10 +943,33 @@ def _pursuit_revise_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
             return True, i18n.t("receipt.pursuit.gone")
         if rec.status in ("done", "dropped"):
             return True, i18n.t("receipt.pursuit.terminal", status=rec.status)
-        rec.pursuit = rec.pursuit.model_copy(update={"status": "dropped"})
-        rec.suspended = True
+        stmt = rec.pursuit.statement[:60]
+        drop_pursuit_record(rec)
         store.put(rec)
-        return True, i18n.t("receipt.pursuit_revise.dropped", statement=rec.pursuit.statement[:60])
+        return True, i18n.t("receipt.pursuit_revise.dropped", statement=stmt)
+    return handler
+
+
+def _pursuit_revise_reject_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """KIND_PURSUIT_REVISE 的 **REJECT 钩子**(docs/88 真伤2:约定 key = f"{kind}:reject")。
+
+    修订卡 REJECT = "不改方向 / 继续追" → **resume**:挂起/revised 的记录回 committed,机器接着自跑
+    (重置成本地板计数,给一轮新预算)。这给挂起记录一条真出口 —— 否则 REJECT 只关卡、记录永远
+    僵在挂起态(revised)再不跑,是"永久僵尸"。fail-soft:store 缺/终态 → 不动,不阻断 REJECT。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        from karvyloop import i18n
+        from karvyloop.console.routes_pursuit import resume_pursuit_record
+        store = getattr(getattr(app, "state", None), "pursuit_store", None)
+        payload = getattr(proposal, "payload", None) or {}
+        pid = (payload.get("pursuit_id") or "").strip()
+        rec = store.get(pid) if (store is not None and pid) else None
+        if rec is None:
+            return True, ""
+        if not resume_pursuit_record(rec):
+            return True, ""   # 终态 → 不动
+        store.put(rec)
+        return True, i18n.t("receipt.pursuit_revise.resumed", statement=rec.pursuit.statement[:60])
     return handler
 
 
@@ -1002,6 +1026,8 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         # 聊天判型建的 Pursuit 随卡清掉不留垃圾;亲手建的保留(第一刀语义)。
         f"{KIND_PURSUIT_COMMIT}:reject": _pursuit_commit_reject_handler(app),
         KIND_PURSUIT_REVISE: _pursuit_revise_handler(app),       # docs/88:修订是决策归人 → ACCEPT=放下追求
+        # REJECT 钩子(真伤2):REJECT=不改方向/继续 → resume 挂起记录回 committed 接着跑(给挂起记录出口)。
+        f"{KIND_PURSUIT_REVISE}:reject": _pursuit_revise_reject_handler(app),
         KIND_EXTERNAL_ADOPT: _external_adopt_handler(app),       # M2 采纳门:外部 untrusted 供稿 H2A 采纳才升记忆
         **_inbox,                                                # 收件箱管道:记台账/存草稿(只进不出)
     }

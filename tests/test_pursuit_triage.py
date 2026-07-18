@@ -335,6 +335,39 @@ def test_dedup_still_active_after_commit(tmp_path):
     assert len(app.state.pursuit_store.all()) == 1
 
 
+def test_dedup_paused_record_points_to_continue(tmp_path):
+    """真伤2:命中的重复目标若是**挂起/改方向**记录,文案改成"去面板点继续"(不是笼统"已经在追"),
+    让用户对僵住的记录有路可走。"""
+    from karvyloop import i18n
+    app = _fake_app(tmp_path, gateway=FakeGateway(_good_llm_json(tmp_path)))
+    assert asyncio.run(maybe_pursuit_triage(app, GOAL_1)) is not None
+    # 把那条记录置为挂起(模拟被地板挂起)
+    rec = app.state.pursuit_store.all()[0]
+    rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})
+    rec.suspended = True
+    app.state.pursuit_store.put(rec)
+    out2 = asyncio.run(maybe_pursuit_triage(app, GOAL_1))
+    assert out2 is not None
+    stmt = (rec.pursuit.statement or "")[:80]
+    # "暂停了 —— 去继续"文案,不是笼统"已经在追"
+    assert out2["text"] == i18n.t("pursuit.triage.duplicate_paused", statement=stmt)
+    assert out2["text"] != i18n.t("pursuit.triage.duplicate", statement=stmt)
+    assert len(app.state.pursuit_store.all()) == 1   # 不建第二条
+
+
+def test_triage_rejects_placeholder_path(tmp_path):
+    """真伤4:LLM 判型吐 `{date}` 模板路径 → parse_pursuit_draft 放弃(宁空勿毒),不带坏 gate 进库。"""
+    draft = parse_pursuit_draft(
+        '{"is_pursuit": true, "statement": "写日报", '
+        '"gate": {"type": "file_exists", "path": "/reports/{date}.md"}}')
+    assert draft is None
+    # 正常路径仍收
+    ok = parse_pursuit_draft(
+        '{"is_pursuit": true, "statement": "写日报", '
+        '"gate": {"type": "file_exists", "path": "/reports/daily.md"}}')
+    assert ok is not None and ok.gate["path"] == "/reports/daily.md"
+
+
 def test_dedup_different_goal_still_creates(tmp_path):
     """真不同的目标(词面不重合+gate 不同)绝不被去重闸误挡 —— 宁建勿吞真需求。"""
     app = _fake_app(tmp_path, gateway=FakeGateway(_good_llm_json(tmp_path)))
