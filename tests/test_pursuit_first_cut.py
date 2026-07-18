@@ -285,11 +285,14 @@ def test_assemble_context_whitelist(tmp_path):
     rec.last_terminal = "completed"
     rec.last_verdict_passed = True
     rec.last_infeasible = False
+    rec.consecutive_failures = 2
     ctx = assemble_context(app, rec)
     assert set(ctx.keys()) == {"terminal", "verdict_passed", "done",
-                               "budget_exhausted", "days_running", "infra_dead"}
+                               "budget_exhausted", "days_running", "infra_dead",
+                               "consecutive_failures"}
     assert ctx["terminal"] == "completed"
     assert ctx["verdict_passed"] is True
+    assert ctx["consecutive_failures"] == 2   # P2 残余小扩:连败计数进白名单,revision_triggers 可引
 
 
 # ---------------------------------------------------------------- commit handler → committed
@@ -441,6 +444,139 @@ def test_tick_throttle_not_bypassed_on_exception(tmp_path, monkeypatch):
     r = app.state.pursuit_store.get(rec.id)
     assert r.last_advance_ts >= t0            # 异常路径也写了节流戳
     assert r.advances == 0                    # 异常不计入 advances
+
+
+# ---------------------------------------------------------------- P2 残余:连续失败硬地板
+def test_tick_consecutive_failures_suspend_and_card(tmp_path, monkeypatch):
+    """pursue 每拍都炸 → advances 永不 +1(旧硬地板永不触发)→ 连败计数在第 N 拍**精确**触发:
+    挂起 + 升同款 REVISE 卡 + 之后 tick 不再 drive(关死"节流上限无限静默重试")。"""
+    from karvyloop.console.pursuit_tick import PURSUIT_MAX_CONSECUTIVE_FAILURES
+
+    class _BoomML:
+        trace = None
+        def __init__(self): self.calls = 0
+        def drive(self, intent, slow_brain=None):
+            self.calls += 1
+            raise RuntimeError("每拍都炸")
+
+    monkeypatch.setattr("karvyloop.runtime.main_loop.forge_slow_brain_factory",
+                        lambda **kw: (lambda *a, **k: ("", None)))
+    boom = _BoomML()
+    app = _fake_app(tmp_path, main_loop=boom)   # interval=0 → 无节流,逐拍推进
+    rec = PursuitRecord(_pursuit({"type": "file_exists", "path": str(tmp_path / "never")}),
+                        owner="karvy", domain_id="l0")
+    rec = _commit(app, rec)
+
+    # 上限前一拍:仍 committed 未挂起、无卡;advances 恒 0(异常不计)= 旧硬地板确实盖不住
+    for _ in range(PURSUIT_MAX_CONSECUTIVE_FAILURES - 1):
+        asyncio.run(pursuit_tick(app))
+    r = app.state.pursuit_store.get(rec.id)
+    assert r.pursuit.status == "committed" and r.suspended is False
+    assert r.consecutive_failures == PURSUIT_MAX_CONSECUTIVE_FAILURES - 1
+    assert r.advances == 0
+    assert not [p for p in app.state.proposal_registry.pending()
+                if getattr(p, "kind", "") == KIND_PURSUIT_REVISE]
+
+    # 第 N 拍 → 精确触发:挂起 + 升 REVISE 卡
+    c = asyncio.run(pursuit_tick(app))
+    assert c["revised"] == 1
+    r = app.state.pursuit_store.get(rec.id)
+    assert r.consecutive_failures == PURSUIT_MAX_CONSECUTIVE_FAILURES
+    assert r.suspended is True and r.pursuit.status == "revised"
+    cards = [p for p in app.state.proposal_registry.pending()
+             if getattr(p, "kind", "") == KIND_PURSUIT_REVISE]
+    assert len(cards) == 1
+    assert r.id in (cards[0].payload or {}).get("pursuit_id", "")
+
+    # 挂起后不再 drive(无限静默重试被关死)
+    calls_at_cap = boom.calls
+    asyncio.run(pursuit_tick(app))
+    assert boom.calls == calls_at_cap
+
+
+def test_tick_failure_count_resets_on_success(tmp_path, monkeypatch):
+    """失败 3 拍后真推进成功 → 计数清零(地板只逮"连续"失败,不背旧账)。"""
+    class _Result:
+        terminal = "completed"; error = ""; text = "跑通了"; sig = ""; task_id = ""
+
+    class _FlakyML:
+        trace = None
+        def __init__(self, boom_times): self.calls = 0; self.boom_times = boom_times
+        def drive(self, intent, slow_brain=None):
+            self.calls += 1
+            if self.calls <= self.boom_times:
+                raise RuntimeError("前几拍炸")
+            return _Result()   # 之后成功(gate 仍不满足 → 不 done,留在 committed)
+
+    monkeypatch.setattr("karvyloop.runtime.main_loop.forge_slow_brain_factory",
+                        lambda **kw: (lambda *a, **k: ("", None)))
+    app = _fake_app(tmp_path, main_loop=_FlakyML(3))
+    rec = PursuitRecord(_pursuit({"type": "file_exists", "path": str(tmp_path / "never")}),
+                        owner="karvy", domain_id="l0")
+    rec = _commit(app, rec)
+
+    for _ in range(3):
+        asyncio.run(pursuit_tick(app))
+    assert app.state.pursuit_store.get(rec.id).consecutive_failures == 3
+    asyncio.run(pursuit_tick(app))   # 第 4 拍:真推进成功
+    r = app.state.pursuit_store.get(rec.id)
+    assert r.consecutive_failures == 0        # 清零
+    assert r.advances == 1                    # 真推进才 +1
+    assert r.pursuit.status == "committed" and r.suspended is False
+    assert not [p for p in app.state.proposal_registry.pending()
+                if getattr(p, "kind", "") == KIND_PURSUIT_REVISE]
+
+
+def test_tick_infra_dead_not_counted_as_pursuit_failure(tmp_path, monkeypatch):
+    """确定性 infra-dead(is_infra_dead terminal)不算 pursuit 的错:连败计数不 +1 也不清零。"""
+    class _InfraResult:
+        terminal = "infra_dead"; error = ""; text = ""; sig = ""; task_id = ""
+
+    class _ScriptML:
+        trace = None
+        def __init__(self, script): self.script = list(script)
+        def drive(self, intent, slow_brain=None):
+            step = self.script.pop(0)
+            if step == "boom":
+                raise RuntimeError("炸")
+            return _InfraResult()
+
+    monkeypatch.setattr("karvyloop.runtime.main_loop.forge_slow_brain_factory",
+                        lambda **kw: (lambda *a, **k: ("", None)))
+    app = _fake_app(tmp_path, main_loop=_ScriptML(["boom", "boom", "infra"]))
+    rec = PursuitRecord(_pursuit({"type": "file_exists", "path": str(tmp_path / "never")}),
+                        owner="karvy", domain_id="l0")
+    rec = _commit(app, rec)
+
+    asyncio.run(pursuit_tick(app))
+    asyncio.run(pursuit_tick(app))
+    assert app.state.pursuit_store.get(rec.id).consecutive_failures == 2
+    asyncio.run(pursuit_tick(app))   # infra-dead 拍
+    r = app.state.pursuit_store.get(rec.id)
+    assert r.consecutive_failures == 2   # 不 +1(不怪 pursuit)也不清零(没成功)
+    assert r.suspended is False and r.pursuit.status == "committed"
+
+
+def test_store_old_json_without_consecutive_failures_defaults_zero(tmp_path):
+    """老 JSON(第一刀落的盘,无 consecutive_failures 键)读回不炸、默认 0;新值可落盘读回。"""
+    import json as _json
+    p = tmp_path / "p.json"
+    store = PursuitStore(p)
+    rec = PursuitRecord(_pursuit({"type": "file_exists", "path": "/x"}))
+    store.put(rec)
+    # 模拟老盘:把新键删掉
+    data = _json.loads(p.read_text(encoding="utf-8"))
+    for d in data:
+        d.pop("consecutive_failures", None)
+    p.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    store2 = PursuitStore(p)
+    got = store2.get(rec.id)
+    assert got is not None
+    assert got.consecutive_failures == 0
+    # 新值 roundtrip
+    got.consecutive_failures = 3
+    store2.put(got)
+    assert PursuitStore(p).get(rec.id).consecutive_failures == 3
 
 
 # ---------------------------------------------------------------- 真伤3:平台感知 split

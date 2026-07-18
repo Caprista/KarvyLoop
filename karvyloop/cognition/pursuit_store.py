@@ -49,6 +49,7 @@ class PursuitRecord:
         suspended: bool = False,
         last_advance_ts: float = 0.0,
         advances: int = 0,
+        consecutive_failures: int = 0,
         # 上次 pursue 推进的确定性探针(assemble_context 从这里读,零 LLM):
         last_terminal: str = "",
         last_verdict_passed: bool = False,
@@ -73,6 +74,10 @@ class PursuitRecord:
         # advances = **真推进**累计次数(outcome=None/异常不计,免虚高)—— 达 PURSUIT_MAX_ADVANCES
         # 硬地板即挂起升卡(真伤1①:和"预算/infra-dead 确定性地板"同构的兜底,不靠用户 revision_trigger)。
         self.advances = int(advances or 0)
+        # consecutive_failures = **连续**失败计数(pursue 抛异常/明确报错 +1;真推进成功清零;确定性
+        # infra 故障不计)—— 堵"pursue 每拍都炸 → advances 永不 +1 → PURSUIT_MAX_ADVANCES 永不触发
+        # → 节流上限无限静默重试"的静默洞(P2 残余)。老 JSON 无此键 → from_dict 默认 0(向后兼容)。
+        self.consecutive_failures = int(consecutive_failures or 0)
         self.last_terminal = last_terminal or ""
         self.last_verdict_passed = bool(last_verdict_passed)
         self.last_infeasible = bool(last_infeasible)
@@ -112,6 +117,7 @@ class PursuitRecord:
             "suspended": self.suspended,
             "last_advance_ts": self.last_advance_ts,
             "advances": self.advances,
+            "consecutive_failures": self.consecutive_failures,
             "last_terminal": self.last_terminal,
             "last_verdict_passed": self.last_verdict_passed,
             "last_infeasible": self.last_infeasible,
@@ -133,6 +139,7 @@ class PursuitRecord:
             "revision_reason": self.revision_reason,
             "suspended": self.suspended,
             "advances": self.advances,
+            "consecutive_failures": self.consecutive_failures,
             "verify_gate": dict(p.verify_gate or {}),
             "created_ts": self.created_ts,
             "updated_ts": self.updated_ts,
@@ -156,6 +163,7 @@ class PursuitRecord:
             suspended=bool(d.get("suspended", False)),
             last_advance_ts=float(d.get("last_advance_ts", 0.0) or 0.0),
             advances=int(d.get("advances", 0) or 0),
+            consecutive_failures=int(d.get("consecutive_failures", 0) or 0),
             last_terminal=str(d.get("last_terminal", "") or ""),
             last_verdict_passed=bool(d.get("last_verdict_passed", False)),
             last_infeasible=bool(d.get("last_infeasible", False)),

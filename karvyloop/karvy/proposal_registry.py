@@ -296,7 +296,17 @@ class PendingProposalRegistry:
 
         if decision == "REJECT":
             self.remove(proposal_id)
-            return DispatchResult(proposal_id, getattr(proposal, "kind", ""), True, "rejected")
+            kind = getattr(proposal, "kind", "")
+            # REJECT 生命周期钩子(业界做法:卡被驳回时给来源一次清理机会,如判型建的
+            # pursuit 记录随卡清掉不留垃圾)。约定 key = f"{kind}:reject";fail-soft ——
+            # 钩子缺/炸都**不改变** REJECT=丢弃 的既有语义与返回值。
+            hook = (handlers or {}).get(f"{kind}:reject")
+            if hook is not None:
+                try:
+                    hook(proposal)
+                except Exception as e:
+                    logger.warning("[proposal] reject 钩子 kind=%s 异常(不阻断驳回): %s", kind, e)
+            return DispatchResult(proposal_id, kind, True, "rejected")
 
         if decision == "DEFER":
             # DEFER 老化(docs/43 ⑤a):记 deferred_at;满 AGING_THRESHOLD_S 后重新计入
@@ -845,12 +855,16 @@ def proposal_for_pursuit_commit(
     domain_id: str = "",
     ts: float,
     strength: float = 0.8,
+    origin: str = "",
 ):
     """建了跨天目标 → 「承诺卡」(docs/88 §5:承诺跨天目标是决策,必人拍)。
 
     第一刀 commitment 简化为"人 ACCEPT=committed"(不做 commitment_condition DSL)。卡上人话化
     展示验证门(算完成的确定性判据)+ 修订触发器 —— 你 ACCEPT = 承诺成立,机器开始自跑几天,
     只在完成 / 修订 / (未来)不可行三个点再回来找你。proposal_id 按 pursuit_id 稳定派生(同目标一张)。
+
+    origin(第二刀):创建来源标("" = 显式 API/面板;"karvy_triage" = 聊天判型)。
+    REJECT 时 reject 钩子按它决定清不清记录 —— 判型建的清掉不留垃圾,亲手建的保留。
     """
     from karvyloop import i18n
     from .atoms import Proposal  # 局部 import 避免模块级循环
@@ -870,6 +884,7 @@ def proposal_for_pursuit_commit(
             "gate_desc": gate_desc,
             "level": level or "atom",
             "domain_id": domain_id,
+            "origin": origin or "",
         },
         proposal_id=f"{KIND_PURSUIT_COMMIT}-0-{hashlib.sha1(pursuit_id.encode('utf-8')).hexdigest()[:8]}",
         basis=i18n.t("proposal.pursuit_commit.basis", gate=gate_desc, trigger=trig),

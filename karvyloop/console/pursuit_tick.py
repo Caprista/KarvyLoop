@@ -15,6 +15,10 @@
     H2A 卡("推进 N 次仍没完成:你来定")—— 不靠用户 revision_trigger(DSL 弱、无 > 比较)。
   - 推进节拍 throttle 的时间戳 `last_advance_ts` **在异常路径也写**(pursue 抛异常绝不旁路节流,
     否则每 10min 一次 =144 次/天)。verify 子进程随整条 tick 工作一起被节流。
+  - `consecutive_failures` 累计**连续失败**(pursue 抛异常/明确报错 +1;真推进成功清零;确定性
+    infra 故障不计),达 `PURSUIT_MAX_CONSECUTIVE_FAILURES` → 同款挂起升卡 —— 堵"pursue 每拍都炸
+    → advances 永不 +1 → 硬地板永不触发 → 以节流上限无限静默重试、人永远不知道"的静默洞
+    (P2 残余;fail-loud:人只该拍板,不该当心跳)。
 
 **核心判断(docs/88 §0)**:把 `pursue()`(内环执行器)当外环 Pursuit 的"每 tick 执行器",不另造
 账——每次推进派生一条 task(复用任务账)、历史进 Trace(复用审计账)。`pursue()` 同步(内含
@@ -31,12 +35,18 @@ logger = logging.getLogger(__name__)
 # context 白名单(docs/88 §4「第一刀 context key 固定小白名单防漂移」):assemble_context 只喂这几个
 # 确定性信号(从 record 存的上次 outcome 探针 + 时间预算读),不开放式。revision_triggers 只能引它们。
 _CONTEXT_KEYS = ("terminal", "verdict_passed", "done", "budget_exhausted",
-                 "days_running", "infra_dead")
+                 "days_running", "infra_dead", "consecutive_failures")
 
 # 推进硬地板(docs/88 真伤1①,待标定):一个 committed 目标真推进这么多次仍没过 verify_gate,
 # 就别再无声烧钱——挂起 + 升 H2A 卡请你定夺(继续/改方向/放弃)。首版 20;和预算/infra-dead 同类的
 # 确定性兜底,不依赖用户写 revision_trigger。
 PURSUIT_MAX_ADVANCES = 20
+
+# 连续失败硬地板(P2 残余,常数待 Trace 真数据标定):pursue 连着这么多拍抛异常/明确报错(真推进
+# 成功即清零;确定性 infra 故障不计)→ 挂起 + 升同款 REVISE 卡。补 PURSUIT_MAX_ADVANCES 盖不住的洞:
+# 异常不计 advances → 全炸的 pursuit 永远到不了推进上限,只会以节流上限无限静默重试、人永远不知道。
+# 首版 5。
+PURSUIT_MAX_CONSECUTIVE_FAILURES = 5
 
 
 def assemble_context(app: Any, rec: Any, *, now: Optional[float] = None) -> dict:
@@ -52,6 +62,9 @@ def assemble_context(app: Any, rec: Any, *, now: Optional[float] = None) -> dict
         "budget_exhausted": bool(getattr(rec, "last_infeasible", False)),
         "days_running": days,
         "infra_dead": bool(getattr(rec, "last_infra_dead", False)),
+        # P2 残余小扩:连败计数进白名单(revision_triggers 可引它,如 "consecutive_failures == 3")。
+        # 白名单是防漂移设计——只加这一个键,别开闸。
+        "consecutive_failures": int(getattr(rec, "consecutive_failures", 0) or 0),
     }
     return {k: ctx[k] for k in _CONTEXT_KEYS}
 
@@ -123,6 +136,10 @@ def _advance_sync(app: Any, rec: Any) -> Any:
         if task_reg is not None and tid:
             task_reg.finish(tid, error=str(e))
         rec.progress_note = f"推进出错: {e}"
+        # P2 残余(连败计数):pursue 抛出的异常**没法确定性区分** infra 故障 vs pursuit 自身问题
+        # (确定性 infra 检测只盖 is_infra_dead terminal / ml 缺失 / 慢脑构造失败,那些路径不计数)。
+        # 取舍:计入 —— 连炸就该响,哪怕是 infra 在连炸,响也比无限静默重试对(宁响勿哑)。
+        rec.consecutive_failures += 1
         return None
 
     checked = outcome.checked
@@ -149,6 +166,18 @@ def _advance_sync(app: Any, rec: Any) -> Any:
                                    and not getattr(verdict, "inconclusive", True))
     rec.last_infeasible = bool(outcome.infeasible)
     rec.last_infra_dead = bool(outcome.infra_dead)
+    # P2 残余(连败计数)—— 与 last_terminal 同一优先级序:
+    #   infra_dead(确定性检测)= infra 的错不算 pursuit 的 → 不计数也不清零(等 infra 恢复);
+    #   err = 返回明确失败 → +1;infeasible = 已走响亮的不可行卡路径挂起 → 计数不动;
+    #   其余(真推进走完没报错)→ 清零(地板只逮"连续"失败)。
+    if outcome.infra_dead:
+        pass
+    elif err:
+        rec.consecutive_failures += 1
+    elif outcome.infeasible:
+        pass
+    else:
+        rec.consecutive_failures = 0
     _n_attempts = len(getattr(outcome, "attempts", []) or [])
     if outcome.infra_dead:
         rec.progress_note = "基础能力暂不可用(模型/网络/沙箱),下轮再试"
@@ -296,6 +325,9 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
                 outcome = await asyncio.to_thread(_advance_sync, app, rec)
             except Exception as e:   # _advance_sync 内部已兜;这里再兜一层,绝不让节流被旁路
                 outcome = None
+                # 装配层/线程炸(逃过 _advance_sync 内层兜的)也是一次推进失败 —— 不计就又是
+                # 无限静默重试(P2 残余);_advance_sync 内层已计过的路径不会走到这里,不双计。
+                rec.consecutive_failures += 1
                 logger.warning(f"[pursuit_tick] 推进线程异常({rec.id}): {e}")
             counts["advanced"] += 1
 
@@ -323,6 +355,22 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
                     counts["done"] += 1
                     continue
 
+            # 连续失败硬地板(P2 残余):pursue 每拍都炸 → advances 永不 +1 → 下面的推进上限永不触发
+            # → 以节流上限无限静默重试、人永远不知道。连败达上限 → 挂起 + 升**同款** REVISE 卡
+            # (fail-loud:人只该拍板,不该当心跳)。真推进成功会清零(见 _advance_sync)。
+            if rec.consecutive_failures >= PURSUIT_MAX_CONSECUTIVE_FAILURES:
+                from karvyloop import i18n
+                rec.pursuit = rec.pursuit.model_copy(update={"status": "revised"})
+                rec.suspended = True
+                await _raise_revise(app, rec,
+                                    reason=i18n.t("pursuit.revise.reason_consecutive_failures",
+                                                  n=rec.consecutive_failures),
+                                    ts=n_ts)
+                counts["revised"] += 1
+                logger.info(f"[pursuit_tick] Pursuit {rec.id} 连续失败 {rec.consecutive_failures} 次"
+                            f" → 挂起升 H2A 卡")
+                continue
+
             # 成本硬地板(真伤1①):真推进达上限仍没过门 → 挂起 + 升 H2A 卡(你来定:继续/改方向/放弃)。
             if rec.advances >= PURSUIT_MAX_ADVANCES:
                 from karvyloop import i18n
@@ -343,4 +391,5 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
     return counts
 
 
-__all__ = ["pursuit_tick", "assemble_context", "PURSUIT_MAX_ADVANCES"]
+__all__ = ["pursuit_tick", "assemble_context", "PURSUIT_MAX_ADVANCES",
+           "PURSUIT_MAX_CONSECUTIVE_FAILURES"]

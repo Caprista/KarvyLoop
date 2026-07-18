@@ -393,6 +393,25 @@ html, body {
   cursor: pointer; font-size: 13px; padding: 2px 8px; color: var(--text-dim);
 }
 .col-act:hover { border-color: var(--accent); color: var(--text); }
+/* 🎯 我的追求入口(col-intel 头部):带 nav-item 类吃 data-panel 委托绑定,
+   但 .nav-item 的整行样式(width:100%/大 padding)要在列头里收回成 col-act 形态 */
+.col-head .nav-item.col-act {
+  display: inline-flex; width: auto; padding: 2px 8px; gap: 4px;
+  font-size: 12px; color: var(--text-dim); border: 1px solid var(--border);
+}
+.col-head .nav-item.col-act:hover { background: transparent; border-color: var(--accent); color: var(--text); }
+/* 🎯 面板:创建表单(一句话目标 + 判据下拉/输入一行排) */
+.pursuit-input {
+  width: 100%; box-sizing: border-box; font-size: 13px; padding: 8px 11px; margin: 4px 0 0;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--text);
+}
+.pursuit-input:focus { outline: none; border-color: var(--accent); }
+.pursuit-gate-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.pursuit-gate-row .pursuit-input { flex: 1; margin: 0; }
+.pursuit-gate-row select.pursuit-gate-sel { width: auto; flex: 0 0 auto; cursor: pointer; }
+.pursuit-card { cursor: pointer; }
+.pursuit-card:hover { border-color: var(--accent); }
+.pursuit-note { margin-top: 6px; }
 .col-sub { font-size: 11px; color: var(--text-dim); margin: 12px 0 4px; font-weight: 600; }
 .know-chip {
   font-size: 12px; color: var(--text); padding: 6px 9px; margin-bottom: 5px;

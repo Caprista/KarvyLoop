@@ -839,6 +839,14 @@ _EN = {
         "pushed {n} times and still hasn't passed its done gate — your call (keep going / change "
         "direction / drop it)"
     ),
+    "pursuit.revise.reason_consecutive_failures": (
+        "the last {n} pushes all failed outright, so it's paused — your call (keep going / change "
+        "direction / drop it)"
+    ),
+    "pursuit.triage.duplicate": (
+        "Already on it — “{statement}” is in your pursuits, so I won't open a second one. "
+        "If this really is a different goal, create it from the My Pursuits panel."
+    ),
     "pursuit.err.gate_not_dict": "verify_gate must be an object with a type.",
     "pursuit.err.gate_type": "First cut only supports these verify_gate types: {allowed}.",
     "pursuit.err.gate_cmd": "test_pass gate needs a non-empty cmd (exit 0 = done).",
@@ -848,6 +856,18 @@ _EN = {
     "pursuit.err.bad_pursuit": "Couldn't build the pursuit: {error}",
     "pursuit.gate_desc.test_pass": "command `{cmd}` exits 0",
     "pursuit.gate_desc.file_exists": "file `{path}` exists",
+    # docs/88 第二刀:聊天判型 create(小卡识别跨天目标 → 升承诺卡)的聊天回执 + REJECT 清理回执
+    "pursuit.triage.card_text": (
+        "This sounds like a multi-day goal to keep pushing: “{statement}”. "
+        "Done-check (verified deterministically after each push — no model asked): {gate}. "
+        "I've wrapped it into a commitment card — nothing starts until you accept. "
+        "Each push spawns a task; after {max_rounds} pushes without passing the done-check "
+        "it pauses and asks you. (Decide in 🤝 H2A)"
+    ),
+    "receipt.pursuit_commit.rejected_cleaned": (
+        "Okay, not pursuing “{statement}” — I've cleaned up its record (no leftovers). "
+        "Just say the word if you want it back."
+    ),
 }
 
 # ---- 中文 ----
@@ -1588,6 +1608,8 @@ _ZH = {
     "pursuit.receipt.done": "✅ 追求达成:「{statement}」(验证门通过)",
     "pursuit.revise.reason_trigger": "命中了一个修订触发器",
     "pursuit.revise.reason_max_advances": "推进 {n} 次仍没过完成门 —— 你来定(继续 / 改方向 / 放弃)",
+    "pursuit.revise.reason_consecutive_failures": "连续 {n} 轮推进都失败了,先暂停 —— 你来定(继续 / 改方向 / 放弃)",
+    "pursuit.triage.duplicate": "已经在追这个了 ——「{statement}」就在你的追求里,不再开第二条。如果这真是个不同的新目标,去「我的追求」面板建。",
     "pursuit.err.gate_not_dict": "verify_gate 必须是带 type 的对象。",
     "pursuit.err.gate_type": "第一刀只支持这几种 verify_gate 类型:{allowed}。",
     "pursuit.err.gate_cmd": "test_pass 门需要非空的 cmd(退出码 0 = 完成)。",
@@ -1597,6 +1619,16 @@ _ZH = {
     "pursuit.err.bad_pursuit": "建 Pursuit 失败:{error}",
     "pursuit.gate_desc.test_pass": "命令 `{cmd}` 退出码为 0",
     "pursuit.gate_desc.file_exists": "文件 `{path}` 存在",
+    # docs/88 第二刀:聊天判型 create(小卡识别跨天目标 → 升承诺卡)的聊天回执 + REJECT 清理回执
+    "pursuit.triage.card_text": (
+        "听起来这是个要**跨几天一直推进**的目标:「{statement}」。"
+        "完成判据(每轮推进后我都确定性核一遍,不问模型):{gate}。"
+        "我把它包成了一张**承诺卡** —— 你点了同意才算数;之后每轮推进会派生任务,"
+        "最多 {max_rounds} 轮没过完成判据就自动暂停来问你。(到 🤝 H2A 处置)"
+    ),
+    "receipt.pursuit_commit.rejected_cleaned": (
+        "好,不追「{statement}」了 —— 这个目标的记录已清掉,不留垃圾。想追随时再说一声。"
+    ),
 }
 
 TABLES = {"en": _EN, "zh": _ZH}

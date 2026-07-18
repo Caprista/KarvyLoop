@@ -71,6 +71,68 @@ def _validate_gate(gate: Any) -> tuple[Optional[dict], str, str]:
     return {"type": "file_exists", "path": path}, i18n.t("pursuit.gate_desc.file_exists", path=path), ""
 
 
+async def create_pursuit_with_commit_card(
+    app: Any,
+    *,
+    statement: str,
+    verify_gate: dict,
+    title: str = "",
+    level: str = "atom",
+    owner: str = "karvy",
+    domain_id: str = "l0",
+    revision_triggers: Optional[List[str]] = None,
+    origin: str = "",
+) -> dict[str, Any]:
+    """第一刀唯一的"创建 Pursuit + 升承诺卡"路径(POST /api/pursuit 与小卡自动判型共用)。
+
+    docs/88 第二刀抽 helper:入口可以有多个(显式 API / 聊天判型),create 路径只有这一条 ——
+    gate 校验、record 落库、承诺卡(H2A)全在这里,绝不另造第二套。返回 dict 形状 =
+    POST /api/pursuit 的历史响应形状(前端在消费,加性不变)。
+
+    origin:创建来源标,进承诺卡 payload(判型入口传 karvy_triage → REJECT 时按它清记录;
+    显式 API 建的默认空 → REJECT 保留记录,"可稍后手动承诺"第一刀语义不变)。
+    """
+    from karvyloop import i18n
+    store = getattr(app.state, "pursuit_store", None)
+    if store is None:
+        return {"ok": False, "reason": i18n.t("pursuit.err.no_store")}
+    level = level if level in _ALLOWED_LEVELS else "atom"
+    gate, gate_desc, err = _validate_gate(verify_gate)
+    if err:
+        return {"ok": False, "reason": err}
+    triggers = [str(t).strip() for t in (revision_triggers or []) if str(t).strip()][:8]
+
+    from karvyloop.cognition.pursuit_store import PursuitRecord, new_pursuit_id
+    from karvyloop.schemas import Pursuit
+    pid = new_pursuit_id(level)
+    try:
+        pursuit = Pursuit(
+            id=pid, level=level, statement=(statement or "").strip(),
+            commitment_condition="",   # 第一刀:人 ACCEPT 承诺卡 = committed(不做 DSL)
+            revision_triggers=triggers, verify_gate=gate, status="active")
+    except Exception as e:
+        return {"ok": False, "reason": i18n.t("pursuit.err.bad_pursuit", error=str(e))}
+    rec = PursuitRecord(pursuit, title=(title or "").strip(), owner=(owner or "").strip() or "karvy",
+                        domain_id=(domain_id or "").strip() or "l0")
+    store.put(rec)
+
+    # 承诺卡(H2A:承诺跨天目标是决策,必人拍)。进 HIGH_RISK_KINDS,绝不被静音自动兑现。
+    commit_pid = ""
+    try:
+        from karvyloop.console.proposals import broadcast_proposal
+        from karvyloop.karvy.proposal_registry import proposal_for_pursuit_commit
+        card = proposal_for_pursuit_commit(
+            pursuit_id=pid, statement=pursuit.statement, gate_desc=gate_desc,
+            level=level, revision_triggers=triggers, domain_id=rec.domain_id, ts=time.time(),
+            origin=origin)
+        commit_pid = card.proposal_id
+        await broadcast_proposal(app, card)
+    except Exception as e:
+        logger.warning(f"[pursuit] 升承诺卡失败(Pursuit 已建,可稍后手动承诺): {e}")
+    return {"ok": True, "pursuit_id": pid, "status": pursuit.status,
+            "commit_proposal_id": commit_pid, "gate_desc": gate_desc}
+
+
 class PursuitCreateRequest(BaseModel):
     statement: str = Field(min_length=1, max_length=2000)
     verify_gate: dict
@@ -84,45 +146,10 @@ class PursuitCreateRequest(BaseModel):
 @router.post("/pursuit")
 async def api_pursuit_create(req: PursuitCreateRequest, request: Request) -> dict[str, Any]:
     """建一个跨天目标(Pursuit)+ 升承诺卡。ACCEPT 承诺卡 → committed → 机器自跑几天。"""
-    from karvyloop import i18n
-    app = request.app
-    store = getattr(app.state, "pursuit_store", None)
-    if store is None:
-        return {"ok": False, "reason": i18n.t("pursuit.err.no_store")}
-    level = req.level if req.level in _ALLOWED_LEVELS else "atom"
-    gate, gate_desc, err = _validate_gate(req.verify_gate)
-    if err:
-        return {"ok": False, "reason": err}
-    triggers = [str(t).strip() for t in (req.revision_triggers or []) if str(t).strip()][:8]
-
-    from karvyloop.cognition.pursuit_store import PursuitRecord, new_pursuit_id
-    from karvyloop.schemas import Pursuit
-    pid = new_pursuit_id(level)
-    try:
-        pursuit = Pursuit(
-            id=pid, level=level, statement=req.statement.strip(),
-            commitment_condition="",   # 第一刀:人 ACCEPT 承诺卡 = committed(不做 DSL)
-            revision_triggers=triggers, verify_gate=gate, status="active")
-    except Exception as e:
-        return {"ok": False, "reason": i18n.t("pursuit.err.bad_pursuit", error=str(e))}
-    rec = PursuitRecord(pursuit, title=req.title.strip(), owner=req.owner.strip() or "karvy",
-                        domain_id=req.domain_id.strip() or "l0")
-    store.put(rec)
-
-    # 承诺卡(H2A:承诺跨天目标是决策,必人拍)。进 HIGH_RISK_KINDS,绝不被静音自动兑现。
-    commit_pid = ""
-    try:
-        from karvyloop.console.proposals import broadcast_proposal
-        from karvyloop.karvy.proposal_registry import proposal_for_pursuit_commit
-        card = proposal_for_pursuit_commit(
-            pursuit_id=pid, statement=pursuit.statement, gate_desc=gate_desc,
-            level=level, revision_triggers=triggers, domain_id=rec.domain_id, ts=time.time())
-        commit_pid = card.proposal_id
-        await broadcast_proposal(app, card)
-    except Exception as e:
-        logger.warning(f"[pursuit] 升承诺卡失败(Pursuit 已建,可稍后手动承诺): {e}")
-    return {"ok": True, "pursuit_id": pid, "status": pursuit.status,
-            "commit_proposal_id": commit_pid, "gate_desc": gate_desc}
+    return await create_pursuit_with_commit_card(
+        request.app, statement=req.statement, verify_gate=req.verify_gate,
+        title=req.title, level=req.level, owner=req.owner, domain_id=req.domain_id,
+        revision_triggers=req.revision_triggers)
 
 
 @router.get("/pursuits")
@@ -167,4 +194,4 @@ def api_pursuit_detail(pursuit_id: str, request: Request) -> dict[str, Any]:
     return {"ok": True, "pursuit": detail}
 
 
-__all__ = ["router"]
+__all__ = ["router", "create_pursuit_with_commit_card"]

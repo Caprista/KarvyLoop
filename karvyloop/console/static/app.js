@@ -166,6 +166,7 @@
     diagnose: { src: "/static/diagnose_panel.js", global: "KarvyDiagnosePanel" },
     files: { src: "/static/files_panel.js", global: "KarvyFilesPanel" },
     schedules: { src: "/static/schedules_panel.js", global: "KarvySchedulesPanel" },
+    pursuits: { src: "/static/pursuits_panel.js", global: "KarvyPursuitsPanel" },  // 🎯 我的追求(col-intel 头部入口,非左导航——13 项 IA 契约锁死)
     demo: { src: "/static/demo_panel.js", global: "KarvyDemoPanel" },     // 👀 顶栏入口(脚本载入时自绑 #demo-open)
     tokens: { src: "/static/tokens_panel.js", global: "KarvyTokens" },    // 💰 顶栏 meter:boot 即 ensure,meter 不长睡
   };
@@ -1950,6 +1951,7 @@
       diagnose: () => openDiagnosePanel(),
       files: () => window.KarvyFilesPanel.open(),
       schedules: () => window.KarvySchedulesPanel.open(),
+      pursuits: () => window.KarvyPursuitsPanel.open(),
     };
     let _lastPanel = "";
     document.querySelectorAll(".nav-item[data-panel]").forEach((btn) => {

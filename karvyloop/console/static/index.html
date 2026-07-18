@@ -228,7 +228,11 @@
              桌面端 display:none(聊天已常驻/rail 放大态走 FAB)。 -->
         <button class="mobile-chat-entry" id="mobile-chat-open" data-i18n="chat.open">💬 跟小卡说…</button>
         <section class="cockpit-col col-intel">
-          <h2 class="col-head" data-i18n="cockpit.intel">📥 流进来的料</h2>
+          <!-- 🎯 我的追求(Pursuit 第二刀):跨多天目标住在"料"这一列的头上 ——
+               左导航 13 项被 IA§1 契约锁死(test_sidebar_nav_three_groups),这里是任务板的近亲位。
+               class 带 nav-item → 与左导航同一套 data-panel 委托绑定(setupMgmtPanels)零新接线。 -->
+          <h2 class="col-head"><span data-i18n="cockpit.intel">📥 流进来的料</span>
+            <button id="pursuits-open" class="col-act nav-item" data-panel="pursuits" data-i18n="nav.pursuits" data-i18n-title="nav.pursuits.title">🎯 My Pursuits</button></h2>
           <div class="col-scroll">
             <!-- ⑤c 环境感知召回:你说了什么 → 相关技能⚡/知识📚主动浮出(WS ambient_recall)。
                  无料时整块 display:none 不占位(朋友调研:空态别占地)。 -->

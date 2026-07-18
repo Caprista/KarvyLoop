@@ -30,11 +30,8 @@ API_ONLY = {
     "/api/mesh/sync",           # 同上:对端推 delta / 拉本机 delta,device-to-device,无 web 前端 caller
     # #54 逃生门 workflow 续/丢/查(pending_resume/resume/discard)已接前端 app.js 顶部横幅
     # (fetchPendingResume + 续跑/丢弃按钮,docs/56 ②)→ 不再是 API_ONLY,已从白名单移除。
-    # Pursuit 招牌第一刀(docs/88 §9):Web「我的追求」面板是**第二刀**;第一刀经 TUI
-    # active_count + 后端 commit/revise 决策卡露面,create 走 POST。接上 Web 面板后本 3 行可删。
-    "/api/pursuit",             # 创建持久追求(第一刀无 web 表单,第二刀接面板)
-    "/api/pursuits",            # 列活跃追求(TUI 计数已真,web 列表面板第二刀)
-    "/api/pursuit/{pursuit_id}",  # 追求详情+派生 task(web 详情面板第二刀)
+    # Pursuit 三端点(docs/88):第二刀已接 Web「我的追求」面板(pursuits_panel.js)→ 从白名单移除,
+    # 接线测试真锁前端调用。
 }
 
 

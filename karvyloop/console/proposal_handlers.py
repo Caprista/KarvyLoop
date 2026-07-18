@@ -897,6 +897,31 @@ def _pursuit_commit_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     return handler
 
 
+def _pursuit_commit_reject_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """KIND_PURSUIT_COMMIT 的 **REJECT 钩子**(docs/88 第二刀:判型建的记录不留垃圾)。
+
+    小卡聊天判型(origin=karvy_triage)建的 Pursuit 是"系统提议、等你拍板"的草案 ——
+    你 REJECT 承诺卡 = 不要这个目标 → 记录随卡清掉,活跃集不留从没被承诺过的暗记录。
+    显式 API/面板建的(origin 空)**不清**:那是你亲手建的,保留"可稍后手动承诺"的
+    第一刀语义(0 回归)。只清从未 committed 的 active 记录(防误删已在跑的追求)。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        from karvyloop import i18n
+        from karvyloop.karvy.pursuit_triage import ORIGIN_KARVY_TRIAGE
+        payload = getattr(proposal, "payload", None) or {}
+        if (payload.get("origin") or "") != ORIGIN_KARVY_TRIAGE:
+            return True, ""   # 亲手建的:REJECT 只关卡,记录保留(第一刀语义)
+        store = getattr(getattr(app, "state", None), "pursuit_store", None)
+        pid = (payload.get("pursuit_id") or "").strip()
+        rec = store.get(pid) if (store is not None and pid) else None
+        if rec is None or rec.status != "active":
+            return True, ""   # 已不在 / 已承诺或终态 → 不动
+        store.remove(pid)
+        return True, i18n.t("receipt.pursuit_commit.rejected_cleaned",
+                            statement=rec.pursuit.statement[:60])
+    return handler
+
+
 def _pursuit_revise_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     """KIND_PURSUIT_REVISE 兑现(docs/88 §5):修订是决策归人 —— ACCEPT = 你决定把这个追求**放下**。
 
@@ -973,6 +998,9 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_SILENCE_GRANT: _silence_grant_handler(app),         # 挣来的静音:授权落台账(可撤)
         KIND_SILENCE_REVOKED: _silence_revoked_handler,          # 吊销告知:纯知悉
         KIND_PURSUIT_COMMIT: _pursuit_commit_handler(app),       # docs/88:承诺跨天目标 → Pursuit 升 committed
+        # REJECT 钩子(registry.decide 驳回时调,约定 key = f"{kind}:reject"):
+        # 聊天判型建的 Pursuit 随卡清掉不留垃圾;亲手建的保留(第一刀语义)。
+        f"{KIND_PURSUIT_COMMIT}:reject": _pursuit_commit_reject_handler(app),
         KIND_PURSUIT_REVISE: _pursuit_revise_handler(app),       # docs/88:修订是决策归人 → ACCEPT=放下追求
         KIND_EXTERNAL_ADOPT: _external_adopt_handler(app),       # M2 采纳门:外部 untrusted 供稿 H2A 采纳才升记忆
         **_inbox,                                                # 收件箱管道:记台账/存草稿(只进不出)

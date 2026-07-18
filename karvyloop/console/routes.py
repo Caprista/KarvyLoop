@@ -1235,6 +1235,15 @@ async def maybe_route_to_role(app, mgr, intent: str):
                          f"要不要转给「{match['role']}」去做?(到 🤝 H2A 处置)"),
             }
 
+    # ②b docs/88 第二刀:跨天持久目标 → 判型 create(升承诺卡,人 ACCEPT 才算承诺)。
+    #    粗筛确定性零 token,命中才烧一次 LLM 判型;识别不出/派生不出确定性完成判据 →
+    #    None 照常往下走(宁漏勿滥 —— 漏了还有 API/面板)。非 None 早返回由上方调用方
+    #    record_turn(与圆桌提案同一模式,防 ctx 串台)。
+    from karvyloop.karvy.pursuit_triage import maybe_pursuit_triage
+    triaged = await maybe_pursuit_triage(app, intent)
+    if triaged is not None:
+        return triaged
+
     # ③ LLM 拆解器兜底(**默认仲裁**,不再被关键词门锁):关键词没命中确定性编排时也给它机会。
     #    "帮我整理竞品分析" 这类没暗号但该编排的活在这里被 LLM 认出;拆不出/无角色 → None,小卡自己干。
     routed = await _maybe_fuzzy_dispatch(app, intent)
