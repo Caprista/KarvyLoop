@@ -19,11 +19,19 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import logging
 import sqlite3
 import threading
 import time
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# 滚动保留期(天):早于「今天 − N 天」的**完整日**逐调用明细滚成按天×source×model 汇总行,
+# 明细删、汇总留。〔常数待 Trace 记分布后标定 —— 首版 90 天:by_day/by_source 的季度级趋势
+# 保得住,只丢逐调用明细(task_total/run_totals/分钟级 buckets 这类精细查询只对近期有意义)。〕
+ROLLUP_RETAIN_DAYS = 90
 
 
 # ---- source contextvar ----
@@ -161,6 +169,17 @@ class TokenLedger:
         if "run_id" not in cols:
             self._conn.execute("ALTER TABLE token_usage ADD COLUMN run_id TEXT NOT NULL DEFAULT ''")
             self._conn.execute("CREATE INDEX IF NOT EXISTS token_usage_run ON token_usage(run_id)")
+        # 迁移(幂等):滚动汇总的两根柱子 —— calls(每明细行=1 次调用;汇总行=被折叠的原调用数,
+        # 聚合查询一律 SUM(calls) 而非 COUNT(*),so 折叠后 by_day 的 calls 也守恒)+ rolled(0=逐调用
+        # 明细,1=滚动汇总行;汇总行 task_id/run_id 空,不参与任务/run 级查询,raw timeline 也排除它)。
+        if "calls" not in cols:
+            self._conn.execute("ALTER TABLE token_usage ADD COLUMN calls INTEGER NOT NULL DEFAULT 1")
+        if "rolled" not in cols:
+            self._conn.execute("ALTER TABLE token_usage ADD COLUMN rolled INTEGER NOT NULL DEFAULT 0")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS token_usage_rolled ON token_usage(rolled)")
+        # 滚动水位线台账(单行 kv):rollup_watermark = ts < 此值的明细已被滚成汇总(archived 边界)。
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS token_ledger_meta (key TEXT PRIMARY KEY, value REAL NOT NULL DEFAULT 0)")
         self._conn.commit()
         self._lock = threading.Lock()
         self._clock = clock
@@ -208,7 +227,7 @@ class TokenLedger:
             rows = self._conn.execute(
                 f"SELECT CAST(ts / {interval} AS INTEGER) * {interval} AS bucket, "
                 f"COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
-                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COALESCE(SUM(calls),0) "
                 f"FROM token_usage {w} GROUP BY bucket ORDER BY bucket DESC LIMIT ?",
                 (*p, int(limit)),
             ).fetchall()
@@ -230,7 +249,7 @@ class TokenLedger:
             return {"input": 0, "output": 0, "total": 0, "calls": 0}
         with self._lock:
             row = self._conn.execute(
-                "SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), COUNT(*) "
+                "SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), COALESCE(SUM(calls),0) "
                 "FROM token_usage WHERE run_id=?", (run_id,)).fetchone()
         return {"input": int(row[0]), "output": int(row[1]),
                 "total": int(row[0]) + int(row[1]), "calls": int(row[2])}
@@ -270,7 +289,7 @@ class TokenLedger:
         with self._lock:
             row = self._conn.execute(
                 f"SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
-                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COALESCE(SUM(calls),0) "
                 f"FROM token_usage {w}", p,
             ).fetchone()
         inp, out, cr, cw, n = row
@@ -289,7 +308,7 @@ class TokenLedger:
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT model, COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
-                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COALESCE(SUM(calls),0) "
                 f"FROM token_usage {w} GROUP BY model "
                 f"ORDER BY SUM(input)+SUM(output) DESC", p,
             ).fetchall()
@@ -306,7 +325,7 @@ class TokenLedger:
         w, p = self._window_where(start_ts, end_ts)
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT source, COALESCE(SUM(input),0), COALESCE(SUM(output),0), COUNT(*) "
+                f"SELECT source, COALESCE(SUM(input),0), COALESCE(SUM(output),0), COALESCE(SUM(calls),0) "
                 f"FROM token_usage {w} GROUP BY source "
                 f"ORDER BY SUM(input)+SUM(output) DESC", p,
             ).fetchall()
@@ -335,7 +354,7 @@ class TokenLedger:
                 rows = self._conn.execute(
                     f"SELECT CAST(ts / {interval} AS INTEGER) * {interval} AS bucket, "
                     f"COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
-                    f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                    f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COALESCE(SUM(calls),0) "
                     f"FROM token_usage {w} GROUP BY bucket ORDER BY bucket ASC LIMIT ?",
                     (*p, lim),
                 ).fetchall()
@@ -350,7 +369,7 @@ class TokenLedger:
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT day, MIN(ts), COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
-                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COALESCE(SUM(calls),0) "
                 f"FROM token_usage {w} GROUP BY day ORDER BY day ASC LIMIT ?",
                 (*p, lim),
             ).fetchall()
@@ -380,11 +399,13 @@ class TokenLedger:
         return (("WHERE " + " AND ".join(conds)) if conds else ""), tuple(params)
 
     def recent(self, *, limit: int = 50) -> list[dict]:
-        """最近 N 条原始调用(时间线:何时、哪个 source/model、烧多少)—— 定位某次尖峰是谁。"""
+        """最近 N 条原始调用(时间线:何时、哪个 source/model、烧多少)—— 定位某次尖峰是谁。
+
+        只取逐调用明细(rolled=0);滚动汇总行(rolled=1)不是"一次调用",不进原始时间线。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT ts, source, model, input, output, cache_read, cache_write "
-                "FROM token_usage ORDER BY ts DESC LIMIT ?", (int(limit),),
+                "FROM token_usage WHERE rolled=0 ORDER BY ts DESC LIMIT ?", (int(limit),),
             ).fetchall()
         return [
             {"ts": float(r[0]),
@@ -404,7 +425,7 @@ class TokenLedger:
         with self._lock:
             row = self._conn.execute(
                 f"SELECT COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
-                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COALESCE(SUM(calls),0) "
                 f"FROM token_usage {w}", p,
             ).fetchone()
         inp, out, cr, cw, n = row
@@ -419,7 +440,7 @@ class TokenLedger:
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT {col}, COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
-                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COUNT(*) "
+                f"COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), COALESCE(SUM(calls),0) "
                 f"FROM token_usage {w} GROUP BY {col} ORDER BY SUM(input)+SUM(output) DESC", p,
             ).fetchall()
         return [
@@ -431,6 +452,95 @@ class TokenLedger:
             for r in rows
         ]
 
+    # ---- 滚动汇总(唯一无界持久台账收口:老明细滚成按天汇总,明细删、聚合守恒)----
+
+    def rollup(self, *, retain_days: int = ROLLUP_RETAIN_DAYS,
+               now: Optional[float] = None) -> dict:
+        """把早于保留期的**完整日**逐调用明细滚成按天×source×model 汇总行:明细删、汇总留。
+
+        为什么这样滚(逻辑可证,不靠运气):
+        - **聚合守恒**(核心不变量):汇总行的 input/output/cache_read/cache_write/calls 恰好是被删
+          明细在该 (day, source, model) 下的和 → totals / by_day / by_source / by_model(全按
+          `GROUP BY` 后 `SUM`,calls 也走 `SUM(calls)`)滚动前后**逐字段相等**。丢的只是逐调用
+          明细(task_total/run_totals/分钟级 buckets 这类精细查询——它们只对近期有意义)。
+        - **只滚完整日**:边界按 `day` 字符串(ISO 日,字典序=时序)比,`day < cutoff_day` 才滚,
+          绝不切半天 → 每 (day,source,model) 至多一条汇总行,幂等(汇总行 rolled=1,下轮不再滚)。
+        - **原子**:聚合(读进内存)→ 删明细 → 插汇总 → 抬水位线,全在一个事务里;任一步崩即
+          `rollback`,一条明细都不丢(sqlite 事务天然)。
+        - **归档诚实**:抬 rollup_watermark(=cutoff_day 零点 ts);ts < 水位线的老 task/run 明细
+          已不在,task_total/run_totals 返回 0,但调用方拿 `rollup_watermark()` 一比即知"已归档"
+          而非"消耗为 0"(不静默变 0)。
+
+        返回 {deleted(删的明细行数), summarized(新增汇总行数), cutoff_day(保留窗起始日)}。
+        """
+        now = self._clock() if now is None else now
+        cutoff_day = _day_of(now - max(0, int(retain_days)) * 86400)
+        with self._lock:
+            # ① 聚合待滚明细(完整日、非汇总行)。COUNT(*) 拿被折叠的明细行数(=删几条),
+            #    SUM(calls) 拿被折叠的原调用数(汇总行的 calls,守恒 by_day 的 calls)。
+            groups = self._conn.execute(
+                "SELECT day, source, model, "
+                "COALESCE(SUM(input),0), COALESCE(SUM(output),0), "
+                "COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_write),0), "
+                "COALESCE(SUM(calls),0), COUNT(*) "
+                "FROM token_usage WHERE day < ? AND rolled=0 "
+                "GROUP BY day, source, model",
+                (cutoff_day,),
+            ).fetchall()
+            if not groups:
+                return {"deleted": 0, "summarized": 0, "cutoff_day": cutoff_day}
+            deleted = sum(int(g[8]) for g in groups)
+            try:
+                # ② 删明细(完整日、非汇总)
+                self._conn.execute(
+                    "DELETE FROM token_usage WHERE day < ? AND rolled=0", (cutoff_day,))
+                # ③ 每 (day,source,model) 插一条汇总行(ts=该本地日零点,day 列不变;
+                #    task_id/run_id 空——归属被折叠掉;calls 累计原调用数;rolled=1)
+                for day, source, model, inp, out, cr, cw, calls, _n in groups:
+                    try:
+                        bstart = float(time.mktime(time.strptime(str(day), "%Y-%m-%d")))
+                    except (ValueError, OverflowError):
+                        bstart = now
+                    self._conn.execute(
+                        "INSERT INTO token_usage "
+                        "(ts, day, source, model, input, output, cache_read, cache_write, "
+                        "task_id, run_id, calls, rolled) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, 1)",
+                        (bstart, str(day), source, model, int(inp), int(out),
+                         int(cr), int(cw), int(calls)),
+                    )
+                # ④ 抬水位线(cutoff_day 零点;取 max 单调不回退)
+                try:
+                    wm = float(time.mktime(time.strptime(cutoff_day, "%Y-%m-%d")))
+                except (ValueError, OverflowError):
+                    wm = now
+                prev = self._conn.execute(
+                    "SELECT value FROM token_ledger_meta WHERE key='rollup_watermark'").fetchone()
+                new_wm = max(float(prev[0]) if prev else 0.0, wm)
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO token_ledger_meta (key, value) "
+                    "VALUES ('rollup_watermark', ?)", (new_wm,))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()   # 崩了整体回滚:明细/汇总/水位线全不落,一条不丢
+                raise
+        # 不静默截断纪律:滚了多少必须上 log(info 一行,天级频率不刷屏)
+        logger.info(
+            "[token_ledger] 滚动汇总:删 %d 条逐调用明细 → %d 条按天汇总行"
+            "(保留最近 %d 天明细;< %s 的完整日已归档,聚合值不变)",
+            deleted, len(groups), int(retain_days), cutoff_day)
+        return {"deleted": deleted, "summarized": len(groups), "cutoff_day": cutoff_day}
+
+    def rollup_watermark(self) -> float:
+        """滚动水位线(float ts):ts < 此值的逐调用明细已被滚成汇总(archived 边界);0.0=从未滚动。
+
+        task_total/run_totals 对 ts < 水位线的老 task/run 已无明细 → 返回 0;调用方拿它一比即可
+        区分"已归档(明细滚走)"和"消耗为 0",不把归档误读成零消耗。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM token_ledger_meta WHERE key='rollup_watermark'").fetchone()
+        return float(row[0]) if row else 0.0
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -438,6 +548,7 @@ class TokenLedger:
 
 __all__ = [
     "TokenLedger",
+    "ROLLUP_RETAIN_DAYS",
     "token_source",
     "token_task",
     "current_task",

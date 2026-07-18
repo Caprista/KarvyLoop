@@ -459,6 +459,18 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 同义标签收敛:并 {mres['merged']} 对(别名表)")
                         except Exception as ie:
                             _maintenance_item_failed(app, "tag_merge_tick", ie)
+                        # token 账本滚动(唯一无界持久台账收口):早于保留期的完整日逐调用明细滚成
+                        # 按天×source×model 汇总行,明细删、by_day/by_source/by_model 聚合值不变
+                        # (照 mesh compaction 接法:天级低频、零 LLM、滚了多少 log 一行、事务原子)。
+                        try:
+                            _led = getattr(app.state, "token_ledger", None)
+                            if _led is not None and hasattr(_led, "rollup"):
+                                rres = await asyncio.to_thread(_led.rollup)
+                                if rres.get("deleted"):
+                                    logger.info(f"[karvyloop console] token 账本滚动:删 {rres['deleted']} 条明细 "
+                                                f"→ {rres['summarized']} 汇总行(< {rres.get('cutoff_day')} 完整日归档)")
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "token_ledger_rollup", ie)
                     except asyncio.CancelledError:
                         break
                     except Exception as e:
