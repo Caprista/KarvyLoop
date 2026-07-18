@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from typing import AsyncIterator, Optional
 
 from karvyloop.schemas import ModelDefinition, ProviderConfig
@@ -119,6 +120,11 @@ class AnthropicAdapter:
                   f"msgs={len(messages)} tools={len(tools)} url={url}\n"
                   f"[adapter debug] request body: {body!r}",
                   file=sys.stderr)
+        # 整段墙钟(docs/87 §五):httpx timeout 只管**单次** read/connect,provider 周期吐
+        # keepalive/注释行就能让每次 read 都不超时、把 drive worker 无限吊住。start/deadline
+        # 从流开始计时,循环体顶部逐行核对(keepalive 也走这里 → 也推进核对),超了 fail-loud。
+        _start = time.monotonic()
+        _deadline = stream_deadline(provider)
         try:
             async with httpx.AsyncClient(timeout=provider_timeout(provider)) as client:
                 async with client.stream("POST", url, json=body, headers=headers) as resp:
@@ -127,6 +133,10 @@ class AnthropicAdapter:
                               file=sys.stderr)
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
+                        if time.monotonic() - _start > _deadline:
+                            raise StreamTimeoutError(
+                                f"流式响应超过整段墙钟上限 {_deadline:.0f}s "
+                                f"(provider={provider.name}) — provider 只吐 keepalive/未完成")
                         if not line.startswith("data:"):
                             continue
                         data = line[len("data:"):].strip()
@@ -253,5 +263,39 @@ class _ToolState:
         self.value = value
 
 
+# 网络超时缺省值(秒)。provider_timeout = **每次** read/connect 上限;
+# stream_deadline = 整段流式响应的墙钟上限(从流开始计时)。二者都可被 provider 配置覆盖。
+_DEFAULT_TIMEOUT_S = 120.0
+_DEFAULT_STREAM_DEADLINE_S = 600.0   # 〔待标定〕整段流墙钟:内测跑真数据后校准(长 thinking 也应 << 此值)
+
+
+class StreamTimeoutError(TimeoutError):
+    """整段流式响应超过墙钟上限(stream_deadline)。
+
+    provider 周期吐 keepalive/注释行时 httpx 的**单次** read 永远不超时 → 没有整段墙钟,
+    drive worker 会被无限吊住(docs/87 §五)。到点抛此错 → 上层 fail-loud(complete() 归一化成
+    ErrorEvent),绝不静默挂死。
+    """
+
+
+def _positive_float(value, default: float) -> float:
+    """把配置值读成正的 float;None / 非法 / ≤0 → 回落 default(不猜、不静默配坏值)。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if v > 0 else default
+
+
 def provider_timeout(provider: ProviderConfig) -> float:
-    return 120.0
+    """httpx 单次 read/connect 超时(秒)。读 provider.timeout,缺省 120。
+
+    这是**每次** I/O 操作的上限,不是整段流的墙钟 —— 整段上限见 stream_deadline()。
+    (此前恒返回 120、形参 provider 从没用上 = 配置里配的超时被忽略,docs/87 §五。)
+    """
+    return _positive_float(getattr(provider, "timeout", None), _DEFAULT_TIMEOUT_S)
+
+
+def stream_deadline(provider: ProviderConfig) -> float:
+    """整段流式响应的墙钟上限(秒),从流开始计时。读 provider.stream_deadline,缺省〔待标定〕。"""
+    return _positive_float(getattr(provider, "stream_deadline", None), _DEFAULT_STREAM_DEADLINE_S)

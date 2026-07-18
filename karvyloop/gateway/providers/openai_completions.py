@@ -16,13 +16,14 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from typing import AsyncIterator, Optional
 
 from karvyloop.schemas import ModelDefinition, ProviderConfig
 
 from ..events import Done, Event, ErrorEvent, TextDelta, ToolUseStart, ToolUseStop, Usage
 from ..system import SystemPrompt
-from .anthropic import provider_timeout
+from .anthropic import StreamTimeoutError, provider_timeout, stream_deadline
 
 
 def _cached_read_tokens(usage: dict) -> int:
@@ -192,11 +193,19 @@ class OpenAICompletionsAdapter:
         if os.environ.get("KARVYLOOP_ADAPTER_DEBUG"):
             print(f"[openai adapter] complete() model={model.id!r} msgs={len(messages)} "
                   f"tools={len(tools)} url={url}", file=sys.stderr)
+        # 整段墙钟(docs/87 §五):同 anthropic —— httpx timeout 只管单次 read,provider 周期吐
+        # keepalive 就能把 drive worker 无限吊住;从流开始计时,循环体顶部逐行核对,超了 fail-loud。
+        _start = time.monotonic()
+        _deadline = stream_deadline(provider)
         try:
             async with httpx.AsyncClient(timeout=provider_timeout(provider)) as client:
                 async with client.stream("POST", url, json=body, headers=headers) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
+                        if time.monotonic() - _start > _deadline:
+                            raise StreamTimeoutError(
+                                f"流式响应超过整段墙钟上限 {_deadline:.0f}s "
+                                f"(provider={provider.name}) — provider 只吐 keepalive/未完成")
                         if not line.startswith("data:"):
                             continue
                         data = line[len("data:"):].strip()

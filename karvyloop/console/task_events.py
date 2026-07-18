@@ -130,6 +130,14 @@ def presence_row_for_task(app: Any, task: dict) -> Any:
     return rows[0] if rows else None
 
 
+# fire-and-forget 广播任务的强引用集(docs/87 §五):CPython 只对 create_task 持**弱**引用,
+# 不存进任何容器 → task 可能被 GC 中途回收 + 吞掉异常。存进模块级 set + done-callback 取回
+# .exception() 记日志、完成即 discard(照仓内正确范式 silence._track_task / decision_wire._decision_tasks)。
+# 这些都是 WS 广播协程(task_status/system_error/role_presence),失败只记日志、**不再**升 system_error
+# —— 否则 system_error 广播自身失败会递归升卡。
+_pending_tasks: set = set()
+
+
 def _schedule(coro_factory: Callable[[], Coroutine]) -> None:
     """在当前事件循环上排一个广播协程;无 loop(同步上下文)→ 静默跳过。
 
@@ -140,7 +148,19 @@ def _schedule(coro_factory: Callable[[], Coroutine]) -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(coro_factory())
+    task = loop.create_task(coro_factory())
+    _pending_tasks.add(task)
+
+    def _done(t: Any) -> None:
+        _pending_tasks.discard(t)
+        try:
+            exc = t.exception()
+        except BaseException:   # CancelledError 等(关停):无结果可报,别穿透吵日志
+            return
+        if exc is not None:
+            logger.warning(f"[task_events] 广播后台任务异常(不拖垮任务流): {exc}")
+
+    task.add_done_callback(_done)
 
 
 def schedule_task_broadcast(app: Any, task: dict) -> None:

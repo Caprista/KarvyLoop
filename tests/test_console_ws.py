@@ -123,3 +123,69 @@ class TestWSPingPong:
             ws.send_json({"type": "ping"})
             msg = ws.receive_json()
             assert msg["type"] == "pong"
+
+
+# ---------- HR-8: 流式围栏 scrubber 接进消费端(docs/87 §四)----------
+
+class TestWSScrubStreamWiring:
+    """scrub_stream 此前只测试用、生产没接 → 模型回声 <memory-context> 标记漏进流式回复。
+    验 ws 消费端 _scrub_drive_event / _scrub_full_text 真剥标记、正常文本不动。"""
+
+    def test_text_delta_fence_tag_is_scrubbed(self):
+        from karvyloop.cognition.fence import ScrubState
+        from karvyloop.console.ws import _scrub_drive_event
+        st = ScrubState()
+        out = _scrub_drive_event(
+            {"type": "text_delta", "text": "hi <memory-context>secret</memory-context> there"}, st)
+        # 事件仍推(非空),但标签+内容被剥
+        assert len(out) == 1 and out[0]["type"] == "text_delta"
+        assert "memory-context" not in out[0]["text"]
+        assert "secret" not in out[0]["text"]
+        assert "hi" in out[0]["text"] and "there" in out[0]["text"]
+
+    def test_normal_text_delta_untouched(self):
+        from karvyloop.cognition.fence import ScrubState
+        from karvyloop.console.ws import _scrub_drive_event
+        st = ScrubState()
+        out = _scrub_drive_event({"type": "text_delta", "text": "你好,今天做什么?"}, st)
+        assert out == [{"type": "text_delta", "text": "你好,今天做什么?"}]
+
+    def test_non_text_events_pass_through(self):
+        from karvyloop.cognition.fence import ScrubState
+        from karvyloop.console.ws import _scrub_drive_event
+        st = ScrubState()
+        ev = {"type": "tool_call", "id": "t1", "name": "read_file", "input": {}}
+        assert _scrub_drive_event(ev, st) == [ev]
+
+    def test_tag_split_across_deltas_is_scrubbed(self):
+        """标签被切成两半(<memory 在 delta1,-context> 在 delta2)—— 跨 chunk buffer 保证仍剥掉。"""
+        from karvyloop.cognition.fence import ScrubState
+        from karvyloop.console.ws import _scrub_drive_event
+        st = ScrubState()
+        out1 = _scrub_drive_event({"type": "text_delta", "text": "ok <memory"}, st)
+        out2 = _scrub_drive_event({"type": "text_delta", "text": "-context>leak</memory-context> end"}, st)
+        joined = "".join(o["text"] for o in (out1 + out2) if o["type"] == "text_delta")
+        assert "memory-context" not in joined and "leak" not in joined
+        assert "ok" in joined and "end" in joined
+
+    def test_terminal_flushes_buffered_tail(self):
+        """流末:半截 buffer(不可能再拼成标签)当最后一段正文补推,不丢字。"""
+        from karvyloop.cognition.fence import ScrubState
+        from karvyloop.console.ws import _scrub_drive_event
+        st = ScrubState()
+        # 结尾一个孤立 '<' 会被 scrub_stream 暂存进 buffer
+        _scrub_drive_event({"type": "text_delta", "text": "值 <"}, st)
+        assert st.buffer  # 有东西暂存
+        out = _scrub_drive_event({"type": "terminal", "ok": True, "reason": ""}, st)
+        # flush 出 text_delta(带尾巴)+ terminal 本身
+        assert out[-1]["type"] == "terminal"
+        flushed = "".join(o["text"] for o in out if o["type"] == "text_delta")
+        assert "<" in flushed
+        assert st.buffer == ""
+
+    def test_scrub_full_text_strips_authoritative_echo(self):
+        """权威终态文本(drive_done 渲染的)也整段剥 —— 避免草稿剥了、权威版没剥的半拉子。"""
+        from karvyloop.console.ws import _scrub_full_text
+        assert _scrub_full_text("答案 <memory-context>x</memory-context> 完") == "答案  完"
+        assert _scrub_full_text("正常回答无标记") == "正常回答无标记"
+        assert _scrub_full_text("") == ""

@@ -71,4 +71,10 @@ class ProviderConfig(Schema):
     # 例:Kimi For Coding(api.kimi.com/coding/v1)按 User-Agent 放行编码 agent,
     # 配 {"User-Agent": "claude-code/1.0.0"} 即可过门。密钥仍走 api_key,绝不放这里。
     extra_headers: dict[str, str] = Field(default_factory=dict)
+    # 单次 read/connect 网络超时(秒)—— httpx timeout。缺省 None → 用适配器默认(见 provider_timeout)。
+    # 注意:这是**每次** I/O 操作的上限,不是整段流的墙钟(整段上限见 stream_deadline)。
+    timeout: Optional[float] = None
+    # 整段流式响应的墙钟上限(秒),从流开始计时。缺省 None → 用适配器默认〔待标定〕。
+    # provider 周期吐 keepalive/注释行时单次 read 永不超时 → 没有这道整段闸,drive worker 会被无限吊住。
+    stream_deadline: Optional[float] = None
     models: list[ModelDefinition] = Field(default_factory=list)

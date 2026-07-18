@@ -289,3 +289,40 @@ async def test_ws_send_lock_no_reentrant_deadlock() -> None:
     await ws.send_json({"a": 1})
     await ws.send_json({"a": 2})                  # 第二次能拿到锁(前一次已释放)= 不死锁
     assert ws.sent == [{"a": 1}, {"a": 2}]
+
+
+# ---- 稳定性:fire-and-forget task 强引用 + done-callback(docs/87 §五)----
+
+
+@pytest.mark.asyncio
+async def test_schedule_tracks_and_drains_pending_tasks() -> None:
+    """CPython 只对 create_task 持弱引用 → 不存进容器可能被 GC 中途回收 + 吞异常。
+    schedule_* 必须把 task 存进强引用 set,完成后 done-callback discard(不裸奔)。"""
+    from karvyloop.console import task_events as te
+    app = _FakeApp()
+    app.state.ws_clients = {_FakeWs()}
+    te._pending_tasks.clear()
+    schedule_task_broadcast(app, {"id": "t1", "status": "running"})
+    assert len(te._pending_tasks) == 1            # 排上即被强引用(不等 GC)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert len(te._pending_tasks) == 0            # 完成后 done-callback discard
+
+
+@pytest.mark.asyncio
+async def test_failing_broadcast_exception_is_logged_not_swallowed(caplog) -> None:
+    """广播协程抛异常 → done-callback 取回 .exception() 记 warning(灭静默吞 + GC 未取回告警)。"""
+    import logging
+
+    from karvyloop.console import task_events as te
+    te._pending_tasks.clear()
+
+    async def _boom() -> None:
+        raise RuntimeError("broadcast boom")
+
+    te._schedule(lambda: _boom())
+    with caplog.at_level(logging.WARNING, logger="karvyloop.console.task_events"):
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+    assert len(te._pending_tasks) == 0
+    assert any("广播后台任务异常" in r.message for r in caplog.records)

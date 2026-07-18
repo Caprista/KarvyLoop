@@ -65,6 +65,47 @@ def _serialize_ws_send(websocket: WebSocket) -> None:
     websocket._send_lock = lock               # type: ignore[attr-defined]  # 留引用便于测试/调试
 
 
+# ---- HR-8 流式围栏 scrubber:剥模型输出里回声的 <memory-context> 标记(防注入越狱冒充指令)----
+# 病根(docs/87 §四):cognition.fence.scrub_stream(流式 delta 剥围栏标记)从没接进生产,
+# 只测试用;兄弟 fence()(入栏时剥)却在生产用 → 模型若把召回背景里的 <memory-context>…
+# </memory-context> 原样回声,会漏进**流式**回复给用户。这里在 ws 消费端接上(不碰 fence.py)。
+
+
+def _scrub_drive_event(ev: dict, state: Any) -> list:
+    """对一个 render 事件剥围栏标记,返回**要广播的事件列表**(可能 0/1/2 条)。
+
+    - text_delta:正文过 scrub_stream(跨 chunk 状态在 state.buffer;标签可能被切成两半)。
+      剥到只剩空串(整段被剥,或半截标签暂存 buffer 待下一 delta)→ 返回 [] 不推空。
+    - terminal:流结束,把 buffer 里攒的尾巴(已不可能再拼成完整标签)当最后一段正文补推,
+      再推 terminal 本身 → [text_delta(tail), terminal]。
+    - 其余事件(tool_call/tool_result/thinking_delta/...)原样返回。
+    """
+    from karvyloop.cognition.fence import scrub_stream
+    etype = ev.get("type")
+    if etype == "text_delta":
+        cleaned = scrub_stream(ev.get("text", ""), state)
+        return [{**ev, "text": cleaned}] if cleaned else []
+    if etype == "terminal" and getattr(state, "buffer", ""):
+        tail = state.buffer
+        state.buffer = ""
+        return [{"type": "text_delta", "text": tail}, ev]
+    return [ev]
+
+
+def _scrub_full_text(text: str) -> str:
+    """对**整段终态文本**剥围栏标记(drive_done 清草稿后渲染的权威版走的是它)。
+
+    复用同一个 scrub_stream:一次性喂完整串 + flush 尾部 buffer(整段已终结,尾巴不可能再拼成
+    标签,直接补回)。与流式草稿对称,避免"草稿剥了、权威版没剥"的半拉子修复。
+    """
+    if not text:
+        return text
+    from karvyloop.cognition.fence import ScrubState, scrub_stream
+    st = ScrubState()
+    out = scrub_stream(text, st)
+    return out + st.buffer
+
+
 @router.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
     """主 WebSocket 端点。"""
@@ -332,11 +373,16 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     # P4 逐字流式:drive 在 worker 线程跑,每个 render 事件经 run_coroutine_threadsafe 桥回本 loop
     # 推 `drive_event`(loop 不被 to_thread 阻塞,可即时广播)→ 前端逐字追加。失败不拖垮 drive。
     _loop = asyncio.get_running_loop()
+    # HR-8:本轮流式围栏 scrubber 状态(跨 delta 维系半截标签 buffer)。worker 线程按序逐 delta
+    # 访问,单 drive 内单线程无并发。见 _scrub_drive_event。
+    from karvyloop.cognition.fence import ScrubState
+    _scrub_state = ScrubState()
 
     def _on_event(ev):
         try:
             from karvyloop.console.task_events import broadcast_drive_event
-            asyncio.run_coroutine_threadsafe(broadcast_drive_event(app, ev), _loop)
+            for _out in _scrub_drive_event(ev, _scrub_state):
+                asyncio.run_coroutine_threadsafe(broadcast_drive_event(app, _out), _loop)
         except Exception:
             pass
 
@@ -366,6 +412,11 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                         "recall_used": _recall_used},
         })
         return
+
+    # HR-8:剥模型输出里回声的 <memory-context> 围栏标记 —— 流式草稿在 _on_event 逐 delta 剥,
+    # 这里对**权威终态文本**再整段剥一次(drive_done 清草稿后渲染 + 落历史的是它;只剥流式=半拉子)。
+    if not outcome.error and outcome.text:
+        outcome.text = _scrub_full_text(outcome.text)
 
     # 共创递口(docs/47 §3.1):建 agent 意图命中(L0 关键词 / L1 LLM build 分类)→
     # 本轮回复末尾主动递"一起共创"的口,并挂 OFFERED 会话态(下一轮应答不再依赖关键词)。
@@ -454,12 +505,33 @@ def _ambient_cooldown(app):
 
 
 def _schedule_ambient_recall(app, intent: str) -> None:
-    """fire-and-forget 触发(镜像 task_events._schedule 模式):无 loop → 静默跳过。"""
+    """fire-and-forget 触发(镜像 task_events._schedule 模式):无 loop → 静默跳过。
+
+    docs/87 §五:存进 app.state._ambient_tasks 强引用 + done-callback 取回 .exception()
+    —— 否则 CPython 只对 create_task 持弱引用,task 可能被 GC 中途回收并吞异常。
+    ambient recall 是非关键增量,异常只记日志、**不**升 system_error(契约:任何失败绝不
+    冒泡到 drive 路径)。
+    """
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(_broadcast_ambient_recall(app, intent))
+    tasks = getattr(app.state, "_ambient_tasks", None)
+    if tasks is None:
+        tasks = app.state._ambient_tasks = set()
+    task = loop.create_task(_broadcast_ambient_recall(app, intent))
+    tasks.add(task)
+
+    def _done(t) -> None:
+        tasks.discard(t)
+        try:
+            exc = t.exception()
+        except BaseException:   # CancelledError 等(关停):无结果可报
+            return
+        if exc is not None:
+            logger.warning(f"[ws] ambient recall 后台任务异常(工作台少一次料浮出,不致命): {exc}")
+
+    task.add_done_callback(_done)
 
 
 async def _broadcast_ambient_recall(app, intent: str) -> None:
