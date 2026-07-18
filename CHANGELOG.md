@@ -11,22 +11,56 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.7.19] — 2026-07-19
+
+_Pursuit grows up: it's now where you work (a panel, and it notices goals you say out loud),
+it shows its working, it runs your done-tests inside a real sandbox, and a hardening pass
+closed seven cross-functional gaps found by adversarial review before any of them reached you._
+
 ### Added
 - **Pursuits are now where you actually work — a panel and plain-English capture.** The
-  multi-day goal engine that shipped in 2026.7.18 gains a **My Pursuits** panel (list,
-  detail and create, in your language) and, more useful, learns to *notice*: say a
-  multi-day goal in chat ("keep the release notes current through Friday") and Karvy
-  recognizes it, derives the goal statement and its done-test, and raises a single commit
-  card for your call. It never auto-starts, it shows you the exact verify command on the
-  card, and if you say the same goal twice it answers "already on it" instead of stacking a
-  second pursuit.
+  multi-day goal engine gains a **My Pursuits** panel (list, detail and create, in your
+  language) and, more useful, learns to *notice*: say a multi-day goal in chat ("keep the
+  release notes current through Friday") and Karvy recognizes it, derives the goal statement
+  and its done-test, and raises a single commit card for your call. It never auto-starts, it
+  shows you the exact verify command on the card, and if you say the same goal twice it
+  answers "already on it" instead of stacking a second pursuit.
+- **See what a pursuit actually did.** Each pursuit's detail view now opens into a
+  plain-language status line, a round-by-round timeline (what ran, whether it worked, why it
+  got stuck) and a "let Karvy explain" button that writes a short human summary on demand —
+  built from that pursuit's own history, never anyone else's, and never stored.
+- **My Pursuits is a first-class item in the sidebar**, alongside your team and the rest.
+
+### Changed
+- **Done-tests now run inside a real sandbox.** When a pursuit checks "is it finished?" by
+  running a test command, that command — which can come from a model or from you — now runs
+  inside the same OS-level isolation that guards the rest of the runtime (writes confined to
+  the project folder, no network, killed on timeout), instead of directly on your machine. On
+  a platform with no real isolation available, the check refuses to run and tells you why
+  rather than pretending. This is the "security is the floor, not the billboard" rule applied
+  to the one place a pursuit executes untrusted input.
 
 ### Fixed
-- **A pursuit that keeps failing stops and asks instead of grinding on.** A goal whose every
-  attempt fails — so it never records progress — now suspends itself after five straight
-  misses and raises a revise card, closing the last gap where a stuck pursuit could keep
-  burning quietly. Attempts that fail because the network or sandbox is down don't count,
-  and one success resets the streak.
+- **A finished pursuit is reported as finished right away.** Cheap done-checks (a file
+  appeared; a condition holds) are now evaluated every cycle, so a goal that's actually done
+  is closed out and receipted immediately instead of possibly waiting hours; only the
+  expensive test-running checks are paced.
+- **A paused pursuit is no longer a dead end.** A goal that changed direction or hit its
+  safety limit used to get stuck with no way forward and could even block you from restating
+  it. It now offers **Continue** and **Drop**, "keep going" on the revise card resumes it with
+  a fresh budget, and restating a paused goal points you to continue it.
+- **A pursuit that keeps failing stops and asks instead of grinding on** — suspends after five
+  straight misses and raises a revise card; failures caused by a down network/sandbox don't
+  count, and one success resets the streak.
+- **Goals scoped to a work area file their results in the right place** (not a stray internal
+  folder), and a goal with no area filed under an explicit "unassigned" instead of a random
+  location.
+- **A goal whose done-test path contained a template placeholder no longer crashes in a loop**
+  — such paths are rejected up front, judged literally at run time, and any check that errors
+  is counted once and caught by the safety limit rather than retrying silently forever.
+- **A slow done-check no longer freezes the console** (it runs off the main loop), and when a
+  check can't run because this machine has no real sandbox, the reason now shows up on the
+  pursuit itself, not only in the logs.
 
 ## [2026.7.18] — 2026-07-18
 
