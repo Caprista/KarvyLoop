@@ -11,6 +11,167 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **Pursuits are now where you actually work — a panel and plain-English capture.** The
+  multi-day goal engine that shipped in 2026.7.18 gains a **My Pursuits** panel (list,
+  detail and create, in your language) and, more useful, learns to *notice*: say a
+  multi-day goal in chat ("keep the release notes current through Friday") and Karvy
+  recognizes it, derives the goal statement and its done-test, and raises a single commit
+  card for your call. It never auto-starts, it shows you the exact verify command on the
+  card, and if you say the same goal twice it answers "already on it" instead of stacking a
+  second pursuit.
+
+### Fixed
+- **A pursuit that keeps failing stops and asks instead of grinding on.** A goal whose every
+  attempt fails — so it never records progress — now suspends itself after five straight
+  misses and raises a revise card, closing the last gap where a stuck pursuit could keep
+  burning quietly. Attempts that fail because the network or sandbox is down don't count,
+  and one success resets the streak.
+
+## [2026.7.18] — 2026-07-18
+
+_The flagship lands: hand KarvyLoop a goal that spans days and it carries it — advancing
+itself and checking its own work — while you stay the one who commits it and the one who
+gets told when it's stuck._
+
+### Added
+- **Persistent, multi-day goals that advance themselves to a finish line you define
+  (Pursuit).** State a goal that outlives a single session, commit to it once, and Karvy
+  drives it forward on its own — each beat runs through the same responsible executor as any
+  other task (with its own receipt and Trace), and every tick it checks a **deterministic
+  done-test you set** (a command that must pass, no model in the loop) before it can call
+  itself finished. A pursuit survives restarts (persistent, atomically written) and is
+  fenced by a hard **advance floor**: after a set number of beats it suspends and raises a
+  card rather than running on forever, so an open-ended goal can never quietly run up a bill.
+  When the goal needs rethinking it raises a high-risk revise card (it never rewrites your
+  statement itself); when it's genuinely blocked it reports back. The web panel and
+  chat-driven capture arrive in the next release. (Independently adversarially verified
+  twice.)
+
+## [2026.7.17] — 2026-07-17
+
+_A hardening pass with teeth — a wave of adversarial-audit fixes, two of them security —
+landing alongside the first cut of the decision lifeline, whole-system agent import, and a
+fourth way your KarvyLoop learns from what it does._
+
+### Added
+- **See exactly how any decision was built (decision lifeline).** Every call in 🗳 Recent
+  now opens a timeline: how the card was born and how strong its basis was, which of your
+  standards it matched, your judgement and your call, the dispatch receipt, the actual tool
+  steps it ran (with tokens), and the outcome — plus a "♻ learned" station showing, honestly,
+  what this batch of decisions fed back into your preferences. Stations with no data say so
+  instead of faking it, and decisions made before this shipped get a truthful stub. (Built
+  from a beta request.)
+- **Import a whole multi-agent system, not just one agent.** Hand KarvyLoop a bundle of
+  agents and one model pass reads the topology and rebuilds it as a business domain with
+  subdomains, roles and a workflow — and everything that *doesn't* map cleanly degrades out
+  loud, item by item (report chains become accountability to you, dynamic routing is pinned
+  static, supervisor authority moves to "Karvy plans, you decide"), all shown in an editable
+  triage table before anything is written. Pure executors land as shared tools with no hollow
+  role in the decision seat; skill-like bundles route to the skill library.
+- **A fourth way it learns: lessons from doing the work (task insight).** Environment facts,
+  correction rules and stray observations surfaced while executing are now distilled from the
+  run record — gated deterministically (a tool retry, a recovered plan) and held to a
+  reproduction bar (hard evidence lands as provisional, softer observations must recur) so the
+  knowledge library isn't fed guesses. It runs in the background and never raises a card.
+- **"You were away — run the ones you missed?"** Scheduled tasks now keep a watermark, so
+  when your machine was off through their window, boot gathers every missed run into a single
+  card per schedule and asks once — it never silently fires a backlog, and answering means it
+  won't nag you again.
+- **See what every device is working on, and share a role by code.** Each device card now
+  lists its running, queued and interrupted tasks, and My Devices gains sharing: pick a role
+  (or read-only) and hand out a one-time code with a QR and link; shares are listed and
+  revocable, and a code can only ever narrow access, never widen it.
+- **A calmer console.** The sidebar is regrouped into Team / What it learned / Engine room,
+  and panels now load only when opened — cutting the first screen from two dozen scripts to a
+  handful (roughly 265KB deferred) — so the console opens faster.
+
+### Fixed
+- **Security: a read-only share could read almost everything.** A share handed out with
+  read-only scope could still fetch nearly the entire read surface (your decision profile,
+  file list, chat history, conversations, audit log, proposals, skills, roles) because the
+  guard was an endpoint-by-endpoint blocklist. It's now a global default-deny allowlist — an
+  external share reaches only the memory-recall knife and the language endpoint, nothing else
+  — closing a live leak on the share feature that had just shipped. Your own full-access
+  devices are unaffected.
+- **Security: deeper floors for reading sensitive files.** The command layer already blocked
+  reading things like your config and tokens by name; the OS-level sandbox floors are now
+  aligned to that same full list (the macOS sandbox previously named only a handful of paths,
+  leaving your access token, `.env`, cloud credentials and browser cookies reachable if the
+  by-name check were dodged).
+- **Your vetted memory is never silently overturned.** Knowledge you pinned or reviewed
+  yourself used to be out-ranked by a passing chat guess; now human-vetted beliefs sit at the
+  top, and any conflict against pinned or reviewed memory routes to a conflict card
+  (old-vs-new, when you last confirmed the old one, keep-old / adopt-new / keep-both) instead
+  of a quiet rewrite. Low-confidence guess-versus-guess still resolves on its own so you're
+  not carded to death.
+- **Crashes during tool execution now fail loudly.** A tool batch that threw used to surface
+  as a fake "completed / success" before re-raising; crash paths now report an honest aborted
+  state (or, on shutdown, no false terminal), and a concurrent failure carries its real cause
+  back to the tool that caused it.
+- **The live console socket is no longer dropped mid-task, and the audit log can't be
+  truncated by a crash.** Concurrent updates to a connection are serialized (a busy socket was
+  being misread as dead and evicted during a run), and the decision and revocation logs are
+  written atomically so a crash mid-write can't zero them.
+- **Editing a model setting no longer quietly drops the rest.** Changing one field used to
+  reset reasoning mode, discard reasoning styles, or zero your token limits because the save
+  rebuilt the config from scratch; saves now preserve fields you didn't touch. Also: the
+  OpenAI-compatible path recognizes Gemini-style `/v1beta` and `/openai` roots, and an unset
+  `${VAR}` reads as "env not set" instead of a misleading "configured".
+- **The decision lifeline's execution step is no longer empty.** A nested run reused the
+  outer run's id, so the "tool steps" station was always blank in production; it now mints a
+  fresh id and shows the real steps (and token attribution improves).
+- **The weekly digest reads in your language, and background maintenance actually runs
+  without a model.** The digest body was hardcoded Chinese (English users got an all-Chinese
+  report); it's now localized. And running with no model attached no longer skips the
+  deterministic weekly-digest, calibration and insight passes it promised to run.
+- **Honest import results.** Importing an executor- or skill-type agent — which builds no role
+  — no longer claims "now in the Role Library ✓"; each import shows what actually happened.
+- **A batch of onboarding and model-setup fixes.** Kimi presets are complete and its
+  UA-gated coding preset works (custom headers are no longer dropped on save); OpenAI-compatible
+  base URLs ending in `/vN` join correctly; unimplemented gateway providers are refused at
+  setup with actionable copy instead of failing mid-chat; the wizard gains a custom
+  OpenAI-compatible slot; a bad key on boot locks back to setup with the reason (a network
+  error offers offline-continue); deleting a provider's last model clears its config. And the
+  installer no longer silently skips PATH setup on machines with an unusual shell profile.
+
+### Changed
+- **Internal quality.** Tool-call outcomes are now recorded on the hot path (feeding more
+  accurate learning), calibration instrumentation was added so the beta can tune unset
+  constants against real data, and one oversized route module was split — with no change to
+  behavior.
+
+## [2026.7.16] — 2026-07-16
+
+_A new face and a much wider reach: the whole console is redrawn, your phone connects by
+scanning a code, any browser can reach home, and your devices start acting as one._
+
+### Added
+- **Scan-to-connect QR for your phone.** The My Devices panel now shows a QR code —
+  scan it on your home Wi-Fi and the decision deck (`/m`) opens on your phone straight
+  away, access token included (token rotates every restart; come back and rescan).
+  The QR endpoint is management-plane local-only: a session coming in over the relay
+  tunnel gets a 403 and never sees the LAN token (a stolen phone can't mint new
+  entrances), locked by a no-leak regression test. QR is generated locally in the
+  bundle — the link never leaves your machine.
+- **The desk gives center stage to your call.** On the desktop view, when decision
+  cards are waiting, "Waiting on you · N" becomes the desk's focal point and the big
+  clock steps aside; decide them all and the clock takes the stage back.
+- **Open your console from any browser, away from home.** karvy.chat now serves an
+  open-source access page: from any browser, anywhere, it tunnels back to your home machine —
+  the connection stays end-to-end encrypted, and the page carries only ciphertext.
+- **Your devices start acting as one (mutual pairing + live task board).** Pairing is now a
+  single mutual step keyed to each device's own identity — fixing a mismatch that had made
+  trusting a device back impossible — and the mesh grows a live task board: register your
+  machines, and if one dies mid-task the others notice and raise a takeover card for your
+  call, so the *job* isn't lost with the *machine*. It never re-runs a task behind your back.
+- **Filter the cards waiting on you by kind.** When several kinds of decision are queued, a
+  chip bar lets you narrow the pending list to one kind at a time.
+- **Set up devices by what you're doing, not by memorizing commands.** Device onboarding is
+  reorganized into two plain paths — "add my phone" and "add another computer" — and a
+  one-time invite code can be issued from the panel with one click, pre-filled into the exact
+  command to run.
+
 ### Changed
 - **A new face: deep-emerald dark theme, designed against "AI-generated look" defaults.**
   The console, desktop view and `/m` phone page move from the warm-cream palette to a
@@ -32,18 +193,16 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   and rise; the token meter pops once when the number actually changes; chat ⇄ desk view
   switches crossfade via the native View Transitions API where available. Every animation
   respects `prefers-reduced-motion` via a global kill-switch.
-
-### Added
-- **Scan-to-connect QR for your phone.** The My Devices panel now shows a QR code —
-  scan it on your home Wi-Fi and the decision deck (`/m`) opens on your phone straight
-  away, access token included (token rotates every restart; come back and rescan).
-  The QR endpoint is management-plane local-only: a session coming in over the relay
-  tunnel gets a 403 and never sees the LAN token (a stolen phone can't mint new
-  entrances), locked by a no-leak regression test. QR is generated locally in the
-  bundle — the link never leaves your machine.
-- **The desk gives center stage to your call.** On the desktop view, when decision
-  cards are waiting, "Waiting on you · N" becomes the desk's focal point and the big
-  clock steps aside; decide them all and the clock takes the stage back.
+- **A lite mode for weak or GPU-less machines.** One toggle (🪶) drops the wallpaper blur,
+  topbar transparency, heavy shadows and idle animation loops and defers non-essential
+  scripts — normal mode stays pixel-for-pixel identical — so the console stays smooth on
+  modest hardware.
+- **Proposal cards now speak your language.** Card summaries and rationale that were
+  hardcoded Chinese now render through the localization layer at the language you're using
+  (model-written summaries stay as-is, as data).
+- **A role's hard-won experience can rise to your shared library.** Experience a role earns
+  inside one business domain, when it's genuinely general, is promoted to the cross-domain
+  layer so your other roles benefit — the first slice of experience reflow.
 
 ### Fixed
 - **Pending decision cards no longer vanish from the chat.** A full chat-history
@@ -64,6 +223,25 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   and intermittently. All five now harvest through one shared collector that prefers the
   schema-guaranteed tool payload and falls back to text (locked by envelope-stub
   regression tests + the real-model pressure test).
+- **Security: closed a raw-dump hole on read-only sharing.** External read-only recipients
+  are funneled through a single audience-whitelisted knife instead of any bare data export, so
+  a share can't be widened into a dump — plus a batch of same-root access-control fixes across
+  cognition recall and roles.
+- **The sandbox no longer lets a relative path escape its workspace.** Filesystem checks and
+  on-disk writes now anchor to the same workspace root, and the restricted sandbox re-runs a
+  shell command by a safe form when the raw one can't start.
+- **Away-from-home no longer wedges on a second connect.** After pairing, the already-open
+  tunnel is reused instead of dialing the room again (which deadlocked as "room busy") — the
+  fix that actually made away access usable.
+- **The console no longer freezes while the model thinks, and an empty key can't wreck your
+  config.** The model pump moved off the event-loop thread, and saving a blank API key can no
+  longer destroy your configuration (the setup gate now guards it).
+- **A stalled local task is caught (persistent-execution, first ring).** A running task is now
+  watched and, if it stalls, marked interrupted with a retry card raised — instead of hanging
+  silently.
+- **Internal quality.** A 2×2 desk layout fix, a reproducible-build fix (line-ending
+  normalization so the away bundle hashes identically across platforms), and test/cleanup
+  housekeeping — with no change to behavior.
 
 ## [2026.7.13] — 2026-07-13
 
