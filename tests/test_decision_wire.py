@@ -78,6 +78,18 @@ def test_observe_accumulates():
 
 
 @pytest.mark.asyncio
+async def test_no_gateway_preserves_samples():
+    """--no-llm(gateway=None):攒满批也**不清空**缓冲——样本留到模型上线才结晶,
+    不静默蒸发(旧序在检查前 buf.clear() → 每满 3 条丢一批,接上模型追不回)。"""
+    app = _FakeApp(gateway=None)
+    for s in _decisions(DECISION_BATCH):
+        observe_decision(app, s)
+    written = await maybe_crystallize_decisions(app)
+    assert written == 0
+    assert len(app.state.decision_samples) == DECISION_BATCH   # 缓冲原样保留,没蒸发
+
+
+@pytest.mark.asyncio
 async def test_under_batch_does_nothing():
     mem = MemoryManager()
     app = _FakeApp(gateway=_StubGateway("[]"), mem=mem)

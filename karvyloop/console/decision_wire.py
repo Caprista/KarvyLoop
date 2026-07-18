@@ -317,13 +317,15 @@ async def maybe_crystallize_decisions(app: Any) -> int:
     buf = getattr(app.state, "decision_samples", None)
     if not buf or len(buf) < DECISION_BATCH:
         return 0
-    batch = buf[:]
-    buf.clear()
+    # 先确认能处理再清缓冲:--no-llm(gw=None)下**不清空**,样本留到模型上线才结晶
+    # (旧序在检查前就 buf.clear() → 每攒满 3 条静默蒸发,接上模型也追不回)。
     rk = getattr(app.state, "runtime_kwargs", None) or {}
     gw = rk.get("gateway")
     mem = getattr(app.state, "memory", None)
     if gw is None or mem is None:
         return 0
+    batch = buf[:]
+    buf.clear()
     now = time.time()
     existing = _existing_pref_list(mem)
     ctx_domain, ctx_role = _batch_context(batch)
