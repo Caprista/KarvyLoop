@@ -60,7 +60,10 @@ async def test_adapter_call_returns_text():
     sess = _FakeSession(_Result([_Text("result A"), _Text("result B")]))
     t = McpAgentTool(server_name="ws", mcp_tool_name="search", description="", parameters={}, session=sess)
     r = await t({"query": "x"})
-    assert r.ok is True and r.payload == "result A\nresult B"
+    # 返回文本过统一不可信围栏(数据仍可读;对抗面在 tests/test_untrusted_fence.py)
+    from karvyloop.cognition.fence import DATA_FENCE_CLOSE
+    assert r.ok is True
+    assert "result A\nresult B" in r.payload and DATA_FENCE_CLOSE in r.payload
     assert sess.calls == [("search", {"query": "x"})]   # 透传 input
 
 
@@ -147,7 +150,7 @@ def test_cross_loop_bridge_calls_on_session_loop():
             r = agent_loop.run_until_complete(tool({"q": "x"}))
         finally:
             agent_loop.close()
-        assert r.ok is True and r.payload == "bridged ok"
+        assert r.ok is True and "bridged ok" in r.payload   # 围栏内,数据仍可读
         # call_tool 真的跑在**会话循环**上,而不是 agent 循环 → 桥成功
         assert sess_loop_holder["called_on"] is session_loop
     finally:

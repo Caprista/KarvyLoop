@@ -29,15 +29,23 @@ def _first_text(content: list) -> str:
     return ""
 
 
-def _flatten(content: list) -> Any:
-    """MCP tool result 的 content 块 → 给 agent/LLM 看的文本(多块/非文本则保留结构)。"""
+def _flatten(content: list, *, source: str = "mcp") -> Any:
+    """MCP tool result 的 content 块 → 给 agent/LLM 看的文本(多块/非文本则保留结构)。
+
+    统一不可信围栏(OWASP LLM01/ASI01,与 mcp_client._flatten_mcp_content 同一收口):
+    server 返回的文本过 cognition.fence.fence_untrusted(数据不是指挥者;包裹+双向假标签
+    擦除)。"[+N non-text block(s)]" 是**我们自己的**标注,不是 server 数据,留在围栏外。
+    """
+    from karvyloop.cognition.fence import fence_untrusted
     if not content:
         return ""
     texts = [c for c in content if getattr(c, "type", None) == "text"]
     if len(texts) == len(content):
-        return "\n".join(getattr(c, "text", "") or "" for c in texts)
+        return fence_untrusted("\n".join(getattr(c, "text", "") or "" for c in texts),
+                               source=source)
     # 混合/非文本:尽量给出文本 + 标注还有其它块,别静默丢
-    head = "\n".join(getattr(c, "text", "") or "" for c in texts)
+    head = fence_untrusted("\n".join(getattr(c, "text", "") or "" for c in texts),
+                           source=source)
     return (head + ("\n" if head else "") + f"[+{len(content) - len(texts)} non-text block(s)]").strip()
 
 
@@ -83,9 +91,14 @@ class McpAgentTool:
                                 error_message=f"MCP 工具 '{self._mcp_tool_name}'"
                                               f"(server={self._server_name})调用失败: {type(e).__name__}: {e}")
         if getattr(result, "isError", False):
+            # 错误文本也是 server 可控的不可信内容(会进模型上下文)→ 过假标签擦除再携带。
+            from karvyloop.cognition.fence import scrub_untrusted
             return CodingResult(ok=False, payload=None, error_code=4,
-                                error_message=f"MCP 工具报错: {_first_text(getattr(result, 'content', []))}")
-        return CodingResult(ok=True, payload=_flatten(getattr(result, "content", []) or []))
+                                error_message="MCP 工具报错: "
+                                              f"{scrub_untrusted(_first_text(getattr(result, 'content', [])))}")
+        return CodingResult(ok=True, payload=_flatten(
+            getattr(result, "content", []) or [],
+            source=f"mcp:{self._server_name}:{self._mcp_tool_name}"))
 
 
 def mcp_tools_from_session(session: Any, tools_list: list, server_name: str,

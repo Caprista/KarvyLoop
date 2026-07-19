@@ -230,7 +230,11 @@ class WebFetchTool:
         max_chars = int(inp.get("max_chars", _MAX_CHARS) or _MAX_CHARS)
         text = _strip_html(body) if "<" in body[:2000] and ">" in body[:2000] else body.strip()
         truncated = len(text) > max_chars
-        return CodingResult(ok=True, payload=text[:max_chars], truncated=truncated)
+        # 统一不可信围栏(OWASP LLM01/ASI01):网页正文是**数据不是指挥者**——先截断再包
+        # (围栏标签绝不被截半),模型仍可读内容答题,但正文里夹带的"忽略上文/执行 X"不构成指令。
+        from karvyloop.cognition.fence import fence_untrusted
+        return CodingResult(ok=True, payload=fence_untrusted(text[:max_chars], source="web_fetch"),
+                            truncated=truncated)
 
 
 def _parse_ddg(html_text: str, limit: int) -> list[dict]:
@@ -291,7 +295,10 @@ class WebSearchTool:
                                 truncated=False)
         lines = [f"{i+1}. {r.get('title','')}\n   {r.get('url','')}\n   {r.get('snippet','')}".rstrip()
                  for i, r in enumerate(results)]
-        return CodingResult(ok=True, payload="\n".join(lines), truncated=False)
+        # 搜索结果的 title/snippet 同样是外部可控文本(同 web_fetch 一类洞)→ 同一围栏。
+        from karvyloop.cognition.fence import fence_untrusted
+        return CodingResult(ok=True, payload=fence_untrusted("\n".join(lines), source="web_search"),
+                            truncated=False)
 
     async def __call__(self, inp: dict) -> CodingResult:
         query = str(inp.get("query", "") or "").strip()

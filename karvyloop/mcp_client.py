@@ -235,7 +235,21 @@ def sanitize_untrusted_text(text: str, cap: int = _DESC_CAP) -> str:
     return s
 
 
-def _flatten_mcp_content(content: list[Any]) -> Any:
+def _fence_text_fields(obj: Any, source: str) -> Any:
+    """递归把 dict/list 里的 "text" 字符串字段过统一不可信围栏(混合 blocks / 嵌入 resource 同防)。"""
+    from karvyloop.cognition.fence import fence_untrusted
+    if isinstance(obj, dict):
+        return {
+            k: (fence_untrusted(v, source=source) if k == "text" and isinstance(v, str)
+                else _fence_text_fields(v, source))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_fence_text_fields(x, source) for x in obj]
+    return obj
+
+
+def _flatten_mcp_content(content: list[Any], *, source: str = "mcp") -> Any:
     """MCP tool result 的 `content` 块数组 → KarvyLoop `Tool.call` 的 dict 输出。
 
     简化策略:
@@ -247,17 +261,25 @@ def _flatten_mcp_content(content: list[Any]) -> Any:
     那个是**给 LLM 看**的(走 Anthropic 协议),必须是 string 或 content blocks;
     这个是**给 KarvyLoop 内部 ToolRegistry 调度**的(dict,registry 内部走 dispatch)。
     不要混。
+
+    **统一不可信围栏(OWASP LLM01/ASI01)**:MCP server 是 untrusted,返回的文本是
+    **数据不是指挥者**——所有 text 字段过 cognition.fence.fence_untrusted(包裹 +
+    双向假标签擦除)再回给 registry(最终经 _serialize_results_for_model 进模型)。
+    模型仍能用结果内容答题;只是结果里夹带的"忽略上文/去删文件"不构成合法指令来源。
     """
+    from karvyloop.cognition.fence import fence_untrusted
     if not content:
         return {"text": ""}
-    # 全部 text → 单 string 包成 dict
+    # 全部 text → 单 string 包成 dict(围栏包整段,一层不嵌套)
     text_blocks = [c for c in content if getattr(c, "type", None) == "text"]
     if len(text_blocks) == len(content):
-        return {"text": "\n".join(getattr(c, "text", "") for c in text_blocks)}
-    # 混合或非 text → 序列化成 dict 列表(简单透传,完整保真)
+        joined = "\n".join(getattr(c, "text", "") for c in text_blocks)
+        return {"text": fence_untrusted(joined, source=source)}
+    # 混合或非 text → 序列化成 dict 列表(结构透传;text 字段逐个过围栏)
     return {
         "blocks": [
-            {k: v for k, v in dataclasses.asdict(c).items() if v is not None}
+            _fence_text_fields(
+                {k: v for k, v in dataclasses.asdict(c).items() if v is not None}, source)
             for c in content
         ]
     }
@@ -348,16 +370,20 @@ def _mcp_tool_to_karvyloop_tool(
                 f"MCP tool '{mcp_tool.name}' (server='{server_name}') 调用失败: {e}"
             ) from e
         if getattr(result, "isError", False):
-            # MCP 协议级错误:server 明确说 tool 执行失败
+            # MCP 协议级错误:server 明确说 tool 执行失败。错误文本也是 server 可控的
+            # 不可信内容(最终会进 tool_result 喂模型)→ 过假标签擦除再携带。
+            from karvyloop.cognition.fence import scrub_untrusted
             err_text = ""
             for c in (result.content or []):
                 if getattr(c, "type", None) == "text":
                     err_text = getattr(c, "text", "")
                     break
             raise McpToolCallError(
-                f"MCP tool '{mcp_tool.name}' (server='{server_name}') isError=True: {err_text}"
+                f"MCP tool '{mcp_tool.name}' (server='{server_name}') isError=True: "
+                f"{scrub_untrusted(err_text)}"
             )
-        return _flatten_mcp_content(result.content or [])
+        return _flatten_mcp_content(result.content or [],
+                                    source=f"mcp:{server_name}:{mcp_tool.name}")
 
     return build_tool(
         name=f"mcp_{server_name}_{mcp_tool.name}",  # 加前缀防与 KarvyLoop 内部 tool 撞名

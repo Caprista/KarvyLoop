@@ -120,14 +120,18 @@ async def test_ac2_call_tool_returns_text(tmp_path: Path):
 
     ctx, tools_by_server = await connect_and_list_tools([cfg])
     async with ctx:
+        from karvyloop.cognition.fence import DATA_FENCE_CLOSE
+
         add_t = next(t for t in tools_by_server["srv2"] if t.name == "mcp_srv2_add")
         result = await add_t.call({"a": 7, "b": 35}, token=None, sandbox=None)
-        # 1 个 TextContent 块 → {"text": str}
-        assert result == {"text": "42"}
+        # 1 个 TextContent 块 → {"text": str};text 过统一不可信围栏(MCP 返回是数据
+        # 不是指挥者,tests/test_untrusted_fence.py 锁对抗面),内容仍可读可用。
+        assert set(result) == {"text"}
+        assert "42" in result["text"] and DATA_FENCE_CLOSE in result["text"]
 
         echo_t = next(t for t in tools_by_server["srv2"] if t.name == "mcp_srv2_echo")
         r2 = await echo_t.call({"text": "hi karvyloop"}, token=None, sandbox=None)
-        assert r2 == {"text": "echo: hi karvyloop"}
+        assert "echo: hi karvyloop" in r2["text"] and DATA_FENCE_CLOSE in r2["text"]
 
 
 # ============ AC3:不可用 command → McpConnectError(包装具体原因)============
@@ -215,8 +219,13 @@ def test_ac7_flatten_mcp_content_shapes():
     """`_flatten_mcp_content` 是 KarvyLoop 内部 dict-shape 输出(与
     `_serialize_results_for_model` 的"给 LLM 看"不同 —— 后者走 Anthropic
     协议必须是 string/content-blocks,本函数是 registry 内部 dict)。
+
+    text 字段过统一不可信围栏(cognition.fence.fence_untrusted;MCP 返回是数据
+    不是指挥者)——内容仍在、可读可用;对抗面在 tests/test_untrusted_fence.py 锁。
     """
     import dataclasses
+
+    from karvyloop.cognition.fence import DATA_FENCE_CLOSE
 
     @dataclasses.dataclass
     class _Text:
@@ -229,18 +238,22 @@ def test_ac7_flatten_mcp_content_shapes():
         data: str = "abc"
         mimeType: str = "image/png"
 
-    # 空 content
+    # 空 content(不伪造空围栏)
     assert _flatten_mcp_content([]) == {"text": ""}
-    # 单 TextContent-like
-    assert _flatten_mcp_content([_Text("hello")]) == {"text": "hello"}
-    # 多 TextContent → \n join
-    assert _flatten_mcp_content([_Text("a"), _Text("b")]) == {"text": "a\nb"}
-    # 混合 → blocks 列表
+    # 单 TextContent-like → 内容在围栏里
+    out1 = _flatten_mcp_content([_Text("hello")])
+    assert set(out1) == {"text"}
+    assert "hello" in out1["text"] and DATA_FENCE_CLOSE in out1["text"]
+    # 多 TextContent → \n join 后整段一层围栏(不嵌套)
+    out2 = _flatten_mcp_content([_Text("a"), _Text("b")])
+    assert "a\nb" in out2["text"] and out2["text"].count(DATA_FENCE_CLOSE) == 1
+    # 混合 → blocks 列表(text 字段围栏,非 text 字段原样透传)
     out = _flatten_mcp_content([_Text("caption"), _Img()])
     assert "blocks" in out
     assert isinstance(out["blocks"], list)
     assert len(out["blocks"]) == 2
-    assert out["blocks"][0]["text"] == "caption"
+    assert "caption" in out["blocks"][0]["text"]
+    assert DATA_FENCE_CLOSE in out["blocks"][0]["text"]
     assert out["blocks"][1]["data"] == "abc"
 
 

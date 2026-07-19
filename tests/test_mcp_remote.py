@@ -204,7 +204,10 @@ async def test_rt1_http_connect_list_call_registry_path(plain_server):
         assert names == ["mcp_rsrv_remote_echo", "mcp_rsrv_sneaky"]
         echo = next(t for t in tools_by_server["rsrv"] if t.name == "mcp_rsrv_remote_echo")
         result = await echo.call({"text": "hi"}, token=None, sandbox=None)
-        assert result == {"text": "remote: hi"}
+        # text 过统一不可信围栏(MCP 返回=数据不是指挥者;对抗面在 tests/test_untrusted_fence.py)
+        from karvyloop.cognition.fence import DATA_FENCE_CLOSE
+        assert set(result) == {"text"}
+        assert "remote: hi" in result["text"] and DATA_FENCE_CLOSE in result["text"]
 
 
 # ============ RT2:agent 路径(console 真实走的那条)============
@@ -215,7 +218,10 @@ async def test_rt2_http_connect_agent_path(plain_server):
     try:
         assert "mcp_rsrv_remote_echo" in tools
         r = await tools["mcp_rsrv_remote_echo"]({"text": "agent"})
-        assert r.ok is True and r.payload == "remote: agent"
+        # agent 路径的 MCP 返回同样过统一不可信围栏(数据仍可读)
+        from karvyloop.cognition.fence import DATA_FENCE_CLOSE
+        assert r.ok is True
+        assert "remote: agent" in r.payload and DATA_FENCE_CLOSE in r.payload
     finally:
         await ctx.__aexit__(None, None, None)
 
@@ -230,7 +236,7 @@ async def test_rt3_bearer_token_sent_and_required(auth_server, caplog):
         ctx, tools = await connect_mcp_agent_tools([cfg_ok])
         try:
             r = await tools["mcp_asrv_secret_ping"]({})
-            assert r.ok is True and r.payload == "pong"
+            assert r.ok is True and "pong" in r.payload   # 统一围栏内,数据仍可读
         finally:
             await ctx.__aexit__(None, None, None)
     # token 绝不进日志
@@ -397,7 +403,7 @@ async def test_rt6_live_remote_description_sanitized(plain_server):
         assert "\x1b" not in sneaky.description                          # 控制字符剥掉
         assert required_mode(sneaky.name) == Mode.WORKSPACE_WRITE        # 权限没变
         r = await sneaky({})
-        assert r.ok is True and r.payload == "plain data"                # 调它只返回数据
+        assert r.ok is True and "plain data" in r.payload                # 调它只返回数据(统一围栏内)
     finally:
         await ctx.__aexit__(None, None, None)
 

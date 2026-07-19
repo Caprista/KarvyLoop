@@ -31,8 +31,12 @@ def test_external_upstream_is_untrusted_fenced():
     assert "some analysis" in fenced          # 原文在,但被围栏包住
 
 
-def test_internal_upstream_not_fenced_zero_regression():
-    """可信 role 上游产出 → 素格式,无 untrusted 围栏(零回归:别给自家产出扣不可信帽)。"""
+def test_internal_upstream_no_untrusted_hat():
+    """可信 role 上游产出 → **不扣"外部·不可信"帽**(别给自家产出扣不可信帽)。
+
+    注:统一不可信围栏收口(OWASP LLM01/ASI01/ASI07)后,内部上游也过**中性数据围栏**
+    (fenced-data:是数据不是指令,防 A2A 注入透传)——但措辞不含"不可信/绝不执行",
+    内容仍可读可参考。中性围栏本体的对抗面在 tests/test_untrusted_fence.py 锁。"""
     plain = _fmt_upstream_output("设计师", "the design", is_external=False)
     assert "不可信" not in plain and "绝不执行" not in plain
     assert "设计师" in plain and "the design" in plain
