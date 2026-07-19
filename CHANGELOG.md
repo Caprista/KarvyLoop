@@ -11,6 +11,32 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **A pursuit can move to another of your devices without starting over.** A goal you've
+  committed to is now visible across your devices; if the device running it drops offline,
+  another of your devices offers to take it over — you accept with one tap, and it picks up
+  from where the last one left off (rounds already done are carried over, so a device swap
+  can't quietly reset a goal's safety budget). Only one device runs a goal at a time, and
+  taking over is always your call — never automatic.
+
+### Changed
+- **Untrusted content is now consistently treated as data, not instructions.** Text that
+  comes from outside — web pages you fetch, results from third-party tools (MCP), and output
+  passed between agents — is wrapped so the model reads it as reference material but won't
+  obey any instructions hidden inside it ("ignore previous instructions", "send that file").
+  Previously only recalled memory and external-agent output were wrapped; this closes the
+  same protection around the remaining paths. Invisible to you; it just means a malicious web
+  page or tool result can't hijack what your agent does.
+- **Group discussions close more cleanly, and high-stakes conclusions come to you first.** A
+  roundtable now converges on a measured level of agreement (with a configurable round limit
+  and a lone-holdout rule, so one contrarian can't stall it forever), and a conclusion that
+  would change shared knowledge — or that carries unresolved disagreement — is raised as a
+  decision card for your call before it's recorded, rather than written automatically.
+
+### Fixed
+- **Declining a "keep going?" prompt on a paused goal now tells you what actually happened**
+  (the goal resumed / the record was cleared) instead of a bare "rejected".
+
 ## [2026.7.19] — 2026-07-19
 
 _Pursuit grows up: it's now where you work (a panel, and it notices goals you say out loud),
