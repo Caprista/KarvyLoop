@@ -47,6 +47,10 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   expiring), so machine state could outrank and crowd out what you actually told it. It's now
   recorded as what it is — machine-verified progress — so your words take precedence again and
   stale status entries get cleaned up.
+- **A group-discussion conclusion you approved is protected the same way.** When you accept a
+  roundtable conclusion into your knowledge base, it can no longer be silently overwritten by a
+  later machine-inferred note — same "what you decided isn't changed behind your back" rule,
+  extended to the decisions you make on a card. (Routine auto-recorded conclusions are unaffected.)
 
 ## [2026.7.19] — 2026-07-19
 
