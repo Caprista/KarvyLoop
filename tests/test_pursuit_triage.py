@@ -237,10 +237,14 @@ def test_reject_cleans_triaged_record(tmp_path):
     app = _fake_app(tmp_path, gateway=FakeGateway(_good_llm_json(tmp_path)))
     asyncio.run(maybe_pursuit_triage(app, GOAL_1))
     assert len(app.state.pursuit_store.all()) == 1
+    stmt = app.state.pursuit_store.all()[0].pursuit.statement
     card = _commit_cards(app)[0]
     res = app.state.proposal_registry.decide(card.proposal_id, "REJECT",
                                              handlers=app.state.proposal_handlers)
-    assert res is not None and res.ok and res.detail == "rejected"
+    assert res is not None and res.ok
+    # REJECT 回执穿透修复:钩子的「已清掉记录」人话回执到用户,不再被通用 "rejected" 盖掉
+    from karvyloop import i18n
+    assert res.detail == i18n.t("receipt.pursuit_commit.rejected_cleaned", statement=stmt[:60])
     assert app.state.pursuit_store.all() == []          # 记录随卡清掉
     assert app.state.proposal_registry.pending() == []  # 卡也没了
 
