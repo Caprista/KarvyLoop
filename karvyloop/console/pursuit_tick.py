@@ -25,6 +25,12 @@
 **核心判断(docs/88 §0)**:把 `pursue()`(内环执行器)当外环 Pursuit 的"每 tick 执行器",不另造
 账——每次推进派生一条 task(复用任务账)、历史进 Trace(复用审计账)。`pursue()` 同步(内含
 asyncio.run 独立验收)→ 必须下线程跑,不嵌套事件循环。
+
+**跨设备接管(docs/88 第三刀 #3)**:relay 挂了才有 mesh(跨网同步 = 远程访问同一决定的延伸)。
+每 tick 先 `publish_pursuit_tasks` 对账:committed 上 mesh 板(offer+自认领,payload 带
+checkpoint)/心跳续租/checkpoint 刷新;别台已接管 → rec.transferred_to 站开(循环跳过,单 owner
+不双跑);别台追完 → 折回本地终态。tick 尾有真变化再对账一次,让 checkpoint 尽快上板。
+接管弹卡/ACCEPT 收编在 mesh_task_board(复用 KIND_MESH_TAKEOVER,H2A 人拍,绝不自动接管)。
 """
 from __future__ import annotations
 
@@ -348,6 +354,17 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
     if store is None or manager is None:
         return counts
     n_ts = now if now is not None else time.time()
+    # ── mesh 对账(docs/88 第三刀 #3:跨设备接管)——**推进前**先对账:committed 上板/心跳续租、
+    # 别台已接管 → 标 transferred(下面循环跳过,单 owner 不双跑)、别台已追完 → 折回本地终态。
+    # 只在 relay 挂了才跑(与 mesh_tick 同一门:跨网同步 = 远程访问同一决定的延伸,不另开开关);
+    # 失败绝不挡推进(幂等对账,下轮补账)。
+    mesh_on = bool(getattr(app.state, "relay_url", ""))
+    if mesh_on:
+        try:
+            from karvyloop.console.mesh_task_board import publish_pursuit_tasks
+            counts["mesh"] = publish_pursuit_tasks(app, now_ms=int(n_ts * 1000))
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[pursuit_tick] mesh 对账失败(下轮补账): {e}")
     advance_interval = 0.0
     try:
         advance_interval = float(getattr(app.state, "pursuit_advance_interval_s", 0.0) or 0.0)
@@ -363,6 +380,9 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
             status = rec.pursuit.status
             if status not in ("committed", "revised"):
                 continue   # active = 等承诺卡 → 不自动动
+            if getattr(rec, "transferred_to", ""):
+                continue   # 已被同主人另一台设备接管(mesh lease 归属清晰)→ 本机站开:
+                           # 不推进不验不落终态(单 owner 不双跑;账回来/远端完成由 mesh 对账折回)
             ctx = assemble_context(app, rec, now=n_ts)
             gate_type = (rec.pursuit.verify_gate or {}).get("type")
             cheap = gate_type in _CHEAP_GATE_TYPES
@@ -482,6 +502,14 @@ async def pursuit_tick(app: Any, *, now: Optional[float] = None) -> dict:
             store.put(rec)
         except Exception as e:
             logger.warning(f"[pursuit_tick] Pursuit {getattr(rec, 'id', '?')} 推进异常(跳过): {e}")
+    # ── mesh 对账·收尾:本 tick 有真变化(推进/完成/挂起)→ 立刻把新 checkpoint 刷上板,
+    # 别等下 tick(lease 窗内 checkpoint 越新,接管方拿到的 advances 越不落后)。幂等,失败下轮补。
+    if mesh_on and (counts["advanced"] or counts["done"] or counts["revised"] or counts["infeasible"]):
+        try:
+            from karvyloop.console.mesh_task_board import publish_pursuit_tasks
+            publish_pursuit_tasks(app, now_ms=int(n_ts * 1000))
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[pursuit_tick] mesh 收尾对账失败(下轮补账): {e}")
     if counts["done"] or counts["revised"] or counts["infeasible"]:
         logger.info(f"[pursuit_tick] {counts}")
     return counts

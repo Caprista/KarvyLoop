@@ -369,6 +369,29 @@ _EN = {
         "REJECT / no decision = nothing happens; any of your devices can still pick it up later."
     ),
     "mesh.takeover.receipt": "{detail} (takeover recorded on your shared task board)",
+    # mesh 任务板:Pursuit 跨设备接管(docs/88 第三刀 #3)
+    "mesh.takeover.pursuit_summary": (
+        "Your “{device}” device was chasing a goal and went quiet: {statement} "
+        "— {advances} rounds in{gate}. Continue it on this device?"
+    ),
+    "mesh.takeover.pursuit_gate_suffix": "; done when {gate_desc}",
+    "mesh.takeover.pursuit_basis": (
+        "Long-horizon goal {pursuit_id} was running on your “{device}” device ({source}); its lease "
+        "expired without a heartbeat, so it looks interrupted. ACCEPT continues from the saved "
+        "progress (round {advances} — the checkpoint synced between your devices), not from zero."
+    ),
+    "mesh.takeover.pursuit_receipt": (
+        "Took over goal “{statement}” — continuing from round {advances} with saved progress."
+    ),
+    "mesh.takeover.pursuit_claim_lost": (
+        "Another of your devices ({device}) already picked this goal up — standing down here."
+    ),
+    "mesh.takeover.pursuit_no_store": (
+        "This device has no pursuit store wired, so it cannot take the goal over."
+    ),
+    "mesh.takeover.pursuit_bad_checkpoint": (
+        "The saved progress from your other device could not be read ({error}) — not taking over."
+    ),
     # ---- 提案工厂 summary/basis(服务端出卡时按当前 locale 定稿;LLM 动态文本是数据不走这里)----
     # confirm_decision_pref(decision_wire)
     "proposal.confirm_pref.kind_constraint": "constraint",
@@ -523,6 +546,33 @@ _EN = {
         "handing the job to one person (delegation). I'll gather {who} in group “{group}”, align the goal with you "
         "first, then start the discussion. The table only opens once you ACCEPT."
     ),
+    # roundtable_conclusion(高风险圆桌结论落认知库确认卡)
+    "proposal.roundtable_conclusion.summary": (
+        "Roundtable “{topic}” reached a conclusion — record it into your cognition base?"
+    ),
+    "proposal.roundtable_conclusion.risk_shared": (
+        "it would enter your shared cognition layer (recalled in every future decision)"
+    ),
+    "proposal.roundtable_conclusion.risk_dissent": (
+        "it closed with unresolved dissent (minority report attached)"
+    ),
+    "proposal.roundtable_conclusion.risk_no_consensus": (
+        "the table hit its round cap without reaching consensus"
+    ),
+    "proposal.roundtable_conclusion.risk_default": "it is marked high impact",
+    "proposal.roundtable_conclusion.basis": (
+        "High-stakes roundtable conclusion: {risk}. "
+        "ACCEPT = record it into cognition (dissents stay on the record); "
+        "REJECT = keep it only in the discussion thread, nothing is persisted."
+    ),
+    "receipt.roundtable_conclusion.ok": "Recorded the roundtable conclusion into your cognition base.",
+    "receipt.roundtable_conclusion.ok_dissent": (
+        "Recorded the roundtable conclusion into your cognition base "
+        "({n} dissent(s) kept on the record)."
+    ),
+    "receipt.roundtable_conclusion.empty": "This conclusion is empty — nothing to record.",
+    "receipt.roundtable_conclusion.no_memory": "Cognition base isn't wired — cannot record the conclusion.",
+    "receipt.roundtable_conclusion.write_failed": "Couldn't record the conclusion: {error}",
     # ops_fix
     "proposal.ops_fix.fallback_summary": "Ops diagnosis",
     "proposal.ops_fix.cause": "Likely cause: {cause}",
@@ -836,6 +886,8 @@ _EN = {
         "Back on it: “{statement}” — I'll keep pushing it and come back at done / revise."
     ),
     "pursuit.progress.done": "done — the goal's verify gate passed",
+    "pursuit.progress.transferred": "Taken over by your device “{device}” — this device stands down.",
+    "pursuit.progress.remote_done": "Finished on your device “{device}”.",
     "pursuit.receipt.done": "✅ Pursuit done: “{statement}” (its verify gate passed)",
     "pursuit.revise.reason_trigger": "a revision trigger fired",
     "pursuit.revise.reason_max_advances": (
@@ -1236,6 +1288,29 @@ _ZH = {
         "记下这次接管(其它设备不再重复提醒)。REJECT / 不拍 = 什么都不发生;之后你的任一设备仍可接。"
     ),
     "mesh.takeover.receipt": "{detail}(已在你的共享任务板记下这次接管)",
+    # mesh 任务板:Pursuit 跨设备接管(docs/88 第三刀 #3)
+    "mesh.takeover.pursuit_summary": (
+        "你的「{device}」设备正在追一个目标,然后没声了:{statement} "
+        "—— 已推进 {advances} 轮{gate}。要在这台设备上接着追吗?"
+    ),
+    "mesh.takeover.pursuit_gate_suffix": ";完成判据:{gate_desc}",
+    "mesh.takeover.pursuit_basis": (
+        "长线目标 {pursuit_id} 此前在你的「{device}」设备上运行(来源:{source});它的 lease 到期都没有心跳,"
+        "看起来是中断了。ACCEPT 会从已保存的进度接着追(第 {advances} 轮 —— checkpoint 已在你的设备间同步),"
+        "不是从零开始。"
+    ),
+    "mesh.takeover.pursuit_receipt": (
+        "已接管目标「{statement}」—— 带着已保存的进度,从第 {advances} 轮接着追。"
+    ),
+    "mesh.takeover.pursuit_claim_lost": (
+        "你的另一台设备({device})已经把这个目标接走了 —— 这台就此站开。"
+    ),
+    "mesh.takeover.pursuit_no_store": (
+        "这台设备没有接 pursuit 存储,没法接管这个目标。"
+    ),
+    "mesh.takeover.pursuit_bad_checkpoint": (
+        "你另一台设备保存的进度读不出来({error})—— 不接管了。"
+    ),
     # ---- 提案工厂 summary/basis(zh 保持既有原文,行为零回归)----
     # confirm_decision_pref(decision_wire)
     "proposal.confirm_pref.kind_constraint": "约束",
@@ -1375,6 +1450,32 @@ _ZH = {
         "你想让多个角色一起讨论,这是**圆桌**(几个人坐一起),不是把活交给一个人(委派)。"
         "我会在群「{group}」拉上 {who},先和你对齐目标再开始讨论。你 ACCEPT 才真正开桌。"
     ),
+    # roundtable_conclusion(高风险圆桌结论落认知库确认卡)
+    "proposal.roundtable_conclusion.summary": (
+        "圆桌「{topic}」得出了结论 —— 要把它记进你的认知库吗?"
+    ),
+    "proposal.roundtable_conclusion.risk_shared": (
+        "它会进入你的共享认知层(以后每次决策都会被召回)"
+    ),
+    "proposal.roundtable_conclusion.risk_dissent": (
+        "它是带着未解决的分歧收口的(附少数派报告)"
+    ),
+    "proposal.roundtable_conclusion.risk_no_consensus": (
+        "圆桌到了轮数上限仍未达成共识"
+    ),
+    "proposal.roundtable_conclusion.risk_default": "它被标为高影响",
+    "proposal.roundtable_conclusion.basis": (
+        "高风险圆桌结论:{risk}。"
+        "ACCEPT = 记进认知库(分歧一并留档);"
+        "REJECT = 只留在讨论线里,什么都不落库。"
+    ),
+    "receipt.roundtable_conclusion.ok": "已把这条圆桌结论记进你的认知库。",
+    "receipt.roundtable_conclusion.ok_dissent": (
+        "已把这条圆桌结论记进你的认知库(保留了 {n} 条分歧记录)。"
+    ),
+    "receipt.roundtable_conclusion.empty": "这条结论是空的 —— 没什么可记的。",
+    "receipt.roundtable_conclusion.no_memory": "认知库未接线 —— 没法记录这条结论。",
+    "receipt.roundtable_conclusion.write_failed": "这条结论没记进去:{error}",
     # ops_fix
     "proposal.ops_fix.fallback_summary": "运维诊断",
     "proposal.ops_fix.cause": "可能原因:{cause}",
@@ -1637,6 +1738,8 @@ _ZH = {
         "接着追:「{statement}」—— 我会继续推进,完成 / 需改方向时再来找你。"
     ),
     "pursuit.progress.done": "已完成 —— 目标的验证门通过了",
+    "pursuit.progress.transferred": "已被你的设备「{device}」接管 —— 这台设备站开。",
+    "pursuit.progress.remote_done": "已在你的设备「{device}」上完成。",
     "pursuit.receipt.done": "✅ 追求达成:「{statement}」(验证门通过)",
     "pursuit.revise.reason_trigger": "命中了一个修订触发器",
     "pursuit.revise.reason_max_advances": "推进 {n} 次仍没过完成门 —— 你来定(继续 / 改方向 / 放弃)",

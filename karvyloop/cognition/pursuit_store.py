@@ -55,6 +55,7 @@ class PursuitRecord:
         last_verdict_passed: bool = False,
         last_infeasible: bool = False,
         last_infra_dead: bool = False,
+        transferred_to: str = "",
     ) -> None:
         self.pursuit = pursuit
         self.title = title or (pursuit.statement or "")[:80]
@@ -82,6 +83,9 @@ class PursuitRecord:
         self.last_verdict_passed = bool(last_verdict_passed)
         self.last_infeasible = bool(last_infeasible)
         self.last_infra_dead = bool(last_infra_dead)
+        # mesh 跨设备接管(docs/88 第三刀 #3):非空 = 这条已被同主人另一台设备接走
+        # (mesh lease 归属清晰,单 owner)→ 本机 tick 不推进不验,直到账回到本机/远端完成。
+        self.transferred_to = transferred_to or ""
 
     @property
     def id(self) -> str:
@@ -122,6 +126,7 @@ class PursuitRecord:
             "last_verdict_passed": self.last_verdict_passed,
             "last_infeasible": self.last_infeasible,
             "last_infra_dead": self.last_infra_dead,
+            "transferred_to": self.transferred_to,
         }
 
     def summary(self) -> dict:
@@ -144,6 +149,7 @@ class PursuitRecord:
             "created_ts": self.created_ts,
             "updated_ts": self.updated_ts,
             "last_task_ids": list(self.last_task_ids),
+            "transferred_to": self.transferred_to,   # 加性:非空 = 已被另一台设备接管
         }
 
     @classmethod
@@ -168,6 +174,7 @@ class PursuitRecord:
             last_verdict_passed=bool(d.get("last_verdict_passed", False)),
             last_infeasible=bool(d.get("last_infeasible", False)),
             last_infra_dead=bool(d.get("last_infra_dead", False)),
+            transferred_to=str(d.get("transferred_to", "") or ""),
         )
 
 

@@ -144,6 +144,7 @@ HIGH_RISK_KINDS = frozenset({
     "schedule_catchup",      # J5:离线追赶补跑卡(同 mesh_takeover 先例)—— 骑 run_task 会被"挣来的静音"自动兑现,独立 kind 硬排除,必人拍
     "pursuit_commit",        # docs/88:承诺跨天目标是决策(照 J5)—— 静音=系统背着你承诺替你做几天事,永不自动
     "pursuit_revise",        # docs/88:改方向/挂起是决策归人(照 D2)—— 静音=系统背着你改追求方向,永不自动
+    "roundtable_conclusion", # 高风险圆桌结论落认知库(共享层/带 dissent/未达共识)—— 静音=系统背着你把有争议/全局生效的结论写进影响未来决策的认知,永不自动(域内干净共识 routine 不出卡,不经此)
     # crystallize_skill 留池:纯新增、provisional、可删,非破坏性(与上面的"改/删"不同类)
 })
 

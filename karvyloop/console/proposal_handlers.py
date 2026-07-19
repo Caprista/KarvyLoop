@@ -26,6 +26,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
     KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER, KIND_MEMORY_CONFLICT,
     KIND_SCHEDULE_CATCHUP, KIND_PURSUIT_COMMIT, KIND_PURSUIT_REVISE,
+    KIND_ROUNDTABLE_CONCLUSION,
 )
 
 logger = logging.getLogger(__name__)
@@ -574,6 +575,49 @@ def _roundtable_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     return handler
 
 
+def _roundtable_conclusion_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """roundtable_conclusion ACCEPT 兑现(B:高风险圆桌结论的 H2A 落库门)。
+
+    K5:只在你 ACCEPT 后被调 —— 高风险结论(共享层 / 带 dissent / 未达共识)**这时才**
+    写进认知库;写入内容与 routine 直写路径**同一形状**(召回/去重口径一致),dissent 随
+    provenance 结构化留档(少数派报告跟着结论走,可审计"这条当时有人反对")。
+    REJECT 走 registry 通用语义(丢弃)= 结论只留在讨论线里,认知库一字不写。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        from karvyloop import i18n
+        payload = getattr(proposal, "payload", None) or {}
+        topic = (payload.get("topic") or "").strip()
+        conclusion = (payload.get("conclusion") or "").strip()
+        if not conclusion:
+            return True, i18n.t("receipt.roundtable_conclusion.empty")
+        mem = getattr(app.state, "memory", None)
+        if mem is None:
+            return False, i18n.t("receipt.roundtable_conclusion.no_memory")
+        applies = payload.get("applies") or {}
+        dissents = [str(d).strip() for d in (payload.get("dissents") or []) if str(d).strip()]
+        try:
+            import time as _t
+            from karvyloop.schemas.cognition import Belief
+            prov = {"source": "roundtable", "kind": "fact", "topic": topic[:80],
+                    "applies": dict(applies), "adopted_via": "h2a"}
+            if dissents:
+                prov["dissents"] = dissents[:8]     # 少数派报告随 provenance 留档
+            cons = payload.get("consensus")
+            if isinstance(cons, (int, float)) and not isinstance(cons, bool):
+                prov["consensus"] = float(cons)
+            # 内容形状与 routine 直写路径一致(圆桌「topic」结论:…)—— 召回/去重同口径
+            mem.write(Belief(
+                content=f"圆桌「{topic[:40]}」结论:{conclusion[:600]}",
+                provenance=prov, freshness_ts=_t.time(), scope="personal"))
+        except Exception as e:
+            logger.warning(f"[roundtable_conclusion] 写认知失败: {e}")
+            return False, i18n.t("receipt.roundtable_conclusion.write_failed", error=str(e))
+        if dissents:
+            return True, i18n.t("receipt.roundtable_conclusion.ok_dissent", n=len(dissents))
+        return True, i18n.t("receipt.roundtable_conclusion.ok")
+    return handler
+
+
 def _infeasible_report_handler(proposal) -> Tuple[bool, str]:
     """「不可行报告」ACCEPT 兑现(docs/02 §15.3)。
 
@@ -1006,6 +1050,9 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_CRYSTALLIZE_SKILL: _crystallize_skill_handler,
         KIND_ROUTE_TO_ROLE: _route_to_role_handler(app),
         KIND_ROUNDTABLE: _roundtable_handler(app),
+        # B:高风险圆桌结论(共享层/带 dissent/未达共识)ACCEPT 才落认知库;
+        # kind ∈ silence.HIGH_RISK_KINDS,绝不被"挣来的静音"自动兑现。
+        KIND_ROUNDTABLE_CONCLUSION: _roundtable_conclusion_handler(app),
         KIND_RUN_TASK: _run_task_handler(app),
         KIND_SCHEDULE_CATCHUP: _run_task_handler(app),           # J5:独立 kind,复用 run_task 重跑逻辑
         KIND_MEMORY_CONFLICT: _memory_conflict_handler(app),     # D2:按你的裁决处置钉住/人审记忆冲突

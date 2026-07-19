@@ -58,6 +58,11 @@ KIND_SCHEDULE_CATCHUP = "schedule_catchup"  # J5:离线追赶补跑卡 —— **
 # 都进 HIGH_RISK_KINDS 绝不被"挣来的静音"自动兑现(照 D2/J5 血教训:改方向/承诺是决策必人拍)。
 KIND_PURSUIT_COMMIT = "pursuit_commit"  # 建了跨天目标 → 升承诺卡:ACCEPT=committed(承诺成立,机器开始自跑几天)
 KIND_PURSUIT_REVISE = "pursuit_revise"  # revision_trigger 命中 → 升修订卡挂起等人拍(自动改方向=架空人,绝不)
+# 圆桌高风险结论落认知库的 H2A 门(对齐招牌:影响未来决策的东西你拍板)。高风险 =
+# 共享/通用层写入(跨域 world 圆桌)/ 收口仍带未解决 dissent / 轮数到顶未达共识 ——
+# 这些不直写认知库,ACCEPT 才落;域内干净共识 routine 仍直写(不是每个圆桌都弹卡)。
+# 进 silence.HIGH_RISK_KINDS:绝不被"挣来的静音"自动兑现。
+KIND_ROUNDTABLE_CONCLUSION = "roundtable_conclusion"
 # 花费预算提醒(llm/spend_budget.build_card 产出):**纯提醒卡,无副作用 handler**——
 # 达 75/90/100% 阈值时经 emit_card→broadcast 出一张告警卡,用户 ACCEPT/REJECT 都只关卡(无兑现)。
 # 这里登记 kind 常量让它进 ALL_KINDS(前端/registry 认得它、不当未知 kind);handler 有意不注册。
@@ -82,6 +87,7 @@ ALL_KINDS = (
     KIND_SCHEDULE_CATCHUP,
     KIND_PURSUIT_COMMIT,
     KIND_PURSUIT_REVISE,
+    KIND_ROUNDTABLE_CONCLUSION,
     KIND_SPEND_BUDGET_ALERT,
 )
 
@@ -279,7 +285,8 @@ class PendingProposalRegistry:
         """按用户决策处置一条 Proposal(PR-3)。
 
         - ACCEPT → 查回 Proposal → 按 kind dispatch 兑现 → 移除 → 返 DispatchResult。
-        - REJECT → 移除丢弃 → 返 DispatchResult(ok=True, "rejected")。
+        - REJECT → 移除丢弃 → 返 DispatchResult(ok=True, detail=reject 钩子的人话回执,
+          无钩子/回执空 → 通用 "rejected")。
         - DEFER  → 留在 registry(下次再呈现)→ 返 DispatchResult(ok=True, "deferred")。
 
         edits(#42 优化①「改了再批」):ACCEPT 时把用户就地改过的 payload 字段**覆盖后兑现**。
@@ -298,15 +305,23 @@ class PendingProposalRegistry:
             self.remove(proposal_id)
             kind = getattr(proposal, "kind", "")
             # REJECT 生命周期钩子(业界做法:卡被驳回时给来源一次清理机会,如判型建的
-            # pursuit 记录随卡清掉不留垃圾)。约定 key = f"{kind}:reject";fail-soft ——
-            # 钩子缺/炸都**不改变** REJECT=丢弃 的既有语义与返回值。
+            # pursuit 记录随卡清掉不留垃圾)。约定 key = f"{kind}:reject",协议同
+            # ProposalHandler:(ok, detail)。fail-soft —— 钩子缺/炸都**不改变**
+            # REJECT=丢弃 的既有语义(ok=True、卡已移除)。
+            # 钩子返回的 detail(人话回执,如 pursuit_revise 的「接着追…」/resumed)
+            # **穿透给用户**,不再被通用 "rejected" 盖掉;detail 空/None/旧式钩子 →
+            # 保持通用 "rejected"(其余 kind 的 REJECT 回执语义一字不变)。
+            detail = "rejected"
             hook = (handlers or {}).get(f"{kind}:reject")
             if hook is not None:
                 try:
-                    hook(proposal)
+                    hres = hook(proposal)
+                    if (isinstance(hres, tuple) and len(hres) == 2
+                            and isinstance(hres[1], str) and hres[1].strip()):
+                        detail = hres[1]
                 except Exception as e:
                     logger.warning("[proposal] reject 钩子 kind=%s 异常(不阻断驳回): %s", kind, e)
-            return DispatchResult(proposal_id, kind, True, "rejected")
+            return DispatchResult(proposal_id, kind, True, detail)
 
         if decision == "DEFER":
             # DEFER 老化(docs/43 ⑤a):记 deferred_at;满 AGING_THRESHOLD_S 后重新计入
@@ -929,6 +944,75 @@ def proposal_for_pursuit_revise(
     )
 
 
+# 圆桌结论卡的 risk 机器码 → i18n 风险标签 key(填进 basis 的 {risk})。
+_RT_CONCL_RISK_KEYS = {
+    "shared_layer": "risk_shared",
+    "unresolved_dissent": "risk_dissent",
+    "no_consensus": "risk_no_consensus",
+}
+
+
+def proposal_for_roundtable_conclusion(
+    *,
+    topic: str,
+    conclusion: str,
+    domain_id: str = "",
+    applies: Optional[dict] = None,
+    dissents: Optional[List[str]] = None,
+    consensus: Optional[float] = None,
+    rounds: int = 0,
+    converged: bool = False,
+    risk: str = "",
+    conversation_id: str = "",
+    ts: float,
+    strength: float = 0.75,
+):
+    """高风险圆桌结论 → 「落认知库确认卡」(B:对齐招牌,影响未来决策的共享认知你拍板)。
+
+    routine(域内干净共识)结论**不经此卡**照旧直写;只有高风险(共享层 / 带未解决
+    dissent / 未达共识收口)走这张卡:ACCEPT = handler 才把结论写进认知库(dissent 随
+    provenance 留档);REJECT = 结论只留在讨论线里,不进认知。kind 进 silence.
+    HIGH_RISK_KINDS —— 绝不被"挣来的静音"自动兑现。
+    幂等:proposal_id 按 topic+conclusion 稳定派生 → 同一结论收敛成一张卡,不刷屏。
+    """
+    from karvyloop import i18n
+    from .atoms import Proposal  # 局部 import 避免模块级循环
+    t = (topic or "").strip()
+    c = (conclusion or "").strip()
+    if not c:
+        raise ValueError("roundtable_conclusion 需要非空 conclusion")
+    dis = [str(d).strip()[:200] for d in (dissents or []) if str(d).strip()][:8]
+    risk_label = i18n.t(
+        f"proposal.roundtable_conclusion.{_RT_CONCL_RISK_KEYS.get(risk, 'risk_default')}")
+    stable = f"{t}\n{c}"
+    pid = "roundtable_conclusion-" + hashlib.sha1(stable.encode("utf-8")).hexdigest()[:8]
+    return Proposal(
+        summary=i18n.t("proposal.roundtable_conclusion.summary", topic=t[:60]),
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_ROUNDTABLE_CONCLUSION,
+        payload={
+            "topic": t[:200],
+            "conclusion": c[:2000],
+            "domain_id": domain_id or "",
+            "applies": dict(applies or {}),
+            "dissents": dis,
+            "consensus": (float(consensus) if isinstance(consensus, (int, float))
+                          and not isinstance(consensus, bool) else None),
+            "rounds": int(rounds or 0),
+            "converged": bool(converged),
+            "risk": risk or "",
+            "conversation_id": conversation_id or "",
+        },
+        proposal_id=pid,
+        basis=i18n.t("proposal.roundtable_conclusion.basis", risk=risk_label),
+    )
+
+
 __all__ = [
     "PendingProposalRegistry",
     "AGING_THRESHOLD_S",
@@ -951,8 +1035,10 @@ __all__ = [
     "KIND_SCHEDULE_CATCHUP",
     "KIND_PURSUIT_COMMIT",
     "KIND_PURSUIT_REVISE",
+    "KIND_ROUNDTABLE_CONCLUSION",
     "proposal_for_pursuit_commit",
     "proposal_for_pursuit_revise",
+    "proposal_for_roundtable_conclusion",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",

@@ -207,14 +207,25 @@ def _roundtable_roster(app, peer) -> list:
     return out
 
 
+# 结果文档里的少数派报告标头(英文常量;待主会话统一 i18n,建议 key:
+# roundtable.result.dissent_header)。分歧留档从"prompt 里顺嘴提"升成**结构规则**:
+# 收口时仍开放的 dissent 必然出现在产物里,不靠模型自觉。
+RESULT_DOC_DISSENT_HEADER = "Key dissents (kept on the record)"
+
+
 def _roundtable_result_doc(result: dict) -> str:
-    """把圆桌产出拼成"结果文档":结论为主 + 内部讨论附在后面。
+    """把圆桌产出拼成"结果文档":结论为主 + 少数派报告(关键分歧留档)+ 内部讨论附后。
 
     这份文档进 task_registry → 同步到工作台首页【流进来的料】卡;点卡看这份(结论+讨论),
     再"打开聊天"跳回群场追问小卡(Hardy:圆桌结果要回流首页,点击去聊天查看+追问)。
     """
     concl = (result.get("conclusion") or "").strip()
     parts = [concl or "(小卡未给出结论)"]
+    dis = [str(d).strip() for d in (result.get("dissents") or []) if str(d).strip()]
+    if dis:
+        parts.append(f"\n\n---\n\n**{RESULT_DOC_DISSENT_HEADER}**:")
+        for d in dis:
+            parts.append(f"\n- ⚖️ {d}")
     tr = result.get("transcript") or []
     if tr:
         parts.append(f"\n\n---\n\n**内部讨论**({result.get('rounds', 0)} 轮):")
@@ -223,8 +234,62 @@ def _roundtable_result_doc(result: dict) -> str:
     return "".join(parts)
 
 
+def _conclusion_risk(result: dict, *, shared_layer: bool) -> str:
+    """圆桌结论落认知库前的风险分级(纯函数)。返回风险原因;"" = routine(照旧直写)。
+
+    高风险(升 H2A 卡,人 ACCEPT 才落认知库;kind ∈ silence.HIGH_RISK_KINDS 绝不被
+    "挣来的静音"自动兑现)—— 任一命中即高风险:
+    - shared_layer:结论要进**共享/通用认知层**(跨域 world 圆桌,无 applies 过滤,
+      影响未来**所有**决策的召回)→ 一律过人。
+    - unresolved_dissent:收口时仍有未解决 dissent(少数派报告)→ 结论有争议,写进
+      影响未来决策的认知前必须人拍。
+    - no_consensus:没真收敛(轮数到顶硬停)→ 共识没达标的"结论"更要过人。
+    routine(不弹卡 —— 挣得的静默,不是每个圆桌都打扰):**域内**圆桌 + 干净收敛 +
+    无遗留分歧 → 照旧直写域私有认知(召回只在本域,爆炸半径有限)。
+    """
+    if shared_layer:
+        return "shared_layer"
+    if result.get("dissents"):
+        return "unresolved_dissent"
+    if not result.get("converged"):
+        return "no_consensus"
+    return ""
+
+
+def _parse_moderation_json(text: str):
+    """严格解析主持人**结构化裁决** JSON;任何不合格 → None(宁空勿毒 —— 调用方退回旧词法)。
+
+    规矩(与 LLM 输出解析器纪律同口径):只剥最外层代码围栏;json.loads 严格;必须是 dict;
+    consensus 必须是 [0,1] 数值(bool 不算);prose 不抽、不猜。open_dissents/recommendation
+    的逐项类型清洗交给 karvy.roundtable.normalize_moderation(单一实现,不两处各写)。
+    """
+    import json
+    import re
+    t = (text or "").strip()
+    m = re.match(r"^```(?:json)?\s*(.*?)\s*```$", t, re.S)   # 只剥最外层 fence
+    if m:
+        t = m.group(1).strip()
+    try:
+        d = json.loads(t)
+    except Exception:
+        return None
+    if not isinstance(d, dict):
+        return None
+    c = d.get("consensus")
+    if isinstance(c, bool) or not isinstance(c, (int, float)):
+        return None
+    if not (0.0 <= float(c) <= 1.0):
+        return None
+    return d
+
+
 async def _host_moderate_call(gw, model_ref, topic, transcript, *, final):
-    """小卡兼主持:防跑偏/防冷场(决定 continue/converge)+ 收敛产出。一次 gateway 调用。"""
+    """小卡兼主持:每轮**结构化裁决**(consensus/open_dissents/recommendation)+ 收敛产出。
+
+    非 final 轮输出严格 JSON:{"consensus": 0-1, "open_dissents": [...], "recommendation": "..."};
+    解析失败 → 退回旧词法(CONVERGE 一词收敛,否则再一轮),绝不崩。收口逻辑(阈值/少数派
+    报告/轮数硬顶)在 karvy.roundtable.run_roundtable_session,这里只产裁决数据。
+    """
     from karvyloop.gateway import ResolveScope
     from karvyloop.gateway.system import SystemPrompt
     convo = "\n".join(f"[{x['speaker']}] {x['text']}" for x in transcript) or "(还没人发言)"
@@ -232,9 +297,13 @@ async def _host_moderate_call(gw, model_ref, topic, transcript, *, final):
         sysp = ("你是圆桌主持人小卡。把下面这场围绕主题的讨论**收敛成一份简洁结论**"
                 "(给老板看、并写进认知库)。抓住共识与关键分歧,给可用的产出。只输出结论本身。")
     else:
-        sysp = ("你是圆桌主持人小卡,管三件事:明确主题、防跑偏、防冷场。看这场讨论:"
-                "**够不够得出结论了**?够了只回一个词 CONVERGE;还值得再聊一轮回 CONTINUE。"
-                "只回这一个词,别的不说。")
+        sysp = ("你是圆桌主持人小卡,管三件事:明确主题、防跑偏、防冷场。看这场讨论,"
+                "只输出**严格 JSON**(不要围栏、不要任何其他文字):"
+                '{"consensus": 0到1的数(讨论对主题的共识程度,1=完全一致), '
+                '"open_dissents": ["谁:一句话概括仍未被回应的实质分歧", ...](没有则 []), '
+                '"recommendation": "你此刻会给的一句话建议"}。'
+                "注意:重复过的、已被回应的、纯情绪的抬杠**不算** open_dissents,"
+                "只记有价值的实质反对。")
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
@@ -247,6 +316,12 @@ async def _host_moderate_call(gw, model_ref, topic, transcript, *, final):
         out = ""
     if final:
         return {"text": out.strip()}
+    parsed = _parse_moderation_json(out)
+    if parsed is not None:
+        return {"consensus": float(parsed["consensus"]),
+                "open_dissents": parsed.get("open_dissents") or [],
+                "recommendation": parsed.get("recommendation") or ""}
+    # 解析失败 → 旧词法兜底("没到就再一轮",别崩;老模型回 CONVERGE 一词也仍然认)
     return {"action": "converge" if "CONVERGE" in out.upper() else "continue"}
 
 
@@ -512,8 +587,28 @@ async def _run_external_guest_supply(app, *, guests, goal, topic, peer, task_id,
     return out
 
 
-async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str, Any]:
-    """圆桌阶段1 执行核心(被 /discuss 和 对话式自动开始 复用):goal→成员群聊→收敛→产出→记录。"""
+# 轮数上限的硬顶(调用方/待办态可配 max_rounds,但夹在 [1, _MAX_ROUNDS_CAP] 内 ——
+# 配置也不许把圆桌烧穿;顶值待 Trace 真数据标定)。
+_MAX_ROUNDS_CAP = 8
+
+
+def _effective_max_rounds(st: dict, override=None) -> int:
+    """这场圆桌的轮数上限:调用方传参 > 圆桌待办态 st["max_rounds"](发起时按议题存)>
+    默认 DEFAULT_MAX_ROUNDS(=3)。坏值一律回默认;夹 [1, _MAX_ROUNDS_CAP] 硬兜底。"""
+    from karvyloop.karvy.roundtable import DEFAULT_MAX_ROUNDS
+    raw = override if override is not None else (st or {}).get("max_rounds")
+    try:
+        n = int(raw) if raw is not None else DEFAULT_MAX_ROUNDS
+    except (TypeError, ValueError):
+        n = DEFAULT_MAX_ROUNDS
+    return max(1, min(n, _MAX_ROUNDS_CAP))
+
+
+async def _execute_roundtable_discussion(app, conversation_id: str,
+                                         max_rounds: int | None = None) -> dict[str, Any]:
+    """圆桌阶段1 执行核心(被 /discuss 和 对话式自动开始 复用):goal→成员群聊→收敛→产出→记录。
+
+    max_rounds:轮数上限覆盖(None → 待办态里存的 → 默认 3;见 _effective_max_rounds)。"""
     from .routes import _model_for_role, _persona_for_role_addr, _rk_model, drive_in_tui
     mgr = getattr(app.state, "conversation_manager", None)
     main_loop = getattr(app.state, "main_loop", None)
@@ -598,10 +693,12 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
         return _is_task_cancelled(app, task_id or "")
     # 50+ 大桌:全员上桌(封顶 64,防真·失控),但**并发只 6 路**——别 50 路同时打一把 key 截断。
     _seats = min(len(members), 64)
+    _rounds_cap = _effective_max_rounds(st, max_rounds)   # 可配轮数(默认 3;硬夹防烧穿)
     if members:
         try:
             result = await run_roundtable_session(goal, members, member_reply=member_reply,
-                                                  host_moderate=host_moderate, max_rounds=3,
+                                                  host_moderate=host_moderate,
+                                                  max_rounds=_rounds_cap,
                                                   max_seats=_seats, concurrency=6,
                                                   should_cancel=_should_cancel)
         except Exception as e:
@@ -612,7 +709,8 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
     else:
         # 只有外部客人、无原生 role → 无 role 讨论主线(外部不占决策席);只做客人供稿。
         result = {"topic": topic, "transcript": [], "rounds": 0,
-                  "converged": False, "conclusion": "", "cancelled": False}
+                  "converged": False, "conclusion": "", "cancelled": False,
+                  "consensus": None, "dissents": []}
     # M2 客人供稿席(#71 §7.1):外部公民**不进 role 讨论主线**(不占决策席、不被 record_turn),
     # 单独派活(走 bridge)拿 untrusted 产出,每条升 external_adopt 采纳门(H2A 才穿来源边界)。
     # 铁律:外部产出**不直接触发别的 agent**——它不喂进 role 的 member_reply transcript(A2A
@@ -643,11 +741,14 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
                             "conclusion": result.get("conclusion", ""),
                             "rounds": result.get("rounds", 0),
                             "converged": result.get("converged", False),
+                            # 结构化收口产物(前端渲染共识度 + 少数派报告;加性字段)
+                            "consensus": result.get("consensus"),
+                            "dissents": result.get("dissents", []),
                         }})
     except Exception as e:
         logger.warning(f"[roundtable] 追加讨论记录失败: {e}")
 
-    # 产出 → 认知库
+    # 产出 → 认知库(B:高风险结论过 H2A,routine 照流 —— 对齐招牌"你拍板")
     mem = getattr(app.state, "memory", None)
     if result.get("conclusion") and mem is not None:
         try:
@@ -659,13 +760,28 @@ async def _execute_roundtable_discussion(app, conversation_id: str) -> dict[str,
             _dom = getattr(peer, "domain_id", "") if peer is not None else ""
             applies = ({"domain": _dom, "role": "group"}
                        if _dom and _dom != KARVY_WORLD_DOMAIN else {})
-            mem.write(Belief(
-                content=f"圆桌「{topic[:40]}」结论:{result['conclusion'][:600]}",
-                provenance={"source": "roundtable", "kind": "fact",
-                            "topic": topic[:80], "applies": applies},
-                freshness_ts=_t.time(), scope="personal"))
+            risk = _conclusion_risk(result, shared_layer=(not applies))
+            if risk:
+                # 高风险(共享层 / 带遗留分歧 / 未达共识收口)→ **不直写**认知库:
+                # 升 H2A 卡(kind ∈ HIGH_RISK_KINDS,绝不被静音自动兑现),ACCEPT 才落库。
+                from karvyloop.console.proposals import broadcast_proposal
+                from karvyloop.karvy.proposal_registry import proposal_for_roundtable_conclusion
+                prop = proposal_for_roundtable_conclusion(
+                    topic=topic, conclusion=result["conclusion"], domain_id=_dom,
+                    applies=applies, dissents=result.get("dissents") or [],
+                    consensus=result.get("consensus"), rounds=result.get("rounds", 0),
+                    converged=bool(result.get("converged")), risk=risk,
+                    conversation_id=conversation_id, ts=_t.time())
+                await broadcast_proposal(app, prop)
+            else:
+                # routine(域内 + 干净收敛 + 无遗留分歧)→ 照旧直写域私有认知(不打扰)。
+                mem.write(Belief(
+                    content=f"圆桌「{topic[:40]}」结论:{result['conclusion'][:600]}",
+                    provenance={"source": "roundtable", "kind": "fact",
+                                "topic": topic[:80], "applies": applies},
+                    freshness_ts=_t.time(), scope="personal"))
         except Exception as e:
-            logger.warning(f"[roundtable] 结论写认知失败: {e}")
+            logger.warning(f"[roundtable] 结论写认知/升卡失败: {e}")
 
     st["phase"] = "done"
     _persist_roundtable_state(app)

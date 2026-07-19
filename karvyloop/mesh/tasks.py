@@ -40,6 +40,9 @@ class TaskState:
     claimer: str = ""
     lease_until: float = 0.0
     result: Optional[dict] = None
+    # 第几任 owner(每次被裁定接受的 claim +1)。长命任务(如 Pursuit)跨设备接管的
+    # "弹卡防重"按 (task_id, claim_epoch) 记——换了 owner 又中断,是新一轮事,可再弹。
+    claim_epoch: int = 0
 
 
 # ---- 往日志写任务事件(各设备本地调,同步后全设备可见)----
@@ -91,6 +94,7 @@ def materialize_tasks(events: List[MeshEvent], now: int) -> Dict[str, TaskState]
                 t.claimer = ev.device_id                # HLC 最早的先到,先占;晚到的这条进不来
                 t.lease_until = at + t.lease_s
                 t.status = ST_CLAIMED
+                t.claim_epoch += 1                      # 新一任 owner(接管防重弹的纪元键)
         elif ev.kind == K_HEARTBEAT:
             t = tasks.get(tid)
             if t is not None and t.status == ST_CLAIMED and t.claimer == ev.device_id:

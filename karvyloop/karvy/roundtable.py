@@ -12,6 +12,50 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable
 
+# ---- 结构化收口(主持人裁决)常量 ----
+# 收口共识阈值:主持人每轮给 consensus ∈ [0,1],达到它就提前收敛。
+# 拍脑袋初值 —— 待 Trace 真数据(consensus 分布 × 收口后满意度)标定。
+CONSENSUS_THRESHOLD = 0.75
+# 默认轮数上限(调用方可按议题复杂度传入覆盖;任何情况轮数到顶必停 —— 硬兜底)。
+DEFAULT_MAX_ROUNDS = 3
+# 少数派报告最早生效轮次:第 2 轮起,若只剩 1 个孤立反对 → 综合多数收口 + 记 dissent
+# (魔鬼代言人/杠精的标准解法:有价值的反对留档,但不再为它烧轮次)。
+MINORITY_REPORT_MIN_ROUND = 2
+# dissent 留档上限(条数/单条长度)—— 宁短勿爆,收口产物不被超长分歧撑破。
+_MAX_DISSENTS = 8
+_MAX_DISSENT_LEN = 200
+
+
+def normalize_moderation(d: Any) -> dict:
+    """把主持人每轮裁决规整成统一形状(纯函数,宁空勿毒)。
+
+    接受两种输入:
+    - 旧式:``{"action": "converge"|"continue"}``(词法判定的向后兼容);
+    - 结构化:``{"consensus": 0-1, "open_dissents": [...], "recommendation": "..."}``。
+
+    返回 ``{action, consensus, open_dissents, recommendation, structured}``:
+    - 显式 action 合法则尊重之;否则结构化输入按 consensus ≥ CONSENSUS_THRESHOLD 定;
+    - 类型不对的字段一律丢弃(不猜);完全无可用信号 → continue(没到就再一轮)。
+    """
+    d = d if isinstance(d, dict) else {}
+    action = str(d.get("action") or "").strip().lower()
+    consensus = None
+    raw_c = d.get("consensus")
+    if isinstance(raw_c, (int, float)) and not isinstance(raw_c, bool):
+        consensus = min(1.0, max(0.0, float(raw_c)))
+    raw_dis = d.get("open_dissents")
+    dissents: list[str] = []
+    if isinstance(raw_dis, list):
+        dissents = [s.strip()[:_MAX_DISSENT_LEN] for s in raw_dis
+                    if isinstance(s, str) and s.strip()][:_MAX_DISSENTS]
+    rec = d.get("recommendation")
+    recommendation = rec.strip()[:400] if isinstance(rec, str) else ""
+    structured = consensus is not None
+    if action not in ("converge", "continue"):
+        action = "converge" if (structured and consensus >= CONSENSUS_THRESHOLD) else "continue"
+    return {"action": action, "consensus": consensus, "open_dissents": dissents,
+            "recommendation": recommendation, "structured": structured}
+
 
 async def run_roundtable(
     intent: str,
@@ -54,7 +98,7 @@ async def run_roundtable_session(
     *,
     member_reply: Callable[[Any, str, list], Awaitable[dict]],
     host_moderate: Callable[..., Awaitable[dict]],
-    max_rounds: int = 3,
+    max_rounds: int = DEFAULT_MAX_ROUNDS,
     max_seats: int = 6,
     concurrency: int = 6,
     should_cancel: Callable[[], bool] | None = None,
@@ -62,23 +106,34 @@ async def run_roundtable_session(
     """**小卡主持的圆桌**(ch4 final):围绕 topic 多轮成员发言 + 小卡控场,差不多就收敛。
 
     主持人(小卡)干三件事:明确主题(开场已框 topic)、防跑偏 + 防冷场(每轮后控场:
-    `host_moderate(..., final=False)` 决定 continue/converge,text=拉回主题/点名提示)、
-    收敛产出(`host_moderate(..., final=True)` → 结论)。**token 纪律**:max_rounds 封顶 +
-    小卡判定"差不多了"就提前收敛,不烧到底(Hardy:小卡控轮次,差不多就停或等 human 追问)。
+    `host_moderate(..., final=False)` 给**结构化裁决** {consensus, open_dissents,
+    recommendation},或向后兼容的 {"action": converge/continue}),收敛产出
+    (`host_moderate(..., final=True)` → 结论)。**token 纪律**:max_rounds 封顶(可配,
+    默认 DEFAULT_MAX_ROUNDS;**任何情况轮数到顶必停** —— 硬兜底,圆桌永不无限烧)+
+    结构化收口:consensus ≥ CONSENSUS_THRESHOLD 提前收敛。
+
+    **少数派报告规则**(杠精免疫):第 MINORITY_REPORT_MIN_ROUND 轮起,若只剩 1 条孤立
+    open_dissent → 不再为它烧轮次,综合多数收口,dissent 记进产物(`dissents`)留档 ——
+    有价值的反对不丢、无谓抬杠拖不死圆桌。
 
     - member_reply(member, topic, transcript_so_far) -> {speaker, text}:一个成员就主题
       + 已有讨论发言。
     - should_cancel():每轮**开始前**查刹车 —— True 就**不再起新一轮**(§0.7 逃生门:人踩刹车),
       拿已有 transcript 直接收敛返回(cancelled=True)。
-    - 返回 {topic, transcript:[{round,speaker,text}], rounds, converged, conclusion, cancelled}。
+    - 返回 {topic, transcript:[{round,speaker,text}], rounds, converged, conclusion,
+      cancelled, consensus, dissents}(consensus=最后一次结构化度量,旧式主持人 → None;
+      dissents=收口时仍开放的关键分歧,保留进产物)。
     """
     if not (topic or "").strip() or not members:
         return {"topic": topic, "transcript": [], "rounds": 0,
-                "converged": False, "conclusion": "", "cancelled": False}
+                "converged": False, "conclusion": "", "cancelled": False,
+                "consensus": None, "dissents": []}
     transcript: list = []
     converged = False
     cancelled = False
     rounds = 0
+    consensus: float | None = None
+    dissents: list = []
     for r in range(max(1, max_rounds)):
         # §0.7 逃生门:开新一轮前查刹车 —— 中止就不再烧下一轮 token,拿已有的收敛。
         if should_cancel is not None:
@@ -99,14 +154,24 @@ async def run_roundtable_session(
             break
         for rep in replies:
             transcript.append({"round": rounds, **rep})
-        # 小卡控场:继续 or 收敛(差不多就停 —— token 纪律)
+        # 小卡控场:结构化裁决(consensus/dissents)或旧式一词;主持人炸了 → 收敛止损。
         try:
             d = await host_moderate(topic, transcript, final=False) or {}
         except Exception:
             d = {"action": "converge"}
-        if d.get("action") == "converge":
+        v = normalize_moderation(d)
+        if v["structured"]:
+            consensus = v["consensus"]
+        dissents = v["open_dissents"]     # 最新分歧留档(收口/到顶时它就是少数派报告)
+        if v["action"] == "converge":
+            converged = True              # 共识达阈值(或旧式主持人拍板)→ 提前收口
+            break
+        # 少数派报告:第 2 轮起只剩 1 条孤立反对 → 综合多数收口 + dissent 留档,
+        # 不再为杠精/魔鬼代言人烧轮次(仍算 converged:多数已齐)。
+        if v["structured"] and rounds >= MINORITY_REPORT_MIN_ROUND and len(dissents) == 1:
             converged = True
             break
+    # 轮数到顶(for 耗尽)= 硬兜底停轮:converged 保持 False,dissents 如实留档。
     # 被中止 → 不再烧 host 的收敛调用(省 token);拿已有 transcript 老实返回。
     conclusion = ""
     if not cancelled:
@@ -116,7 +181,9 @@ async def run_roundtable_session(
         except Exception:
             conclusion = ""
     return {"topic": topic, "transcript": transcript, "rounds": rounds,
-            "converged": converged, "conclusion": conclusion, "cancelled": cancelled}
+            "converged": converged, "conclusion": conclusion, "cancelled": cancelled,
+            "consensus": consensus, "dissents": list(dissents)}
 
 
-__all__ = ["run_roundtable", "run_roundtable_session"]
+__all__ = ["run_roundtable", "run_roundtable_session", "normalize_moderation",
+           "CONSENSUS_THRESHOLD", "DEFAULT_MAX_ROUNDS", "MINORITY_REPORT_MIN_ROUND"]
