@@ -25,31 +25,25 @@ a single maintainer. Security fixes land in a new release; we do not backport.
 
 **Please do not open a public GitHub issue for security vulnerabilities.**
 
-Report privately via either channel:
-
-1. **GitHub private vulnerability reporting** (preferred):
-   [Report a vulnerability](https://github.com/Caprista/KarvyLoop/security/advisories/new)
-   <!-- TODO(Hardy): enable "Private vulnerability reporting" in the repo's
-        Settings → Security before publishing this file. -->
-2. **Email**: `security@karvy.chat`
-   <!-- TODO(Hardy): placeholder — confirm the real mailbox (karvy.chat MX or an
-        alias you actually read) before publishing. -->
+Report privately through **GitHub's private vulnerability reporting**:
+[Report a vulnerability](https://github.com/Caprista/KarvyLoop/security/advisories/new).
+This reaches the maintainer privately without exposing any contact address, and
+keeps the details out of public view until a fix is ready. (No email address is
+published on purpose — the GitHub channel is the single point of contact.)
 
 Please include: affected version (`karvyloop --version` / `__version__`), a
 reproduction (proof-of-concept input, config, platform), and the impact as you
 understand it. Reports in English or Chinese are both fine.
 
-### What to expect (our commitments)
+### What to expect
 
-| Stage | Target |
-|-------|--------|
-| Acknowledgement | within **72 hours** |
-| Initial assessment (is it a vulnerability, severity) | within **7 days** |
-| Fix or documented mitigation for confirmed issues | within **90 days**, usually much sooner |
-
-We ask for **coordinated disclosure**: give us the window above before
-publishing details. We will credit you in the release notes and the advisory
-(unless you prefer to stay anonymous), and we will tell you when the fix ships.
+KarvyLoop is a **single-maintainer open-source project**, not a commercial
+product with an on-call team — so this section is honest about that rather than
+promising a service-level agreement it can't guarantee. Expect a look as soon as
+the maintainer reasonably can, a genuine attempt to reproduce and fix confirmed
+issues, and a heads-up when a fix ships. Please practice **coordinated
+disclosure**: give a reasonable window before publishing details publicly. You'll
+be credited in the advisory and release notes unless you prefer to stay anonymous.
 
 ### Bug bounty
 
