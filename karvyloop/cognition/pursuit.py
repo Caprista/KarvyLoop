@@ -442,17 +442,23 @@ class PursuitManager:
     def _persist_personal(self, p: Pursuit) -> None:
         if self._memory is None:
             return  # 没接 memory manager,no-op
+        # 摘冒档(docs/89 ⑥,Hardy 拍):Pursuit 状态条是**机器投影的执行现实**(完成还过了确定性
+        # verify_gate),不是"用户亲口说的"——source 从 user_explicit(人审受保护档)改成
+        # `trace_verified`(rank 80,机器派生·不受保护)。① 不再冒充你说话、你的原话不被它压过;
+        # ② 不再受保护 → 陈旧状态条(`[pursuit/active]` 被 `[pursuit/done]` 取代后)日常整理能清掉,
+        # 不再永久堆积。ts 写真实时刻(修死值 0.0 导致 recent 排序沉底)。
+        now = _now()
         belief = Belief(
             content=f"[pursuit/{p.status}] {p.statement}",
             provenance={
-                "source": "user_explicit",  # Pursuit 是用户级目标,默认 user_explicit
+                "source": "trace_verified",
                 "agent": "pursuit_manager",
-                "ts": 0.0,  # 持久化时刻不是新鲜度;freshness_ts 用当前
+                "ts": now,
                 "trace_ref": "",
                 "pursuit_id": p.id,
                 "level": p.level,
             },
-            freshness_ts=_now(),
+            freshness_ts=now,
             scope="personal",  # type: ignore[arg-type]
         )
         self._memory.write(belief)

@@ -232,6 +232,13 @@ def test_ac5a_personal_pursuit_persists_to_belief():
     b = next(b for b in hits if "写完 README" in b.content)
     assert "pursuit_id" in b.provenance
     assert b.provenance["pursuit_id"] == "atom:1"
+    # 摘冒档回归锁(docs/89 ⑥):Pursuit 状态条是机器投影,**绝不冒充 user_explicit**(人审受保护档);
+    # 用 trace_verified(机器派生·不受保护 → 你的原话不被它压过 + 陈旧条能被日常整理清掉);ts 真实非 0。
+    from karvyloop.cognition.conflict import HUMAN_REVIEWED_SOURCES
+    assert b.provenance["source"] == "trace_verified"
+    assert b.provenance["source"] not in HUMAN_REVIEWED_SOURCES   # 不再受保护、不再冒充你
+    assert not mgr.is_protected_memory(b)
+    assert float(b.provenance["ts"]) > 0.0                        # 修死值 0.0
 
 
 def test_ac5b_domain_pursuit_persists_to_domain_kb(tmp_path: Path):

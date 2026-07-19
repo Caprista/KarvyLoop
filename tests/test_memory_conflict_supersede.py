@@ -242,6 +242,29 @@ def test_source_alias_covers_production_sources():
         f"猜的合法推翻,D1 第三次复发):{missing} —— 去 conflict.py 给它定合理档位")
 
 
+def test_human_authority_sources_are_protected():
+    """D2 守卫(docs/89 ②):**人审级**的记忆来源必须在 HUMAN_REVIEWED_SOURCES,否则「你亲口让记
+    的东西被机器猜的不弹卡悄悄改掉」。让保护集不靠"我记得"同步 —— 漏保护 → 本测红着逼人补。
+
+    **从登记表 `_SOURCE_ALIAS` 本身派生**(不靠代码扫描——`user` 这种无字面 `"source":"user"` 的也
+    覆盖,独立验收揪出旧版扫描口径漏了它):
+      · 凡归 **user_explicit 档** = 你的原话/人审喂料(ingest/fed/knowledge/user/karvy_chat/…)必保护;
+      · `consolidated` 归 trace_verified 档但 **人 ACCEPT 过**(_SOURCE_ALIAS 注释明说)→ 也必保护,
+        它不在 user_explicit 档、派生规则抓不到,**显式列**(待完整登记簿给来源加"人审 flag"后可自动化)。
+    pursuit=trace_verified 机器投影,**不**在 must_protect,对(不误伤)。
+    """
+    from karvyloop.cognition.conflict import _SOURCE_ALIAS, HUMAN_REVIEWED_SOURCES
+    # user_explicit 档的全部登记源(含 user —— 从表派生,不靠扫描)
+    user_explicit_sources = {s for s, tier in _SOURCE_ALIAS.items() if tier == "user_explicit"}
+    # 人 ACCEPT 过但档位是 trace_verified 的,显式补(派生规则覆盖不到的人审来源)
+    human_accepted_extra = {"consolidated"}
+    must_protect = user_explicit_sources | human_accepted_extra
+    unprotected = sorted(s for s in must_protect if s not in HUMAN_REVIEWED_SOURCES)
+    assert not unprotected, (
+        f"这些是人审级来源(你的原话/人审喂料/人 ACCEPT 过)却不在 HUMAN_REVIEWED_SOURCES —— 会被"
+        f"机器猜的不弹卡悄悄推翻,D2 承诺漏:{unprotected}。去 conflict.py 补进保护集。")
+
+
 # ============ D2:钉住/人审的旧记忆被 supersede 撞上 → 升冲突卡,不自动失效(核心) ============
 
 def test_pinned_old_not_auto_invalidated_raises_conflict():

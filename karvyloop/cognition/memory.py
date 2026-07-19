@@ -168,7 +168,8 @@ class MemoryManager:
         单一真相源(supersede 侧 conflict._is_protected_old 委托到这里,别造第二套):
         - 钉住(index.is_pinned):你亲手锁的,防归档也防自动失效;
         - 人审来源(provenance.source ∈ HUMAN_REVIEWED_SOURCES:fed/user_edit/cli/user_explicit/
-          ingest/role_experience):你确认过/亲手喂的,被推翻要你拍板(升 H2A 冲突卡)。
+          ingest/role_experience + **你的原话/人审喂料** knowledge/user/karvy_chat + **人 ACCEPT 过**的
+          consolidated):你确认过/亲手喂的,被推翻要你拍板(升 H2A 冲突卡)。
         低权威猜测(conversation/task_insight/roundtable…)不受保护,互相取代照旧默默 supersede。
         """
         try:

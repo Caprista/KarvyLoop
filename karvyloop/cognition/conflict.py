@@ -73,8 +73,17 @@ _SOURCE_ALIAS = {
 # ---- D2:钉住 / 人审来源的记忆,supersede 绝不背着你悄悄失效(升 H2A 冲突卡)----
 # 只列**人审来源**(pin 态另在 memory.is_protected_memory 里查):这些是「你确认过/亲手喂的」,
 # 被推翻要你拍板。低权威猜测(conversation/task_insight)不在此列 —— 它们互相取代照旧默默 supersede。
+#
+# ⚠ D2 真缝修复(docs/89 ②,Hardy 拍"活着的洞现在就修"):`knowledge`/`user`/`karvy_chat` 经
+# _SOURCE_ALIAS **归到 user_explicit 档**(你聊天里让小卡「记住这句」= 你的原话),`consolidated`
+# 是**人 ACCEPT 过**的知识合并条——它们的**权威档**都是人审级,却漏在保护集外,导致
+# 「你亲口让记的东西被机器猜的不弹卡悄悄改掉」(D2 承诺漏一角)。补齐。防再漂移的守卫见
+# tests/test_memory_conflict_supersede.py::test_human_authority_sources_are_protected(user_explicit
+# 档的 source 必须在此集,红着逼人补 —— 不靠"我记得")。
 HUMAN_REVIEWED_SOURCES = frozenset({
     "fed", "user_edit", "cli", "user_explicit", "ingest", "role_experience",
+    "knowledge", "user", "karvy_chat",   # 归 user_explicit 档 = 你的原话/人审喂料
+    "consolidated",                       # 人 ACCEPT 过的知识合并条
 })
 
 
