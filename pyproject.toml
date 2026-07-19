@@ -75,6 +75,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "respx>=0.21",   # HTTP mock:gateway adapter 的请求体形状/SSE 测试用(test_web_tools/multimodal/openai_completions 顶层 import)
     "psutil>=5.9",   # test_mcp_client.py 验子进程清理(AC6;顶层 import;mcp 组需另装 `pip install mcp`)
+    "hypothesis>=6.100",  # property-based fuzz of security-critical 宁空勿毒 解析器(fence / pursuit gate /
+                          # triage / ingest / checker):机器生成对抗输入补"作者想象力上限"盲区,纯本地无 key
+                          # 进普通 CI(顶层 import in tests/security/test_parser_properties.py)。
     "ruff>=0.6",     # lint 门(仅 `ruff check`,不 --fix);见 [tool.ruff] + .github/workflows/ci.yml
 ]
 

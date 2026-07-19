@@ -133,17 +133,27 @@ _FAKE_NOTE_RE = re.compile(r"\[\s*fenced[\s_-]*data\s+note\s*\]", re.IGNORECASE)
 # source 属性只留安全字符(防属性注入 `source="x"><evil>`)
 _SOURCE_SAFE_RE = re.compile(r"[^A-Za-z0-9_.:/\-]+")
 
+# 擦除迭代上限:单趟 re.sub 会被嵌套/交叠假标签绕过(property-test 揪出的真伤——
+# `</fenced<fenced-data>-data>` 删掉内层后重组出一个**活的** </fenced-data> 闭合符)。
+# 每趟有改动必严格缩短(移除非空匹配),故必收敛;上限只是防病态输入的安全带。
+_SCRUB_MAX_PASSES = 8
+
 
 def scrub_untrusted(text: str) -> str:
     """擦掉不可信正文里试图闭合围栏/伪造系统标签的注入;其余内容原样保留(内容仍可读)。
 
-    与 _scrub_belief_text 对称(双向假标签擦除的"入栏"方向),但覆盖整个假标签家族。
+    与 _scrub_belief_text 对称(双向假标签擦除的"入栏"方向),覆盖整个假标签家族,
+    **迭代到不动点**:嵌套/交叠假标签(擦内层后重组出活标签)也逃不掉。
     """
     s = str(text or "")
-    s = _FAKE_ANGLE_TAG_RE.sub("", s)
-    s = _FAKE_BRACKET_TAG_RE.sub("", s)
-    s = _FAKE_NOTE_RE.sub("", s)
-    s = _INJECT_HINT_RE.sub("", s)
+    for _ in range(_SCRUB_MAX_PASSES):
+        before = s
+        s = _FAKE_ANGLE_TAG_RE.sub("", s)
+        s = _FAKE_BRACKET_TAG_RE.sub("", s)
+        s = _FAKE_NOTE_RE.sub("", s)
+        s = _INJECT_HINT_RE.sub("", s)
+        if s == before:
+            break
     return s
 
 

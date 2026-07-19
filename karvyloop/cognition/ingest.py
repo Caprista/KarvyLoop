@@ -84,13 +84,19 @@ _FACTS_SCHEMA = {
 }
 
 
+def _clean_str(v: Any) -> str:
+    """宁空勿毒:只接受字符串字段;非 str(int/list/dict 等垃圾)→ 当空(拒绝,不 str() 强转投毒)。
+    property-test 揪出:非 str content 触发 AttributeError,LLM04 拒毒地板崩了而非返空。"""
+    return v.strip() if isinstance(v, str) else ""
+
+
 def _facts_from_list(data: list) -> list[dict]:
     facts: list[dict] = []
     for item in data:
         if isinstance(item, dict):
-            c = (item.get("content") or item.get("fact") or "").strip()
+            c = _clean_str(item.get("content")) or _clean_str(item.get("fact"))
             if c:
-                facts.append({"title": (item.get("title") or "").strip(),
+                facts.append({"title": _clean_str(item.get("title")),
                               "content": c, "kind": str(item.get("kind", "fact"))})
         elif isinstance(item, str) and item.strip():
             facts.append({"title": "", "content": item.strip(), "kind": "fact"})
@@ -133,8 +139,8 @@ def parse_facts(text: str) -> list[dict]:
         for k in ("facts", "items", "data", "beliefs", "knowledge"):
             if isinstance(data.get(k), list):
                 return _facts_from_list(data[k])
-        c = (data.get("content") or data.get("fact") or "").strip()
-        return [{"title": (data.get("title") or "").strip(), "content": c,
+        c = _clean_str(data.get("content")) or _clean_str(data.get("fact"))
+        return [{"title": _clean_str(data.get("title")), "content": c,
                  "kind": str(data.get("kind", "fact"))}] if c else []
     if isinstance(data, list):
         return _facts_from_list(data)

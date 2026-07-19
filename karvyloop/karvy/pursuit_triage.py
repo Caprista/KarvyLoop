@@ -172,8 +172,11 @@ def parse_pursuit_draft(text: str, *, intent: str = "") -> Optional[PursuitDraft
     if not statement:
         return None
     title = str(obj.get("title") or "").strip()[:_MAX_TITLE]
-    trigs = tuple(str(t).strip() for t in (obj.get("revision_triggers") or [])
-                  if str(t).strip())[:_MAX_TRIGGERS]
+    # 宁空勿毒:revision_triggers 非 list(如 int/str/dict)→ 当空,别 for 一个不可迭代的东西崩掉
+    # (property-test 揪出:非 list 触发 TypeError,违背"任何坏输入→合法对象/None"契约)。
+    rt_raw = obj.get("revision_triggers")
+    rt_list = rt_raw if isinstance(rt_raw, list) else []
+    trigs = tuple(str(t).strip() for t in rt_list if str(t).strip())[:_MAX_TRIGGERS]
     return PursuitDraft(statement=statement, gate=gate, title=title, revision_triggers=trigs)
 
 
