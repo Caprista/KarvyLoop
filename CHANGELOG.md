@@ -36,6 +36,17 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 ### Fixed
 - **Declining a "keep going?" prompt on a paused goal now tells you what actually happened**
   (the goal resumed / the record was cleared) instead of a bare "rejected".
+- **What you explicitly asked to remember can no longer be overwritten behind your back.**
+  Memories you confirmed yourself — things you told Karvy to remember in chat, knowledge you
+  reviewed and fed in, entries you accepted — are now protected: if a later machine-inferred
+  memory conflicts with one, you get a decision card instead of a silent replacement. (Low-
+  confidence guesses still resolve among themselves quietly, so this doesn't flood you with
+  cards.) A drift guard in the test suite keeps this from silently regressing.
+- **A goal's own progress no longer masquerades as something you said.** A pursuit's internal
+  status was being recorded at the same authority level as your own explicit words (and never
+  expiring), so machine state could outrank and crowd out what you actually told it. It's now
+  recorded as what it is — machine-verified progress — so your words take precedence again and
+  stale status entries get cleaned up.
 
 ## [2026.7.19] — 2026-07-19
 
