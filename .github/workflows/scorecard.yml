@@ -1,0 +1,61 @@
+name: Scorecard supply-chain security
+
+# OpenSSF Scorecard (https://securityscorecards.dev) — an automated, third-party
+# security posture score (~18 checks: token permissions, pinned dependencies,
+# dangerous workflow patterns, CI tests, branch protection, ...). Dev-time infra
+# only, same as ci.yml: this never ships in the runtime. No secrets required —
+# it reads repository metadata and public info via the default GITHUB_TOKEN.
+on:
+  # For the Branch-Protection check: re-run when protection rules change.
+  branch_protection_rule:
+  # Weekly re-score so the public result stays fresh (Saturday 01:30 UTC).
+  schedule:
+    - cron: "30 1 * * 6"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Top-level default: read-only. Jobs opt in to exactly what they need.
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Upload the SARIF results to GitHub code scanning.
+      security-events: write
+      # OIDC token used by publish_results to sign the results and publish them
+      # to the OpenSSF REST API (this is what feeds the README badge).
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publish to the OpenSSF public API so the badge and
+          # https://securityscorecards.dev/viewer/ have data (public repo).
+          publish_results: true
+
+      # Keep the raw SARIF around briefly for debugging a surprising score.
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      # Surface findings in the repo's Security > Code scanning tab.
+      - name: Upload to code-scanning
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        with:
+          sarif_file: results.sarif
