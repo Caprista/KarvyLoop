@@ -359,6 +359,14 @@ The suite is **self-contained**: it doesn't depend on any non-shipped docs, and 
 
 > A meta-guard test (`tests/test_suite_self_contained.py`) forbids any test from reading non-shipped docs, so "code-only checkouts stay green" is enforced, not hoped for.
 
+## Security
+
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Caprista/KarvyLoop/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Caprista/KarvyLoop)
+
+Security here is a floor built into the execution path, not a feature: local-first data sovereignty, human-approved decisions (irreversible actions are *never* auto-approved), provenance-based injection defense (untrusted content is fenced as data, never instructions), and real OS sandboxes on all three platforms. Those floors are held by an adversarial suite you can run yourself — `pytest -m security` (342 cases, catalog in [`tests/security/README.md`](tests/security/README.md)).
+
+The honest posture: we self-assess against the **OWASP LLM Top 10 (2025)** and **OWASP Agentic Top 10 (2026)** with `file:line` evidence per item — no certification claimed, and the gaps are listed, not hidden. Full self-assessment + threat model: [`docs/SECURITY-POSTURE.md`](docs/SECURITY-POSTURE.md). Found a vulnerability? Please report it privately — see [`SECURITY.md`](SECURITY.md).
+
 ## Front-end / back-end
 
 Classic separation: the back end is FastAPI (`/api/*` REST + one `/ws` WebSocket, with auto-generated OpenAPI at `/docs`); the front end is a static SPA under `karvyloop/console/static/` that talks only via `fetch` + WebSocket. You can rebuild the front end in any framework against the same contract with zero back-end changes.
