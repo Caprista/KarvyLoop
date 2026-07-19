@@ -133,17 +133,21 @@ _FAKE_NOTE_RE = re.compile(r"\[\s*fenced[\s_-]*data\s+note\s*\]", re.IGNORECASE)
 # source 属性只留安全字符(防属性注入 `source="x"><evil>`)
 _SOURCE_SAFE_RE = re.compile(r"[^A-Za-z0-9_.:/\-]+")
 
-# 擦除迭代上限:单趟 re.sub 会被嵌套/交叠假标签绕过(property-test 揪出的真伤——
-# `</fenced<fenced-data>-data>` 删掉内层后重组出一个**活的** </fenced-data> 闭合符)。
-# 每趟有改动必严格缩短(移除非空匹配),故必收敛;上限只是防病态输入的安全带。
-_SCRUB_MAX_PASSES = 8
+# 擦除迭代上限:单趟 re.sub 会被嵌套/交叠假标签绕过(`</fenced<fenced-data>-data>` 删内层后
+# 重组出一个**活的** </fenced-data> 闭合符)。故迭代擦到收敛。上限内几乎所有真实内容都收敛;
+# **但纯上限会被对抗性深嵌套(>上限层)在收敛前截断、残留活闭合符逸出**(独立验收 PoC 揪出:
+# 光"迭代到不动点+封顶"不安全)。所以上限内没收敛 → 走兜底硬中和(见下),保证任何深度都不逸出。
+_SCRUB_MAX_PASSES = 12
+# 兜底:删掉能构成标签的全部尖/方括号 —— 任何假闭合符/系统标签都无法幸存。只在对抗性深嵌套
+# (良性内容永远收敛、到不了这里)时触发,宁伤这罕见输入里的括号,绝不放注入逸出围栏。
+_HARD_NEUTRALIZE_RE = re.compile(r"[<>\[\]]")
 
 
 def scrub_untrusted(text: str) -> str:
     """擦掉不可信正文里试图闭合围栏/伪造系统标签的注入;其余内容原样保留(内容仍可读)。
 
-    与 _scrub_belief_text 对称(双向假标签擦除的"入栏"方向),覆盖整个假标签家族,
-    **迭代到不动点**:嵌套/交叠假标签(擦内层后重组出活标签)也逃不掉。
+    与 _scrub_belief_text 对称(双向假标签擦除的"入栏"方向),覆盖整个假标签家族。
+    收敛即返回;对抗性深嵌套(上限内不收敛)→ 硬中和残留括号 —— **任何深度都不逸出围栏**。
     """
     s = str(text or "")
     for _ in range(_SCRUB_MAX_PASSES):
@@ -153,8 +157,8 @@ def scrub_untrusted(text: str) -> str:
         s = _FAKE_NOTE_RE.sub("", s)
         s = _INJECT_HINT_RE.sub("", s)
         if s == before:
-            break
-    return s
+            return s
+    return _HARD_NEUTRALIZE_RE.sub("", s)   # 深嵌套没收敛 → 硬中和,活闭合符零幸存
 
 
 def _safe_source(source: str) -> str:

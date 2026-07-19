@@ -86,6 +86,23 @@ HUMAN_REVIEWED_SOURCES = frozenset({
     "consolidated",                       # 人 ACCEPT 过的知识合并条
 })
 
+# ⚠ P1(连改数程冷审揪出):**经 H2A 卡人采纳**的记忆(provenance.adopted_via)= 你亲手拍板确认过 →
+# 同人审来源一样受保护。圆桌高风险结论走 H2A、你 ACCEPT 才落库(proposal_handlers 写
+# adopted_via="h2a"),但其 source 仍是 `roundtable`(rank 60 系统观察档、不在 HUMAN_REVIEWED_SOURCES),
+# 光看 source 会漏保护"你亲手拍板进库的结论"——它可被任何 rank≥60 机器条(含 Pursuit trace_verified)
+# 不弹卡悄悄失效,正是 D2 承诺漏的同一角。故保护判定加"人采纳"这一维(routine 直写无 adopted_via,
+# 不受此保护,不过度打扰)。守卫见 test_h2a_adopted_conclusions_are_protected。
+HUMAN_ADOPTED_MARKERS = frozenset({"h2a"})
+
+
+def is_human_authority(provenance: dict) -> bool:
+    """一条记忆是否**人审级权威**(受 D2 保护:supersede/invalidate 绝不背着你自动失效它):
+    人审来源(HUMAN_REVIEWED_SOURCES)**或** 经 H2A 卡人采纳(adopted_via ∈ HUMAN_ADOPTED_MARKERS)。"""
+    prov = provenance or {}
+    if str(prov.get("source", "") or "") in HUMAN_REVIEWED_SOURCES:
+        return True
+    return str(prov.get("adopted_via", "") or "") in HUMAN_ADOPTED_MARKERS
+
 
 def provenance_rank(provenance: dict) -> int:
     """按 provenance.source 查权重;缺/未知 → 0。
@@ -508,7 +525,7 @@ def _is_protected_old(mem: Any, b: Belief) -> bool:
             return bool(fn(b))
         except Exception:
             pass
-    return str((getattr(b, "provenance", None) or {}).get("source", "") or "") in HUMAN_REVIEWED_SOURCES
+    return is_human_authority(getattr(b, "provenance", None) or {})
 
 
 def _conflict_record(nb: Belief, ob: Belief, rel: str, *, pinned: bool = False) -> dict:
@@ -590,6 +607,7 @@ async def _judge(news: list, olds: list, *, gateway: Any, model_ref: str = "") -
 
 __all__ = [
     "PROVENANCE_RANK", "provenance_rank", "HUMAN_REVIEWED_SOURCES",
+    "HUMAN_ADOPTED_MARKERS", "is_human_authority",
     "ConflictReport", "resolve", "detect_conflict",
     "SUPERSEDE_SYSTEM", "parse_supersede_pairs", "find_supersede_candidates",
     "run_supersede_pass", "extends_idem_key", "memory_conflict_idem_key",

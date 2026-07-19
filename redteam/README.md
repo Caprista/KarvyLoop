@@ -21,11 +21,17 @@ whatever attacks the author thought of. To hedge that ceiling we use two machine
 
 ## What it attacks
 
-The target is our **provenance fence** — `karvyloop/cognition/fence.py: fence_untrusted`. Every
-piece of untrusted content KarvyLoop ingests (fetched web body, MCP tool result, imported-agent
-text, recalled memory) is wrapped as **data, not instructions** with bidirectional fake-tag
-scrubbing before it reaches the model. `fence_provider.py` exposes that function as a promptfoo
-provider so probes hit the actual code.
+The target is our **provenance fence** — `karvyloop/cognition/fence.py: fence_untrusted`. The
+untrusted content this fence wraps in production is: **fetched web body** (`coding/tools/web.py`),
+**MCP tool result** (`mcp_client` / `coding/tools/mcp_tool`), **inter-agent / A2A output**
+(`console/workflow_engine.py`), and **recalled memory** (`fence.py`). All are wrapped as **data,
+not instructions** with bidirectional fake-tag scrubbing before they reach the model.
+`fence_provider.py` exposes that function as a promptfoo provider so probes hit the actual code.
+
+> Note (honest scope): **imported agents/skills are NOT put through this fence** — their bodies
+> go through the refuse-garbage decompose parser and only land via H2A adoption
+> (`adapter/bootstrap.py`), a different defense. The `[system]`-in-import probe below therefore
+> tests the fence *mechanism* on that content shape, not a claim that production import is fenced.
 
 OWASP mapping of the probes in `promptfooconfig.yaml`:
 
@@ -49,10 +55,13 @@ npx promptfoo@latest eval -c redteam/promptfooconfig.yaml
 npx promptfoo@latest view          # open the results web UI
 ```
 
-Expected: the 4 channel probes **pass** (fence holds); the row tagged **`[KNOWN-FINDING P2]`**
-**fails on purpose** — a nested fake tag (`</fenced<fenced-data>-data>`) reconstructs a live
-closer after the single-pass scrub, so the injection escapes the fence. That same finding is
-recorded as a strict `xfail` in `tests/security/test_parser_properties.py::test_finding_p2_*`.
+Expected: **all** probes **pass** (fence holds), including the nested-fake-tag rows
+(`</fenced<fenced-data>-data>`, and deep nesting). That nested-tag escape was a real finding
+(a single-pass, then a bounded-iteration scrub, both left a live closer under deep enough
+nesting) — **now fixed**: `scrub_untrusted` iterates until stable, and if a crafted deep nesting
+doesn't converge within bound it **hard-neutralizes any residual `<>[]` characters** — so no live
+fence-closer / system tag survives **at any nesting depth**. Regression-locked (incl. the deep
+PoC) in `tests/security/test_parser_properties.py::test_finding_p2_*`.
 Seeing the red-team harness independently reproduce it is the whole point.
 
 ### 2. Real-model mode — needs an API key (manual)

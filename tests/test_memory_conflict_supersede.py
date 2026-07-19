@@ -265,6 +265,29 @@ def test_human_authority_sources_are_protected():
         f"机器猜的不弹卡悄悄推翻,D2 承诺漏:{unprotected}。去 conflict.py 补进保护集。")
 
 
+def test_h2a_adopted_conclusions_are_protected():
+    """P1 守卫(连改数程冷审):**经 H2A 卡人采纳**的记忆(provenance.adopted_via='h2a',如你拍板
+    的高风险圆桌结论)必须受保护——哪怕它的 source 是低档(roundtable rank60)。routine 直写(无
+    adopted_via)不受此保护(不过度打扰)。防"你亲手拍板进库的结论被机器条不弹卡悄悄改掉"。"""
+    from karvyloop.schemas.cognition import Belief
+    mgr = MemoryManager()
+    # 你 ACCEPT 的圆桌结论:source=roundtable(低档)但 adopted_via=h2a → 受保护
+    adopted = Belief(content="圆桌「X」结论:走方案A",
+                     provenance={"source": "roundtable", "adopted_via": "h2a"},
+                     freshness_ts=time.time(), scope="personal")
+    assert mgr.is_protected_memory(adopted) is True
+    # routine 直写(无 adopted_via):不受此保护(它可被机器条默默取代,不打扰)
+    routine = Belief(content="圆桌「Y」结论:走方案B",
+                     provenance={"source": "roundtable"},
+                     freshness_ts=time.time(), scope="personal")
+    assert mgr.is_protected_memory(routine) is False
+    # _is_protected_old(supersede 侧的保护判定,委托到 is_protected_memory)对 adopted 也认——
+    # 故机器条撞它时走 H2A 冲突卡路径、不静默失效(集成行为由既有 supersede 测试 + 本保护判定覆盖)。
+    from karvyloop.cognition.conflict import is_human_authority
+    assert is_human_authority({"source": "roundtable", "adopted_via": "h2a"}) is True
+    assert is_human_authority({"source": "roundtable"}) is False
+
+
 # ============ D2:钉住/人审的旧记忆被 supersede 撞上 → 升冲突卡,不自动失效(核心) ============
 
 def test_pinned_old_not_auto_invalidated_raises_conflict():

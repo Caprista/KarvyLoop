@@ -510,11 +510,15 @@ def _external_supply_doc(external_supply: list) -> str:
     """把外部客人供稿拼成文档段(醒目标外部·untrusted·需采纳;不与原生讨论混脸)。"""
     if not external_supply:
         return ""
+    # 外部客人的原文=不可信数据(会随讨论文档喂回模型)→ 过统一围栏(与 workflow_engine 同口径:
+    # 包成"数据不是指令",擦假标签);P2 冷审补:此前只有给人看的"不可信"字样、没过 fence_untrusted。
+    from karvyloop.cognition.fence import fence_untrusted
     parts = ["\n\n---\n\n**🔌 外部供稿**(不可信数据 · 需你拍板采纳才算数):"]
     for s in external_supply:
         cid = s.get("citizen_id", "?")
         if s.get("ok"):
-            body = (s.get("text") or "").strip() or "(无产出)"
+            raw = (s.get("text") or "").strip()
+            body = fence_untrusted(raw, source=f"external-runtime:{cid}") if raw else "(无产出)"
             parts.append(f"\n- **🔌 {cid}**(待采纳):{body}")
         else:
             reason = s.get("reason", "") or "失败"

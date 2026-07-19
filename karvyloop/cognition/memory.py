@@ -177,9 +177,10 @@ class MemoryManager:
                 return True
         except Exception:
             pass
-        from karvyloop.cognition.conflict import HUMAN_REVIEWED_SOURCES
-        src = str((getattr(belief, "provenance", None) or {}).get("source", "") or "")
-        return src in HUMAN_REVIEWED_SOURCES
+        from karvyloop.cognition.conflict import is_human_authority
+        # 人审来源 或 经 H2A 卡人采纳(adopted_via=h2a,如你拍板的圆桌结论)→ 受保护(P1 冷审补:
+        # 光看 source 会漏"你亲手拍板进库、但 source 仍是 roundtable"的结论)。
+        return is_human_authority(getattr(belief, "provenance", None) or {})
 
     def invalidate(self, belief: Belief, *, reason: str = "", now: Optional[float] = None,
                    force: bool = False) -> bool:
