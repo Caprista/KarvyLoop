@@ -1430,7 +1430,9 @@
   // 进【你可能想做】。旧实现用"决策 kind 白名单",任何新 kind(merge_knowledge / merge_atoms /
   // confirm_result / crystallize_skill / confirm_decision_pref / infeasible_report)
   // 都被误丢进预判列 —— 无拒绝按钮、丢 payload。改成"预判白名单",新 kind 一律进决策列。
-  const _PREDICT_KINDS = ["run_task"];
+  // docs/90 刀3c:schedule_suggest(时机能力提示)也进预判象限 —— 温和的"要不要每周自动跑",
+  // 不是要拍板的决策卡。ACCEPT 特判成"预填聊天补节奏"(不直接建定时任务),见 renderPredict。
+  const _PREDICT_KINDS = ["run_task", "schedule_suggest"];
   // opts.replay = 状态回放(boot fetch 存量卡),非新卡事件 —— 透传给 renderProposal,
   // 桌面吉祥物剧场(叼卡/闪⚖/冒泡)只回应真事件(WS h2a_proposal / 手动求建议)。
   function _routeProposal(payload, opts) {
@@ -1459,15 +1461,50 @@
     }
     const pid = payload.proposal_id || ("p-" + (payload.habit_id || 0));
     const row = el("div", { class: "predict-buttons" });
-    row.appendChild(el("button", { class: "predict-yes", text: t("predict.do"),
-      onClick: () => { sendWS("h2a_decision", { proposal_id: pid, decision: "ACCEPT", reason: "" });
-                       _clearPredict(); } }));
-    row.appendChild(el("button", { class: "predict-no", text: t("predict.ignore"),
-      onClick: () => { sendWS("h2a_decision", { proposal_id: pid, decision: "DEFER", reason: "" });
-                       _clearPredict(); } }));
+    // docs/90 刀3c:schedule_suggest 特判 —— ACCEPT ≠ 直接建定时任务(cron 要用户定"多久一次/
+    // 几点"),而是把这条 intent 预填进与小卡的聊天让用户补节奏再走 create_schedule;忽略 = REJECT
+    // (彻底收起,不再挂待决;already_suggested 后端已置,永不再提)。
+    const isSchedSuggest = String(payload.kind || "") === "schedule_suggest";
+    if (isSchedSuggest) {
+      const sIntent = String((payload.payload || {}).intent || "");
+      row.appendChild(el("button", { class: "predict-yes", text: t("predict.do"),
+        onClick: () => { sendWS("h2a_decision", { proposal_id: pid, decision: "ACCEPT", reason: "" });
+                         _prefillScheduleSuggest(sIntent);
+                         _clearPredict(); } }));
+      row.appendChild(el("button", { class: "predict-no", text: t("predict.ignore"),
+        onClick: () => { sendWS("h2a_decision", { proposal_id: pid, decision: "REJECT", reason: "" });
+                         _clearPredict(); } }));
+    } else {
+      row.appendChild(el("button", { class: "predict-yes", text: t("predict.do"),
+        onClick: () => { sendWS("h2a_decision", { proposal_id: pid, decision: "ACCEPT", reason: "" });
+                         _clearPredict(); } }));
+      row.appendChild(el("button", { class: "predict-no", text: t("predict.ignore"),
+        onClick: () => { sendWS("h2a_decision", { proposal_id: pid, decision: "DEFER", reason: "" });
+                         _clearPredict(); } }));
+    }
     card.appendChild(row);
     _placeCard(list, pid, card);   // 多卡不覆盖:同 id 替换、新 id 追加
     updatePulse();
+  }
+  // docs/90 刀3c:接受"每周自动跑"建议 = 切到小卡私聊 + 把这条事预填进输入框(带上"补节奏"提示),
+  // 用户改成"每周一早八"这类再发 → 走既有 create_schedule(NL→cron)。**绝不替用户假设 cron**。
+  function _prefillScheduleSuggest(intent) {
+    if (!intent) return;
+    try { _talkToKarvy(); } catch (e) { /* 切场失败也别炸,尽力预填 */ }
+    // _talkToKarvy 内部 switchPeer 会 _ceClear(输入框),稍等它落定再写预填文本 + 光标到末尾。
+    setTimeout(() => {
+      const ce = _ceInput();
+      if (!ce) return;
+      ce.textContent = t("schedule_suggest.prefill", { intent: intent });
+      _ceUpdateEmpty();
+      ce.focus();
+      try {
+        const sel = window.getSelection();
+        const rng = document.createRange();
+        rng.selectNodeContents(ce); rng.collapse(false);
+        sel.removeAllRanges(); sel.addRange(rng);
+      } catch (e) { /* 光标定位失败无所谓,文本已在 */ }
+    }, 220);
   }
   function _clearPredict() {
     const list = document.getElementById("predict-list");

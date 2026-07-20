@@ -773,6 +773,20 @@ _EN = {
         "Catching up means running it once now — not replaying every missed slot. "
         "If you decline or ignore this, nothing runs, and I won't bring this batch up again."
     ),
+    # ---- schedule-suggest 段(docs/90 刀3c:手动跑到第 N 次 → 温和的"要不要每周自动跑"提示)----
+    "proposal.schedule_suggest.summary": (
+        "You've run “{intent}” by hand {n} times — want me to run it on a schedule?"
+    ),
+    "proposal.schedule_suggest.basis": (
+        "You did this yourself {n} times, so it might be worth automating. "
+        "Accepting won't schedule anything yet — I'll bring it into the schedule setup so you can "
+        "tell me how often and when (I won't guess the timing for you). "
+        "Ignore it and I won't bring this one up again."
+    ),
+    "receipt.schedule_suggest.accepted": (
+        "Brought it to the schedule setup — tell me how often and when (e.g. “every Monday 8am”) "
+        "and I'll set it up. I won't pick the timing for you."
+    ),
     # ---- system-import 段(docs/84 #3 多 agent 系统导入:plan/apply 用户可见文案)----
     "system_import.note.no_llm": (
         "No LLM wired (--no-llm?), so the topology can't be read. You can still import each agent "
@@ -1640,6 +1654,19 @@ _ZH = {
     "proposal.schedule_catchup.basis": (
         "「{title}」到点时系统没开机,这 {n} 场都没跑成。补跑 = 现在按原意图跑**一次**,"
         "不是把错过的每一场都重放。你拒绝或不理会就不补,这批旧账下次开机也不会再提。"
+    ),
+    # ---- schedule-suggest 段(docs/90 刀3c:手动跑到第 N 次 → 温和的"要不要每周自动跑"提示)----
+    "proposal.schedule_suggest.summary": (
+        "你手动跑了 {n} 次「{intent}」—— 要不要设成定时自动跑?"
+    ),
+    "proposal.schedule_suggest.basis": (
+        "这件事你亲手做了 {n} 次,也许值得自动化。接受不会立刻建定时任务 —— 我会把它带到"
+        "定时设置,你补一句「多久一次、几点」(比如「每周一早八」)再确认,我绝不替你瞎定时间。"
+        "忽略的话,这条我以后不再提。"
+    ),
+    "receipt.schedule_suggest.accepted": (
+        "已把这件事带到定时设置 —— 告诉我多久一次、几点(比如「每周一早八」),我就替你建。"
+        "时间我不替你拍。"
     ),
     # ---- system-import 段(docs/84 #3 多 agent 系统导入:plan/apply 用户可见文案)----
     "system_import.note.no_llm": (

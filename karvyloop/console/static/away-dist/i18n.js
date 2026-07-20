@@ -877,6 +877,7 @@
         "proposal.kind.spend_budget_alert": "Budget alert",
         "proposal.kind.memory_conflict": "Memory conflict",
         "proposal.kind.schedule_catchup": "Catch up scheduled task",
+        "proposal.kind.schedule_suggest": "Automate on a schedule?",
         "memory.conflict.old_label": "Existing",
         "memory.conflict.new_label": "New",
         "proposal.memory_conflict.keep_old": "Keep the old",
@@ -1120,6 +1121,8 @@
         "proposal.cost_estimate": "Recent similar tasks cost ~{mean} tokens each ({min}–{max}, last {n}) — measured, not guessed",
         "predict.do": "▶ Do it",
         "predict.ignore": "Dismiss",
+        // docs/90 刀3c:接受"每周自动跑"建议 → 预填进小卡聊天的文本(用户补节奏再发,走 NL→cron)
+        "schedule_suggest.prefill": "Set this up on a schedule: {intent} (tell me how often and when, e.g. every Monday 8am)",
         "proposal.accept": "✅ Accept",
         "proposal.edit_then_accept": "Edit, then accept",
         "proposal.edit_hint": "Your edit runs instead of the original — and teaches the system how you decide.",
@@ -2434,6 +2437,7 @@
         "proposal.kind.spend_budget_alert": "预算提醒",
         "proposal.kind.memory_conflict": "记忆冲突",
         "proposal.kind.schedule_catchup": "补跑定时任务",
+        "proposal.kind.schedule_suggest": "要不要定时自动跑?",
         "memory.conflict.old_label": "原有",
         "memory.conflict.new_label": "新的",
         "proposal.memory_conflict.keep_old": "保留旧的",
@@ -2677,6 +2681,8 @@
         "proposal.cost_estimate": "最近同类任务平均消耗 ~{mean} tokens(区间 {min}–{max},近 {n} 次)—— 实测,不是猜的",
         "predict.do": "▶ 去做",
         "predict.ignore": "忽略",
+        // docs/90 刀3c:接受"每周自动跑"建议 → 预填进小卡聊天的文本(用户补节奏再发,走 NL→cron)
+        "schedule_suggest.prefill": "把这件事设成定时任务:{intent}(告诉我多久一次、几点,比如每周一早八)",
         "proposal.accept": "✅ 接受",
         "proposal.edit_then_accept": "改了再批",
         "proposal.edit_hint": "按你的修改执行 —— 这一改也会成为它学你口味的最强信号。",

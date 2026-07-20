@@ -1051,6 +1051,12 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     if task_reg is not None and task_id is not None:
         task_reg.finish(task_id, result=(outcome.text or ""), error=(outcome.error or ""))
 
+    # docs/90 刀3c 时机能力提示:这条直接聊天(kind=drive)= 用户**手动**发起的运行 —— 成功完成
+    # 就 bump 手动运行计数(旁路 fire-and-forget,失败不计数)。攒到第 N 次且三道门全过 → 递
+    # 「要不要每周自动跑」建议卡。绝不阻塞热路径、任何异常不冒泡。
+    from karvyloop.console.schedule_suggest import schedule_suggest_after_drive
+    schedule_suggest_after_drive(request.app, req.intent, error=(outcome.error or ""))
+
     # 共创递口(docs/47 §3.1,镜像 ws 同款):建 agent 意图命中 → 回复末尾递"一起共创"口
     # 并挂 OFFERED 会话态;零副作用,失败静默=旧行为。
     if not outcome.error:

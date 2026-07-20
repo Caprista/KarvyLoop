@@ -67,6 +67,13 @@ KIND_ROUNDTABLE_CONCLUSION = "roundtable_conclusion"
 # 达 75/90/100% 阈值时经 emit_card→broadcast 出一张告警卡,用户 ACCEPT/REJECT 都只关卡(无兑现)。
 # 这里登记 kind 常量让它进 ALL_KINDS(前端/registry 认得它、不当未知 kind);handler 有意不注册。
 KIND_SPEND_BUDGET_ALERT = "spend_budget_alert"
+# docs/90 刀3c「时机能力提示」(防 Alexa 坑:藏起来≠教会)。用户手动把同一类事跑到第 N 次
+# → 递一张**温和**的建议卡:「你已手动跑了 N 次 X —— 要每周自动跑吗?」。**不进** HIGH_RISK_KINDS
+# (它是提示不是安全拦截),但也**不该被"挣来的静音"自动兑现**(加个定时任务=改系统行为,永远要人点)
+# —— 靠 taste_eval.SKIP_KINDS 把它挡在静音/押注之外(见 silence.try_silence 的 SKIP_KINDS 门)。
+# ACCEPT ≠ 直接建定时任务:cron 需要用户定"多久一次/几点",接受只把这条 intent 带到定时设置
+# 让用户补节奏(前端预填聊天/开面板),**绝不替用户假设 cron**;handler 只回诚实回执(无副作用)。
+KIND_SCHEDULE_SUGGEST = "schedule_suggest"
 
 ALL_KINDS = (
     KIND_CRYSTALLIZE_SKILL,
@@ -89,6 +96,7 @@ ALL_KINDS = (
     KIND_PURSUIT_REVISE,
     KIND_ROUNDTABLE_CONCLUSION,
     KIND_SPEND_BUDGET_ALERT,
+    KIND_SCHEDULE_SUGGEST,
 )
 
 # Handler 协议:(proposal) -> (ok: bool, detail: str)。注入式,默认无副作用。
@@ -1013,6 +1021,44 @@ def proposal_for_roundtable_conclusion(
     )
 
 
+def proposal_for_schedule_suggest(
+    *,
+    intent: str,
+    count: int,
+    fingerprint: str,
+    ts: float,
+    strength: float = 0.5,
+):
+    """docs/90 刀3c:某类事被**手动**跑到第 N 次 → 「要不要每周自动跑」温和建议卡。
+
+    - **温和**:进前端预判象限(renderPredict),两键 接受/忽略,不是高风险硬拦;strength 低。
+    - **ACCEPT ≠ 建定时任务**:payload 带 intent,前端把它预填进聊天/开定时面板让用户补
+      "多久一次/几点"再走既有 create_schedule —— **绝不替用户假设 cron**;handler 只回诚实回执。
+    - 幂等:proposal_id 按 fingerprint 稳定派生 → 同一类事只收敛一张卡(且 already_suggested
+      持久化保证提过永不再提,双保险)。summary/basis 走 i18n(en/zh 双表,源码扫描门)。
+    """
+    from karvyloop import i18n
+    from .atoms import Proposal  # 局部 import 避免模块级循环
+    text = (intent or "").strip()
+    gist = text if len(text) <= 60 else text[:59] + "…"
+    n = int(count or 0)
+    fp = (fingerprint or "").strip()
+    digest = hashlib.sha1((fp or text).encode("utf-8")).hexdigest()[:8]
+    return Proposal(
+        summary=i18n.t("proposal.schedule_suggest.summary", n=n, intent=gist),
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_SCHEDULE_SUGGEST,
+        payload={"intent": text, "count": n, "fingerprint": fp},
+        proposal_id=f"{KIND_SCHEDULE_SUGGEST}-0-{digest}",
+        basis=i18n.t("proposal.schedule_suggest.basis", n=n),
+    )
+
+
 __all__ = [
     "PendingProposalRegistry",
     "AGING_THRESHOLD_S",
@@ -1039,6 +1085,8 @@ __all__ = [
     "proposal_for_pursuit_commit",
     "proposal_for_pursuit_revise",
     "proposal_for_roundtable_conclusion",
+    "proposal_for_schedule_suggest",
+    "KIND_SCHEDULE_SUGGEST",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",

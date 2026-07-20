@@ -25,7 +25,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_INFEASIBLE_REPORT, KIND_MERGE_ATOMS, KIND_MERGE_KNOWLEDGE, KIND_OPS_FIX,
     KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
     KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER, KIND_MEMORY_CONFLICT,
-    KIND_SCHEDULE_CATCHUP, KIND_PURSUIT_COMMIT, KIND_PURSUIT_REVISE,
+    KIND_SCHEDULE_CATCHUP, KIND_SCHEDULE_SUGGEST, KIND_PURSUIT_COMMIT, KIND_PURSUIT_REVISE,
     KIND_ROUNDTABLE_CONCLUSION,
 )
 
@@ -37,6 +37,17 @@ def _crystallize_skill_handler(proposal) -> Tuple[bool, str]:
     from karvyloop import i18n
     summary = getattr(proposal, "summary", "") or i18n.t("receipt.crystallize.default_habit")
     return True, i18n.t("receipt.crystallize.accepted", summary=summary)
+
+
+def _schedule_suggest_handler(proposal) -> Tuple[bool, str]:
+    """docs/90 刀3c:schedule_suggest ACCEPT 兑现 —— **无副作用**,只回诚实回执。
+
+    ACCEPT ≠ 建定时任务:真正的落地是前端把这条 intent 预填进聊天/开定时面板,让用户补
+    "多久一次/几点"再走既有 create_schedule(NL→cron)。这里绝不替用户假设 cron、绝不直接
+    写 SchedulerStore —— handler 存在只为让 ACCEPT 干净地把卡移出待决表(否则无 handler 会
+    "卡保留待决")。回执走 i18n(en/zh)。"""
+    from karvyloop import i18n
+    return True, i18n.t("receipt.schedule_suggest.accepted")
 
 
 def _governance_for(app: Any, payload: dict) -> str:
@@ -1058,6 +1069,9 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         KIND_ROUNDTABLE_CONCLUSION: _roundtable_conclusion_handler(app),
         KIND_RUN_TASK: _run_task_handler(app),
         KIND_SCHEDULE_CATCHUP: _run_task_handler(app),           # J5:独立 kind,复用 run_task 重跑逻辑
+        # docs/90 刀3c:时机能力提示的 ACCEPT 兑现 = 无副作用回执(真落地在前端预填→create_schedule)。
+        # ∈ taste_eval.SKIP_KINDS,永不被"挣来的静音"自动兑现;∉ HIGH_RISK_KINDS(温和提示非安全拦截)。
+        KIND_SCHEDULE_SUGGEST: _schedule_suggest_handler,
         KIND_MEMORY_CONFLICT: _memory_conflict_handler(app),     # D2:按你的裁决处置钉住/人审记忆冲突
         KIND_MESH_TAKEOVER: make_mesh_takeover_handler(app),     # mesh 接活:claim→重跑→complete
         KIND_CONFIRM_DECISION_PREF: _confirm_decision_pref_handler(app),

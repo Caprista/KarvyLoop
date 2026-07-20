@@ -203,15 +203,19 @@ def test_h2a_kind_routing_contract():
     其余每个后端 kind 都必须走**决策列**(有认/改/删 + 拒 + 依据)。防止再出现
     merge_knowledge 那种"新 kind 被误丢进预判列、无拒绝按钮、丢 payload"的接线漏。"""
     import re
-    from karvyloop.karvy.proposal_registry import ALL_KINDS, KIND_RUN_TASK
+    from karvyloop.karvy.proposal_registry import (ALL_KINDS, KIND_RUN_TASK,
+                                                   KIND_SCHEDULE_SUGGEST)
     js = _read("app.js")
     m = re.search(r"_PREDICT_KINDS\s*=\s*\[([^\]]*)\]", js)
     assert m, "app.js 未定义 _PREDICT_KINDS 数组"
     predict_kinds = set(re.findall(r'"([^"]+)"', m.group(1)))
-    # 只有习惯预判(KIND_RUN_TASK)在预判列;其余全走决策列(fail-safe)
-    assert predict_kinds == {KIND_RUN_TASK}, f"预判列 kind 应只有 run_task,实际 {predict_kinds}"
+    # 预判列 = 习惯预判(run_task)+ 时机能力提示(schedule_suggest,docs/90 刀3c:
+    # 温和建议卡,接受也不落地任何东西、只预填定时设置 → 无 payload 可丢,进预判列是设计内);
+    # 其余全走决策列(fail-safe)
+    assert predict_kinds == {KIND_RUN_TASK, KIND_SCHEDULE_SUGGEST}, \
+        f"预判列 kind 应只有 run_task+schedule_suggest,实际 {predict_kinds}"
     # 每个后端决策 kind 都不在预判白名单 → 自动进决策列(含曾漏的 merge_knowledge)
-    decision_kinds = set(ALL_KINDS) - {KIND_RUN_TASK}
+    decision_kinds = set(ALL_KINDS) - {KIND_RUN_TASK, KIND_SCHEDULE_SUGGEST}
     for k in ("merge_knowledge", "merge_atoms", "confirm_result",
               "crystallize_skill", "confirm_decision_pref",
               "infeasible_report", "route_to_role", "roundtable", "resolve_conflict", "ops_fix"):

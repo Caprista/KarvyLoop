@@ -496,6 +496,12 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         _payload["recall_as_of"] = _recall_as_of   # docs/69 Q4:按此时点召回(chip 标"按 X 时点的记忆")
     await websocket.send_json({"type": "drive_done", "payload": _payload})
 
+    # docs/90 刀3c 时机能力提示:WS 直接聊天 = 用户**手动**发起的运行 —— 成功完成就旁路 bump
+    # 手动运行计数(fire-and-forget,已发完 drive_done 才触发,不挡响应);攒到第 N 次且三道门
+    # 全过 → 递「要不要每周自动跑」建议卡。失败不计数、任何异常不冒泡到 drive。
+    from karvyloop.console.schedule_suggest import schedule_suggest_after_drive
+    schedule_suggest_after_drive(app, intent, error=(outcome.error or ""))
+
 
 # ---- ⑤c 环境感知召回(ambient recall):工作台"料"的主动浮出 ----
 

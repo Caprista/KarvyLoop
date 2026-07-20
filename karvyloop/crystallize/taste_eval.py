@@ -28,8 +28,11 @@ WINDOW = 20         # 滚动窗:近 N 次算"当前命中率",再往前 N 次算
 _PENDING_TTL_S = 14 * 86400   # 押注后两周没拍板 → 过期清理(DEFER 挂太久的不永久占坑)
 _OUTCOME_RETAIN = 500         # 对账记录留存上限(够画趋势,有界)
 
-# 押注只对真决策 kind;确认偏好卡是元循环(和 record_decision_signals 同口径)
-SKIP_KINDS = ("confirm_decision_pref",)
+# 押注只对真决策 kind;确认偏好卡是元循环(和 record_decision_signals 同口径)。
+# schedule_suggest(docs/90 刀3c 时机能力提示):温和建议卡,**永不被"挣来的静音"自动兑现**
+# (加个定时任务=改系统行为,必须人点)—— 进 SKIP_KINDS 让 silence.try_silence 直接放行不接管,
+# 且不押注(它不是"替你拍板"的决策信号,是"你要不要自动化"的提示)。不进 HIGH_RISK_KINDS。
+SKIP_KINDS = ("confirm_decision_pref", "schedule_suggest")
 
 
 class TastePredictionStore:
