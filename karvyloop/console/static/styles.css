@@ -508,6 +508,11 @@ html, body {
 .karvy-fab:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 4px; border-radius: 50%; }
 /* 任一模态(聊天/管理面)打开时,收起悬浮入口,免得卡皮巴拉浮在遮罩上 */
 .modal-overlay:not(.hidden) ~ .karvy-dock { display: none; }
+/* chat 停靠视图(>720px 且非 desk/board):聊天就在屏中央,"召唤聊天"的浮球纯冗余,
+   还压住右栏「你可能想」的字(2026-07-20 真机截图实锤)→ 藏。desk/board/移动端它是入口,保留。 */
+@media (min-width: 721px) {
+  body:not(.desk-view):not(.board-view) .karvy-dock { display: none; }
+}
 /* === 全局聊天:从右下角小卡升起的对话面板(左 对话/场 · 右 正文)=== */
 /* 遮罩不压暗(悬浮挂件感),面板贴右下;点面板外关闭 */
 .modal-overlay.chat-overlay { background: transparent; align-items: flex-end; justify-content: flex-end; padding: var(--sp-5); }
