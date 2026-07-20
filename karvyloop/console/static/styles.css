@@ -2070,6 +2070,34 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 }
 .dcard-violation-head { color: var(--danger, #d8527c); font-weight: 600; line-height: 1.45; }
 
+/* ── 决策卡折叠(docs/90 刀1b,Hardy 卡片模型):默认只留「摘要 + 拍板」,详情/依据收进「详情 ▾」;
+      安全项(违背/无脑拍)不靠"始终可见"守 —— 靠 decide() 的强制阅读门(展开+确认才拍)。 ── */
+.h2a-chip-slot { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+.h2a-chip-slot:empty { display: none; margin: 0; }
+/* 🧭 楔子的脸:详情折了这句仍可见 —— 系统在长成你(点它直接展开看是哪几条 + 回执) */
+.dcard-aligned-chip {
+  font-size: 12px; line-height: 1.3; padding: 3px 10px; border-radius: 999px;
+  background: var(--accent-soft, rgba(28,181,111,0.12));
+  border: 1px solid var(--accent-line, rgba(28,181,111,0.40));
+  color: var(--accent-strong, #0B6F40); cursor: pointer;
+}
+.dcard-aligned-chip:hover { border-color: var(--accent, #1CB56F); }
+/* 详情 toggle:安静的文字按钮(不是主按钮),点开露出全部依据/复述/核验 */
+.dcard-fold-toggle {
+  align-self: flex-start; background: transparent; border: none;
+  color: var(--text-dim); cursor: pointer; font-size: 12px;
+  padding: 3px 0; margin: 2px 0;
+}
+.dcard-fold-toggle:hover { color: var(--accent-strong, #0B6F40); text-decoration: underline; }
+/* ⚠ 有违背/无脑拍:toggle 变红加粗 —— 折叠是"强制阅读前的提示"不是措手不及(拍时 decide 再弹门) */
+.dcard-fold-toggle.has-attention,
+.dcard-fold-toggle.has-attention:hover { color: var(--danger, #d8527c); font-weight: 600; }
+/* 展开的详情:左侧细线 + 缩进,一眼"这是展开的支撑信息" */
+.dcard-fold {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 4px 0 2px; padding-left: 10px; border-left: 2px solid var(--border);
+}
+
 /* ============ 共享部件:穿梭框 transferList + 分页搜索 pagedList(ui_widgets.ts) ============ */
 .xfer { display: grid; grid-template-columns: 1fr 32px 1fr; gap: 8px; align-items: stretch; margin: 6px 0 10px; }
 .xfer-pane { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); overflow: hidden; }

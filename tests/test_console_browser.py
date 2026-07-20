@@ -305,7 +305,9 @@ def console_with_proposal(tmp_path):
 
 
 def test_decision_card_shows_your_standard_with_receipt(console_with_proposal):
-    """楔子的脸:待决卡上摆出"🧭 你的标准 + 📍 来自你的拍板"回执 —— 渲染崩了楔子就对用户隐形。"""
+    """楔子的脸(docs/90 刀1b 卡片折叠后):详情折起来了,但摘要行留一句**可见 chip**
+    「🧭 已按你 N 条标准对齐」—— 楔子的脸不藏进折叠。点开 chip → 你的标准 + 📍来自你的拍板
+    回执全露出(依据=想深究才点开的下一步)。chip 崩了或点开没回执 = 楔子对用户隐形。"""
     from playwright.sync_api import sync_playwright
 
     found = {}
@@ -314,14 +316,22 @@ def test_decision_card_shows_your_standard_with_receipt(console_with_proposal):
         page = browser.new_page()
         page.goto(console_with_proposal, wait_until="commit", timeout=10000)
         try:
-            page.wait_for_selector(".dcard-pref-receipt", timeout=8000)   # 回执行渲染出来
-            found["receipt_text"] = page.query_selector(".dcard-pref-receipt").inner_text()
+            # 决策卡"双面出"(右栏 #h2a-list + 聊天流内联),各一份折叠 —— 全程限定右栏这张,别串台。
+            # ① 楔子的脸:可见 chip(不展开就能看见"系统在按你的标准对齐")
+            page.wait_for_selector("#h2a-list .dcard-aligned-chip", timeout=8000)
+            found["chip_text"] = page.query_selector("#h2a-list .dcard-aligned-chip").inner_text()
+            # ② 点 chip 展开右栏这张的折叠 → 你的标准 + 回执露出(折叠里的支撑信息,想深究才点)
+            page.click("#h2a-list .dcard-aligned-chip")
+            page.wait_for_selector("#h2a-list .dcard-pref-receipt", timeout=8000)   # 回执渲染 + 展开后可见
+            found["receipt_text"] = page.query_selector("#h2a-list .dcard-pref-receipt").inner_text()
             found["h2a_text"] = page.query_selector("#h2a-list").inner_text()
         except Exception:
-            found["receipt_text"] = ""
+            found.setdefault("chip_text", "")
+            found.setdefault("receipt_text", "")
             found["h2a_text"] = page.query_selector("#h2a-list").inner_text() if page.query_selector("#h2a-list") else "(no #h2a-list)"
         browser.close()
-    assert "没备份" in found.get("receipt_text", ""), f"回执没渲染:{found}"
+    assert "🧭" in found.get("chip_text", ""), f"楔子的脸 chip 没渲染(折叠后它必须可见):{found}"
+    assert "没备份" in found.get("receipt_text", ""), f"回执没渲染(展开后应露出):{found}"
     assert "备份" in found.get("h2a_text", ""), f"标准没摆上卡:{found}"
 
 

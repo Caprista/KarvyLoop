@@ -641,7 +641,8 @@
 
   // 拉一张决策卡并渲染进 container:已核验区(接地✓/✗)/ 小卡复述区(标未核验)/ 逐条认改删。
   // engaged(改或删过任一依据)写回 judgeState —— 决定回喂 + 反投降是否计数。
-  function _renderDecisionCard(container, proposalId, judgeState) {
+  function _renderDecisionCard(container, proposalId, judgeState, ui) {
+    ui = ui || {};
     fetch("/api/decision_card?proposal_id=" + encodeURIComponent(proposalId))
       .then((r) => r.json())
       .then((res) => {
@@ -656,8 +657,10 @@
         const _fresh = !window._dcardSeen.has(proposalId);
         window._dcardSeen.add(proposalId);
         const box = el("div", { class: "dcard" + (c.high_value ? " dcard-highvalue" : "") + (_fresh ? " dcard-in" : "") });
-        // Cut 2 违背即拦:踩了你定的标准 → 拍板**之前**最显眼处标红(带回执,可核"它替我把关")
+        // Cut 2 违背即拦:踩了你定的标准。docs/90 刀1b 起收进折叠,但 decide() ACCEPT 前强制展开+确认
+        // (Hardy「像 App 安全协议强制阅读后才能拍」)—— 存进 judgeState 供那道门读。
         const violations = c.violations || [];
+        judgeState.violations = violations;
         violations.forEach((v) => {
           const vb = el("div", { class: "dcard-violation" });
           vb.appendChild(el("div", { class: "dcard-violation-head",
@@ -725,6 +728,15 @@
               text: t("dcard.aligned_omitted").replace("{n}", String(c.aligned_omitted)) }));
           }
           box.appendChild(el("div", { class: "dcard-aligned-hint", text: t("dcard.aligned_hint") }));
+          // 楔子的脸(Hardy 2026-07-20 拍):详情折叠了,但摘要行留一句**可见** chip「🧭 已按你 N 条标准对齐」
+          // —— 系统在长成你,别藏进折叠;点它直接展开看是哪几条 + 回执。
+          if (ui.chipSlot) {
+            const n = prefs.length + (c.aligned_omitted > 0 ? c.aligned_omitted : 0);
+            const chip = el("button", { class: "dcard-aligned-chip", type: "button",
+              text: t("dcard.aligned_chip", { n: n }),
+              onClick: () => { if (ui.openFold) ui.openFold(); } });
+            ui.chipSlot.appendChild(chip);
+          }
         }
         // unverifiable 卡没有接地依据可 认/改/删 → 给"你的判断依据"输入:你也能真判断,
         // 而且这是喂楔子的**显式(STATE)信号**——救最常见卡(以前它永远拿不到 engaged)。
@@ -739,8 +751,21 @@
         // 中立不推 ACCEPT(后端 system prompt 守)。追问后仍是同一张卡的同一个拍板口(问责单点)。
         box.appendChild(_dcardAsk(proposalId));
         container.appendChild(box);
+        // ⚠ 注意标:有违背 / 无脑拍 streak / 高价值 → 折叠 toggle 变红加「⚠ 有要你确认的」,
+        // 让折叠是「强制阅读前的提示」而非「措手不及」(拍时 decide() 再弹门)。
+        if (ui.foldToggle && (violations.length || c.needs_recheck || c.high_value)) {
+          ui.foldToggle.classList.add("has-attention");
+          if (ui.foldToggle.getAttribute("aria-expanded") !== "true") {
+            ui.foldToggle.textContent = t("dcard.attention") + " · " + t("dcard.details") + " ▾";
+          }
+        }
       })
-      .catch(() => {});   // 拉卡失败不挡拍板(降级到老提案卡)
+      .catch(() => {})   // 拉卡失败不挡拍板(降级到老提案卡)
+      .finally(() => {
+        // ready 必在所有路径 resolve(成功/无卡/报错)—— decide() ACCEPT 等它,绝不永久挂起
+        judgeState.loaded = true;
+        if (judgeState._resolveReady) judgeState._resolveReady();
+      });
   }
 
   // 决策卡的追问区:折叠入口 → 展开输入 + 问答气泡。单飞互斥;失败诚实提示。
@@ -814,6 +839,24 @@
 
   // 真判断了吗:改/删过依据(engaged)或在卡上陈述了判断依据(basis)都算 —— 救 unverifiable 卡。
   function _engagedNow(js) { return !!js.engaged || !!((js.basis || "").trim()); }
+
+  // ACCEPT 前等 decision_card 的 ready(核对你标准回来),但设兜底超时:真卡死也不永久挂住 ACCEPT。
+  // resolve(true)=核对回来了;resolve(false)=超时没等到 —— 调用方**不许静默放行**(fail-loud:
+  // 超时要明着问"不等核对直接拍?"),否则慢 LLM 就成了绕过违背门的通道(对抗验收 B3 实锤过)。
+  function _readyWithin(js, ms) {
+    if (!js || !js.ready || js.loaded) return Promise.resolve(true);
+    let to;
+    const timeout = new Promise((res) => { to = setTimeout(() => res(false), ms); });
+    return Promise.race([js.ready.then(() => true), timeout])
+      .then((ok) => { if (to) clearTimeout(to); return ok || !!js.loaded; });
+  }
+  // 让浏览器先渲染一帧再弹阻塞式 window.confirm(否则 confirm 同步阻塞主线程,刚展开的红 banner 来不及画)。
+  function _nextPaint() {
+    return new Promise((res) => {
+      if (typeof requestAnimationFrame !== "function") { setTimeout(res, 16); return; }
+      requestAnimationFrame(() => requestAnimationFrame(res));
+    });
+  }
 
   // 回喂判断:engaged/basis → /api/decision_card/judge。needs_recheck=true → 反投降轻确认。
   function _judgeDecisionCard(proposalId, decision, judgeState) {
@@ -1141,33 +1184,54 @@
     const card = el("div", { class: "h2a-card" });
     card.setAttribute("data-kind", String(payload.kind || ""));   // #6:按 kind 客户端筛选的数据源
     card.appendChild(el("div", { class: "h2a-summary", text: "💡 " + (payload.summary || t("proposal.no_desc")) }));
-    // ch4 #6.1:拍板必须带决策依据(为什么)—— 否则凭啥拍
+    // ── 卡片折叠(docs/90 刀1b,Hardy 卡片模型):默认只留「摘要 + 拍板」,详情/依据收进「详情 ▾」。
+    //    看懂摘要直接拍;要深究才点开。安全项(违背/无脑拍)不靠"始终可见"守 —— 靠 decide() 的
+    //    强制阅读门(Hardy「像 App 安全协议一样,强制阅读后才能拍」):折叠不损失,安全也不损失。──
+    const chipSlot = el("div", { class: "h2a-chip-slot" });   // 🧭 楔子的脸(可见 chip)由 decision_card 回填
+    card.appendChild(chipSlot);
+    const fold = el("div", { class: "dcard-fold hidden" });
+    const foldToggle = el("button", { class: "dcard-fold-toggle", type: "button",
+      text: t("dcard.details") + " ▾", "aria-expanded": "false" });
+    const _setFold = (open) => {
+      fold.classList.toggle("hidden", !open);
+      foldToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      // ⚠ 注意标(有违背/无脑拍时,decision_card 回填加的 has-attention)在收起态保留
+      const mark = foldToggle.classList.contains("has-attention") ? t("dcard.attention") + " · " : "";
+      foldToggle.textContent = mark + t("dcard.details") + (open ? " ▴" : " ▾");
+    };
+    foldToggle.addEventListener("click", () => _setFold(fold.classList.contains("hidden")));
+    const _openFold = () => { if (fold.classList.contains("hidden")) _setFold(true); };
+    card.appendChild(foldToggle);
+    card.appendChild(fold);
+
+    // ── 以下全部收进折叠(详情/依据),默认不铺在正文 ──
+    // ch4 #6.1:决策依据(为什么)—— 折进"详情",不追不展开、不影响拍板(Hardy 卡片模型:依据=关联)
     if (payload.basis) {
-      card.appendChild(el("div", { class: "h2a-basis" },
+      fold.appendChild(el("div", { class: "h2a-basis" },
         el("span", { class: "h2a-basis-label", text: t("proposal.basis_label") }),
         el("span", { text: payload.basis })));
     }
     // 两张新卡的专属渲染:revise_skill(old/new steps 对照)/ weekly_digest(markdown 周报)
-    _renderProposalKindDetail(card, payload);
+    _renderProposalKindDetail(fold, payload);
     // ch4:上下文跳转 —— 跳进那条任务/对话看全貌再拍
     const ctxRef = payload.context_ref || {};
     if (ctxRef.kind === "task" && ctxRef.id) {
-      card.appendChild(el("button", { class: "h2a-jump", text: t("proposal.jump"),
+      fold.appendChild(el("button", { class: "h2a-jump", text: t("proposal.jump"),
         onClick: () => openTaskById(ctxRef.id) }));
     }
     if (typeof payload.strength === "number") {
-      card.appendChild(el("div", {
+      fold.appendChild(el("div", {
         class: "h2a-strength",
         text: t("proposal.strength", { pct: Math.round(payload.strength * 100) }),
         title: t("proposal.strength.title"),   // 生词审计(docs/85 ⑥):strength 加一句人话解释
       }));
     }
-    // #42 打计费黑箱:"花钱之前告诉你" —— 执行类提案带最近同类任务的真实消耗分布。
+    // #42 打计费黑箱:"花钱之前告诉你" —— 执行类提案带最近同类任务的真实消耗分布(折进详情)。
     // 诚实:样本<3 不显示;数字来自 per-task 归因账本,不是猜的。
     const _COSTLY_KINDS = ["route_to_role", "run_task", "roundtable"];
     if (_COSTLY_KINDS.indexOf(payload.kind) >= 0) {
       const costLine = el("div", { class: "h2a-cost" });
-      card.appendChild(costLine);
+      fold.appendChild(costLine);
       _getTaskCostEstimate().then((est) => {
         if (est && est.n >= 3) {
           costLine.textContent = t("proposal.cost_estimate",
@@ -1179,7 +1243,11 @@
 
     // 决策卡:把执行翻成「你能判断的东西」—— 已核验区(接地✓/✗)与小卡复述区分开,
     // 逐条 认/改/删。改/删过 = engaged(真判断,非 rubber-stamp)。回喂结晶 + 反投降。
-    const judgeState = { engaged: false, edited: [], basis: "" };
+    const judgeState = { engaged: false, edited: [], basis: "", violations: [], loaded: false };
+    // ready:decision_card(核对你标准)回来才 resolve。decide() ACCEPT 前必等它 —— 折叠后违背绝不因
+    // "还没加载完"而漏过强制阅读门(比原来只靠可见 banner 更严)。加载失败/无卡也 resolve(降级不挡拍)。
+    const uiRefs = { chipSlot: chipSlot, foldToggle: foldToggle, openFold: _openFold };
+    judgeState.ready = new Promise((res) => { judgeState._resolveReady = res; });
     // 懒加载(2026-07-13 Hardy 报 LAN 开屏卡):/api/decision_card 建卡含召回 +（有预对齐时）违背 LLM,
     // 单卡 ~1.5s。积压 N 张若开屏全拉 → N 并发把 worker 池 + 限流堵成秒级齐返(实测 39 张→10s)。
     // 改为**卡真滚进视口才建 detail**:收在 dock 里没打开的卡一次都不拉;跑评分离(违背 LLM 只对你在看的
@@ -1191,14 +1259,14 @@
         for (var i = 0; i < ents.length; i++) {
           if (ents[i].isIntersecting) {
             _dcDone = true; _io.disconnect();
-            _renderDecisionCard(card, proposalId, judgeState);
+            _renderDecisionCard(fold, proposalId, judgeState, uiRefs);
             return;
           }
         }
       }, { rootMargin: "300px" });
       _io.observe(card);
     } else {
-      _renderDecisionCard(card, proposalId, judgeState);   // 老浏览器无 IO → 退回即时(不劣化)
+      _renderDecisionCard(fold, proposalId, judgeState, uiRefs);   // 老浏览器无 IO → 退回即时(不劣化)
     }
 
     // #42 优化①「改了再批」:kind→可编辑的"行动文本"字段。你不只认/拒,还能亲手改到该有的样子
@@ -1234,32 +1302,9 @@
       "data-i18n-ph": "proposal.reason_optional",
     });
     reasonInput.placeholder = t("proposal.reason_optional");
-    const decide = (decision) => {
-      // 「改了再批」:改动过 → 随 ACCEPT 带 edits。改过=亲手判断过(最强的 engaged 信号),
-      // 放在逼判断闸**之前**标记 —— 改过的人不该再被闸拦。
-      let _edits = null;
-      if (decision === "ACCEPT" && editArea && editArea.value.trim() &&
-          editArea.value.trim() !== _editSrc.trim()) {
-        _edits = {}; _edits[_editField] = editArea.value.trim();
-        judgeState.engaged = true;
-      }
-      // D2 记忆冲突卡:你选的裁决(keep_old/adopt_new/keep_both)随 ACCEPT 带上 edits.resolution
-      // (「改了再批」白名单式覆盖 payload.resolution 既有字段);选/看过 = 真判断,标 engaged。
-      if (decision === "ACCEPT" && payload.kind === "memory_conflict") {
-        const _res = card.dataset.mcResolution || "keep_both";
-        _edits = _edits || {};
-        _edits.resolution = _res;
-        judgeState.engaged = true;
-      }
-      // 逼判断闸(过度判断=没判断的反面:稀有的高价值/已投降 streak 别被橡皮图章)。
-      // 在**拍之前**拦,取消=不拍;只拦"没真判断过"的 ACCEPT(改/删依据 或 陈述判断依据都算判断过)。
-      if (decision === "ACCEPT" && !_engagedNow(judgeState)) {
-        if (judgeState.highValue &&
-            !window.confirm(t("dcard.hv_confirm", { standard: judgeState.hvStandard || "" }))) return;
-        if (judgeState.needsRecheck && !window.confirm(t("dcard.surrender_confirm"))) return;
-      }
-      // 微动效 P1-3 品位 shake:REJECT 拍下那刻本卡轻微横移抖一次(<300ms 单次,
-      // "收到你的品位信号");reduced-motion 时 CSS 显式 animation:none = 直接无。
+    // 拍板提交(shake→回喂→WS→终态)。从闸门里抽出:ACCEPT 过完强制阅读门再调;DEFER/REJECT 直调。
+    const _commitDecision = (decision, _edits) => {
+      // 微动效 P1-3 品位 shake:REJECT 拍下那刻本卡轻微横移抖一次(reduced-motion 时 CSS 关掉)
       if (decision === "REJECT") {
         card.classList.remove("kv-reject-shake");
         void card.offsetWidth;   // 重启动画(同卡连点不哑)
@@ -1275,6 +1320,45 @@
         if (_edits) msg.edits = _edits;
         sendWS("h2a_decision", msg);
         _finalizeInlineCards(proposalId, decision);   // S3:任一侧拍板,聊天流里的同卡即刻转终态
+      });
+    };
+    const decide = (decision) => {
+      // 「改了再批」:改动过 → 随 ACCEPT 带 edits。改过=亲手判断过(最强 engaged 信号),闸前标记。
+      let _edits = null;
+      if (decision === "ACCEPT" && editArea && editArea.value.trim() &&
+          editArea.value.trim() !== _editSrc.trim()) {
+        _edits = {}; _edits[_editField] = editArea.value.trim();
+        judgeState.engaged = true;
+      }
+      // D2 记忆冲突卡:你选的裁决随 ACCEPT 带上 edits.resolution;选/看过 = 真判断,标 engaged。
+      if (decision === "ACCEPT" && payload.kind === "memory_conflict") {
+        const _res = card.dataset.mcResolution || "keep_both";
+        _edits = _edits || {};
+        _edits.resolution = _res;
+        judgeState.engaged = true;
+      }
+      // DEFER/REJECT 不过闸,直接提交(拒绝一个违背/无脑拍是安全的,不必强制阅读)。
+      if (decision !== "ACCEPT") { _commitDecision(decision, _edits); return; }
+      // ACCEPT:先等"核对你标准"的懒加载回来(≤6s 兜底)—— 卡片折叠后,违背绝不因"还没加载完"而漏过下面的门。
+      _readyWithin(judgeState, 6000).then(async (checked) => {
+        // 超时降级也 fail-loud(对抗验收 B3 补):核对没回来 ≠ 静默放行 —— 明着问,你确认"不等了"才继续。
+        if (!checked && !window.confirm(t("dcard.gate_timeout"))) return;
+        // 强制阅读门①(Hardy「像 App 安全协议:强制阅读后才能拍」):踩了你定的标准 → 展开折叠露出红 banner
+        // + 必须确认才继续(取消=不拍)。总是弹(不受 engaged 影响):违背太重,每次批都要你亲眼确认过。
+        const vios = judgeState.violations || [];
+        if (vios.length) {
+          _openFold();
+          await _nextPaint();   // 让红 banner 先画出来,再弹阻塞式 confirm —— 真"强制阅读",不是盲弹
+          const std = vios.map((v) => "『" + (v.standard || "") + "』" + (v.why ? " — " + v.why : "")).join("\n  ");
+          if (!window.confirm(t("dcard.violation_gate", { standard: std }))) return;
+        }
+        // 逼判断闸②(高价值/无脑拍,仅"没真判断过"时拦):与原逻辑一致(改/删依据 或 陈述判断依据都算判断过)。
+        if (!_engagedNow(judgeState)) {
+          if (judgeState.highValue &&
+              !window.confirm(t("dcard.hv_confirm", { standard: judgeState.hvStandard || "" }))) return;
+          if (judgeState.needsRecheck && !window.confirm(t("dcard.surrender_confirm"))) return;
+        }
+        _commitDecision("ACCEPT", _edits);
       });
     };
     btnRow.appendChild(el("button", { class: "h2a-accept", onClick: () => decide("ACCEPT"), text: t("proposal.accept") }));
