@@ -550,18 +550,19 @@ def test_models_panel_add_uses_guided_picker():
 
 def test_sidebar_nav_three_groups():
     """②(docs/85 IA§1,Hardy 放行):左导航分三组带小标题 ——
-    👥你的团队(domains/roles/atoms/agents/external/devices/pursuits)/ 🧠它学到的你(memory/
+    👥你的团队(domains/roles/atoms/agents/external/devices)/ 🧠它学到的你(memory/
     decision_prefs/skills)/ 🔧引擎室(models/diagnose/files/schedules)。纯挪位:
     data-panel 委托绑定与 desk dock 同构复用(.sidebar .nav-item)零改动。
-    docs/88 第三刀:🎯我的追求进主导航(Hardy 拍本程功能优先)→ 「你的团队」组 14 项。"""
+    docs/88 第三刀曾把 🎯我的追求塞进「你的团队」组(14 项);docs/90 刀1「双入口收一」
+    把它从左导航撤下(第一屏只留决策舱列头的就近入口)→ 现 13 项。"""
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     sidebar = html[html.find('<nav class="sidebar">'):html.find("</nav>")]
     # 三个组标题按序 + 走 i18n
     groups = _re2.findall(r'nav-group-title" data-i18n="([^"]+)"', sidebar)
     assert groups == ["nav.group.team", "nav.group.learned", "nav.group.engine"], groups
-    # 组内成员按序(以 data-panel 出现顺序锁分组;14 项一个不少 —— docs/88 第三刀 pursuits 进团队组)
+    # 组内成员按序(以 data-panel 出现顺序锁分组;13 项 —— docs/90 刀1 把 pursuits 从左导航撤下)
     panels = _re2.findall(r'data-panel="([^"]+)"', sidebar)
-    assert panels == ["domains", "roles", "atoms", "agents", "external", "devices", "pursuits",
+    assert panels == ["domains", "roles", "atoms", "agents", "external", "devices",
                       "memory", "decision_prefs", "skills",
                       "models", "diagnose", "files", "schedules"], panels
     # 每组标题的位置在其成员之前(标题真的领着那一组)

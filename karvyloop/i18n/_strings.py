@@ -906,13 +906,13 @@ _EN = {
         "This goal is paused — “{statement}” is already in your pursuits, waiting on you. "
         "Open My Pursuits and hit Continue to pick it back up (I won't open a second one)."
     ),
-    "pursuit.err.gate_not_dict": "verify_gate must be an object with a type.",
-    "pursuit.err.gate_type": "First cut only supports these verify_gate types: {allowed}.",
-    "pursuit.err.gate_cmd": "test_pass gate needs a non-empty cmd (exit 0 = done).",
-    "pursuit.err.gate_cmd_unsplittable": "test_pass cmd doesn't parse into a runnable command: {cmd}",
-    "pursuit.err.gate_path": "file_exists gate needs a non-empty path.",
+    "pursuit.err.gate_not_dict": "A done-check has to be an object with a type.",
+    "pursuit.err.gate_type": "For now a done-check can only be one of these kinds: {allowed}.",
+    "pursuit.err.gate_cmd": "A test done-check needs a command to run (it's done when the command exits 0).",
+    "pursuit.err.gate_cmd_unsplittable": "That test command doesn't parse into something runnable: {cmd}",
+    "pursuit.err.gate_path": "A file done-check needs the path of the file to watch for.",
     "pursuit.err.gate_path_placeholder": (
-        "file_exists path can't contain {{...}} placeholders (no path templating): {path}"
+        "The file path can't contain {{...}} placeholders (no path templating): {path}"
     ),
     "pursuit.err.no_store": "Pursuit isn't wired (started with --no-llm?).",
     "pursuit.err.not_found": "That pursuit is gone (maybe already finished or dropped).",
@@ -1746,12 +1746,12 @@ _ZH = {
     "pursuit.revise.reason_consecutive_failures": "连续 {n} 轮推进都失败了,先暂停 —— 你来定(继续 / 改方向 / 放弃)",
     "pursuit.triage.duplicate": "已经在追这个了 ——「{statement}」就在你的追求里,不再开第二条。如果这真是个不同的新目标,去「我的追求」面板建。",
     "pursuit.triage.duplicate_paused": "这个目标先前暂停了 ——「{statement}」就在你的追求里、等你拍板。去「我的追求」面板点「继续」把它接着跑起来(不再开第二条)。",
-    "pursuit.err.gate_not_dict": "verify_gate 必须是带 type 的对象。",
-    "pursuit.err.gate_type": "第一刀只支持这几种 verify_gate 类型:{allowed}。",
-    "pursuit.err.gate_cmd": "test_pass 门需要非空的 cmd(退出码 0 = 完成)。",
-    "pursuit.err.gate_cmd_unsplittable": "test_pass 的 cmd 解析不出可执行命令:{cmd}",
-    "pursuit.err.gate_path": "file_exists 门需要非空的 path。",
-    "pursuit.err.gate_path_placeholder": "file_exists 的 path 不能含 {{...}} 占位符(第一刀不做路径模板):{path}",
+    "pursuit.err.gate_not_dict": "完成判据必须是一个带类型的对象。",
+    "pursuit.err.gate_type": "完成判据目前只支持这几种:{allowed}。",
+    "pursuit.err.gate_cmd": "「跑测试」这类完成判据要填一条要跑的命令(命令退出码 0 就算完成)。",
+    "pursuit.err.gate_cmd_unsplittable": "这条要跑的命令解析不出可执行命令:{cmd}",
+    "pursuit.err.gate_path": "「看文件在不在」这类完成判据要填要检查的文件路径。",
+    "pursuit.err.gate_path_placeholder": "文件路径不能含 {{...}} 占位符(暂不支持路径模板):{path}",
     "pursuit.err.no_store": "Pursuit 未接线(--no-llm 启动?)。",
     "pursuit.err.not_found": "这条追求已经不在了(可能刚完成或被放下)。",
     "pursuit.err.terminal_no_resume": "这条追求已经是 {status} 了 —— 没什么可继续的。",

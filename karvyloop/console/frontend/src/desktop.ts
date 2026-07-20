@@ -777,7 +777,7 @@ interface I18n { t: (key: string, vars?: Record<string, unknown>) => string }
     box.textContent = "";
     const head = document.createElement("div");
     head.className = "desk-recent-head";
-    head.textContent = "🧠 " + t("desk.recent_knowledge");
+    head.textContent = "📚 " + t("desk.recent_knowledge");
     box.appendChild(head);
     items.forEach((it) => {
       const card = document.createElement("button");

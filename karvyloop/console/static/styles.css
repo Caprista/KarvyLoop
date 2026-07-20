@@ -696,24 +696,35 @@ html, body {
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 6px;
   overflow-y: auto;
 }
-.nav-group { display: flex; flex-direction: column; gap: 4px; }
+/* docs/90 刀1(层级/图标):把"一级分组"和"二级可点项"从"只差字号"拉成两种截然不同的东西。
+   分组标题 = 安静的区段眉标(小号大写 / 字重轻 / 更淡 / 加字间距 / 上分割线,不可点);
+   面板项 = 带图标 / 正常字重 / 轻微缩进 / hover 高亮的可点行。一眼分清"这是一组"与"组里一个可点项"。 */
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-group + .nav-group {          /* 组间:细分割线 + 上留白 —— 一眼"这是新区段" */
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
 .nav-group-title {
-  font-size: 11px;
+  font-size: 10.5px;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.4px;
   color: var(--text-dim);
-  font-weight: 700;
+  opacity: 0.65;                   /* 更淡:明确"这是区段标题不是按钮" */
+  font-weight: 600;                /* 轻:不再与可点项抢重量(旧 700 太像被强调的项) */
   padding: 0 8px 4px;
+  pointer-events: none;            /* 从交互上也钉死"非按钮":不可点、不可选 */
+  user-select: none;
 }
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 16px;      /* 左缩进:项比分组眉标更靠右,看着"归属这一组" */
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -724,7 +735,8 @@ html, body {
   text-align: left;
 }
 .nav-item:hover { background: var(--surface); border-color: var(--border); }
-.nav-item .nav-ico { width: 18px; text-align: center; opacity: 0.85; }
+/* 固定宽度、居中、满不透明的图标列:emoji 宽度不一也对齐,辨识度拉满(Hardy 点名图标要清晰) */
+.nav-item .nav-ico { width: 20px; flex: 0 0 auto; text-align: center; opacity: 1; font-size: 14px; }
 .nav-item.is-soon { color: var(--text-dim); cursor: not-allowed; opacity: 0.7; }
 .nav-item.is-soon:hover { background: transparent; border-color: transparent; }
 .nav-soon {

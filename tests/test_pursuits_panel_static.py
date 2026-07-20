@@ -1,8 +1,8 @@
 """test_pursuits_panel_static — 🎯「我的追求」Web 面板(Pursuit,docs/88 §7 + 第三刀)静态验收。
 
 锁四件事(纯文件+正则,CI 无浏览器也跑):
-1. 接线三件套:index.html 有 data-panel="pursuits" 入口 —— **左导航第 14 项**(docs/88 第三刀,
-   Hardy 拍本程功能优先;「你的团队」组)+ 决策舱列头就近入口(第二刀落此,并存)+ app.js
+1. 接线三件套:index.html 有 data-panel="pursuits" 入口 —— **只留一个**(docs/90 刀1「双入口收一」:
+   左导航第 14 项已撤下,第一屏只留决策舱/情报列头的就近入口)+ app.js
    _PANEL_SCRIPTS/_panelOpeners 双注册 + 面板脚本真消费 pursuit 端点(列/详情/创建/讲讲);
 2. i18n:面板用到的 pursuit.* 字面键 en/zh 双表齐(AC8 同口径);入口文案走 data-i18n;
 3. 安全:pursuits_panel.js 落 DOM 全走 el()/textContent —— 不许 innerHTML 拼接后端文本
@@ -23,18 +23,16 @@ def _read(name: str) -> str:
 
 # ---- 1. 接线三件套 ----
 
-def test_index_has_pursuits_entry_in_sidebar_and_near():
-    """docs/88 第三刀:pursuits **进左导航第 14 项**(Hardy 拍本程功能优先),同时保留决策舱
-    列头就近入口(常驻导航 + 就近入口并存,和其它面板一致)。"""
+def test_index_has_pursuits_entry_single_near_only():
+    """docs/90 刀1「双入口收一」:第一屏只留**一个**「我的追求」入口 —— 决策舱/情报列头的就近入口
+    (docs/90 S1「我的追求是常驻门」择那个显眼的);左导航项(原 docs/88 第三刀第 14 项)已撤下,
+    消掉"第一屏同词出现两次"。"""
     html = _read("index.html")
     assert 'data-panel="pursuits"' in html, "index.html 缺 pursuits 入口"
-    # ① 左导航里有一项(第 14 项,吃 setupMgmtPanels + desk dock 同构复用的 .sidebar .nav-item[data-panel])
+    # ① 左导航里**不再**有 pursuits(双入口收一,只留就近入口)
     sidebar = html[html.find('<nav class="sidebar">'):html.find("</nav>")]
-    assert 'data-panel="pursuits"' in sidebar, "pursuits 应进左导航(docs/88 第三刀,第 14 项)"
-    side_btn = re.search(r'<button class="nav-item"[^>]*data-panel="pursuits"[^>]*>[\s\S]*?</button>', sidebar)
-    assert side_btn, "侧栏 pursuits 应是 nav-item <button>"
-    assert 'data-i18n="nav.pursuits_side"' in side_btn.group(0), "侧栏入口文案应走 i18n(nav.pursuits_side)"
-    # ② 决策舱列头仍有就近入口(在侧栏之外),带 nav-item 类命中同一套委托绑定
+    assert 'data-panel="pursuits"' not in sidebar, "pursuits 已从左导航撤下(docs/90 刀1 双入口收一)"
+    # ② 决策舱/情报列头仍有就近入口(在侧栏之外),带 nav-item 类命中同一套委托绑定
     outside = html[html.find("</nav>"):]
     m = re.search(r'<button[^>]*data-panel="pursuits"[^>]*>', outside)
     assert m, "决策舱列头就近入口应保留(<button data-panel=pursuits>)"
@@ -99,7 +97,8 @@ def test_pursuit_i18n_keys_en_zh_parity():
     used |= {f"pursuit.st.{s}" for s in ("active", "committed", "revised", "done", "dropped")}
     # 时间线行状态经 t(stKey) 变量分派(docs/88 第三刀 #2)→ 正则抓不到,显式点名
     used |= {f"pursuit.round.{s}" for s in ("running", "error", "done")}
-    used |= {"nav.pursuits", "nav.pursuits.title", "nav.pursuits_side"}   # index.html 入口键(列头 + 侧栏第 14 项)
+    # index.html 就近入口键(列头);nav.pursuits_side 键暂留(刀1 撤下侧栏项后 UI 未用,待刀2 折叠菜单复用)——仍锁 parity
+    used |= {"nav.pursuits", "nav.pursuits.title", "nav.pursuits_side"}
     missing_en = used - en
     missing_zh = used - zh
     assert not missing_en, f"en 表缺 pursuit 键: {sorted(missing_en)}"

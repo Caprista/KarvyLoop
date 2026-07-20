@@ -2747,7 +2747,7 @@
       ? " · " + t("recall.as_of", { date: new Date(asOf * 1000).toLocaleDateString() }) : "";
     const chip = el("button", {
       class: "recall-chip" + (asOfLabel ? " recall-chip-asof" : ""), type: "button",
-      text: "🧠 " + t("recall.used_n", { n: used.length }) + asOfLabel,
+      text: "📚 " + t("recall.used_n", { n: used.length }) + asOfLabel,
       onclick: () => {
         list.classList.toggle("hidden");
         // 展开时把列表滚进视野(chip 常在聊天底部,不滚用户看不见展开了什么)

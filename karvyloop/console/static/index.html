@@ -82,55 +82,56 @@
 
     <!-- 左导航:管理面入口 + 对话控件 + 统计。
          docs/85 IA§1(Hardy 放行):入口按决策者心智分三组 —— 你的团队 / 它学到的你 / 引擎室。
-         docs/88 第三刀(Hardy 拍"本程功能优先"):🎯我的追求进「你的团队」组 → 14 项。
+         docs/88 第三刀曾把 🎯我的追求塞进「你的团队」组(14 项);docs/90 刀1「双入口收一」
+         又把它撤下(第一屏只留决策舱列头的就近入口)→ 现 13 项。
          纯 HTML 挪位:data-panel 委托绑定(setupMgmtPanels)与 desk dock 同构复用
          (.sidebar .nav-item[data-panel])都按 selector 命中,零接线改动。 -->
     <nav class="sidebar">
       <div class="nav-group">
-        <div class="nav-group-title" data-i18n="nav.group.team">👥 Your Team</div>
+        <!-- docs/90 刀1(层级/图标):分组标题去 emoji —— 图标归面板项,标题走纯文字「区段眉标」
+             样式(小号大写/字重轻/更淡/加字间距/上分割线),一眼分清"这是一组"不是可点项。 -->
+        <div class="nav-group-title" data-i18n="nav.group.team">Your Team</div>
         <!-- 界面灌输(docs/85 Part A ④):四个承担教学点的入口挂 tooltip(问责链/开公司/你的标准);
-             tour 刻意不说「原子」—— 原子的教学点就在这里 -->
+             tour 刻意不说「原子」—— 原子的教学点就在这里。
+             docs/90 刀1:每项一个有辨识度、零重复的图标(语义贴功能)。 -->
         <button class="nav-item" data-panel="domains" data-i18n-title="nav.domains.title">
-          <span class="nav-ico">📂</span><span data-i18n="nav.domains">Business Domains</span>
+          <span class="nav-ico">🏢</span><span data-i18n="nav.domains">Business Domains</span>
         </button>
         <button class="nav-item" data-panel="roles" data-i18n-title="nav.roles.title">
-          <span class="nav-ico">◑</span><span data-i18n="nav.roles">Roles</span>
+          <span class="nav-ico">👤</span><span data-i18n="nav.roles">Roles</span>
         </button>
         <button class="nav-item" data-panel="atoms" data-i18n-title="nav.atoms.title">
-          <span class="nav-ico">⬡</span><span data-i18n="nav.atoms">Atom Agents</span>
+          <span class="nav-ico">🧩</span><span data-i18n="nav.atoms">Atom Agents</span>
         </button>
         <button class="nav-item" data-panel="agents">
-          <span class="nav-ico">⊞</span><span data-i18n="nav.agents">External Agents</span>
+          <span class="nav-ico">🤝</span><span data-i18n="nav.agents">External Agents</span>
         </button>
         <button class="nav-item" data-panel="external">
           <span class="nav-ico">🔌</span><span data-i18n="nav.external">External Runtimes</span>
         </button>
         <button class="nav-item" data-panel="devices">
-          <span class="nav-ico">🖥️</span><span data-i18n="nav.devices">My Devices</span>
+          <span class="nav-ico">📱</span><span data-i18n="nav.devices">My Devices</span>
         </button>
-        <!-- 🎯 我的追求进主导航第 14 项(docs/88 第三刀,Hardy 拍"本程功能优先先加,学习曲线专程再收"):
-             你交给系统、跨多天自己推进的长期目标 —— 归"你的团队"(团队替你在追的事)。
-             决策舱列头仍留一个就近入口(常驻导航 + 就近入口并存,和其它面板一致)。 -->
-        <button class="nav-item" data-panel="pursuits" data-i18n-title="nav.pursuits.title">
-          <span class="nav-ico">🎯</span><span data-i18n="nav.pursuits_side">My Pursuits</span>
-        </button>
+        <!-- 🎯 我的追求「双入口收一」(docs/90 刀1,Hardy 拍学习曲线专程):第一屏只留**一个**入口 ——
+             决策舱/情报列头的就近入口(docs/90 S1「我的追求是常驻门」择那个显眼的);左导航项撤下
+             (原 docs/88 第三刀的第 14 项),消掉"第一屏同词出现两次"。nav.pursuits_side 键暂留待刀2 折叠菜单复用。 -->
       </div>
       <div class="nav-group">
-        <div class="nav-group-title" data-i18n="nav.group.learned">🧠 What it's learned about you</div>
+        <div class="nav-group-title" data-i18n="nav.group.learned">What it's learned about you</div>
         <button class="nav-item" data-panel="memory">
-          <span class="nav-ico">🧠</span><span data-i18n="nav.memory">Knowledge</span>
+          <span class="nav-ico">📚</span><span data-i18n="nav.memory">Knowledge</span>
         </button>
         <button class="nav-item" data-panel="decision_prefs" data-i18n-title="nav.decision_prefs.title">
           <span class="nav-ico">🧭</span><span data-i18n="nav.decision_prefs">Decision Preferences</span>
         </button>
         <button class="nav-item" data-panel="skills">
-          <span class="nav-ico">🧩</span><span data-i18n="nav.skills">Skill Library</span>
+          <span class="nav-ico">🧰</span><span data-i18n="nav.skills">Skill Library</span>
         </button>
       </div>
       <div class="nav-group">
-        <div class="nav-group-title" data-i18n="nav.group.engine">🔧 Engine Room</div>
+        <div class="nav-group-title" data-i18n="nav.group.engine">Engine Room</div>
         <button class="nav-item" data-panel="models">
-          <span class="nav-ico">🤖</span><span data-i18n="nav.models">Models (global)</span>
+          <span class="nav-ico">🤖</span><span data-i18n="nav.models">Models (Global)</span>
         </button>
         <button class="nav-item" data-panel="diagnose">
           <span class="nav-ico">🩺</span><span data-i18n="nav.diagnose">Diagnose</span>
@@ -139,7 +140,7 @@
           <span class="nav-ico">📁</span><span data-i18n="nav.files">Files</span>
         </button>
         <button class="nav-item" data-panel="schedules">
-          <span class="nav-ico">⏰</span><span data-i18n="nav.schedules">Scheduled</span>
+          <span class="nav-ico">⏰</span><span data-i18n="nav.schedules">Scheduled Tasks</span>
         </button>
       </div>
 

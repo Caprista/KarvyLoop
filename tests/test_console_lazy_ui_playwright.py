@@ -5,13 +5,13 @@
 
   1. T4 懒加载真验:开机只有 boot-ensure 的 models/tokens 两个面板脚本(meter/setup gate 行为
      不变),其余面板全局 undefined、无 <script id=panel-js-*>;
-  2. 逐个打开全部 14 个左导航面板:脚本按需注入、面板真渲染(mgmt-body 有内容且可见 rect>0)、
+  2. 逐个打开全部 13 个左导航面板:脚本按需注入、面板真渲染(mgmt-body 有内容且可见 rect>0)、
      全程 0 console error / 0 pageerror;
-  3. ② 侧栏三组分组:三个组标题可见(rect>0)、14 项入口都在(docs/88 第三刀:🎯我的追求进主导航);
+  3. ② 侧栏三组分组:三个组标题可见(rect>0)、13 项入口都在(docs/90 刀1:🎯我的追求双入口收一从左导航撤下);
   4. ④ T5 highlight 懒加载:开机无 hljs;真发一条带代码块的消息 → highlight.min.js+CSS 被注入、
      代码块真高亮(hljs span)且可见;
   5. ① CFG-01②:models 面板新增区 = provider 预设选择器(带「高级/自定义」回退);
-  6. 桌面视图正常:dock 14 入口、从 dock 开面板走同一条懒加载路径;
+  6. 桌面视图正常:dock 13 入口、从 dock 开面板走同一条懒加载路径;
   7. 👀 demo 入口(demo_panel 原自绑 → 懒加载后第一击由 app.js 接)仍一击即开、不双开。
 
 截图 3 张(tests/_artifacts/lazy_ui/):分组后侧栏 / 懒加载面板打开态 / models 新增区预设选择器。
@@ -37,9 +37,9 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 _PORT = 8905          # 任务钦点端口
 _SHOTS = os.path.join(os.path.dirname(__file__), "_artifacts", "lazy_ui")
 
-# 14 个左导航面板(= index.html data-panel 顺序 = app.js _PANEL_SCRIPTS nav 批)
-# docs/88 第三刀:🎯 pursuits 进「你的团队」组(Hardy 拍本程功能优先)
-_NAV_PANELS = ["domains", "roles", "atoms", "agents", "external", "devices", "pursuits",
+# 13 个左导航面板(= index.html data-panel 顺序 = app.js _PANEL_SCRIPTS nav 批)
+# docs/90 刀1:🎯 pursuits「双入口收一」从左导航撤下(只留决策舱列头就近入口)→ 侧栏 13 项
+_NAV_PANELS = ["domains", "roles", "atoms", "agents", "external", "devices",
                "memory", "decision_prefs", "skills",
                "models", "diagnose", "files", "schedules"]
 
@@ -148,19 +148,25 @@ def test_lazy_panels_full_regression(console_url):
         assert page.evaluate("window.hljs === undefined"), "开机不该有 hljs(T5 懒加载)"
         assert page.evaluate("document.getElementById('hljs-js') === null")
 
-        # ---- 3) ② 侧栏三组分组:组标题可见、14 项都在 ----
+        # ---- 3) ② 侧栏三组分组:组标题可见、13 项都在 ----
         titles = page.evaluate(
             "[...document.querySelectorAll('.sidebar .nav-group-title')].map((n) => n.textContent.trim())")
-        assert len(titles) == 3 and titles[0].startswith("👥") and titles[1].startswith("🧠") \
-            and titles[2].startswith("🔧"), f"侧栏应是 👥/🧠/🔧 三组小标题,实际 {titles}"
+        # docs/90 刀1(层级/图标):分组标题去 emoji、走纯文字区段眉标(图标归面板项)。
+        # 锁"三组纯文字小标题"不变量(en/zh 两语都认),顺带钉死"不再以 emoji 开头"。
+        _expect_titles = {
+            ("Your Team", "What it's learned about you", "Engine Room"),   # en
+            ("你的团队", "它学到的你", "引擎室"),                              # zh
+        }
+        assert len(titles) == 3 and tuple(titles) in _expect_titles, \
+            f"侧栏应是三组纯文字小标题(docs/90 刀1:分组去 emoji、图标归面板项),实际 {titles}"
         for i in range(1, 4):
             r = _visible_rect(page, f".sidebar .nav-group:nth-of-type({i}) .nav-group-title")
             assert r["w"] > 0 and r["h"] > 0, f"第 {i} 组标题应真可见(rect>0),实际 {r}"
         nav_count = page.evaluate("document.querySelectorAll('.sidebar .nav-item[data-panel]').length")
-        assert nav_count == 14, f"左导航应 14 项,实际 {nav_count}"   # docs/88 第三刀:pursuits 进主导航
+        assert nav_count == 13, f"左导航应 13 项,实际 {nav_count}"   # docs/90 刀1:pursuits 双入口收一从左导航撤下
         page.screenshot(path=os.path.join(_SHOTS, "01-sidebar-groups.png"))
 
-        # ---- 2) 逐个打开全部 14 个面板:脚本注入 + 真渲染 + 0 error ----
+        # ---- 2) 逐个打开全部 13 个面板:脚本注入 + 真渲染 + 0 error ----
         for name in _NAV_PANELS:
             # 上一面板的 modal 蒙层会拦住侧栏点击 → 每轮先关掉;并清掉旧内容,
             # 让"渲染出来了"的等待不吃旧 DOM 的假阳性
@@ -243,12 +249,12 @@ def test_lazy_panels_full_regression(console_url):
         page.wait_for_function(
             "document.getElementById('mgmt-modal').classList.contains('hidden')", timeout=5000)
 
-        # ---- 6) 桌面视图正常:dock 14 入口 + 从 dock 开面板(同一条懒加载路径)----
+        # ---- 6) 桌面视图正常:dock 13 入口 + 从 dock 开面板(同一条懒加载路径)----
         page.click("#view-opt-desk")
         page.wait_for_function("document.body.classList.contains('desk-view')", timeout=5000)
         dock_panels = page.evaluate(
             "document.querySelectorAll('#desk-dock .dock-item[data-panel]').length")
-        assert dock_panels == 14, f"desk dock 应同构复用 14 入口,实际 {dock_panels}"   # docs/88 第三刀:pursuits 进主导航
+        assert dock_panels == 13, f"desk dock 应同构复用 13 入口,实际 {dock_panels}"   # docs/90 刀1:pursuits 双入口收一从左导航撤下
         page.evaluate("document.getElementById('mgmt-body').innerHTML = ''")
         page.click('#desk-dock .dock-item[data-panel="files"]')
         page.wait_for_function(
