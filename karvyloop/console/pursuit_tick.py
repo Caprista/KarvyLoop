@@ -117,7 +117,8 @@ def _advance_sync(app: Any, rec: Any) -> Any:
     tid = None
     if task_reg is not None:
         tid = task_reg.start(who=_owner_display(owner), domain_id=did, role=role,
-                             intent=statement, pursuit_id=rec.id)
+                             intent=statement, pursuit_id=rec.id,
+                             kind="pursuit")   # docs/90 刀3a:显式任务类型(停止按钮按它路由)
 
     from karvyloop.cli.pursuit_loop import pursue
     from karvyloop.cognition.trace import run_scope
@@ -149,7 +150,10 @@ def _advance_sync(app: Any, rec: Any) -> Any:
     outcome = None
     try:
         # per-tick token 归因:这一拍烧的每个 token 记到该 task 名下(成本可查)。
-        with run_scope():
+        # docs/90 刀3a:pursuit 一拍也登 running-run 注册表(本函数已在 to_thread 线程里,
+        # contextvar 穿线程内 asyncio.run 直达 executor)→ /api/task/cancel 能停正跑的一拍。
+        from karvyloop.atoms.abort import abort_scope
+        with abort_scope(tid or ""), run_scope():
             with token_task(tid or ""):
                 outcome = pursue(statement, ml=ml, slow_brain=slow_brain, rk=rk)
     except Exception as e:
@@ -255,7 +259,8 @@ def _complete(app: Any, rec: Any) -> None:
         try:
             receipt = i18n.t("pursuit.receipt.done", statement=rec.pursuit.statement[:60])
             tid = task_reg.start(who=_owner_display(rec.owner), domain_id=rec.domain_id or "l0",
-                                 role="", intent=receipt, pursuit_id=rec.id)
+                                 role="", intent=receipt, pursuit_id=rec.id,
+                                 kind="pursuit")   # docs/90 刀3a(完成回执,即起即落)
             task_reg.finish(tid, result=receipt)
             rec.note_task(tid)
         except Exception as e:

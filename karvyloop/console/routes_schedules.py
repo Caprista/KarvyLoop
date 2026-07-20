@@ -216,15 +216,19 @@ async def fire_schedule(app: Any, t) -> None:
             persona = None
     task_reg = getattr(app.state, "task_registry", None)
     task_id = task_reg.start(who=who, domain_id=(t.target_domain or "l0"),
-                             role=(t.target_role or ""), intent=f"⏰ {t.intent[:120]}") if task_reg else None
+                             role=(t.target_role or ""), intent=f"⏰ {t.intent[:120]}",
+                             kind="schedule") if task_reg else None   # docs/90 刀3a
     try:
         scope = "domain" if t.target_domain and t.target_role else None
         # Step 0(a):你的决策标准在**定时任务**触发时也生效(到点替你做事,标准照管)。
         from karvyloop.console.decision_wire import assemble_governance
         _sched_gov = assemble_governance(app, intent=t.intent, domain=(t.target_domain or ""),
                                          role=(t.target_role or ""))
-        outcome = await _routes.drive_in_tui(t.intent, main_loop, governance=_sched_gov, persona=persona,
-                                             scope=scope, **eff_rk)
+        # docs/90 刀3a:定时触发 run 也登 running-run 注册表 → /api/task/cancel 可停。
+        from karvyloop.atoms.abort import abort_scope as _abort_scope
+        with _abort_scope(task_id or ""):
+            outcome = await _routes.drive_in_tui(t.intent, main_loop, governance=_sched_gov,
+                                                 persona=persona, scope=scope, **eff_rk)
         err = getattr(outcome, "error", "") or ""
         if task_reg and task_id:
             task_reg.finish(task_id, result=(outcome.text or ""), error=err)

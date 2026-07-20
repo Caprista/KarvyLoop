@@ -361,6 +361,7 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
                 domain_id=payload.get("domain_id", "l0"),
                 role=payload.get("role", ""), intent=intent,
                 proposal_id=(getattr(proposal, "proposal_id", "") or ""),  # docs/85:任务↔提案回链(加性)
+                kind="proposal",   # docs/90 刀3a:显式任务类型(停止按钮按它路由)
             )
         try:
             from karvyloop.runtime.main_loop import forge_slow_brain_factory
@@ -384,7 +385,9 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
             # per-task token 归因(#42 成本预估地基):这个任务烧的每个 token 记到它名下
             from karvyloop.llm.token_ledger import token_task
             from karvyloop.coding.checker import verify_and_fix_with_rk, verdict_suffix
-            with token_task(tid or ""):
+            # docs/90 刀3a:proposal 派生重跑也登 running-run 注册表 → /api/task/cancel 可停。
+            from karvyloop.atoms.abort import abort_scope
+            with abort_scope(tid or ""), token_task(tid or ""):
                 checked = verify_and_fix_with_rk(intent, ml=ml, slow_brain=slow_brain, rk=rk)
             result = checked.result
         except Exception as e:

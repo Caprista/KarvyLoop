@@ -2993,14 +2993,24 @@
     if (tk.status === "running" && tk.blocked && tk.last_event) {
       blockedEl = el("div", { class: "task-blocked", text: "⚠ " + t("task.blocked_on", { what: tk.last_event.text || "?" }) });
     }
-    // #54 逃生门:跑起来也能踩刹车 —— 运行中的 workflow/圆桌给"中止"按钮(§0.7:人坐驾驶座)。
+    // docs/90 刀3a:停止是安全网 —— **每条**活任务都有 ⏹ 停止(火灾键秒达,无确认弹窗;
+    // 停错了损失小,任务可重跑)。路由按显式 tk.kind;老记录无 kind → 退回 who 嗅探(旧数据不崩)。
     let abortEl = null;
-    const who = tk.who || "";
-    const isWf = who.indexOf("工作流") >= 0 || who.indexOf("Workflow") >= 0 || who.indexOf("⚙") >= 0;
-    const isRt = who.indexOf("圆桌") >= 0 || who.indexOf("Roundtable") >= 0 || who.indexOf("🎡") >= 0;
-    if (tk.status === "running" && (isWf || isRt)) {
-      abortEl = el("button", { class: "task-abort", text: t("task.abort"),
-        onClick: (e) => { e.stopPropagation(); _abortTask(tk, isWf); } });
+    if (tk.status !== "running") {
+      _cancellingTasks.delete(tk.id);   // 终态到了 → 清本端"正在停"标(防 Set 单页会话缓涨)
+    }
+    if (tk.status === "running") {
+      const who = tk.who || "";
+      const isWf = tk.kind === "workflow" ||
+        (!tk.kind && (who.indexOf("工作流") >= 0 || who.indexOf("Workflow") >= 0 || who.indexOf("⚙") >= 0));
+      const isRt = tk.kind === "roundtable" ||
+        (!tk.kind && (who.indexOf("圆桌") >= 0 || who.indexOf("Roundtable") >= 0 || who.indexOf("🎡") >= 0));
+      const stopping = _cancellingTasks.has(tk.id) ||
+        (tk.last_event && tk.last_event.kind === "cancelling");
+      abortEl = el("button", { class: "task-abort" + (stopping ? " cancelling" : ""),
+        text: stopping ? t("task.stopping") : t("task.stop"),
+        disabled: stopping ? "disabled" : null,
+        onClick: (e) => { e.stopPropagation(); if (!stopping) _abortTask(tk, isWf, isRt); } });
     }
     return el("div", { class: "task-card" + (blockedEl ? " has-blocked" : ""),
       onclick: (e) => { if (e.target && (e.target.classList.contains("task-check") || e.target.classList.contains("task-abort"))) return; openTaskDetail(tk); } },
@@ -3012,14 +3022,30 @@
       (tk.status !== "running" && tk.result) ? el("div", { class: "task-result", text: tk.result }) : null,
       (tk.status !== "running") ? el("div", { class: "task-jump", text: t("task.view_result") }) : null);
   }
-  // #54 逃生门:点"中止" → 打 cancel 端点(workflow 走 /workflow/cancel,圆桌走 /roundtable/cancel)。
-  async function _abortTask(tk, isWf) {
+  // docs/90 刀3a:点 ⏹ 停止 → 按 kind 打对应 cancel 端点(workflow → /workflow/cancel,
+  // 圆桌 → /roundtable/cancel,其余一律通用 /api/task/cancel)。即时反馈:卡转 cancelling 态
+  // (钮变"正在停止…"),终态由既有 task_status WS 推送/轮询刷新。无确认弹窗(火灾键秒达)。
+  const _cancellingTasks = new Set();   // taskId → 已点停(本端即时反馈;终态到了自然出列表)
+  async function _abortTask(tk, isWf, isRt) {
+    _cancellingTasks.add(tk.id);
+    renderTaskBoard(_lastTasks);        // 立即重画:钮转"正在停止…"(不等下一次 poll)
     try {
-      const url = isWf ? "/api/workflow/cancel" : "/api/roundtable/cancel";
-      await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+      const url = isWf ? "/api/workflow/cancel"
+        : (isRt ? "/api/roundtable/cancel" : "/api/task/cancel");
+      const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task_id: tk.id }) });
+      if (!r.ok) {                      // fail-loud:404 等别静默装停了
+        _cancellingTasks.delete(tk.id);
+        pushChatLine("system", "⚠ " + t("task.stop_failed", { who: _localizeWho(tk.who) }));
+        renderTaskBoard(_lastTasks);
+        return;
+      }
       pushChatLine("system", t("task.aborting", { who: _localizeWho(tk.who) }));
-    } catch (e) { pushChatLine("system", "⚠ " + e.message); }
+    } catch (e) {
+      _cancellingTasks.delete(tk.id);
+      pushChatLine("system", "⚠ " + e.message);
+      renderTaskBoard(_lastTasks);
+    }
   }
   // ch4:任务分两象限 —— 跑完的进【流进来的料】,跑着的进【谁在忙】(干完即撤)
   // 微动效 P0-5:轮询整块重建的列表,只给**首次出现**的卡入场(每次重渲都播=群魔乱舞,明禁)

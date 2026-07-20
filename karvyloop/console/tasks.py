@@ -21,12 +21,16 @@ from typing import Callable, Optional
 
 class TaskRecord:
     def __init__(self, task_id: str, who: str, domain_id: str, role: str, intent: str,
-                 proposal_id: str = "", pursuit_id: str = "") -> None:
+                 proposal_id: str = "", pursuit_id: str = "", kind: str = "") -> None:
         self.id = task_id
         self.who = who              # 显示名:"小卡" / 角色名
         self.domain_id = domain_id  # 关联 peer(点回去切聊天)
         self.role = role
         self.intent = intent
+        # docs/90 刀3a:显式任务类型(workflow/roundtable/drive/pursuit/schedule/proposal),
+        # 前端停止按钮按它选 cancel 端点 —— 替代 who 字符串嗅探。加性兼容:老记录无此键 → ""
+        # (前端退回既有 who 嗅探,旧数据不崩)。
+        self.kind = kind or ""
         # docs/85 数据审计缺口:run_task 兑现的任务此前不存 proposal_id → 决策⑥执行段与提案
         # 无键可联。可选回链(加性兼容:老 tasks.json 无此键 → "",一切照旧)。
         self.proposal_id = proposal_id or ""
@@ -60,6 +64,7 @@ class TaskRecord:
             "id": self.id, "who": self.who,
             "domain_id": self.domain_id, "role": self.role,
             "intent": self.intent, "status": self.status,
+            "kind": self.kind,                 # 任务类型(docs/90 刀3a;老记录为 "")
             "result": self.result, "conversation_id": self.conversation_id,
             "trace_id": self.trace_id,
             "proposal_id": self.proposal_id,   # 决策回链(docs/85;老记录为 "")
@@ -91,6 +96,7 @@ class TaskRecord:
         t.trace_id = d.get("trace_id", "") or ""
         t.proposal_id = str(d.get("proposal_id", "") or "")   # 加性兼容:老文件无此键 → ""
         t.pursuit_id = str(d.get("pursuit_id", "") or "")     # 加性兼容:老文件无此键 → ""
+        t.kind = str(d.get("kind", "") or "")                 # 加性兼容(docs/90 刀3a):老文件 → ""
         ev = d.get("events")
         t.events = [e for e in ev if isinstance(e, dict)] if isinstance(ev, list) else []
         # 类型强制(手改坏文件里的字符串时间戳 → 抛 → load_all 丢掉该坏项,不污染前端排序)
@@ -157,9 +163,9 @@ class TaskRegistry:
                 self._by_id[t.id] = t
 
     def start(self, *, who: str, domain_id: str = "l0", role: str = "", intent: str = "",
-              proposal_id: str = "", pursuit_id: str = "") -> str:
+              proposal_id: str = "", pursuit_id: str = "", kind: str = "") -> str:
         t = TaskRecord(uuid.uuid4().hex[:12], who, domain_id, role, intent,
-                       proposal_id=proposal_id, pursuit_id=pursuit_id)
+                       proposal_id=proposal_id, pursuit_id=pursuit_id, kind=kind)
         t.add_event("start", intent)
         if len(self._tasks) == self._tasks.maxlen and self._tasks:
             oldest = self._tasks[-1]

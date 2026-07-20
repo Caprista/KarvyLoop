@@ -193,6 +193,23 @@ def _clear_task_cancelled(app, task_id: str) -> None:
         s.discard(task_id)
 
 
+def _signal_executor_abort(task_id: str) -> bool:
+    """拉响活 executor 的 abort_requested(docs/90 刀3a,经 atoms.abort running-run 注册表)。
+
+    协作旗(_mark_task_cancelled)只在**步/轮边界**生效;这面旗让**正在跑的那一步**
+    (executor 多轮工具循环)也在下一轮循环边界协作式收口 —— 不杀进程,当前 LLM 流式/
+    单个工具调用跑完才停(既有 ABORTED_* 语义)。
+    返回 True=有活 run 接到旗;False=没登记活 run(已跑完 / 未接线路径)——如实上报。
+    """
+    if not task_id:
+        return False
+    try:
+        from karvyloop.atoms.abort import running_runs
+        return running_runs.request_abort(task_id)
+    except Exception:
+        return False   # 拉旗失败不挡协作旗路径(勿让停止按钮 500)
+
+
 def _workflow_run_store(app):
     st = getattr(app.state, "workflow_run_store", None)
     if st is None:

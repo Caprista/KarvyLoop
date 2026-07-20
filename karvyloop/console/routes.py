@@ -48,6 +48,7 @@ from .serializers import (
 from .workflow_engine import (  # P2-e:workflow 引擎已下沉(纯搬移);re-export 保端点与既有 import/monkeypatch 可达
     _mark_task_cancelled,
     _push_step,
+    _signal_executor_abort,
     _workflow_plan_llm,
     _workflow_result_doc,
     _workflow_roles_from_mentions,
@@ -688,7 +689,8 @@ async def api_workflow_run(req: WorkflowRunRequest, request: Request) -> dict[st
 
     task_reg = getattr(app.state, "task_registry", None)
     task_id = (task_reg.start(who="⚙ 工作流", domain_id=peer.domain_id, role="group",
-                              intent=f"⚙ {goal[:120]}") if task_reg is not None else None)
+                              intent=f"⚙ {goal[:120]}", kind="workflow")   # docs/90 刀3a
+               if task_reg is not None else None)
     # #39 ①:持久化执行 —— 登记运行(每步落盘),console 中途崩/重启能 replay 续上
     import uuid as _uuid
     run_id = _uuid.uuid4().hex[:16]
@@ -696,8 +698,12 @@ async def api_workflow_run(req: WorkflowRunRequest, request: Request) -> dict[st
     _workflow_run_store(app).create(run_id, goal=goal, steps=steps, domain_id=peer.domain_id,
                                     task_id=task_id or "")
     try:
-        result = await execute_workflow_durable(app, run_id=run_id, goal=goal, steps=steps,
-                                                governance=governance, task_id=task_id)
+        # docs/90 刀3a:workflow 也登 running-run 注册表 —— cancel 不只"不再起新步",
+        # 正在跑的那步(step 内 drive 的 executor)也在下一轮循环边界协作式收口。
+        from karvyloop.atoms.abort import abort_scope as _abort_scope
+        with _abort_scope(task_id or ""):
+            result = await execute_workflow_durable(app, run_id=run_id, goal=goal, steps=steps,
+                                                    governance=governance, task_id=task_id)
     except Exception as e:
         if task_reg is not None and task_id is not None:
             task_reg.finish(task_id, error=str(e))
@@ -786,6 +792,7 @@ async def api_workflow_cancel(req: WorkflowCancelRequest, request: Request) -> d
     # 双保险:按 task_id 也记中止旗(圆桌无 run store,workflow 借它兜底 durable run 未及时找到的窗口)。
     if req.task_id:
         _mark_task_cancelled(app, req.task_id)
+        _signal_executor_abort(req.task_id)   # docs/90 刀3a:正在跑的步也协作式收口
     return {"ok": bool(ok or req.task_id), "run_id": rid, "cancelled": bool(ok)}
 
 
@@ -797,11 +804,13 @@ async def api_roundtable_cancel(req: WorkflowCancelRequest, request: Request) ->
     if not req.task_id:
         return {"ok": False, "reason": "need_task_id"}
     _mark_task_cancelled(app, req.task_id)
+    _signal_executor_abort(req.task_id)   # docs/90 刀3a:正在发言的成员 drive 也协作式收口
     return {"ok": True, "task_id": req.task_id}
 
 
 # workflow 逃生门端点(pending_resume / resume / discard)已 carve 到 routes_workflow.py
 # (2026-07-11 激活外部 runtime 把 routes.py 顶破 2000 红线 → 拆自包含端点给头寸,路径不变)。
+# docs/90 刀3a:通用停止端点 POST /api/task/cancel 也在 routes_workflow.py(自包含,给头寸)。
 
 
 def _recall_domain(mgr) -> str:
@@ -996,7 +1005,8 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         _role = (getattr(_peer, "role", "") or "") if _peer is not None else ""
         # @ 命中/l0 直聊角色 → 是那个角色在忙(speaker_display 返角色名,私聊小卡/群返 "")
         _who = m_speaker or speaker_display(request.app, mgr) or ("小卡" if _did == "l0" else (_role or "角色"))
-        task_id = task_reg.start(who=_who, domain_id=_did, role=_role, intent=req.intent)
+        task_id = task_reg.start(who=_who, domain_id=_did, role=_role, intent=req.intent,
+                                 kind="drive")   # docs/90 刀3a:显式任务类型(停止按钮按它路由)
 
     # 走 drive_in_tui(asyncio.to_thread 包装,防 R3-async 嵌套)
     try:
@@ -1004,7 +1014,9 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         eff_rk = _rk_model(runtime_kwargs, _model_for_role(request.app, req.mention)) if m_persona is not None else runtime_kwargs
         # per-task token 归因(#42):这轮 drive 烧的每个 token 记到任务名下(成本预估样本)
         from karvyloop.llm.token_ledger import token_task as _token_task
-        with _token_task(task_id or ""):
+        from karvyloop.atoms.abort import abort_scope as _abort_scope
+        # docs/90 刀3a:登进 running-run 注册表 —— /api/task/cancel 拉旗 → executor 下一轮边界停。
+        with _abort_scope(task_id or ""), _token_task(task_id or ""):
             outcome = await drive_in_tui(req.intent, main_loop, ctx=ctx, governance=governance,
                                          persona=persona, scope=eff_scope,
                                          images=_normalize_images(req.images),

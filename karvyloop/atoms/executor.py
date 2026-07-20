@@ -27,6 +27,7 @@ from karvyloop.gateway import GatewayClient, ResolveScope, SystemPrompt
 from karvyloop.capability import Allow as _Allow, Mode as _Mode, PermissionContext as _PC, authorize as _authorize, check
 from karvyloop.schemas import AtomRun, AtomSpec, CapabilityToken
 
+from .abort import current_abort_flag as _current_abort_flag
 from .loop_state import LoopState, Transition
 from .orchestration import ToolResult, ToolUseBlock, run_tools
 from .terminal import Terminal
@@ -280,7 +281,13 @@ async def run(
                 print(f"[executor debug] loop start turn={state.turn_count} "
                       f"msgs={len(state.messages)}",
                       file=_sys_ex.stderr)
-            # 0) 中断检查
+            # 0) 中断检查(docs/90 刀3a:cancel 端点经 abort 注册表拉响 contextvar 旗 →
+            #    这里落到 state.abort_requested,既有收口生效。协作式:本轮跑完才停,不杀进程。
+            #    注意 state 每轮整体替换 —— 外部只握旗(共享可变),不握 LoopState 引用。)
+            if not state.abort_requested:
+                _abort_flag = _current_abort_flag()
+                if _abort_flag is not None and _abort_flag.is_set():
+                    state.abort_requested = True
             if state.abort_requested:
                 final_reason = (Terminal.ABORTED_TOOLS
                                 if state.transition.reason == "ran_tools"

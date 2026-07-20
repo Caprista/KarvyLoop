@@ -688,7 +688,8 @@ async def _execute_roundtable_discussion(app, conversation_id: str,
 
     task_reg = getattr(app.state, "task_registry", None)
     task_id = (task_reg.start(who="🎡 圆桌", domain_id=peer.domain_id, role="group",
-                              intent=f"🎡 {topic[:120]}") if task_reg is not None else None)
+                              intent=f"🎡 {topic[:120]}", kind="roundtable")   # docs/90 刀3a
+               if task_reg is not None else None)
     from karvyloop.karvy.roundtable import run_roundtable_session
 
     from .workflow_engine import _clear_task_cancelled, _is_task_cancelled  # noqa: F401
@@ -698,30 +699,34 @@ async def _execute_roundtable_discussion(app, conversation_id: str,
     # 50+ 大桌:全员上桌(封顶 64,防真·失控),但**并发只 6 路**——别 50 路同时打一把 key 截断。
     _seats = min(len(members), 64)
     _rounds_cap = _effective_max_rounds(st, max_rounds)   # 可配轮数(默认 3;硬夹防烧穿)
-    if members:
-        try:
-            result = await run_roundtable_session(goal, members, member_reply=member_reply,
-                                                  host_moderate=host_moderate,
-                                                  max_rounds=_rounds_cap,
-                                                  max_seats=_seats, concurrency=6,
-                                                  should_cancel=_should_cancel)
-        except Exception as e:
-            if task_reg is not None and task_id is not None:
-                task_reg.finish(task_id, error=str(e))
-            logger.exception(f"[roundtable] 讨论异常: {e}")
-            return {"ok": False, "reason": f"圆桌讨论失败: {e}"}
-    else:
-        # 只有外部客人、无原生 role → 无 role 讨论主线(外部不占决策席);只做客人供稿。
-        result = {"topic": topic, "transcript": [], "rounds": 0,
-                  "converged": False, "conclusion": "", "cancelled": False,
-                  "consensus": None, "dissents": []}
-    # M2 客人供稿席(#71 §7.1):外部公民**不进 role 讨论主线**(不占决策席、不被 record_turn),
-    # 单独派活(走 bridge)拿 untrusted 产出,每条升 external_adopt 采纳门(H2A 才穿来源边界)。
-    # 铁律:外部产出**不直接触发别的 agent**——它不喂进 role 的 member_reply transcript(A2A
-    # Contagion 防御:要接力必经小卡编排 + H2A)。
-    external_supply = await _run_external_guest_supply(
-        app, guests=guests, goal=goal, topic=topic, peer=peer, task_id=task_id,
-        conversation_id=conversation_id, should_cancel=_should_cancel)
+    # docs/90 刀3a:圆桌也登 running-run 注册表 —— cancel 不只"不再起下一轮",
+    # 正在发言的成员 drive(executor 多轮工具循环)也在下一轮循环边界协作式收口。
+    from karvyloop.atoms.abort import abort_scope as _abort_scope
+    with _abort_scope(task_id or ""):
+        if members:
+            try:
+                result = await run_roundtable_session(goal, members, member_reply=member_reply,
+                                                      host_moderate=host_moderate,
+                                                      max_rounds=_rounds_cap,
+                                                      max_seats=_seats, concurrency=6,
+                                                      should_cancel=_should_cancel)
+            except Exception as e:
+                if task_reg is not None and task_id is not None:
+                    task_reg.finish(task_id, error=str(e))
+                logger.exception(f"[roundtable] 讨论异常: {e}")
+                return {"ok": False, "reason": f"圆桌讨论失败: {e}"}
+        else:
+            # 只有外部客人、无原生 role → 无 role 讨论主线(外部不占决策席);只做客人供稿。
+            result = {"topic": topic, "transcript": [], "rounds": 0,
+                      "converged": False, "conclusion": "", "cancelled": False,
+                      "consensus": None, "dissents": []}
+        # M2 客人供稿席(#71 §7.1):外部公民**不进 role 讨论主线**(不占决策席、不被 record_turn),
+        # 单独派活(走 bridge)拿 untrusted 产出,每条升 external_adopt 采纳门(H2A 才穿来源边界)。
+        # 铁律:外部产出**不直接触发别的 agent**——它不喂进 role 的 member_reply transcript(A2A
+        # Contagion 防御:要接力必经小卡编排 + H2A)。
+        external_supply = await _run_external_guest_supply(
+            app, guests=guests, goal=goal, topic=topic, peer=peer, task_id=task_id,
+            conversation_id=conversation_id, should_cancel=_should_cancel)
     result["external_supply"] = external_supply
     result["topic"] = topic
     result["goal"] = goal
