@@ -1682,6 +1682,153 @@ var KarvyDevicesPanelBundle = (function(exports) {
     row.appendChild(btn);
     return row;
   }
+  let _receipt = "";
+  function _fpTail(fp) {
+    const clean = (fp || "").replace(/[^0-9a-zA-Z]/g, "");
+    return clean.slice(-6) || "?";
+  }
+  function _lostBannerInto(body) {
+    body.appendChild(el(
+      "div",
+      { class: "dev-lost-banner" },
+      el(
+        "div",
+        { class: "dev-lost-text" },
+        el("div", { class: "dev-lost-title", text: t("devices.lost.banner_title") }),
+        el("div", { class: "mgmt-hint", text: t("devices.lost.banner_hint") })
+      ),
+      el("button", {
+        class: "dev-lost-jump",
+        text: t("devices.lost.banner_btn"),
+        onclick: () => {
+          const sec = document.getElementById("dev-access-section");
+          if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      })
+    ));
+  }
+  function _accessCard(p, host) {
+    const isShare = p.scope === "read";
+    const label = (p.label || "").trim();
+    const name = label || p.fingerprint || "?";
+    const expected = label || _fpTail(p.fingerprint);
+    const when = p.granted_at ? new Date(p.granted_at * 1e3).toLocaleDateString() : "";
+    const card = el("div", { class: "mgmt-card dev-access-card" });
+    const main = el(
+      "div",
+      { class: "mc-main" },
+      el("div", { class: "mc-name", text: (isShare ? "🤝 " : "📱 ") + name }),
+      el(
+        "div",
+        { class: "mc-meta" },
+        el("span", { class: "mc-tag", text: isShare ? t("devices.access.scope_read") : t("devices.access.scope_full") }),
+        " · ",
+        el("span", { text: t("devices.access.fp", { fp: _fpTail(p.fingerprint) }) }),
+        p.role ? el("span", { text: " · " + t("devices.share.role_bound", { role: p.role }) }) : null,
+        when ? el("span", { text: " · " + t("devices.paired.granted", { d: when }) }) : null
+      )
+    );
+    const revealBtn = el("button", { class: "mc-del dev-revoke-btn", text: t("devices.access.revoke") });
+    card.appendChild(el("div", { class: "dev-access-row" }, main, revealBtn));
+    const input = el("input", {
+      class: "dev-revoke-input",
+      type: "text",
+      placeholder: expected,
+      autocomplete: "off",
+      spellcheck: "false"
+    });
+    const goBtn = el("button", {
+      class: "dev-revoke-go",
+      text: t("devices.access.confirm_go"),
+      disabled: "true"
+    });
+    const cancelBtn = el("button", { class: "dev-revoke-cancel", text: t("devices.access.cancel") });
+    const errLine = el("div", { class: "dev-revoke-error" });
+    errLine.hidden = true;
+    const confirmBox = el(
+      "div",
+      { class: "dev-revoke-confirm" },
+      el("div", { class: "mgmt-hint", text: t("devices.access.confirm_prompt", { name: expected }) }),
+      el("div", { class: "dev-revoke-inputrow" }, input, goBtn, cancelBtn),
+      el("div", { class: "mgmt-hint", text: t("devices.access.confirm_note") }),
+      errLine
+    );
+    confirmBox.hidden = true;
+    card.appendChild(confirmBox);
+    const sync = () => {
+      goBtn.disabled = input.value.trim() !== expected;
+    };
+    input.addEventListener("input", sync);
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !goBtn.disabled) goBtn.click();
+    });
+    revealBtn.addEventListener("click", () => {
+      confirmBox.hidden = !confirmBox.hidden;
+      if (!confirmBox.hidden) {
+        input.value = "";
+        sync();
+        errLine.hidden = true;
+        input.focus();
+      }
+    });
+    cancelBtn.addEventListener("click", () => {
+      confirmBox.hidden = true;
+      input.value = "";
+      sync();
+      errLine.hidden = true;
+    });
+    goBtn.addEventListener("click", async () => {
+      if (input.value.trim() !== expected) return;
+      goBtn.disabled = true;
+      const r = await _postJSON("/api/pair/revoke", { ident: p.fingerprint || p.pub });
+      if (!(r && r.ok && r.data && r.data.ok)) {
+        const reason = r && r.data && r.data.reason ? _tB(String(r.data.reason)) : String(r && r.status || "?");
+        errLine.textContent = t("devices.access.revoke_failed", { reason });
+        errLine.hidden = false;
+        sync();
+        return;
+      }
+      _receipt = t("devices.access.receipt", { name });
+      void render(host);
+    });
+    return card;
+  }
+  async function _accessSection(body) {
+    const sec = el("div", { class: "dev-access-section", id: "dev-access-section" });
+    sec.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.access.title") }));
+    sec.appendChild(el("div", { class: "mgmt-hint", text: t("devices.access.sub") }));
+    if (_receipt) {
+      sec.appendChild(el("div", { class: "dev-revoke-receipt", text: _receipt }));
+      _receipt = "";
+    }
+    let data = null;
+    try {
+      data = await _getJSON("/api/pair/devices");
+    } catch (e) {
+    }
+    if (!data) {
+      sec.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.access.unavailable") }));
+      body.appendChild(sec);
+      return;
+    }
+    if (data.ok === false) {
+      sec.appendChild(el("div", {
+        class: "mgmt-hint ext-boundary",
+        text: data.reason ? _tB(String(data.reason)) : t("devices.access.local_only")
+      }));
+      body.appendChild(sec);
+      return;
+    }
+    const recs = data.devices || [];
+    if (!recs.length) {
+      sec.appendChild(el("div", { class: "mgmt-empty", text: t("devices.access.empty") }));
+    } else {
+      const list = el("div", { class: "mgmt-list" });
+      for (const p of recs) list.appendChild(_accessCard(p, body));
+      sec.appendChild(list);
+    }
+    body.appendChild(sec);
+  }
   async function _removeFlow(d, host) {
     const name = d.label || d.device_id.slice(0, 12) + "…";
     if (!window.confirm(t("devices.confirm_light", { name }))) return;
@@ -1781,6 +1928,39 @@ var KarvyDevicesPanelBundle = (function(exports) {
     card.appendChild(actions);
     return card;
   }
+  async function _meshRosterInto(body) {
+    let data = null;
+    let board = null;
+    try {
+      data = await _getJSON("/api/mesh/devices");
+    } catch (e) {
+    }
+    try {
+      board = await _getJSON("/api/mesh/board");
+    } catch (e) {
+    }
+    const tasksByDev = board && board.tasks_by_device || {};
+    const devices = data && data.devices || [];
+    const det = el("details", { class: "dev-roster" });
+    det.appendChild(el("summary", {
+      class: "dev-roster-summary",
+      text: t("devices.roster.title", { n: devices.length })
+    }));
+    det.appendChild(el("div", { class: "mgmt-hint", text: t("devices.intro") }));
+    det.appendChild(el("div", { class: "mgmt-hint", text: t("devices.roster.hint") }));
+    if (data && data.has_identity === false) {
+      det.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.no_identity") }));
+      det.appendChild(_copyRow("devices.cmd_pair_label", "karvyloop relay-pair"));
+    }
+    if (!devices.length) {
+      det.appendChild(el("div", { class: "mgmt-empty", text: t("devices.empty") }));
+    } else {
+      const list = el("div", { class: "mgmt-list" });
+      for (const d of devices) list.appendChild(_deviceCard(d, body, tasksByDev[d.device_id] || []));
+      det.appendChild(list);
+    }
+    body.appendChild(det);
+  }
   async function _phoneScene(host) {
     const box = el("div", { class: "ext-onboarding" });
     box.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.scene.phone.title") }));
@@ -1805,7 +1985,7 @@ var KarvyDevicesPanelBundle = (function(exports) {
       box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
     }
     await _awayPairInto(box);
-    await _pairedInto(box, host);
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.access.manage_up") }));
     box.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.scene.phone.roadmap") }));
     host.appendChild(box);
   }
@@ -1854,55 +2034,6 @@ var KarvyDevicesPanelBundle = (function(exports) {
     });
     box.appendChild(btn);
     box.appendChild(out);
-  }
-  async function _pairedInto(box, host) {
-    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.title") }));
-    let data = null;
-    try {
-      data = await _getJSON("/api/pair/devices");
-    } catch (e) {
-    }
-    const paired = (data && data.devices || []).filter((p) => p && p.scope !== "read");
-    if (!paired.length) {
-      box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.empty") }));
-      return;
-    }
-    const list = el("div", { class: "mgmt-list" });
-    for (const p of paired) {
-      const when = p.granted_at ? new Date(p.granted_at * 1e3).toLocaleDateString() : "";
-      const card = el(
-        "div",
-        { class: "mgmt-card" },
-        el(
-          "div",
-          { class: "mc-main" },
-          el("div", { class: "mc-name", text: "📱 " + (p.label || p.fingerprint || "?") }),
-          el(
-            "div",
-            { class: "mc-meta" },
-            el("span", { class: "mc-tag", text: p.scope === "read" ? t("devices.paired.scope_read") : t("devices.paired.scope_full") }),
-            when ? " · " + t("devices.paired.granted", { d: when }) : ""
-          )
-        ),
-        el("button", {
-          class: "mc-del",
-          text: t("devices.paired.revoke"),
-          onclick: async () => {
-            if (!window.confirm(t("devices.paired.revoke_confirm", { f: p.fingerprint }))) return;
-            const r = await _postJSON("/api/pair/revoke", { ident: p.fingerprint });
-            if (!(r && r.ok && r.data && r.data.ok)) {
-              window.alert(t("devices.paired.revoke_failed"));
-              return;
-            }
-            const body = host.closest("#mgmt-body");
-            if (body) void render(body);
-          }
-        })
-      );
-      list.appendChild(card);
-    }
-    box.appendChild(list);
-    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.how") }));
   }
   function _pcScene(host) {
     const box = el("div", { class: "ext-onboarding" });
@@ -2022,48 +2153,7 @@ var KarvyDevicesPanelBundle = (function(exports) {
     });
     box.appendChild(btn);
     box.appendChild(out);
-    const shared = (data.devices || []).filter((p) => p && p.scope === "read");
-    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.list_title") }));
-    if (!shared.length) {
-      box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.list_empty") }));
-    } else {
-      const list = el("div", { class: "mgmt-list" });
-      for (const p of shared) {
-        const when = p.granted_at ? new Date(p.granted_at * 1e3).toLocaleDateString() : "";
-        const card = el(
-          "div",
-          { class: "mgmt-card" },
-          el(
-            "div",
-            { class: "mc-main" },
-            el("div", { class: "mc-name", text: "🤝 " + (p.label || p.fingerprint || "?") }),
-            el(
-              "div",
-              { class: "mc-meta" },
-              el("span", { class: "mc-tag", text: t("devices.paired.scope_read") }),
-              " · ",
-              el("span", { text: p.role ? t("devices.share.role_bound", { role: p.role }) : t("devices.share.role_unbound") }),
-              when ? " · " + t("devices.paired.granted", { d: when }) : ""
-            )
-          ),
-          el("button", {
-            class: "mc-del",
-            text: t("devices.paired.revoke"),
-            onclick: async () => {
-              if (!window.confirm(t("devices.share.revoke_confirm", { f: p.fingerprint }))) return;
-              const rr = await _postJSON("/api/pair/revoke", { ident: p.fingerprint });
-              if (!(rr && rr.ok && rr.data && rr.data.ok)) {
-                window.alert(t("devices.paired.revoke_failed"));
-                return;
-              }
-              void render(host);
-            }
-          })
-        );
-        list.appendChild(card);
-      }
-      box.appendChild(list);
-    }
+    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.access.manage_up") }));
     host.appendChild(box);
   }
   function _advancedScene(host) {
@@ -2076,30 +2166,9 @@ var KarvyDevicesPanelBundle = (function(exports) {
   }
   async function render(body) {
     body.innerHTML = "";
-    body.appendChild(el("div", { class: "mgmt-hint", text: t("devices.intro") }));
-    let data = null;
-    let board = null;
-    try {
-      data = await _getJSON("/api/mesh/devices");
-    } catch (e) {
-    }
-    try {
-      board = await _getJSON("/api/mesh/board");
-    } catch (e) {
-    }
-    const tasksByDev = board && board.tasks_by_device || {};
-    const devices = data && data.devices || [];
-    if (data && data.has_identity === false) {
-      body.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.no_identity") }));
-      body.appendChild(_copyRow("devices.cmd_pair_label", "karvyloop relay-pair"));
-    }
-    if (!devices.length) {
-      body.appendChild(el("div", { class: "mgmt-empty", text: t("devices.empty") }));
-    } else {
-      const list = el("div", { class: "mgmt-list" });
-      for (const d of devices) list.appendChild(_deviceCard(d, body, tasksByDev[d.device_id] || []));
-      body.appendChild(list);
-    }
+    _lostBannerInto(body);
+    await _accessSection(body);
+    await _meshRosterInto(body);
     await _phoneScene(body);
     _pcScene(body);
     await _shareScene(body);

@@ -3387,3 +3387,57 @@ body.lite .karvy-fab:hover { filter: drop-shadow(0 2px 5px rgba(142, 95, 60, 0.3
   .karvy-fab,
   .karvy-fab:hover { filter: drop-shadow(0 2px 5px rgba(142, 95, 60, 0.32)); }
 }
+
+/* ---- 🔐 设备面板「Google 安全页」形态(docs/90 刀3b:丢设备低频高紧迫,一页全有) ---- */
+/* 安全横幅:第一屏第一眼「丢了设备?」,按钮滚动直达统一访问列表 */
+.dev-lost-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; margin-bottom: 14px;
+  background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: 10px;
+}
+.dev-lost-title { font-weight: 700; font-size: 14px; }
+.dev-lost-jump {
+  padding: 7px 13px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  font-family: inherit; color: var(--danger); background: var(--surface);
+  border: 1px solid var(--danger); border-radius: 9px;
+}
+.dev-lost-jump:hover { background: var(--danger); color: #fff; }
+.dev-access-section { margin-bottom: 16px; }
+/* 访问卡:块级(卡内要装打字确认区),行内再 flex;吊销钮**常显**(闭眼能摸到)——
+   覆盖 .mgmt-card 悬停才显 .mc-del 的通例(丢设备的人没心情找隐藏按钮) */
+.mgmt-card.dev-access-card { display: block; }
+.dev-access-row { display: flex; align-items: flex-start; gap: 10px; }
+.dev-access-row .mc-main { flex: 1; min-width: 0; }
+.mgmt-card.dev-access-card .mc-del { opacity: 1; }
+/* 打字确认区(卡内展开;display:flex 会盖掉 UA 的 [hidden],显式补一条) */
+.dev-revoke-confirm {
+  margin-top: 10px; padding: 10px 12px; border: 1px solid var(--danger);
+  border-radius: 9px; background: var(--surface-2);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.dev-revoke-confirm[hidden] { display: none; }
+.dev-revoke-inputrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dev-revoke-input {
+  flex: 1; min-width: 140px; padding: 6px 10px; font-size: 13px; font-family: inherit;
+  border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg); color: var(--text);
+}
+.dev-revoke-go {
+  padding: 6px 12px; font-size: 12px; font-weight: 600; border-radius: 7px; cursor: pointer;
+  font-family: inherit; color: #fff; background: var(--danger); border: 1px solid var(--danger);
+}
+.dev-revoke-go:disabled { opacity: .45; cursor: not-allowed; }
+.dev-revoke-cancel {
+  padding: 6px 12px; font-size: 12px; border-radius: 7px; cursor: pointer; font-family: inherit;
+  color: var(--text); background: var(--surface); border: 1px solid var(--border-strong);
+}
+.dev-revoke-receipt {
+  padding: 8px 12px; margin: 6px 0 10px; border-radius: 8px; font-size: 13px;
+  color: var(--green); border: 1px solid var(--green); background: var(--surface-2);
+}
+.dev-revoke-error { color: var(--danger); font-size: 12px; }
+.dev-revoke-error[hidden] { display: none; }
+/* mesh 能力花名册:降级为折叠段(协作规划用;移除记录≠吊销访问) */
+.dev-roster { border: 1px dashed var(--border); border-radius: 10px; padding: 8px 12px; margin: 4px 0 14px; }
+.dev-roster > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-dim); }
+.dev-roster > summary:hover { color: var(--text); }
+.dev-roster[open] > summary { margin-bottom: 8px; }

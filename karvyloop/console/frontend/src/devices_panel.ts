@@ -1,16 +1,17 @@
-/* devices_panel.ts — 🖥️ 我的设备 mesh 面板(docs/74 用户可见面 —— 后端 registry/schedule 的接线)。
- * 后端 /api/mesh/devices 给花名册(能力指纹 + last_seen 在线态 + 本机标记);这里给每台:
- *   - ★ 本机徽标 / 在线状态灯(presence 第一刀 = last_seen 新鲜度)
- *   - 能力 chips(coding/shell/… = feasibility 调度的输入,用户一眼看懂"这台能干什么")
- *   - 任务板折叠列表(GET /api/mesh/board):这台设备板上在跑/排队/中断待接的活 ——
- *     人话三态(排队中 / 在跑·lease 还剩X / ⚠ 中断待接),空板零高度不占地。
- *   - 删除按钮 = **知情删除**(docs/74 §6.2):POST /api/mesh/devices/remove 先探,后端回
- *     requires_confirm + 会永久失去的能力列表 → 弹明确风险确认 → confirm=true 真删(H2A)。
- * ＋「分享给别人」区(docs/73 分享 UI):选角色 → 签 read 分享码(POST /api/pair/issue
- *   {scope:"read",role})→ QR/深链(复用 karvy-pair 实现);已分享列表 + 吊销。管理权=本地:
- *   经隧道后端 403 → 这里隐藏管理面并给一句为什么。
- * ＋添加设备引导(真实 CLI 命令,可复制)＋离家远端访问指引(诚实标注:跨网开网页尚未建成)。
- * 暴露 window.KarvyDevicesPanel.open()。
+/* devices_panel.ts — 🖥️ 我的设备面板(docs/90 刀3b:「Google 账户安全页」形态)。
+ * 丢设备是低频高紧迫场景 —— 一页全有、闭眼能摸到:
+ *   ① 顶部安全横幅「📱 丢了设备?」→ 一键滚到统一访问列表;
+ *   ② 主区 = **能访问你 KarvyLoop 的设备**(/api/pair/devices 合并视图:自有 full + 分享 read),
+ *      每台一张一致的卡(名字/指纹尾6位/scope/授权日期)+ 常显红色「吊销访问」;
+ *      吊销 = **打字确认**(输入设备名;没名字的输指纹尾6位,输对才亮「确认吊销」)——
+ *      不再 window.confirm 一闪而过;成功给可见回执,失败 fail-loud 带原因。
+ *      管理权=本地(docs/74):经隧道后端拒 → 只给一句为什么,不给吊销面。
+ *   ③ mesh 能力花名册**降级为折叠段**(协作规划用):/api/mesh/devices 能力 chips +
+ *      任务板(/api/mesh/board);「移除记录」只删本地 mesh 记录、**不**吊销访问 ——
+ *      两套语义在文案上钉死。移除保留轻 confirm(知情删除,docs/74 §6.2:probe →
+ *      requires_confirm + 永久失去的能力 → confirm=true 真删;is_self 额外警告)。
+ * ＋场景化引导照旧:📱 手机远程访问 / 💻 新电脑入 mesh / 🤝 分享(签码;列表/吊销统一在②)/
+ *   🧭 自建中转。暴露 window.KarvyDevicesPanel.open()。
  */
 import qrcode from "qrcode-generator";
 
@@ -88,7 +89,146 @@ function _copyRow(labelKey: string, cmd: string): HTMLElement {
   return row;
 }
 
+// ============================================================================
+// 🔐 统一访问列表(docs/90 刀3b「Google 安全页」主区)
+// 数据源 = /api/pair/devices 一张表(自有设备 scope=full + 分享窗口 scope=read 合并视图)。
+// 吊销走既有 POST /api/pair/revoke(撤销即断:下一个请求 403,relay/client 回源在线校验),
+// 后端一行不动 —— 这里只是把"真撤访问权"从场景深处提到第一屏。
+// ============================================================================
+
+interface AccessRec {
+  pub: string; fingerprint: string; label: string;
+  scope: string; role: string; granted_at: number;
+}
+
+// 吊销成功的可见回执(破坏性动作纪律):重渲染后在访问列表顶部显示一次。
+let _receipt = "";
+
+// 指纹尾 6 位(fingerprint 形如 ab12-cd34-ef56-7890,剥分隔符取尾):
+// 没起名字的设备,打字确认就输这 6 位 —— 短到能抄,长到不误触。
+function _fpTail(fp: string): string {
+  const clean = (fp || "").replace(/[^0-9a-zA-Z]/g, "");
+  return clean.slice(-6) || "?";
+}
+
+// 📱 丢了设备?—— 安全横幅(第一屏第一眼),按钮滚动直达统一访问列表。
+function _lostBannerInto(body: HTMLElement): void {
+  body.appendChild(el("div", { class: "dev-lost-banner" },
+    el("div", { class: "dev-lost-text" },
+      el("div", { class: "dev-lost-title", text: t("devices.lost.banner_title") }),
+      el("div", { class: "mgmt-hint", text: t("devices.lost.banner_hint") })),
+    el("button", { class: "dev-lost-jump", text: t("devices.lost.banner_btn"),
+      onclick: () => {
+        const sec = document.getElementById("dev-access-section");
+        if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
+      } })));
+}
+
+// 统一「能访问」卡:名字 + 指纹尾6位 + scope + 授权日期,右侧**常显**红色「吊销访问」。
+// 吊销 = 卡内展开打字确认(不新造 modal):输对设备名(没名=指纹尾6位)才亮「确认吊销」;
+// 取消恢复原状;成功 → 重渲染 + 顶部回执;失败 → fail-loud 留在原地带原因重试。
+function _accessCard(p: AccessRec, host: HTMLElement): HTMLElement {
+  const isShare = p.scope === "read";
+  const label = (p.label || "").trim();
+  const name = label || p.fingerprint || "?";
+  const expected = label || _fpTail(p.fingerprint);
+  const when = p.granted_at ? new Date(p.granted_at * 1000).toLocaleDateString() : "";
+  const card = el("div", { class: "mgmt-card dev-access-card" });
+  const main = el("div", { class: "mc-main" },
+    el("div", { class: "mc-name", text: (isShare ? "🤝 " : "📱 ") + name }),
+    el("div", { class: "mc-meta" },
+      el("span", { class: "mc-tag", text: isShare ? t("devices.access.scope_read") : t("devices.access.scope_full") }),
+      " · ",
+      el("span", { text: t("devices.access.fp", { fp: _fpTail(p.fingerprint) }) }),
+      p.role ? el("span", { text: " · " + t("devices.share.role_bound", { role: p.role }) }) : null,
+      when ? el("span", { text: " · " + t("devices.paired.granted", { d: when }) }) : null));
+  const revealBtn = el("button", { class: "mc-del dev-revoke-btn", text: t("devices.access.revoke") }) as HTMLButtonElement;
+  card.appendChild(el("div", { class: "dev-access-row" }, main, revealBtn));
+
+  // —— 打字确认区(docs/90 刀3b 核心):高紧迫不可逆动作,confirm 一闪就点错 ——
+  const input = el("input", { class: "dev-revoke-input", type: "text",
+    placeholder: expected, autocomplete: "off", spellcheck: "false" }) as HTMLInputElement;
+  const goBtn = el("button", { class: "dev-revoke-go", text: t("devices.access.confirm_go"),
+    disabled: "true" }) as HTMLButtonElement;
+  const cancelBtn = el("button", { class: "dev-revoke-cancel", text: t("devices.access.cancel") }) as HTMLButtonElement;
+  const errLine = el("div", { class: "dev-revoke-error" });
+  errLine.hidden = true;
+  const confirmBox = el("div", { class: "dev-revoke-confirm" },
+    el("div", { class: "mgmt-hint", text: t("devices.access.confirm_prompt", { name: expected }) }),
+    el("div", { class: "dev-revoke-inputrow" }, input, goBtn, cancelBtn),
+    el("div", { class: "mgmt-hint", text: t("devices.access.confirm_note") }),
+    errLine);
+  confirmBox.hidden = true;
+  card.appendChild(confirmBox);
+
+  const sync = () => { goBtn.disabled = input.value.trim() !== expected; };
+  input.addEventListener("input", sync);
+  input.addEventListener("keydown", (ev) => {
+    if ((ev as KeyboardEvent).key === "Enter" && !goBtn.disabled) goBtn.click();
+  });
+  revealBtn.addEventListener("click", () => {
+    confirmBox.hidden = !confirmBox.hidden;
+    if (!confirmBox.hidden) { input.value = ""; sync(); errLine.hidden = true; input.focus(); }
+  });
+  cancelBtn.addEventListener("click", () => {     // 取消 = 恢复原状
+    confirmBox.hidden = true; input.value = ""; sync(); errLine.hidden = true;
+  });
+  goBtn.addEventListener("click", async () => {
+    if (input.value.trim() !== expected) return;  // disabled 之外的第二道闸(键盘路径)
+    goBtn.disabled = true;
+    const r = await _postJSON("/api/pair/revoke", { ident: p.fingerprint || p.pub });
+    if (!(r && r.ok && r.data && r.data.ok)) {
+      // fail-loud:吊销失败明说 + 带后端原因,确认区留着让人重试
+      const reason = (r && r.data && r.data.reason) ? _tB(String(r.data.reason)) : String((r && r.status) || "?");
+      errLine.textContent = t("devices.access.revoke_failed", { reason });
+      errLine.hidden = false;
+      sync();
+      return;
+    }
+    _receipt = t("devices.access.receipt", { name });   // 可见回执:吊销即时刷新后置顶显示
+    void render(host);
+  });
+  return card;
+}
+
+// 主区:能访问你 KarvyLoop 的设备(合并视图)。经隧道被拒 → 只给一句为什么(管理权=本地)。
+async function _accessSection(body: HTMLElement): Promise<void> {
+  const sec = el("div", { class: "dev-access-section", id: "dev-access-section" });
+  sec.appendChild(el("div", { class: "mgmt-section-title", text: t("devices.access.title") }));
+  sec.appendChild(el("div", { class: "mgmt-hint", text: t("devices.access.sub") }));
+  if (_receipt) {
+    sec.appendChild(el("div", { class: "dev-revoke-receipt", text: _receipt }));
+    _receipt = "";
+  }
+  let data: any = null;
+  try {
+    data = await _getJSON("/api/pair/devices");
+  } catch (e) { /* 后端不可达 → 诚实空态 */ }
+  if (!data) {
+    sec.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.access.unavailable") }));
+    body.appendChild(sec);
+    return;
+  }
+  if (data.ok === false) {
+    sec.appendChild(el("div", { class: "mgmt-hint ext-boundary",
+      text: (data.reason ? _tB(String(data.reason)) : t("devices.access.local_only")) }));
+    body.appendChild(sec);
+    return;
+  }
+  const recs: AccessRec[] = (data.devices || []) as AccessRec[];
+  if (!recs.length) {
+    sec.appendChild(el("div", { class: "mgmt-empty", text: t("devices.access.empty") }));
+  } else {
+    const list = el("div", { class: "mgmt-list" });
+    for (const p of recs) list.appendChild(_accessCard(p, body));
+    sec.appendChild(list);
+  }
+  body.appendChild(sec);
+}
+
 // 知情删除:先无 confirm 探 → 后端回"会永久失去什么" → 人看着风险拍板 → confirm=true 真删。
+// 注意语义(docs/90 刀3b):这是 mesh 花名册的「移除记录」—— 只删本地能力记录,**不**吊销访问;
+// 真撤访问权在上面的统一列表。轻 confirm 就够(不撤权,别过度仪式);is_self 额外警告保留。
 async function _removeFlow(d: DeviceRec, host: HTMLElement): Promise<void> {
   const name = d.label || d.device_id.slice(0, 12) + "…";
   if (!window.confirm(t("devices.confirm_light", { name }))) return;
@@ -185,6 +325,39 @@ function _deviceCard(d: DeviceRec, host: HTMLElement, boardRows: BoardRow[]): HT
   return card;
 }
 
+// 🕸 mesh 能力花名册(docs/90 刀3b:降级为折叠段)。协作规划用的**记录**:
+// 能力 chips 决定活派给谁;「移除记录」只删本地 mesh 记录、不吊销访问 —— 标题文案钉死语义。
+async function _meshRosterInto(body: HTMLElement): Promise<void> {
+  let data: any = null;
+  let board: any = null;
+  try {
+    data = await _getJSON("/api/mesh/devices");
+  } catch (e) { /* 后端不可达 → 空态 */ }
+  try {
+    board = await _getJSON("/api/mesh/board");
+  } catch (e) { /* 板取不到 → 设备卡不挂任务列表(诚实降级,不臆造) */ }
+  const tasksByDev: Record<string, BoardRow[]> = (board && board.tasks_by_device) || {};
+  const devices: DeviceRec[] = (data && data.devices) || [];
+  const det = el("details", { class: "dev-roster" });
+  det.appendChild(el("summary", { class: "dev-roster-summary",
+    text: t("devices.roster.title", { n: devices.length }) }));
+  det.appendChild(el("div", { class: "mgmt-hint", text: t("devices.intro") }));
+  det.appendChild(el("div", { class: "mgmt-hint", text: t("devices.roster.hint") }));
+  if (data && data.has_identity === false) {
+    // 本机还没有 relay 身份 → 诚实提示怎么生成(没身份就不入册,不是 bug)
+    det.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.no_identity") }));
+    det.appendChild(_copyRow("devices.cmd_pair_label", "karvyloop relay-pair"));
+  }
+  if (!devices.length) {
+    det.appendChild(el("div", { class: "mgmt-empty", text: t("devices.empty") }));
+  } else {
+    const list = el("div", { class: "mgmt-list" });
+    for (const d of devices) list.appendChild(_deviceCard(d, body, tasksByDev[d.device_id] || []));
+    det.appendChild(list);
+  }
+  body.appendChild(det);
+}
+
 // ============================================================================
 // 场景化引导(Hardy 2026-07-13:引导按**用户场景**分,别按机制堆;手机不造轮子——
 // 长远手机=装 APP 入 mesh 同等待遇,网页只是过渡形态)。场景只有两个:
@@ -219,7 +392,8 @@ async function _phoneScene(host: HTMLElement): Promise<void> {
     box.appendChild(_copyRow("devices.qr.url_label", String(data.m)));
   }
   await _awayPairInto(box);
-  await _pairedInto(box, host);
+  // 已授权手机的查看/吊销统一在顶部访问列表(docs/90 刀3b:丢设备一页全有,不再散在场景里)
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.access.manage_up") }));
   box.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.scene.phone.roadmap") }));
   host.appendChild(box);
 }
@@ -267,42 +441,7 @@ async function _awayPairInto(box: HTMLElement): Promise<void> {
   box.appendChild(out);
 }
 
-// 已授权的手机列表(配对身份切片,docs/74)——挂在手机场景里,不再单开一块。
-// 管理面只在本机/局域网可操作;一键吊销 = 那台设备下一个请求就被拒(回源在线校验)。
-async function _pairedInto(box: HTMLElement, host: HTMLElement): Promise<void> {
-  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.title") }));
-  let data: any = null;
-  try {
-    data = await _getJSON("/api/pair/devices");
-  } catch (e) { /* 后端不可达 → 空态 */ }
-  // read 分享码是给**别人**的,列在「分享给别人」区;这里只列自己的设备(full)。
-  const paired: any[] = ((data && data.devices) || []).filter((p: any) => p && p.scope !== "read");
-  if (!paired.length) {
-    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.empty") }));
-    return;
-  }
-  const list = el("div", { class: "mgmt-list" });
-  for (const p of paired) {
-    const when = p.granted_at ? new Date(p.granted_at * 1000).toLocaleDateString() : "";
-    const card = el("div", { class: "mgmt-card" },
-      el("div", { class: "mc-main" },
-        el("div", { class: "mc-name", text: "📱 " + (p.label || p.fingerprint || "?") }),
-        el("div", { class: "mc-meta" },
-          el("span", { class: "mc-tag", text: p.scope === "read" ? t("devices.paired.scope_read") : t("devices.paired.scope_full") }),
-          when ? " · " + t("devices.paired.granted", { d: when }) : "")),
-      el("button", { class: "mc-del", text: t("devices.paired.revoke"),
-        onclick: async () => {
-          if (!window.confirm(t("devices.paired.revoke_confirm", { f: p.fingerprint }))) return;
-          const r = await _postJSON("/api/pair/revoke", { ident: p.fingerprint });
-          if (!(r && r.ok && r.data && r.data.ok)) { window.alert(t("devices.paired.revoke_failed")); return; }
-          const body = host.closest("#mgmt-body") as HTMLElement | null;
-          if (body) void render(body);
-        } }));
-    list.appendChild(card);
-  }
-  box.appendChild(list);
-  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.paired.how") }));
-}
+// (旧 _pairedInto 已并入顶部统一访问列表 —— docs/90 刀3b:已授权手机与分享窗口同一张表。)
 
 // 💻 场景二:新电脑加入 mesh(两步)。①装 runtime:三平台同一条命令(跨平台三平台同发,
 // 差异只在"终端在哪/怎么先有 Python",按 OS 各给一句);②签一次性邀请 → 新设备任何网络执行
@@ -423,33 +562,8 @@ async function _shareScene(host: HTMLElement): Promise<void> {
   });
   box.appendChild(btn);
   box.appendChild(out);
-  // 已分享列表(scope=read;自有设备 full 在手机场景那节)+ 吊销即断
-  const shared: any[] = ((data.devices || []) as any[]).filter((p) => p && p.scope === "read");
-  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.list_title") }));
-  if (!shared.length) {
-    box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.share.list_empty") }));
-  } else {
-    const list = el("div", { class: "mgmt-list" });
-    for (const p of shared) {
-      const when = p.granted_at ? new Date(p.granted_at * 1000).toLocaleDateString() : "";
-      const card = el("div", { class: "mgmt-card" },
-        el("div", { class: "mc-main" },
-          el("div", { class: "mc-name", text: "🤝 " + (p.label || p.fingerprint || "?") }),
-          el("div", { class: "mc-meta" },
-            el("span", { class: "mc-tag", text: t("devices.paired.scope_read") }), " · ",
-            el("span", { text: p.role ? t("devices.share.role_bound", { role: p.role }) : t("devices.share.role_unbound") }),
-            when ? " · " + t("devices.paired.granted", { d: when }) : "")),
-        el("button", { class: "mc-del", text: t("devices.paired.revoke"),
-          onclick: async () => {
-            if (!window.confirm(t("devices.share.revoke_confirm", { f: p.fingerprint }))) return;
-            const rr = await _postJSON("/api/pair/revoke", { ident: p.fingerprint });
-            if (!(rr && rr.ok && rr.data && rr.data.ok)) { window.alert(t("devices.paired.revoke_failed")); return; }
-            void render(host);   // 吊销即断:下一个请求就被拒;重渲染让列表如实收缩
-          } }));
-      list.appendChild(card);
-    }
-    box.appendChild(list);
-  }
+  // 已分享窗口的查看/吊销统一在顶部访问列表(docs/90 刀3b:合并视图,吊销打字确认在那里)
+  box.appendChild(el("div", { class: "mgmt-hint", text: t("devices.access.manage_up") }));
   host.appendChild(box);
 }
 
@@ -463,31 +577,13 @@ function _advancedScene(host: HTMLElement): void {
   host.appendChild(away);
 }
 
+// docs/90 刀3b 页序(Google 安全页形态):安全横幅 → 统一访问列表(真撤权在这)→
+// mesh 花名册折叠段(记录,移除≠吊销)→ 场景化引导(加设备/分享/自建中转)。
 async function render(body: HTMLElement): Promise<void> {
   body.innerHTML = "";
-  body.appendChild(el("div", { class: "mgmt-hint", text: t("devices.intro") }));
-  let data: any = null;
-  let board: any = null;
-  try {
-    data = await _getJSON("/api/mesh/devices");
-  } catch (e) { /* 后端不可达 → 空态 */ }
-  try {
-    board = await _getJSON("/api/mesh/board");
-  } catch (e) { /* 板取不到 → 设备卡不挂任务列表(诚实降级,不臆造) */ }
-  const tasksByDev: Record<string, BoardRow[]> = (board && board.tasks_by_device) || {};
-  const devices: DeviceRec[] = (data && data.devices) || [];
-  if (data && data.has_identity === false) {
-    // 本机还没有 relay 身份 → 诚实提示怎么生成(没身份就不入册,不是 bug)
-    body.appendChild(el("div", { class: "mgmt-hint ext-boundary", text: t("devices.no_identity") }));
-    body.appendChild(_copyRow("devices.cmd_pair_label", "karvyloop relay-pair"));
-  }
-  if (!devices.length) {
-    body.appendChild(el("div", { class: "mgmt-empty", text: t("devices.empty") }));
-  } else {
-    const list = el("div", { class: "mgmt-list" });
-    for (const d of devices) list.appendChild(_deviceCard(d, body, tasksByDev[d.device_id] || []));
-    body.appendChild(list);
-  }
+  _lostBannerInto(body);
+  await _accessSection(body);
+  await _meshRosterInto(body);
   await _phoneScene(body);
   _pcScene(body);
   await _shareScene(body);
