@@ -713,6 +713,9 @@ html, body {
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+/* docs/90 刀2:眉标兼任折叠开关 —— 去 pointer-events:none(刀1a 钉的"非按钮"让位给折叠),
+   但视觉仍是区段眉标:hover 只轻微提亮文字色,**不加**面板项那种背景高亮框;
+   箭头(▾展开/▸收起)贴右端。折/展纯 display 切换,零动画(reduced-motion 天然尊重)。 */
 .nav-group-title {
   font-size: 10.5px;
   text-transform: uppercase;
@@ -721,9 +724,19 @@ html, body {
   opacity: 0.65;                   /* 更淡:明确"这是区段标题不是按钮" */
   font-weight: 600;                /* 轻:不再与可点项抢重量(旧 700 太像被强调的项) */
   padding: 0 8px 4px;
-  pointer-events: none;            /* 从交互上也钉死"非按钮":不可点、不可选 */
   user-select: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;  /* 文案居左、折叠箭头贴右端 */
+  gap: 6px;
 }
+.nav-group-title:hover { opacity: 0.9; }             /* 只提亮文字,不做菜单项式高亮框 */
+.nav-group-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; opacity: 0.9; }
+.nav-fold-arrow { font-size: 9px; opacity: 0.9; flex: 0 0 auto; }
+/* 收起的组:面板项藏掉(仍在 DOM —— desk dock 克隆按 querySelectorAll 命中,不看 display),
+   组标题+箭头常驻,用户知道那里还有一组 */
+.nav-group.is-folded .nav-item { display: none; }
 .nav-item {
   display: flex;
   align-items: center;

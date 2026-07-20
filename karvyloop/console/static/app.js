@@ -2054,6 +2054,38 @@
     });
   }
 
+  // docs/90 刀2:左导航三组可折叠。组标题=折叠开关(role=button + aria-expanded,键盘可达);
+  // 默认态:你的团队+它学到的你 展开、引擎室 收起(docs/90 §C:引擎室整组降 S3 折叠);
+  // 用户折/展记 localStorage(karvyloop_navfold_<group>),重开保持。纯 display 切换零动画。
+  // 收起组的 nav-item 仍在 DOM(display:none 不移除)→ desk dock 克隆(querySelectorAll)不受影响。
+  const _NAVFOLD_DEFAULT = { team: false, learned: false, engine: true };   // true = 收起
+  function setupNavFold() {
+    document.querySelectorAll(".sidebar .nav-group-title[data-fold]").forEach((title) => {
+      const group = title.closest(".nav-group");
+      const name = title.getAttribute("data-fold");
+      if (!group || !name) return;
+      const key = "karvyloop_navfold_" + name;
+      const apply = (folded) => {
+        group.classList.toggle("is-folded", folded);
+        title.setAttribute("aria-expanded", folded ? "false" : "true");
+        const arrow = title.querySelector(".nav-fold-arrow");
+        if (arrow) arrow.textContent = folded ? "▸" : "▾";
+      };
+      let saved = null;
+      try { saved = localStorage.getItem(key); } catch (e) { /* storage 不可用 → 走默认 */ }
+      apply(saved === null ? !!_NAVFOLD_DEFAULT[name] : saved === "1");
+      const toggle = () => {
+        const folded = !group.classList.contains("is-folded");
+        apply(folded);
+        try { localStorage.setItem(key, folded ? "1" : "0"); } catch (e) { /* 记不住也照常折 */ }
+      };
+      title.addEventListener("click", toggle);
+      title.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+      });
+    });
+  }
+
   function renderSnapshot(snap) {
     // Domains
     const domainList = document.getElementById("domain-list");
@@ -4635,6 +4667,7 @@
     // (移除冗余的"🏢 建域"按钮:左导航「业务域」面板已能新建业务域,这个是历史遗产,Hardy)
     // 9.5 #3:左导航管理面(原子库 / 角色库 / 业务域)
     setupMgmtPanels();
+    setupNavFold();   // docs/90 刀2:三组可折叠(默认引擎室收起,localStorage 记选择)
     _wireSkillLifelineEntries();   // 技能库每张技能卡挂「🧬 生命线」入口(观察面板渲染补挂)
     refreshPeers();
     refreshConversations();

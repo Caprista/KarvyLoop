@@ -84,13 +84,22 @@
          docs/85 IA§1(Hardy 放行):入口按决策者心智分三组 —— 你的团队 / 它学到的你 / 引擎室。
          docs/88 第三刀曾把 🎯我的追求塞进「你的团队」组(14 项);docs/90 刀1「双入口收一」
          又把它撤下(第一屏只留决策舱列头的就近入口)→ 现 13 项。
+         docs/90 刀2(菜单收敛):① agents/external 挪进引擎室(§C 打分表 #4/#5:导入外部 agent/
+         接外部 runtime 是稀有配置动作,S3 引擎室折叠);② 三组可折叠 —— 组标题=折叠开关
+         (role=button + aria-expanded,箭头在右端),默认 你的团队+它学到的你 展开、引擎室 收起,
+         用户折/展记 localStorage(karvyloop_navfold_<group>,setupNavFold)。
          纯 HTML 挪位:data-panel 委托绑定(setupMgmtPanels)与 desk dock 同构复用
-         (.sidebar .nav-item[data-panel])都按 selector 命中,零接线改动。 -->
+         (.sidebar .nav-item[data-panel])都按 selector 命中(querySelectorAll 不看 display,
+         收起组的项仍在 DOM → dock 永远全入口),零接线改动。 -->
     <nav class="sidebar">
-      <div class="nav-group">
+      <div class="nav-group" data-navgroup="team">
         <!-- docs/90 刀1(层级/图标):分组标题去 emoji —— 图标归面板项,标题走纯文字「区段眉标」
-             样式(小号大写/字重轻/更淡/加字间距/上分割线),一眼分清"这是一组"不是可点项。 -->
-        <div class="nav-group-title" data-i18n="nav.group.team">Your Team</div>
+             样式(小号大写/字重轻/更淡/加字间距/上分割线)。刀2:眉标兼任折叠开关(可点、
+             键盘可达),但视觉仍是区段眉标 —— hover 只提亮文字,不做菜单项式背景高亮框;
+             文案在子 span(applyStatic 写 textContent,直挂标题会把箭头抹掉)。 -->
+        <div class="nav-group-title" role="button" tabindex="0" aria-expanded="true" data-fold="team">
+          <span data-i18n="nav.group.team">Your Team</span><span class="nav-fold-arrow" aria-hidden="true">▾</span>
+        </div>
         <!-- 界面灌输(docs/85 Part A ④):四个承担教学点的入口挂 tooltip(问责链/开公司/你的标准);
              tour 刻意不说「原子」—— 原子的教学点就在这里。
              docs/90 刀1:每项一个有辨识度、零重复的图标(语义贴功能)。 -->
@@ -103,12 +112,7 @@
         <button class="nav-item" data-panel="atoms" data-i18n-title="nav.atoms.title">
           <span class="nav-ico">🧩</span><span data-i18n="nav.atoms">Atom Agents</span>
         </button>
-        <button class="nav-item" data-panel="agents">
-          <span class="nav-ico">🤝</span><span data-i18n="nav.agents">External Agents</span>
-        </button>
-        <button class="nav-item" data-panel="external">
-          <span class="nav-ico">🔌</span><span data-i18n="nav.external">External Runtimes</span>
-        </button>
+        <!-- devices 暂留「你的团队」:docs/90 刀3 才走安全聚合页(吊销丢失设备,恒定位置) -->
         <button class="nav-item" data-panel="devices">
           <span class="nav-ico">📱</span><span data-i18n="nav.devices">My Devices</span>
         </button>
@@ -116,8 +120,10 @@
              决策舱/情报列头的就近入口(docs/90 S1「我的追求是常驻门」择那个显眼的);左导航项撤下
              (原 docs/88 第三刀的第 14 项),消掉"第一屏同词出现两次"。nav.pursuits_side 键暂留待刀2 折叠菜单复用。 -->
       </div>
-      <div class="nav-group">
-        <div class="nav-group-title" data-i18n="nav.group.learned">What it's learned about you</div>
+      <div class="nav-group" data-navgroup="learned">
+        <div class="nav-group-title" role="button" tabindex="0" aria-expanded="true" data-fold="learned">
+          <span data-i18n="nav.group.learned">What it's learned about you</span><span class="nav-fold-arrow" aria-hidden="true">▾</span>
+        </div>
         <button class="nav-item" data-panel="memory">
           <span class="nav-ico">📚</span><span data-i18n="nav.memory">Knowledge</span>
         </button>
@@ -128,8 +134,19 @@
           <span class="nav-ico">🧰</span><span data-i18n="nav.skills">Skill Library</span>
         </button>
       </div>
-      <div class="nav-group">
-        <div class="nav-group-title" data-i18n="nav.group.engine">Engine Room</div>
+      <div class="nav-group is-folded" data-navgroup="engine">
+        <!-- 引擎室默认收起(docs/90 §C:整组降 S3 折叠;HTML 预置 is-folded 防 JS 前闪一帧全展);
+             组标题+箭头常驻 —— 用户知道那里还有一组 -->
+        <div class="nav-group-title" role="button" tabindex="0" aria-expanded="false" data-fold="engine">
+          <span data-i18n="nav.group.engine">Engine Room</span><span class="nav-fold-arrow" aria-hidden="true">▸</span>
+        </div>
+        <!-- docs/90 刀2:agents/external 从「你的团队」挪来(§C #4/#5,稀有配置动作;组内相对顺序保持) -->
+        <button class="nav-item" data-panel="agents">
+          <span class="nav-ico">🤝</span><span data-i18n="nav.agents">External Agents</span>
+        </button>
+        <button class="nav-item" data-panel="external">
+          <span class="nav-ico">🔌</span><span data-i18n="nav.external">External Runtimes</span>
+        </button>
         <button class="nav-item" data-panel="models">
           <span class="nav-ico">🤖</span><span data-i18n="nav.models">Models (Global)</span>
         </button>
@@ -221,6 +238,10 @@
         <section class="cockpit-col col-decide">
           <h2 class="col-head"><span><span data-i18n="cockpit.decide">⚖ 要我拍什么板</span><span id="decide-count" class="decide-count" hidden></span></span>
             <span class="col-acts">
+              <!-- 🧭 决策偏好就近入口(docs/90 刀2,§C #9:S2 + 决策卡就近入口):拍板列头一个小图标钮,
+                   点开「你的标准」面板;带 nav-item 类吃 setupMgmtPanels 的 data-panel 委托绑定
+                   (同 col-intel 的 My Pursuits 就近入口接法),不喧宾夺主 —— 图标钮不是大字入口。 -->
+              <button id="decision-prefs-open" class="col-act nav-item" data-panel="decision_prefs" data-i18n-title="nav.decision_prefs.near">🧭</button>
               <button id="propose-btn" class="col-act" data-i18n="btn.propose" data-i18n-title="btn.propose.title">🔮</button>
               <button id="rail-zoom-btn" class="col-act" data-i18n-title="rail.zoom.title" aria-label="zoom quadrants">⛶</button>
             </span></h2>

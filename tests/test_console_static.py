@@ -549,32 +549,93 @@ def test_models_panel_add_uses_guided_picker():
 
 
 def test_sidebar_nav_three_groups():
-    """②(docs/85 IA§1,Hardy 放行):左导航分三组带小标题 ——
-    👥你的团队(domains/roles/atoms/agents/external/devices)/ 🧠它学到的你(memory/
-    decision_prefs/skills)/ 🔧引擎室(models/diagnose/files/schedules)。纯挪位:
+    """②(docs/85 IA§1,Hardy 放行)+ docs/90 刀2 分组挪位:左导航分三组带小标题 ——
+    👥你的团队(domains/roles/atoms/devices;devices 暂留,刀3 才走安全聚合页)/
+    🧠它学到的你(memory/decision_prefs/skills)/ 🔧引擎室(agents/external/models/
+    diagnose/files/schedules —— docs/90 §C 打分表 #4/#5:导入外部 agent、接外部 runtime
+    是稀有配置动作,从「你的团队」挪进引擎室;组内相对顺序保持)。纯挪位:
     data-panel 委托绑定与 desk dock 同构复用(.sidebar .nav-item)零改动。
     docs/88 第三刀曾把 🎯我的追求塞进「你的团队」组(14 项);docs/90 刀1「双入口收一」
     把它从左导航撤下(第一屏只留决策舱列头的就近入口)→ 现 13 项。"""
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     sidebar = html[html.find('<nav class="sidebar">'):html.find("</nav>")]
-    # 三个组标题按序 + 走 i18n
-    groups = _re2.findall(r'nav-group-title" data-i18n="([^"]+)"', sidebar)
+    # 三个组标题按序 + 走 i18n(docs/90 刀2:标题文案挪进子 span —— applyStatic 写 textContent,
+    # data-i18n 直挂标题 div 会把折叠箭头抹掉)
+    groups = _re2.findall(r'nav-group-title"[^>]*>\s*<span data-i18n="([^"]+)"', sidebar)
     assert groups == ["nav.group.team", "nav.group.learned", "nav.group.engine"], groups
     # 组内成员按序(以 data-panel 出现顺序锁分组;13 项 —— docs/90 刀1 把 pursuits 从左导航撤下)
     panels = _re2.findall(r'data-panel="([^"]+)"', sidebar)
-    assert panels == ["domains", "roles", "atoms", "agents", "external", "devices",
-                      "memory", "decision_prefs", "skills",
-                      "models", "diagnose", "files", "schedules"], panels
+    assert panels == ["domains", "roles", "atoms", "devices",          # 你的团队(docs/90 刀2)
+                      "memory", "decision_prefs", "skills",            # 它学到的你
+                      "agents", "external", "models",                  # 引擎室(agents/external 挪入)
+                      "diagnose", "files", "schedules"], panels
     # 每组标题的位置在其成员之前(标题真的领着那一组)
     i_team = sidebar.find("nav.group.team"); i_learned = sidebar.find("nav.group.learned")
     i_engine = sidebar.find("nav.group.engine")
     assert i_team < sidebar.find('data-panel="domains"') < i_learned
     assert i_learned < sidebar.find('data-panel="memory"') < i_engine
-    assert i_engine < sidebar.find('data-panel="models"')
+    assert i_engine < sidebar.find('data-panel="agents"')
     # i18n en+zh 各一份
     i18n = (STATIC_DIR / "i18n.js").read_text(encoding="utf-8")
     for k in ("nav.group.team", "nav.group.learned", "nav.group.engine"):
         assert i18n.count(f'"{k}"') == 2, f"{k} 必须 en+zh 各一份"
+
+
+def test_sidebar_nav_groups_foldable():
+    """docs/90 刀2:三组可折叠 —— 组标题=折叠开关(role=button + tabindex,键盘可达),
+    默认 你的团队+它学到的你 展开、引擎室 收起(§C:引擎室整组降 S3 折叠);
+    折/展记 localStorage(karvyloop_navfold_<group>),重开保持。
+    收起组的 nav-item 走 display:none **不移除**(desk dock 克隆按 querySelectorAll 命中 →
+    dock 永远全入口)。视觉纪律(与刀1a 调和):标题仍是区段眉标 —— hover 只轻微提亮文字,
+    不加面板项那种背景高亮框。"""
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    sidebar = html[html.find('<nav class="sidebar">'):html.find("</nav>")]
+    # ① 三个折叠开关按序,键盘可达(role=button + tabindex),默认 aria-expanded:展开/展开/收起
+    toggles = _re2.findall(
+        r'<div class="nav-group-title" role="button" tabindex="0" aria-expanded="([^"]+)" data-fold="([^"]+)"',
+        sidebar)
+    assert toggles == [("true", "team"), ("true", "learned"), ("false", "engine")], toggles
+    # ② 每个标题右端有折叠箭头(常驻:收起的组也留标题+箭头,用户知道那里还有一组)
+    assert sidebar.count('class="nav-fold-arrow"') == 3
+    # ③ 引擎室 HTML 预置 is-folded(默认收起,防 JS 起来前闪一帧全展)
+    assert _re2.search(r'<div class="nav-group is-folded" data-navgroup="engine"', sidebar)
+    # ④ app.js:setupNavFold 接线 + 默认态表(engine: true=收起)+ localStorage 键
+    app_js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "function setupNavFold" in app_js and "setupNavFold();" in app_js
+    assert '"karvyloop_navfold_" + name' in app_js, "折/展选择必须记 localStorage(karvyloop_navfold_<group>)"
+    assert _re2.search(r"_NAVFOLD_DEFAULT\s*=\s*\{\s*team:\s*false,\s*learned:\s*false,\s*engine:\s*true\s*\}",
+                       app_js), "默认态:你的团队+它学到的你 展开,引擎室 收起"
+    assert 'aria-expanded' in app_js and '"keydown"' in app_js, "键盘可达(Enter/Space 触发 + aria-expanded)"
+    # ⑤ CSS:收起 = display:none(项仍在 DOM);标题可点但 hover 不加背景高亮框
+    css = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+    assert _re2.search(r"\.nav-group\.is-folded \.nav-item\s*\{\s*display:\s*none;\s*\}", css)
+    title_block = css.split(".nav-group-title {")[1].split("}")[0]
+    assert "pointer-events: none" not in title_block, "刀2:眉标兼任折叠开关,pointer-events:none 必须去掉"
+    assert "cursor: pointer" in title_block, "眉标现在可点(折叠开关)"
+    m = _re2.search(r"\.nav-group-title:hover\s*\{([^}]*)\}", css)
+    assert m and "background" not in m.group(1), "hover 只提亮文字色,不加面板项式背景高亮框"
+
+
+def test_decision_prefs_near_entry():
+    """docs/90 刀2(§C #9:S2 + 决策卡就近入口):⚖ 拍板列头一个小图标钮(🧭)就近开
+    「决策偏好/你的标准」面板 —— 带 nav-item 类吃 setupMgmtPanels 的 data-panel 委托绑定
+    (同 col-intel 的 My Pursuits 就近入口接法,零新接线);title 走 i18n 新键
+    nav.decision_prefs.near(小图标钮不喧宾夺主,不是大字入口)。"""
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    # 在 ⚖ col-decide 的列头动作簇里(侧栏之外;切片终点用完整 section class,
+    # 别用裸 "col-intel" —— 注释里点它会提前截断)
+    decide = html[html.find('class="cockpit-col col-decide"'):html.find('class="cockpit-col col-intel"')]
+    m = _re2.search(r'<button id="decision-prefs-open"[^>]*>', decide)
+    assert m, "⚖ 列头缺 🧭 决策偏好就近入口"
+    btn = m.group(0)
+    assert 'data-panel="decision_prefs"' in btn, "必须走同一 data-panel 委托绑定"
+    assert "nav-item" in btn and "col-act" in btn, "带 nav-item 类命中委托绑定 + col-act 收成小图标钮"
+    assert 'data-i18n-title="nav.decision_prefs.near"' in btn, "title 走 i18n(nav.decision_prefs.near)"
+    # i18n en+zh 各一份(static 构建产物 + TS 源同步)
+    i18n = (STATIC_DIR / "i18n.js").read_text(encoding="utf-8")
+    assert i18n.count('"nav.decision_prefs.near"') == 2, "nav.decision_prefs.near 必须 en+zh 各一份"
+    ts = (FRONTEND_SRC / "i18n.ts").read_text(encoding="utf-8")
+    assert ts.count('"nav.decision_prefs.near"') == 2, "frontend/src/i18n.ts 也要 en+zh 同步"
 
 
 _LAZY_PANEL_SCRIPTS = [   # T4 懒加载批(与 app.js _PANEL_SCRIPTS 一一对应)
