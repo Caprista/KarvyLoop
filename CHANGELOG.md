@@ -11,15 +11,53 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.7.20] — 2026-07-20
+
+The learning-curve release: the interface got simpler to read, every running task got a stop
+button, losing a device got a one-page answer, and Karvy learned to suggest automation at the
+right moment — plus the security wave (unified untrusted-content fence, memory-authority
+protection) that landed alongside it.
+
 ### Added
+- **Every running task now has a ⏹ Stop button.** Previously only workflows and roundtables
+  could be stopped; direct chats, pursuit rounds, scheduled runs and proposal-driven tasks
+  couldn't. Now every live task card carries a stop control — no confirmation dialog (stopping
+  is safe; a task can always be rerun), immediate "stopping…" feedback, and the interruption
+  reaches inside the running agent (it stops at the next step boundary instead of running to
+  the end). Stopping never kills the process mid-write.
+- **Lost a device? One page, one motion.** The My Devices panel is now shaped like a security
+  page: a "Lost a device?" banner up top, one unified list of everything that can access your
+  KarvyLoop (your own devices and read-only shares alike), and a consistent red "Revoke
+  access" on each entry. Revoking now asks you to **type the device's name** to confirm —
+  and takes effect on that device's very next request. The capability roster (which never
+  granted access in the first place) is folded below and clearly labeled so the two can't be
+  confused.
+- **Karvy now notices when you repeat yourself.** Run the same kind of task by hand twice and
+  a gentle suggestion appears: "you've done this twice — want it on a schedule?" Accepting
+  doesn't guess the timing for you — it hands the task to schedule setup where you say how
+  often. It suggests each thing at most once ever, stays silent if a schedule already covers
+  it, and small talk never triggers it. Detection is fully deterministic — no model call.
 - **A pursuit can move to another of your devices without starting over.** A goal you've
   committed to is now visible across your devices; if the device running it drops offline,
   another of your devices offers to take it over — you accept with one tap, and it picks up
   from where the last one left off (rounds already done are carried over, so a device swap
   can't quietly reset a goal's safety budget). Only one device runs a goal at a time, and
   taking over is always your call — never automatic.
+- **Decision cards now fold.** A card shows its title, a one-line summary, a visible chip
+  when it's been pre-aligned to your standards ("🧭 aligned to N of your standards"), and the
+  approve/later/reject buttons — everything else (reasoning, verification details, cost
+  estimates) folds behind "Details". Safety didn't move into the fold: if a proposal steps on
+  a standard you set, approving it force-opens the warning and requires an explicit confirm —
+  read-then-approve, like a security agreement. If the standards check hasn't loaded yet,
+  approval waits for it (and tells you honestly if it times out, instead of skipping the check).
 
 ### Changed
+- **The sidebar reads as three groups, and the engine room stays out of the way.** Group
+  titles are now quiet section labels (not button look-alikes), every panel has its own
+  distinct icon (no more two-things-one-icon), and each group folds — the Engine Room
+  (models, diagnostics, files, scheduled tasks, external agents/runtimes) starts collapsed,
+  so the first screen shows only what a decision-maker touches. Your fold/unfold choices are
+  remembered. Labels got un-truncated too ("Scheduled" → "Scheduled Tasks").
 - **Untrusted content is now consistently treated as data, not instructions.** Text that
   comes from outside — web pages you fetch, results from third-party tools (MCP), and output
   passed between agents — is wrapped so the model reads it as reference material but won't
@@ -32,8 +70,14 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   and a lone-holdout rule, so one contrarian can't stall it forever), and a conclusion that
   would change shared knowledge — or that carries unresolved disagreement — is raised as a
   decision card for your call before it's recorded, rather than written automatically.
+- **Pursuit error messages speak plainly** ("a done-check needs a command to run" instead of
+  internal terms like `verify_gate`/`test_pass`), and My Pursuits no longer appears twice on
+  the first screen — one entry, next to where decisions happen.
 
 ### Fixed
+- **The floating Karvy button no longer covers the "You might want to" text** in chat view
+  (the chat is already front and center there; the button remains on the desk view and
+  mobile, where it's the entry point).
 - **Declining a "keep going?" prompt on a paused goal now tells you what actually happened**
   (the goal resumed / the record was cleared) instead of a bare "rejected".
 - **What you explicitly asked to remember can no longer be overwritten behind your back.**
