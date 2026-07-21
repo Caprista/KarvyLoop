@@ -971,6 +971,23 @@ _EN = {
         "see images, add `image` to its `input_modalities` in the model config.)"
     ),
     # D② drive 聊天路径 provider 错误人话化(人话在前,真因原文在后 —— fail-loud 不丢真因)
+    "config.external_reloaded": (
+        "Your model config was changed outside this console (CLI/editor) — reloaded it just now. "
+        "If that change was a mistake, check Models (Global)."
+    ),
+    "config.external_reload_failed": (
+        "Your model config was changed outside this console (CLI/editor), but the new config "
+        "doesn't load: {reason} — chat may fail until it's fixed in Models (Global)."
+    ),
+    "task.err.infra_dead": (
+        "⚠ Model service unavailable (model/network/sandbox couldn't be reached) — this isn't the "
+        "task's fault. Check Models (Global) and your network, then rerun."
+    ),
+    "task.err.max_turns": "⚠ Hit the per-run step limit before finishing — rerun to continue.",
+    "task.err.blocking_limit": "⚠ Token/cost budget ran out before finishing — raise the budget or rerun.",
+    "task.err.circuit_open": "⚠ Stopped after repeated failures — something's stuck; take a look, then rerun.",
+    "task.err.aborted": "⚠ Interrupted — the result may be incomplete.",
+    "task.err.hook_stopped": "⚠ Stopped by a rule/hook.",
     "drive.err.bad_key": (
         "The model provider rejected the credentials (401/403) — check the API key in your "
         "model settings. (cause: {cause})"
@@ -1859,6 +1876,25 @@ _ZH = {
         "(附了 {n} 张图,但当前模型 {model} 看不了图(它的配置声明只收文本)—— 文字我照常处理。"
         "要用图,换一个支持视觉的模型;若这个模型其实能看图,在模型配置的 `input_modalities` 里补上 `image`。)"
     ),
+    # 配置外改检测(内测实拍:终端+WebUI 双写 config,坏配置潜伏到重启才炸)
+    "config.external_reloaded": (
+        "检测到模型配置在本控制台之外被修改(终端/编辑器)—— 已重新加载。"
+        "如果那次修改不是你想要的,去「模型(全局)」检查。"
+    ),
+    "config.external_reload_failed": (
+        "检测到模型配置在本控制台之外被修改(终端/编辑器),但新配置加载失败:{reason} —— "
+        "修好之前聊天可能会失败,去「模型(全局)」处理。"
+    ),
+    # 任务失败咽喉人话化(内测实拍:聊天气泡糊「✗ infra_dead」裸码)
+    "task.err.infra_dead": (
+        "⚠ 模型服务不可用(模型/网络/沙箱调不通)—— 这不是任务本身的问题。"
+        "去「模型(全局)」检查配置和网络,然后重跑。"
+    ),
+    "task.err.max_turns": "⚠ 达到单次执行步数上限,没做完 —— 重跑可继续。",
+    "task.err.blocking_limit": "⚠ token/成本预算用尽,没做完 —— 调高预算或重跑。",
+    "task.err.circuit_open": "⚠ 连续失败触发断路,已停下 —— 看看哪步卡住了再重跑。",
+    "task.err.aborted": "⚠ 执行被中断,结果可能不完整。",
+    "task.err.hook_stopped": "⚠ 被规则/钩子拦下停止。",
     # D② drive 聊天路径 provider 错误人话化(人话在前,真因原文在后 —— fail-loud 不丢真因)
     "drive.err.bad_key": (
         "模型服务拒绝了密钥(401/403)—— 检查模型配置里的 API key。(真因: {cause})"

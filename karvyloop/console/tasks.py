@@ -19,6 +19,27 @@ from pathlib import Path
 from typing import Callable, Optional
 
 
+def _humanize_bare_terminal(error: str) -> str:
+    """error 咽喉的人话闸(内测实拍:聊天气泡直接糊「✗ infra_dead」)。
+
+    上游任何路径把**裸终态码**(atoms.Terminal 的机器值,如 infra_dead/max_turns)当 error
+    传进来 → 在这唯一咽喉翻成人话再落盘/上屏;非裸码(已是人话/真异常信息)原样过。
+    只匹配"整串就是终态码"——绝不动包含上下文的真错误文本。"""
+    e = (error or "").strip()
+    if not e:
+        return error
+    code = e.lstrip("✗✘×xX ").strip()
+    _KEYS = {"infra_dead": "task.err.infra_dead", "max_turns": "task.err.max_turns",
+             "blocking_limit": "task.err.blocking_limit", "circuit_open": "task.err.circuit_open",
+             "aborted_streaming": "task.err.aborted", "aborted_tools": "task.err.aborted",
+             "hook_stopped": "task.err.hook_stopped"}
+    key = _KEYS.get(code)
+    if key is None:
+        return error
+    from karvyloop import i18n as _i18n
+    return _i18n.t(key)
+
+
 class TaskRecord:
     def __init__(self, task_id: str, who: str, domain_id: str, role: str, intent: str,
                  proposal_id: str = "", pursuit_id: str = "", kind: str = "") -> None:
@@ -181,6 +202,7 @@ class TaskRegistry:
         if t is None:
             return
         t.status = "error" if error else "done"
+        error = _humanize_bare_terminal(error)   # 咽喉人话化:裸终态码绝不糊到用户脸上(内测实拍 ✗ infra_dead)
         full = (error or result or "")
         t.result_full = full[:16000]   # 结果文档(封顶防爆)
         t.result = full[:280]          # 卡片摘要

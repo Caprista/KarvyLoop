@@ -29,10 +29,51 @@ def _reload_gateway_registry(app) -> tuple[bool, str]:
     try:
         from karvyloop.gateway.registry import ModelRegistry
         gw.reg = ModelRegistry.load(cfgp)
+        _mark_config_seen(app)   # 自己刚读过盘 → 记 mtime,外改检测别把这次当"别处修改"
         return True, ""
     except Exception as e:
+        _mark_config_seen(app)   # 坏配置也记——本次已 fail-loud 报因,watcher 别每轮重复轰
         # 配置已落盘,但新配置过不了校验(如默认模型被删)→ 不热替换,提示重启/修正
         return False, f"配置已保存,但热加载失败(检查默认模型/必填项;重启也会校验):{e}"
+
+
+def _config_mtime(app) -> float:
+    cfgp = _model_cfg_path(app)
+    try:
+        import os
+        return os.stat(cfgp).st_mtime if cfgp else 0.0
+    except OSError:
+        return 0.0
+
+
+def _mark_config_seen(app) -> None:
+    app.state._config_mtime_seen = _config_mtime(app)
+
+
+def check_config_external_change(app) -> bool:
+    """配置外改检测(内测实拍病根:终端与 WebUI 双通道写同一份 config.yaml,console 只在
+    自己保存时读盘 → 终端写坏的配置有"潜伏期",到重启/下次 UI 保存才发作,像"放一会就坏")。
+
+    一次 stat(微秒级)比对 mtime:别处改了 → 立刻热加载 + 主动推一句(成功=已重新加载;
+    失败=fail-loud 说清哪坏了)。潜伏期归零:盘一坏,下一次聊天/下一个维护 tick 就现形。
+    挂两处:drive 入口(改完配置第一件事就是试聊)+ 维护 tick(不聊天的定时/追求路径兜底)。
+    返回 True=检测到外改(无论热加载成败)。"""
+    seen = getattr(app.state, "_config_mtime_seen", None)
+    now_m = _config_mtime(app)
+    if seen is None:              # 首次:只登记基线,不算外改
+        app.state._config_mtime_seen = now_m
+        return False
+    if now_m == seen or now_m == 0.0:
+        return False
+    ok, msg = _reload_gateway_registry(app)   # 内部成败都会 _mark_config_seen(不重复轰)
+    from karvyloop import i18n as _i18n
+    from karvyloop.console.task_events import schedule_system_error
+    if ok:
+        schedule_system_error(app, "config_watch", _i18n.t("config.external_reloaded"))
+    else:
+        schedule_system_error(app, "config_watch",
+                              _i18n.t("config.external_reload_failed", reason=msg))
+    return True
 
 
 @router.get("/model/config")

@@ -235,6 +235,14 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     # 纯本地重叠打分(零 LLM,毫秒级),结果走 WS 广播,不 await 在 drive 前面挡路。
     _schedule_ambient_recall(app, intent)
 
+    # 配置外改检测(一次 stat,微秒级):终端/编辑器改过 config.yaml → 本次聊天前就热加载
+    # + 主动说一声,坏配置不再潜伏到重启才炸(内测实拍"放一会就不能用"的病根)。失败不挡聊。
+    try:
+        from karvyloop.console.routes_models import check_config_external_change
+        check_config_external_change(app)
+    except Exception:
+        logger.debug("[ws] 配置外改检测失败(不挡聊)", exc_info=True)
+
     main_loop: Optional[MainLoop] = app.state.main_loop
     runtime_kwargs: dict = app.state.runtime_kwargs or {}
     workbench_app = app.state.workbench_app

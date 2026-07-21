@@ -307,6 +307,13 @@ def build_console_app(
                 while True:
                     try:
                         await asyncio.sleep(tick)
+                        # 配置外改检测(内测实拍:终端+WebUI 双写 config,坏配置潜伏到重启才炸)——
+                        # drive 入口已挂主检,这里兜底不聊天的路径(定时/追求 tick 用的也是同一注册表)。
+                        try:
+                            from karvyloop.console.routes_models import check_config_external_change
+                            check_config_external_change(app)
+                        except Exception as ie:
+                            _maintenance_item_failed(app, "config_watch", ie)
                         # 本机执行任务监控(docs/80 #4 第一环):每次醒都跑(轻量、无 LLM),
                         # 揪"标 running 却长时间无进展"的疑似中断任务 → 标中断 + 升"要我接着跑吗"卡。
                         # 放在 idle 判断之前 = 不受 daily 节流影响,停滞任务及时被发现(§0.7 收口)。
