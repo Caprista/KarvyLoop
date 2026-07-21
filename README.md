@@ -348,6 +348,27 @@ KarvyLoop ships **by version** ([CHANGELOG](CHANGELOG.md)), and it tells you whe
 - **Take it with you.** `karvyloop export` packs your whole instance (skills, knowledge, preferences, history) into one portable archive — API keys are deliberately left behind; unpack it into `~/.karvyloop` on the new machine and you're home.
 - **One-command return trip.** `karvyloop import <archive>` unpacks it back into `~/.karvyloop` for you — path-safe, never touches your local `config.yaml`, and refuses to clobber an existing instance unless you say `--force` (`--dry-run` shows the plan first).
 
+### Uninstalling
+
+Everything the installer touches is listed here — removing it all takes four steps (beta feedback: this used to be undocumented):
+
+```bash
+# 1. the app venv + the launcher symlink (this is the actual program)
+rm -rf ~/.karvyloop-venv
+rm -f  ~/.local/bin/karvyloop
+
+# 2. your instance data — config, keys, beliefs, skills, decision log.
+#    Skip this line if you might come back (or `karvyloop export` first — it packs everything portable):
+rm -rf ~/.karvyloop
+
+# 3. the PATH line the installer appended (marked "# added by KarvyLoop installer")
+#    in whichever of these exist: ~/.bashrc ~/.zshrc ~/.zprofile ~/.zlogin ~/.profile
+
+# 4. installed from a clone instead? just `pip uninstall karvyloop` in that env and delete the clone.
+```
+
+On Windows (installed via `install.ps1`): remove `%LOCALAPPDATA%\karvyloop\` (contains both the venv and the `bin\karvyloop.cmd` shim), take `%LOCALAPPDATA%\karvyloop\bin` out of your user PATH, and optionally remove `%USERPROFILE%\.karvyloop` (your instance data).
+
 ## Running the tests
 
 ```bash

@@ -270,6 +270,19 @@ def test_workflow_and_roundtable_cancel_also_signal_executor(app):
             running_runs.unregister(tid)
 
 
+def test_workflow_cancel_by_run_id_signals_resumed_run(app):
+    """刀3a 收尾回归锁:resume 续跑无 task_id,durable 执行器按 **run_id** 包 abort_scope
+    → /workflow/cancel 只带 run_id 也要拉响同键的旗(此前 resume 是漏网路径,步内中断够不到)。"""
+    rid = "WFRUN-RESUME"
+    flag = running_runs.register(rid)              # 桩:模拟 resume 的 durable scope 按 run_id 在册
+    try:
+        j = TestClient(app).post("/api/workflow/cancel", json={"run_id": rid}).json()
+        assert flag.is_set() is True, "cancel 带 run_id 应拉响按 run_id 注册的旗(resume 场景)"
+        assert j["run_id"] == rid
+    finally:
+        running_runs.unregister(rid)
+
+
 # ================= 前端静态:⏹ 停止贴每条活卡(不再靠 who 嗅探) =================
 
 def test_frontend_stop_button_on_every_running_card():

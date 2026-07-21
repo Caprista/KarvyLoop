@@ -86,16 +86,19 @@ async def check_violations(app: Any, proposal_text: str, standards: list[str],
     gw = rk.get("gateway")
     if gw is None or not standards or not (proposal_text or "").strip():
         return []
+    from karvyloop import i18n as _i18n
     from karvyloop.crystallize.decision_pref import VIOLATION_SYSTEM, parse_violations
     from karvyloop.gateway import ResolveScope
     from karvyloop.gateway.system import SystemPrompt
+    # K②(内测产品条③):违背说明("why")上卡给人看 —— 跟界面语言(i18n 进程 locale)。
+    violation_sys = VIOLATION_SYSTEM + _i18n.t("prompt.lang.json_why")
     numbered = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(standards))
     material = f"提案:\n{proposal_text.strip()}\n\n用户已定的决策标准:\n{numbered}"
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=rk.get("model_ref") or None))
         async for ev in gw.complete([{"role": "user", "content": material}], [], ref,
-                                    system=SystemPrompt(static=[VIOLATION_SYSTEM])):
+                                    system=SystemPrompt(static=[violation_sys])):
             if type(ev).__name__ == "TextDelta":
                 out += getattr(ev, "text", "")
     except Exception:
@@ -236,9 +239,12 @@ async def decision_card_ask(app: Any, *, proposal_id: str, question: str,
     prefs_txt = "\n".join(f"- {a.get('content', '')}" for a in aligned) or "(无相关标准)"
     convo = "\n".join(f"{x.get('who', '?')}: {x.get('text', '')}"
                       for x in (transcript or [])[-12:] if isinstance(x, dict))
+    # K②(内测产品条③):追问答复跟界面语言(i18n 进程 locale;没设走 i18n 默认,不硬编码 zh)。
+    from karvyloop import i18n as _i18n
     sysp = ("你是小卡。用户正在决定要不要批准这张决策卡(可 同意/稍后/拒绝)。**只依据下面这张卡的"
             "证据回答**(要做什么、为什么、他以前定的相关标准);卡上没有的事实,老实说\"卡上没写\"或"
-            "\"我不确定\",**绝不编造**。你是帮他判断,**保持中立、不要劝他批准**。简洁、对话式、说日常话。")
+            "\"我不确定\",**绝不编造**。你是帮他判断,**保持中立、不要劝他批准**。简洁、对话式、说日常话。"
+            + _i18n.t("prompt.lang.answer"))
     usr = (f"[要做什么]\n{summary}\n\n[为什么提这个 / 依据]\n{basis}\n\n"
            f"[你以前定的相关标准]\n{prefs_txt}\n\n[此前追问]\n{convo}\n\n[用户这句]\n{q}")
     out = ""

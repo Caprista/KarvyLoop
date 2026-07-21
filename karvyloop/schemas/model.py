@@ -46,7 +46,12 @@ class ModelDefinition(Schema):
     # openai-completions: {deep: {reasoning_effort: high}}。缺省 {} = 用 api 方言内置映射
     # (仅 reasoning: true 的模型);内置也不会 → 忽略档位(debug 日志,不加参、不发坏请求)。
     reasoning_styles: dict = Field(default_factory=dict)
-    input_modalities: list[InputModality] = Field(default_factory=lambda: ["text"])
+    # 输入模态(配置约定,D/内测 U-06):模型配置里可写 `input_modalities: [text, image]`。
+    # **None = 未声明 = 未知** → 执行器保持旧行为(带图照拼图块,不动存量视觉模型用户);
+    # **显式声明**且不含 image → 才把图降级成人话占位(文字照跑,不 400)。
+    # **不做模型名→能力猜表**(会过时);纯文本模型想免 400,在 config.yaml 该模型条目下
+    # 显式写 `input_modalities: [text]`(视觉模型写 [text, image] 亦可自文档化)。
+    input_modalities: Optional[list[InputModality]] = None
     context_window: int
     max_tokens: int
     cost: dict = Field(default_factory=dict)  # {input,output,cache_read,cache_write} USD/百万token

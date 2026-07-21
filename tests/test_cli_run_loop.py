@@ -352,6 +352,98 @@ class TestAC8StatsLineOnStderr:
         assert "drive_calls=" in captured.err
 
 
+# ---------- I(内测 U-05):默认路径实时进度 —— renderer 透进 forge 工厂 ----------
+
+class TestIU05ProgressStreaming:
+    """`karvyloop run` 默认路径不再全程无声:
+    ① renderer 透进 forge_slow_brain_factory(与 --json 的 emitter 同源事件流);
+    ② 已实时流过正文 → 终态不整段重打(只补非正常终止的 ⚠ 提示);
+    ③ 没流过(快脑/桩)→ 保持旧行为渲染 r.text;
+    ④ drive 起步前 stderr 打一行阶段提示(检索技能→调模型)。
+    """
+
+    def _factory_streaming(self, *, terminal: str = ""):
+        """stub 工厂:slow_brain 模拟 forge 把 TextEvent 经 renderer 实时流出。"""
+        from karvyloop.schemas.atom import AtomRun
+        seen: dict = {}
+
+        def factory(**kwargs):
+            seen.update(kwargs)
+            rdr = kwargs.get("renderer")
+
+            def slow_brain(intent: str):
+                from karvyloop.atoms.executor import TextEvent
+                if rdr is not None:
+                    rdr.render(TextEvent(text="hello-stream"))
+                run = AtomRun(atom_id="a", input={"intent": intent},
+                              output={"text": "hello-stream"}, success=True,
+                              tool_calls=[], trace_ref="t", ts=1.0,
+                              terminal=(terminal or None))
+                return ("hello-stream", run)
+
+            return slow_brain
+
+        return factory, seen
+
+    def test_renderer_threaded_into_factory_no_duplicate_text(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        ml = build_main_loop()
+        factory, seen = self._factory_streaming()
+        with patch("karvyloop.cli.run_loop.forge_slow_brain_factory", factory):
+            rc = run_intent_via_loop(
+                "stream test", ml,
+                token=MagicMock(), sandbox=MagicMock(), gateway=MagicMock(),
+                workspace_root=str(tmp_path), model_ref="fake",
+            )
+        assert rc == 0
+        assert seen.get("renderer") is not None, "renderer 必须透进 forge 工厂(实时流)"
+        out = capsys.readouterr().out
+        assert out.count("hello-stream") == 1, "流过一次后终态不许整段重打"
+
+    def test_streamed_abnormal_terminal_appends_honest_note(self, tmp_path, monkeypatch, capsys):
+        """流式路径下非正常终止(max_turns)的 ⚠ 提示仍要打出来(不因略过终态渲染而丢)。"""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        ml = build_main_loop()
+        factory, _seen = self._factory_streaming(terminal="max_turns")
+        with patch("karvyloop.cli.run_loop.forge_slow_brain_factory", factory):
+            run_intent_via_loop(
+                "stream test 2", ml,
+                token=MagicMock(), sandbox=MagicMock(), gateway=MagicMock(),
+                workspace_root=str(tmp_path), model_ref="fake",
+            )
+        out = capsys.readouterr().out
+        assert out.count("hello-stream") == 1
+        assert "步数上限" in out            # _annotate_terminal(MAX_TURNS) 的诚实提示
+
+    def test_non_streaming_stub_falls_back_to_final_text(self, tmp_path, monkeypatch, capsys):
+        """桩慢脑不碰 renderer(没流)→ 保持旧行为:终态渲染 r.text 一次。"""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        ml = build_main_loop()
+        with patch("karvyloop.cli.run_loop.forge_slow_brain_factory", _stub_slow_brain_factory()):
+            run_intent_via_loop(
+                "fallback test", ml,
+                token=MagicMock(), sandbox=MagicMock(), gateway=MagicMock(),
+                workspace_root=str(tmp_path), model_ref="fake",
+            )
+        out = capsys.readouterr().out
+        assert "ok-fallback test-0" in out
+
+    def test_stage_line_on_stderr_before_drive(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("KARVYLOOP_LANG", raising=False)
+        from karvyloop import i18n
+        i18n.set_locale(None)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        ml = build_main_loop()
+        with patch("karvyloop.cli.run_loop.forge_slow_brain_factory", _stub_slow_brain_factory()):
+            run_intent_via_loop(
+                "stage line test", ml,
+                token=MagicMock(), sandbox=MagicMock(), gateway=MagicMock(),
+                workspace_root=str(tmp_path), model_ref="fake",
+            )
+        err = capsys.readouterr().err
+        assert "recalling skills" in err    # i18n en 默认;阶段提示在 stderr,不污染 stdout
+
+
 # ---------- 工具:K 铁律源码扫描锁 (拍 4c 也要跑,本拍 4a 末先验) ----------
 # 用 tests/_scan.grep_py(OS 无关)代替 shell grep:grep 不在 Windows PATH 上会
 # FileNotFoundError 假红(CI windows job / 本机全量都踩过),Python 原生扫描三平台一致。

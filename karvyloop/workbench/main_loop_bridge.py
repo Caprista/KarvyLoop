@@ -22,6 +22,39 @@ from karvyloop.cli.run_loop import forge_slow_brain_factory  # noqa: F401 — pa
 logger = logging.getLogger(__name__)
 
 
+import re as _re
+
+_HTTP_4XX_IN_MESSAGE = _re.compile(r"'(4\d\d) ")   # httpx: "Client error '400 Bad Request' for url …"
+
+
+def _humanize_drive_error(e: BaseException) -> str:
+    """drive 崩溃 → 用户可读错误(D②,内测 U-06):人话在前、真因(异常类名+原文)在后。
+
+    fail-loud 边界纪律不变:真实异常类名/原文一字不丢(仍在括号里),只是不再裸堆栈开场。
+    分类复用 console.routes_models._classify_model_error(bad_key/bad_url/unreachable),
+    另加 4xx 坏请求(400/422 —— 给纯文本模型发图是典型)。判不出 → 保持旧格式原样返回。
+    """
+    raw = f"{type(e).__name__}: {e}"
+    try:
+        from karvyloop import i18n
+        key = ""
+        try:
+            from karvyloop.console.routes_models import _classify_model_error
+            key = {"bad_key": "drive.err.bad_key", "bad_url": "drive.err.bad_url",
+                   "unreachable": "drive.err.unreachable"}.get(_classify_model_error(raw), "")
+        except Exception:
+            key = ""
+        if not key:
+            low = raw.lower()
+            if _HTTP_4XX_IN_MESSAGE.search(raw) or "bad request" in low or "unprocessable" in low:
+                key = "drive.err.bad_request"
+        if not key:
+            return raw
+        return i18n.t(key, cause=raw)
+    except Exception:
+        return raw
+
+
 @dataclass
 class DriveOutcome:
     """TUI 视角的 drive 结果(snapshot 喂给 widget 用)。"""
@@ -214,6 +247,8 @@ async def drive_in_tui(
             # 可观测性②:error 带**真实异常类名**(TypeError/KeyError…)—— 代码缺陷从执行器
             # fail-loud 上冒到这里,绝不在边界又抹成无名错误;traceback 已由上面 logger.exception
             # 全量落日志,Trace 里另有 drive 写的 kind="error" 真因条目。
+            # D②(内测 U-06):provider 类错误(4xx/密钥/网络)前面加一句人话(i18n),
+            # 真因原样保留在括号里 —— fail-loud 但说人话;判不出的保持旧格式不动。
             return DriveOutcome(
                 intent=intent,
                 brain=Brain.SLOW,
@@ -221,7 +256,7 @@ async def drive_in_tui(
                 skill_name="",
                 fast_brain_hit=False,
                 crystallized=False,
-                error=f"{type(e).__name__}: {e}",
+                error=_humanize_drive_error(e),
             )
 
     outcome = await asyncio.to_thread(_run_drive)

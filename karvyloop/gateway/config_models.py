@@ -29,6 +29,8 @@ IMPLEMENTED_APIS = ("anthropic-messages", "openai-completions")
 VALID_ROLES = ("chat", "embedding")
 # 推理强度档(碎碎念⑩;与 gateway/reasoning.py REASONING_LEVELS 同源语义)
 VALID_REASONING = ("fast", "balanced", "deep")
+# 输入模态(与 schemas/model.py InputModality 对齐;D/内测 U-06 配置约定)
+VALID_MODALITIES = ("text", "image", "audio", "video")
 
 
 def _default_path() -> Path:
@@ -216,6 +218,23 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
                     if k in VALID_REASONING and isinstance(v, dict)}
         if clean_rs:
             md["reasoning_styles"] = clean_rs
+    # 输入模态(可选,D/内测 U-06):`input_modalities: [text, image]`,配了就认;
+    # **没配 = 不写字段 = 未声明(None)**→ 执行器保持旧行为(带图照拼,存量视觉模型零回退);
+    # 显式声明且不含 image 才降级图块。None(请求未承载)= 保留旧值(与 reasoning_styles 同模具:
+    # 编辑别的字段不把手写的声明静默丢掉);显式 list = 覆写(只收合法模态、去重保序;
+    # 全不合法/空 = 清掉字段回到未声明)。不做模型名→能力猜表。
+    im = spec.get("input_modalities")
+    if im is None:
+        if existing_md and existing_md.get("input_modalities"):
+            md["input_modalities"] = [str(x) for x in existing_md["input_modalities"]]
+    elif isinstance(im, list):
+        clean_im: list = []
+        for x in im:
+            x = str(x).strip()
+            if x in VALID_MODALITIES and x not in clean_im:
+                clean_im.append(x)
+        if clean_im:
+            md["input_modalities"] = clean_im
     # id 全局唯一:先从所有 provider 删同 id(支持改 provider),再加到目标 provider
     for pp in provs.values():
         pp["models"] = [x for x in (pp.get("models") or []) if x.get("id") != mid]

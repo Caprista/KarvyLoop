@@ -64,7 +64,7 @@ case ":${PATH:-}:" in
     esac
     touch "$primary_rc" 2>/dev/null || true
     touched=""
-    for rc in "$primary_rc" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.profile"; do
+    for rc in "$primary_rc" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.zlogin" "$HOME/.profile"; do
       [ -e "$rc" ] || continue
       case " $touched " in *" $rc "*) continue ;; esac
       grep -q '.local/bin' "$rc" 2>/dev/null || printf '\n# added by KarvyLoop installer\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"

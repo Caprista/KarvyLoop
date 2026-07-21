@@ -170,6 +170,23 @@ def _emit_stats_line(stats: Any, *, task_id: str = "") -> None:
     sys.stderr.flush()
 
 
+def _terminal_note(terminal_value: str) -> str:
+    """DriveResult.terminal(Terminal.value 字符串)→ 非正常终止的诚实提示;COMPLETED/空 → ""。
+
+    复用 runtime.main_loop._annotate_terminal 的文案(工厂在 r.text 末尾追加的就是它)——
+    流式路径正文已实时打过,这里只把那句 ⚠ 提示补上,不整段重打。
+    """
+    if not terminal_value:
+        return ""
+    from karvyloop.atoms.terminal import Terminal
+    from karvyloop.runtime.main_loop import _annotate_terminal
+    try:
+        term = Terminal(terminal_value)
+    except ValueError:
+        return ""
+    return _annotate_terminal("", term)
+
+
 def run_intent_via_loop(
     intent: str,
     ml: MainLoop,
@@ -187,19 +204,35 @@ def run_intent_via_loop(
     forge_slow_brain_factory 内部用 asyncio.run 同步化 forge —— 若调用方
     已经在 asyncio loop 里,直接调会爆。async 调用方应用 asyncio.to_thread 包。
     """
+    # I(内测 U-05):默认路径此前不接 renderer → 慢脑跑几分钟终端全程无声,结束才吐全文。
+    # 修:renderer 透进 forge 工厂(与 --json 路径的 emitter 同源事件流,不另造格式)——
+    # 工具调用一行(⚙ name)/文本流式/终止标记(✓ run …)全部实时可见。
+    rdr = renderer or Renderer()
+    _chars0, _tools0 = rdr.stats.text_chars, rdr.stats.tool_calls
+    # 即时阶段提示(stderr):drive 起步到首个流事件之间也不哑(检索技能→调模型)。
+    from karvyloop.i18n import t as _t
+    sys.stderr.write(_t("cli.run.progress_start") + "\n")
+    sys.stderr.flush()
     slow_brain = forge_slow_brain_factory(
         token=token, sandbox=sandbox, gateway=gateway,
         workspace_root=workspace_root, model_ref=model_ref,
+        renderer=rdr,
     )
     r = ml.drive(intent, slow_brain=slow_brain)
 
     # 渲染
-    rdr = renderer or Renderer()
     if r.brain == Brain.FAST and r.skill_name:
         # 已有 Renderer.fast_brain_note(skill_name, saved_tokens) — 省 token 估算 P1
         rdr.fast_brain_note(r.skill_name, saved_tokens=0)
     else:
-        if r.text:
+        streamed = (rdr.stats.text_chars > _chars0) or (rdr.stats.tool_calls > _tools0)
+        if streamed:
+            # 正文/工具行已实时流过 —— 别整段重打;只补非正常终止的诚实提示
+            # (工厂把它追加在 r.text 末尾,但流式事件里没有)。
+            note = _terminal_note(getattr(r, "terminal", "") or "")
+            if note:
+                rdr.render_text(note)
+        elif r.text:
             rdr.render_text(r.text)
 
     # 北极星指标(M3+ 批 6:加 task_id 方便调试)

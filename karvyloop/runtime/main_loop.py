@@ -919,6 +919,7 @@ def forge_slow_brain_factory(
     max_turns: int = 30,
     governance: str = "",
     emitter: object = None,
+    renderer: object = None,  # I(内测 U-05):cli.render.Renderer —— 默认 CLI 路径也实时流(emitter 在场时 emitter 优先)
     persona: object = None,   # 9.4e 方案 A:人格 system prompt(CodingPrompt);None=默认 coding 提示
     enable_compression: bool = True,  # loop step4a:对话/长任务慢脑默认开上下文治理(防 O(n²) 烧 token)
     mcp_tools: object = None,  # A:MCP 工具(console 启动时连好、注入 runtime_kwargs);None=无
@@ -974,6 +975,7 @@ def forge_slow_brain_factory(
                 gateway=gateway, workspace_root=workspace_root,
                 model_ref=model_ref, max_turns=max_turns,
                 emitter=emitter,  # 9.4:渲染事件收集器(None=旧行为,0 回归)
+                renderer=renderer,  # I(内测 U-05):人读终端实时流(emitter 在场时 forge 内 emitter 优先)
                 system_prompt=persona,  # 9.4e 方案 A:人格 prompt(None=默认 coding)
                 enable_compression=enable_compression,  # step4a:上下文治理
                 extra_tools=_extra_tools or None,  # A:MCP 工具 + §15.5 create_atom 并进 agent 工具集

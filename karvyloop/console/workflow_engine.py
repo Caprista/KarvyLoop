@@ -392,8 +392,14 @@ async def execute_workflow_durable(app, *, run_id: str, goal: str, steps: list,
         # §0.7 逃生门:人点了"中止"(经 run store 的 cancelled 标,或按 task_id 的中止旗)→ 不再起新步。
         return store.is_cancelled(run_id) or _is_task_cancelled(app, task_id or "")
 
-    return await run_workflow({"goal": goal, "steps": steps}, run_step=run_step,
-                              should_cancel=_should_cancel)
+    # docs/90 刀3a 收尾:durable 执行器自己也包 abort_scope —— 首跑时外层(routes 起点)已按
+    # task_id 包过,这里嵌套同 id 安全(注册表引用计数);**resume 续跑**没有外层 scope 且
+    # task_id=None,用 run_id 注册 → /workflow/cancel 按 run_id 也拉旗,续跑中的步内也能协作式
+    # 收口(此前 resume 是第 7 条漏网路径:只能步边界停,步内中断够不到)。
+    from karvyloop.atoms.abort import abort_scope as _abort_scope
+    with _abort_scope(task_id or run_id or ""):
+        return await run_workflow({"goal": goal, "steps": steps}, run_step=run_step,
+                                  should_cancel=_should_cancel)
 
 
 # 重启时超此 age 的中断 workflow 直接标 abandoned(不复活)。默认 6h:比任何合理的单轮工作流都长,

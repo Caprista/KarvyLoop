@@ -315,8 +315,10 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
         if len(txt) > 140:
             txt = txt[:140] + "…"
         suffix = verdict_suffix(checked)
+        from karvyloop import i18n as _i18n
         _stash_report_card(app, proposal, checked,
-                           problem=requirement, approach=f"由「{role}」在域治理下执行")
+                           problem=requirement,
+                           approach=_i18n.t("report.approach_route", role=role))
         # docs/54 模块1 Top2:角色经验沉淀 —— 委派任务收尾 → 保守门 → 蒸馏 → role-scoped Belief。
         # 只在**过了独立验收**的成功任务沉(should_distill 内部保守;无域/纯失败不沉)。
         # fire-and-forget、fail-soft,绝不阻断决策兑现。
@@ -418,8 +420,10 @@ def _run_task_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
         if len(short) > 140:
             short = short[:140] + "…"
         suffix = verdict_suffix(checked)
+        from karvyloop import i18n as _i18n
         _stash_report_card(app, proposal, checked,
-                           problem=intent, approach=f"重跑「{intent[:40]}」")
+                           problem=intent,
+                           approach=_i18n.t("report.approach_rerun", intent=intent[:40]))
         return True, f"已重跑「{intent[:30]}」:{short or '(无输出)'}{(' ' + suffix) if suffix else ''}"
 
     return handler

@@ -337,6 +337,27 @@ KarvyLoop **按版本发布**([CHANGELOG](CHANGELOG.md)),有新版会**提示你
 - **打包带走**:`karvyloop export` 把整个实例(技能、知识、偏好、历史)打成一个可携带压缩包——API key 刻意留在原机;新机器上解进 `~/.karvyloop` 就是回家。
 - **一条命令的回程**:`karvyloop import <包>` 替你解回 `~/.karvyloop`——路径安全、绝不碰本机 `config.yaml`、已有实例默认拒绝覆盖(`--force` 才合并,`--dry-run` 先看清单)。
 
+### 卸载
+
+安装器碰过的东西全在这里,四步删干净(内测反馈:此前没有官方卸载说明):
+
+```bash
+# 1. 程序本体:venv + 启动软链
+rm -rf ~/.karvyloop-venv
+rm -f  ~/.local/bin/karvyloop
+
+# 2. 你的实例数据 —— 配置、key、认知、技能、决策记录。
+#    以后可能回来就跳过这行(或先 `karvyloop export` 打成便携包):
+rm -rf ~/.karvyloop
+
+# 3. 安装器追加的 PATH 行(标着 "# added by KarvyLoop installer"),
+#    在这些文件里有哪个删哪个:~/.bashrc ~/.zshrc ~/.zprofile ~/.zlogin ~/.profile
+
+# 4. 从源码 clone 装的?在那个环境里 `pip uninstall karvyloop`,再删掉 clone 目录即可。
+```
+
+Windows(经 `install.ps1` 安装):删 `%LOCALAPPDATA%\karvyloop\`(venv 和 `bin\karvyloop.cmd` 启动器都在里面),把 `%LOCALAPPDATA%\karvyloop\bin` 从用户 PATH 里去掉,按需删 `%USERPROFILE%\.karvyloop`(实例数据)。
+
 ## 跑测试
 
 ```bash

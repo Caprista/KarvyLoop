@@ -383,8 +383,12 @@ async def _refine_run_title(gw, model_ref, text: str, *, max_keep: int = 24) -> 
         return s[:max_keep]
     from karvyloop.gateway import ResolveScope
     from karvyloop.gateway.system import SystemPrompt
+    from karvyloop import i18n as _i18n
+    # K②(内测产品条③):标题跟界面语言 —— lang 来源 = i18n 进程 locale(--lang/env/config,
+    # CLI 没设就走 i18n 默认 en),把语言指令拼进 system prompt 尾。
     sysp = ("把用户这段意图压成一个**极短主题名**(≤12 字 / ≤6 词),像给一次协作起标签。"
-            "只输出主题名本身,不要引号、标点、解释、前后缀。")
+            "只输出主题名本身,不要引号、标点、解释、前后缀。"
+            + _i18n.t("prompt.lang.title"))
     out = ""
     try:
         ref = gw.resolve_model(ResolveScope(atom_model=model_ref or None))
@@ -793,6 +797,8 @@ async def api_workflow_cancel(req: WorkflowCancelRequest, request: Request) -> d
     if req.task_id:
         _mark_task_cancelled(app, req.task_id)
         _signal_executor_abort(req.task_id)   # docs/90 刀3a:正在跑的步也协作式收口
+    if rid:
+        _signal_executor_abort(rid)   # 刀3a 收尾:resume 续跑无 task_id、scope 按 run_id 注册 → 同键拉旗
     return {"ok": bool(ok or req.task_id), "run_id": rid, "cancelled": bool(ok)}
 
 
@@ -1225,12 +1231,15 @@ async def maybe_route_to_role(app, mgr, intent: str):
                 await broadcast_proposal(app, proposal)
             except Exception:
                 pass
-            who = "、".join(rt["participant_names"]) if rt["participant_names"] else "群里的角色"
+            from karvyloop import i18n as _i18n
+            who = ("、".join(rt["participant_names"]) if rt["participant_names"]
+                   else _i18n.t("proposal.roundtable.who_default"))
             return {
                 "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
                 "crystallized": False, "skill_name": "", "routed": True,
-                "text": (f"想让 {who} 一起讨论 —— 这是开**圆桌**(几个人坐一起),不是交给一个人。"
-                         f"要在「{rt['group_name']}」开桌讨论「{rt['topic']}」吗?(到 🤝 H2A 处置)"),
+                # K①(内测产品条③):此前硬编码中文 f-string → 决策卡路上中英混杂;走 i18n
+                "text": _i18n.t("route.roundtable_hint", who=who,
+                                group=rt["group_name"], topic=rt["topic"]),
             }
 
         # ② 退回单角色委派(原逻辑,确定性子串匹配)。
@@ -1246,11 +1255,13 @@ async def maybe_route_to_role(app, mgr, intent: str):
                 await broadcast_proposal(app, proposal)  # 推到 H2A 列
             except Exception:
                 pass
+            from karvyloop import i18n as _i18n
             return {
                 "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
                 "crystallized": False, "skill_name": "", "routed": True,
-                "text": (f"这件事属于业务域「{match['domain_name']}」 — "
-                         f"要不要转给「{match['role']}」去做?(到 🤝 H2A 处置)"),
+                # K①(内测产品条③):同上,路由提示走 i18n(en+zh)
+                "text": _i18n.t("route.delegate_hint",
+                                domain_name=match["domain_name"], role=match["role"]),
             }
 
     # ②b docs/88 第二刀:跨天持久目标 → 判型 create(升承诺卡,人 ACCEPT 才算承诺)。

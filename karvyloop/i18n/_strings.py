@@ -421,12 +421,12 @@ _EN = {
         "This isn't a request for more power — it's a score card: {hits} right out of {n} on this kind of card, "
         "≥{min_lb}% even at the 95% confidence lower bound (not a lucky streak; the accept and reject sides each "
         "clear the bar). Of those, I predicted you'd REJECT {reject_pred} time(s) and was right {reject_correct} "
-        "time(s) (proof I can block the bad ones for you, not just nod along). After ACCEPT, for 30 days: I **only** "
+        "time(s) (proof I can block the bad ones for you, not just nod along). After ACCEPT, for 30 days: I only "
         "handle cards where I predict you'd ACCEPT with ≥{min_conf}% confidence; predicted-REJECT or low-confidence "
         "cards still come to you; I'll also randomly let some through as ordinary cards to check my answers (you "
         "won't be told which are spot checks); irreversible things — deletes, outbound sends, payments, going live — "
         "always come to you. Every silent action leaves a full trail (run record + ledger), and after 30 days renewal "
-        "must be your own hand; one wrong call and the grant is **revoked automatically, immediately** — and you can "
+        "must be your own hand; one wrong call and the grant is revoked automatically, immediately — and you can "
         "revoke it anytime. REJECT = keep things as they are, every card asks you."
     ),
     "proposal.silence_renew.audit_some": "spot-checked {audit_n} time(s), {audit_hits} right",
@@ -516,7 +516,7 @@ _EN = {
     "proposal.archive_stale.summary": "🗄️ {n} knowledge item(s) unused for a year — archive them?",
     "proposal.archive_stale.basis": (
         "These {n} knowledge items haven't been recalled (or updated) in over a year — likely stale: {shown}. "
-        "ACCEPT = mark them invalid and archive (**invalidate, not delete**: they stay in the library, auditable "
+        "ACCEPT = mark them invalid and archive (invalidate, not delete: they stay in the library, auditable "
         "and reversible, just out of recall); REJECT = keep them in recall."
     ),
     # promote_experience(promotion_tick)
@@ -542,7 +542,7 @@ _EN = {
     "proposal.roundtable.who_default": "the roles in the group",
     "proposal.roundtable.summary": "Open a roundtable in “{group}” with {who} to discuss “{topic}”",
     "proposal.roundtable.basis": (
-        "You want several roles to discuss this together — that's a **roundtable** (people around a table), not "
+        "You want several roles to discuss this together — that's a roundtable (people around a table), not "
         "handing the job to one person (delegation). I'll gather {who} in group “{group}”, align the goal with you "
         "first, then start the discussion. The table only opens once you ACCEPT."
     ),
@@ -578,11 +578,11 @@ _EN = {
     "proposal.ops_fix.cause": "Likely cause: {cause}",
     "proposal.ops_fix.fix": "Suggested fix: {fix}",
     "proposal.ops_fix.auto": (
-        "ACCEPT runs a **deterministic, reversible repair** (backup first, then reset; recoverable from "
+        "ACCEPT runs a deterministic, reversible repair (backup first, then reset; recoverable from "
         ".corrupt.bak) — no model gets to change your system."
     ),
     "proposal.ops_fix.manual": (
-        "This is an LLM diagnosis, **unverified**; ACCEPT only means you acknowledge it — the system will **not** "
+        "This is an LLM diagnosis, unverified; ACCEPT only means you acknowledge it — the system will not "
         "change anything by itself. Please follow the steps above by hand."
     ),
     # merge_atoms
@@ -593,8 +593,8 @@ _EN = {
         "near-duplicates never get merged)."
     ),
     "proposal.merge_atoms.accept": (
-        "ACCEPT will **rewire-before-delete**: first repoint every role referencing these atoms to the canonical "
-        "one, then delete the redundant ones — **never leaving dangling references**; doing nothing is also safe "
+        "ACCEPT will rewire-before-delete: first repoint every role referencing these atoms to the canonical "
+        "one, then delete the redundant ones — never leaving dangling references; doing nothing is also safe "
         "(they just stay unmerged)."
     ),
     "proposal.merge_atoms.summary": "Merge {n} near-duplicate atoms → “{canon}”",
@@ -650,16 +650,16 @@ _EN = {
     "proposal.inbox_decision.default_action": "(see the mail)",
     "proposal.inbox_decision.summary": "📧 Needs your call: {sender} “{subject}”",
     "proposal.inbox_decision.basis": (
-        "This mail was triaged as **needs your decision** ({reason}). Suggested action: {action}. "
+        "This mail was triaged as needs your decision ({reason}). Suggested action: {action}. "
         "Body snippet: {snippet}. This pipe only notifies and suggests — nothing is ever sent without your "
         "confirmation; ACCEPT only records your decision, it does not auto-reply or trigger any external action."
     ),
     "proposal.inbox_reply.default_reason": "triage judged a reply can be drafted first",
     "proposal.inbox_reply.summary": "✉️ Draft reply awaiting your approval: {sender} “{subject}”",
     "proposal.inbox_reply.basis": (
-        "This mail was triaged as **needs a reply** ({reason}); a draft is prepared (edit it in place before "
-        "approving). ACCEPT = save the draft to the ledger and show it to you, and **you copy and send it "
-        "yourself** — the system never sends mail on its own (nothing goes out without your confirmation, "
+        "This mail was triaged as needs a reply ({reason}); a draft is prepared (edit it in place before "
+        "approving). ACCEPT = save the draft to the ledger and show it to you, and you copy and send it "
+        "yourself — the system never sends mail on its own (nothing goes out without your confirmation, "
         "hard rule)."
     ),
     # revise_skill(crystallize/revision)
@@ -677,7 +677,7 @@ _EN = {
     "proposal.external_adopt.default_citizen": "external collaborator",
     "proposal.external_adopt.summary": "Adopt the output of {badge} “{cid}”? (external executor · untrusted data)",
     "proposal.external_adopt.basis_head": (
-        "This is output from external executor “{badge} {cid}” — **untrusted data** (it doesn't carry your "
+        "This is output from external executor “{badge} {cid}” — untrusted data (it doesn't carry your "
         "accountability; no accountability chain)."
     ),
     "proposal.external_adopt.basis_ctx": "Context: {ctx}",
@@ -963,6 +963,52 @@ _EN = {
         "Okay, not pursuing “{statement}” — I've cleaned up its record (no leftovers). "
         "Just say the word if you want it back."
     ),
+    # D(内测 U-06)多模态降级:模型**显式声明** text-only → 图不拼进请求,占位一句人话(拼在该轮 user 内容里)
+    "executor.images_unsupported": (
+        "(You attached {n} image(s), but the current model {model} can't view images "
+        "(its config declares text-only input) — proceeding with the text as usual. "
+        "To use the images, switch to a vision-capable model; or if this model can actually "
+        "see images, add `image` to its `input_modalities` in the model config.)"
+    ),
+    # D② drive 聊天路径 provider 错误人话化(人话在前,真因原文在后 —— fail-loud 不丢真因)
+    "drive.err.bad_key": (
+        "The model provider rejected the credentials (401/403) — check the API key in your "
+        "model settings. (cause: {cause})"
+    ),
+    "drive.err.bad_url": (
+        "The model endpoint wasn't found (404) — check base_url / path in your model settings. "
+        "(cause: {cause})"
+    ),
+    "drive.err.unreachable": (
+        "Couldn't reach the model service (network/timeout) — check your network or the endpoint, "
+        "then try again. (cause: {cause})"
+    ),
+    "drive.err.bad_request": (
+        "The model provider rejected this request (4xx). Usually the request carried something "
+        "this model doesn't support (e.g. images sent to a text-only model) or a protocol mismatch. "
+        "The task didn't run — adjust the model settings or remove the unsupported content and retry. "
+        "(cause: {cause})"
+    ),
+    # K① 决策卡/路由提示(此前硬编码中文 f-string)
+    "report.approach_route": "Executed by “{role}” under domain governance",
+    "report.approach_rerun": "Re-run “{intent}”",
+    "route.roundtable_hint": (
+        "You want {who} to discuss this together — that's opening a **roundtable** (several "
+        "people at one table), not handing it to one person. Open a table in “{group}” to "
+        "discuss “{topic}”? (decide in 🤝 H2A)"
+    ),
+    "route.delegate_hint": (
+        "This belongs to business domain “{domain_name}” — hand it to “{role}”? (decide in 🤝 H2A)"
+    ),
+    # K② 卡侧 LLM prompt 的应答语言指令(跟界面语言;拼进 system prompt 末尾)
+    "prompt.lang.answer": "Answer in English.",
+    "prompt.lang.json_why": "Write the \"why\" values in English.",
+    "prompt.lang.title": "Write the topic name in English.",
+    # I:CLI run 默认路径的即时阶段提示(stderr;后续工具/文本事件实时流)
+    "cli.run.progress_start": (
+        "[karvyloop] working: recalling skills → calling the model if no skill hits; "
+        "tool/text events stream below in real time"
+    ),
 }
 
 # ---- 中文 ----
@@ -1106,7 +1152,7 @@ _ZH = {
     "wizard.written": "✓ 已写入:{target}",
     "wizard.next_ollama": "下一步:启动 ollama (默认 http://127.0.0.1:11434),然后 karvyloop run \"...\"",
     "wizard.next_apikey": "下一步:直接 karvyloop run \"...\" 即可(API key 已写入 config.yaml)",
-    "wizard.next_export": "注意:config.yaml 写的是 ${{{env_var}}} 占位 —— 环境变量没设之前**跑不起来**(先 export {env_var}=...,再 karvyloop run \"...\")",
+    "wizard.next_export": "注意:config.yaml 写的是 ${{{env_var}}} 占位 —— 环境变量没设之前跑不起来(先 export {env_var}=...,再 karvyloop run \"...\")",
     "wizard.custom_desc": "自定义 OpenAI 兼容端点(自己的 base_url + 模型 id:vLLM / Ark / 自建网关)",
     "wizard.custom_base_prompt": "OpenAI 兼容端点的 Base URL(如 https://host/v1): ",
     "wizard.custom_base_bad": "base URL 必须以 http:// 或 https:// 开头",
@@ -1352,11 +1398,11 @@ _ZH = {
         "下界算也 ≥{min_lb}%(不是碰巧连中,批/拒两向各自过线),其中我押"
         "你会拒 {reject_pred} 次、押对 {reject_correct} 次"
         "(证明我能替你挡坏的,不只会点头)。"
-        "ACCEPT 后 30 天内:这类卡我**只**替你办「我押你会 ACCEPT 且把握 ≥"
+        "ACCEPT 后 30 天内:这类卡我只替你办「我押你会 ACCEPT 且把握 ≥"
         "{min_conf}%」的;押 REJECT 或没把握的照旧问你;"
         "我还会不定期抽一部分照常出卡对答案(哪张是抽查不告诉你);删除/外发/付款/"
         "上线这类不可逆的永远问你。每次静音处理完整留痕(运行记录+台账)、满 30 天"
-        "要你亲手续期;我**押错一次立即自动收回**授权,你也随时可撤。"
+        "要你亲手续期;我押错一次立即自动收回授权,你也随时可撤。"
         "REJECT=保持现状,每张都问你。"
     ),
     "proposal.silence_renew.audit_some": "抽查对账 {audit_n} 次中 {audit_hits} 次",
@@ -1438,7 +1484,7 @@ _ZH = {
     "proposal.archive_stale.summary": "🗄️ {n} 条知识一年没用了,归档?",
     "proposal.archive_stale.basis": (
         "这 {n} 条知识超过一年没被召回过(也没更新),疑似过时:{shown}。"
-        "ACCEPT = 打失效标记归档(**失效不删**:仍留库可审计、可翻案,只是不再进召回);"
+        "ACCEPT = 打失效标记归档(失效不删:仍留库可审计、可翻案,只是不再进召回);"
         "REJECT = 留着继续参与召回。"
     ),
     # promote_experience(promotion_tick)
@@ -1461,7 +1507,7 @@ _ZH = {
     "proposal.roundtable.who_default": "群里的角色",
     "proposal.roundtable.summary": "在「{group}」开圆桌,叫上 {who} 讨论「{topic}」",
     "proposal.roundtable.basis": (
-        "你想让多个角色一起讨论,这是**圆桌**(几个人坐一起),不是把活交给一个人(委派)。"
+        "你想让多个角色一起讨论,这是圆桌(几个人坐一起),不是把活交给一个人(委派)。"
         "我会在群「{group}」拉上 {who},先和你对齐目标再开始讨论。你 ACCEPT 才真正开桌。"
     ),
     # roundtable_conclusion(高风险圆桌结论落认知库确认卡)
@@ -1494,15 +1540,15 @@ _ZH = {
     "proposal.ops_fix.fallback_summary": "运维诊断",
     "proposal.ops_fix.cause": "可能原因:{cause}",
     "proposal.ops_fix.fix": "建议修法:{fix}",
-    "proposal.ops_fix.auto": "ACCEPT 将执行**确定性可逆修复**(先备份再重置,可从 .corrupt.bak 找回),不调模型改系统。",
-    "proposal.ops_fix.manual": "这是 LLM 诊断、**未经验证**;ACCEPT 只表示你认可,系统**不会自动改**——请按上面步骤手动处理。",
+    "proposal.ops_fix.auto": "ACCEPT 将执行确定性可逆修复(先备份再重置,可从 .corrupt.bak 找回),不调模型改系统。",
+    "proposal.ops_fix.manual": "这是 LLM 诊断、未经验证;ACCEPT 只表示你认可,系统不会自动改——请按上面步骤手动处理。",
     # merge_atoms
     "proposal.merge_atoms.head": "把 {n} 个近义原子合并成规范原子「{canon}」:{members}。",
     "proposal.merge_atoms.reason": "判断依据:{reason}",
     "proposal.merge_atoms.why": "合并 = 减少重复、提升复用(护城河:批量导入的原子常因近义不并而 reuse 偏低)。",
     "proposal.merge_atoms.accept": (
-        "ACCEPT 会 **rewire-before-delete**:先把所有引用这些原子的角色改写到规范原子,"
-        "再删冗余,**绝不留悬空引用**;不动也安全(只是不并)。"
+        "ACCEPT 会 rewire-before-delete:先把所有引用这些原子的角色改写到规范原子,"
+        "再删冗余,绝不留悬空引用;不动也安全(只是不并)。"
     ),
     "proposal.merge_atoms.summary": "合并 {n} 个近义原子 → 「{canon}」",
     # fs_access
@@ -1552,7 +1598,7 @@ _ZH = {
     "proposal.inbox_decision.default_action": "(见邮件)",
     "proposal.inbox_decision.summary": "📧 需要拍板:{sender} 「{subject}」",
     "proposal.inbox_decision.basis": (
-        "这封邮件被分诊为**需要你拍板**({reason})。建议动作:{action}。"
+        "这封邮件被分诊为需要你拍板({reason})。建议动作:{action}。"
         "正文摘要:{snippet}。"
         "本管道只通知与建议 —— 未经你确认绝不对外发信;ACCEPT 也只是记录你的决定,"
         "不会自动回信或执行任何外部动作。"
@@ -1560,8 +1606,8 @@ _ZH = {
     "proposal.inbox_reply.default_reason": "分诊判定可以先代拟回复",
     "proposal.inbox_reply.summary": "✉️ 代拟回复待批:{sender} 「{subject}」",
     "proposal.inbox_reply.basis": (
-        "这封邮件被分诊为**需要回复**({reason}),已代拟草稿(可就地修改后再批)。"
-        "ACCEPT = 把草稿存进台账并显示给你,由你**自行复制发送** —— "
+        "这封邮件被分诊为需要回复({reason}),已代拟草稿(可就地修改后再批)。"
+        "ACCEPT = 把草稿存进台账并显示给你,由你自行复制发送 —— "
         "系统不代发任何邮件(未经确认绝不对外发信是硬规矩)。"
     ),
     # revise_skill(crystallize/revision)
@@ -1575,7 +1621,7 @@ _ZH = {
     # external_adopt(external_collab)
     "proposal.external_adopt.default_citizen": "外部同事",
     "proposal.external_adopt.summary": "采纳 {badge} 「{cid}」的产出?(外部执行体·不可信数据)",
-    "proposal.external_adopt.basis_head": "这是外部执行体「{badge} {cid}」的产出——**不可信数据**(它不担你的责、无问责链)。",
+    "proposal.external_adopt.basis_head": "这是外部执行体「{badge} {cid}」的产出——不可信数据(它不担你的责、无问责链)。",
     "proposal.external_adopt.basis_ctx": "背景:{ctx}",
     "proposal.external_adopt.basis_tail": (
         "ACCEPT = 你拍板采纳这份产出,它才穿过来源边界(可进记忆/当结论/交给下游角色);"
@@ -1612,7 +1658,7 @@ _ZH = {
     ),
     "agent_import.note.advisory_persona": (
         "这个角色暂无可立即执行的原子(纯人设或需外部集成)。已按顾问角色导入。"
-        "要让它真能干活 → 去技能库**建或导一个 skill** 给它(skill 会落到写代码跑 / 连 MCP)。"
+        "要让它真能干活 → 去技能库建或导一个 skill 给它(skill 会落到写代码跑 / 连 MCP)。"
     ),
     "agent_import.note.v0_fallback": "未接 LLM 或拆解未成 → 走确定性 adapter(tools 仅列名,未出原子)",
     # ---- task-insight 段(docs/82 非任务认知沉淀:记忆面板来源列/kind 标签)----
@@ -1652,7 +1698,7 @@ _ZH = {
         "你不在的时候,「{title}」错过了 {n} 次(最近该跑:{when})—— 要补跑一次吗?"
     ),
     "proposal.schedule_catchup.basis": (
-        "「{title}」到点时系统没开机,这 {n} 场都没跑成。补跑 = 现在按原意图跑**一次**,"
+        "「{title}」到点时系统没开机,这 {n} 场都没跑成。补跑 = 现在按原意图跑一次,"
         "不是把错过的每一场都重放。你拒绝或不理会就不补,这批旧账下次开机也不会再提。"
     ),
     # ---- schedule-suggest 段(docs/90 刀3c:手动跑到第 N 次 → 温和的"要不要每周自动跑"提示)----
@@ -1800,13 +1846,51 @@ _ZH = {
     "pursuit.narrate.fb_none": "这条还没开始动 —— 下一轮我会带上它。",
     # docs/88 第二刀:聊天判型 create(小卡识别跨天目标 → 升承诺卡)的聊天回执 + REJECT 清理回执
     "pursuit.triage.card_text": (
-        "听起来这是个要**跨几天一直推进**的目标:「{statement}」。"
+        "听起来这是个要跨几天一直推进的目标:「{statement}」。"
         "完成判据(每轮推进后我都确定性核一遍,不问模型):{gate}。"
-        "我把它包成了一张**承诺卡** —— 你点了同意才算数;之后每轮推进会派生任务,"
+        "我把它包成了一张承诺卡 —— 你点了同意才算数;之后每轮推进会派生任务,"
         "最多 {max_rounds} 轮没过完成判据就自动暂停来问你。(到 🤝 H2A 处置)"
     ),
     "receipt.pursuit_commit.rejected_cleaned": (
         "好,不追「{statement}」了 —— 这个目标的记录已清掉,不留垃圾。想追随时再说一声。"
+    ),
+    # D(内测 U-06)多模态降级:模型**显式声明** text-only → 图不拼进请求,占位一句人话(拼在该轮 user 内容里)
+    "executor.images_unsupported": (
+        "(附了 {n} 张图,但当前模型 {model} 看不了图(它的配置声明只收文本)—— 文字我照常处理。"
+        "要用图,换一个支持视觉的模型;若这个模型其实能看图,在模型配置的 `input_modalities` 里补上 `image`。)"
+    ),
+    # D② drive 聊天路径 provider 错误人话化(人话在前,真因原文在后 —— fail-loud 不丢真因)
+    "drive.err.bad_key": (
+        "模型服务拒绝了密钥(401/403)—— 检查模型配置里的 API key。(真因: {cause})"
+    ),
+    "drive.err.bad_url": (
+        "模型端点地址不对(404)—— 检查模型配置里的 base_url/路径。(真因: {cause})"
+    ),
+    "drive.err.unreachable": (
+        "连不上模型服务(网络/超时)—— 检查网络或端点后再试。(真因: {cause})"
+    ),
+    "drive.err.bad_request": (
+        "模型服务拒绝了这次请求(4xx)。通常是请求里带了这个模型不支持的内容"
+        "(比如给纯文本模型发图),或协议不匹配。这次没跑成 —— 调整模型配置"
+        "或去掉不支持的内容后再试。(真因: {cause})"
+    ),
+    # K① 决策卡/路由提示(此前硬编码中文 f-string)
+    "report.approach_route": "由「{role}」在域治理下执行",
+    "report.approach_rerun": "重跑「{intent}」",
+    "route.roundtable_hint": (
+        "想让 {who} 一起讨论 —— 这是开**圆桌**(几个人坐一起),不是交给一个人。"
+        "要在「{group}」开桌讨论「{topic}」吗?(到 🤝 H2A 处置)"
+    ),
+    "route.delegate_hint": (
+        "这件事属于业务域「{domain_name}」 — 要不要转给「{role}」去做?(到 🤝 H2A 处置)"
+    ),
+    # K② 卡侧 LLM prompt 的应答语言指令(跟界面语言;拼进 system prompt 末尾)
+    "prompt.lang.answer": "用中文回答。",
+    "prompt.lang.json_why": "\"why\" 字段用中文写。",
+    "prompt.lang.title": "主题名用中文。",
+    # I:CLI run 默认路径的即时阶段提示(stderr;后续工具/文本事件实时流)
+    "cli.run.progress_start": (
+        "[karvyloop] 运行中:先检索技能 → 没命中再调模型;下面会实时流工具/文本事件"
     ),
 }
 

@@ -152,6 +152,28 @@ def _synthesize_missing_tool_results(
     return synth
 
 
+def _model_accepts_images(gateway: GatewayClient, atom_model) -> tuple[bool, str]:
+    """当前解析出的模型是否接受图像输入(D,内测 U-06)。返回 (accepts, model_id)。
+
+    判定**只认注册表配置** `input_modalities`(schemas/model.py),**不猜模型名**(猜表会过时)。
+    语义(review 拧正):**未声明(None/空)= 未知 → 保持旧行为拼图块** —— 存量视觉模型用户
+    (配了 claude/gpt-4o/glm-4v 但没写 modalities)升级后图照发,不功能回退;
+    **显式声明**且不含 "image" → 才降级(不拼图块,文字照跑,不会 400)。
+
+    判不出来(mock/桩 gateway 无 reg、模型对象没这属性、解析抛异常)→ (True, ""):
+    同样旧行为,0 回归 —— 真解析失败会在主循环 step 2 被分类上报,不在这里预判。
+    """
+    try:
+        ref = gateway.resolve_model(ResolveScope(atom_model=atom_model))
+        m = gateway.reg.get(ref)
+        mods = list(getattr(m, "input_modalities", None) or [])
+        if not mods:
+            return True, str(ref)   # 未声明/属性缺失 = 未知 → 旧行为(拼图块)
+        return ("image" in mods), str(getattr(m, "id", "") or ref)
+    except Exception:
+        return True, ""
+
+
 def _tool_call_fact(r: ToolResult) -> tuple[bool, str]:
     """ToolResult → (ok, error_reason) 成败事实对(slice C;记事实不算评价)。
 
@@ -247,6 +269,17 @@ async def run(
         user_content = str(input)
     # 多模态:有图 → 首条 user 消息建成 content 块列表(文本块 + Anthropic 原生图块;
     # openai 系 adapter 会把图块转成 image_url)。无图 → 维持纯字符串(0 回归)。
+    # D(内测 U-06):当前模型**显式声明**了 input_modalities 且不含 "image" → **不拼图块**
+    # (纯文本 provider 收到图块 = 400 崩整个任务),改为该轮 user 内容附一行人话占位,
+    # 任务继续跑文字部分。未声明(None,存量配置)/判不出来(mock gateway/测试桩)→
+    # 保持旧行为拼图块(存量视觉模型用户零回退)。
+    if images:
+        _img_ok, _img_model = _model_accepts_images(gateway, atom.model)
+        if not _img_ok:
+            from karvyloop import i18n as _i18n
+            user_content = (user_content + "\n\n" + _i18n.t(
+                "executor.images_unsupported", n=len(images), model=_img_model))
+            images = None
     if images:
         blocks: list = [{"type": "text", "text": user_content}]
         for im in images:
