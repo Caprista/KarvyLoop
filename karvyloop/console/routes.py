@@ -344,6 +344,18 @@ def _resolve_mention(app, mgr, mention: str, workspace_root: str, *, domain: str
     return None, "", None
 
 
+def _resolve_private_mentions(app, peer, intent: str) -> list:
+    """U-03 私聊 @ 解析(本体在 console/mention_fastlane.py,god-module 红线抽出;薄委托保测试面)。"""
+    from karvyloop.console.mention_fastlane import resolve_private_mentions
+    return resolve_private_mentions(app, peer, intent, roster_fn=_roundtable_roster)
+
+
+async def _mention_fastlane(app, peer, intent: str):
+    """U-03 私聊 @ 快通道委派卡(本体在 console/mention_fastlane.py;薄委托保测试面)。"""
+    from karvyloop.console.mention_fastlane import mention_fastlane
+    return await mention_fastlane(app, peer, intent, roster_fn=_roundtable_roster)
+
+
 def group_no_mention_nudge(app, mgr, mention: str) -> dict | None:
     """群里**不 @ 任何人** → 系统不知道发给谁 → 不跑模型,只让小卡轻提醒一句(Hardy 定的群语义)。
 
@@ -1200,6 +1212,14 @@ async def maybe_route_to_role(app, mgr, intent: str):
     domain_id = peer.domain_id if peer is not None else "l0"  # 默认私聊小卡
     if not is_karvy_peer(domain_id):
         return None  # 私聊业务 role → 该 role 自己执行(照常 drive)
+    # U-03(Hardy 拍板):私聊小卡里 @某角色 → 快通道委派卡(用户已点名,跳过下面全部
+    # 意图识别/ops 关键词/LLM 拆解 —— @ 比关键词强)。**群场语义不动**(@1直答/@2+workflow/
+    # @0 nudge 在上游,l0 大群漏到这里的也不走快通道)。REST api_intent 与 WS _handle_intent_ws
+    # 都经本函数 → 两路行为天然一致;非 None 早返回由既有调用方 record_turn(防 ctx 串台)。
+    if getattr(peer, "role", "") != "group":
+        fast = await _mention_fastlane(app, peer, intent)
+        if fast is not None:
+            return fast
     # 运维意图(诊断/排查/运维)→ ops 诊断 H2A。ops 不是"委派给某角色",故不经 should_route 分类
     # (独立对抗验收点名:"帮我诊断系统" 会被 should_route 判 execute → 永远到不了 ops 路由)。
     if _looks_like_ops(intent):

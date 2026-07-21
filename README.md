@@ -350,7 +350,14 @@ KarvyLoop ships **by version** ([CHANGELOG](CHANGELOG.md)), and it tells you whe
 
 ### Uninstalling
 
-Everything the installer touches is listed here — removing it all takes four steps (beta feedback: this used to be undocumented):
+One command (keeps your instance data; add `--purge-data` / `-PurgeData` to remove that too):
+
+```bash
+sh scripts/uninstall.sh            # Linux / macOS   (from a clone, or download just this file)
+# Windows: powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1
+```
+
+Or by hand — everything the installer touches is listed here (beta feedback: this used to be undocumented):
 
 ```bash
 # 1. the app venv + the launcher symlink (this is the actual program)

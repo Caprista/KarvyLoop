@@ -10,7 +10,12 @@
 ⑥ 接线:paradigm persona 携带机器可读 deontic_forbid → forge 咽喉真武装 → 工具never执行
    + 诚实 reason 回灌模型;
 ⑦ 防双注入:机器可读属性不往 prompt 文本里加任何字;
-⑧ apply_deontic(mode="enforce") 真抛 DeonticViolationError(此前只有 docstring 声称)。
+⑧ apply_deontic(mode="enforce") 真抛 DeonticViolationError(此前只有 docstring 声称);
+⑨ C-03 点名工具硬拦:forbid 原文点名真实工具名 → per-tool 精确阻断(named_tool),
+   只读豁免不适用(用户指名道姓优先);点名不存在的工具/子串近似 → 诚实留软,绝不误硬;
+⑩ 唯一许可句定向豁免(对抗验收非阻塞项):「只准用 X」「仅允许 X」「除了 X 其他都不许」
+   「don't use anything except X」里点名的工具是要**留**的 → 不进阻断集(条目照旧降软);
+   「除 X 外随便用」是禁 X 本身,照拦;成语覆盖不到的边缘形态退回误硬(安全侧)。
 """
 from __future__ import annotations
 
@@ -24,6 +29,7 @@ from karvyloop.capability.decision import Allow, Deny, authorize
 from karvyloop.capability.deontic_gate import (
     CATEGORY_DELETE,
     CATEGORY_EXTERNAL_SEND,
+    CATEGORY_NAMED_TOOL,
     CATEGORY_TRANSACTION,
     active_scope,
     build_scope,
@@ -306,6 +312,276 @@ async def test_forge_normal_work_unaffected_under_finance_persona(tmp_path):
                                  system_prompt=cp)
     assert res.terminal.value == "completed"
     assert len(sb.exec_log) == 1   # echo 真跑了(没被误拦)
+
+
+# ============ ⑨ C-03:forbid 点名工具 = 确定性硬拦(named_tool) ============
+
+def test_named_tool_forbid_enforceable_and_denied_real_authorize(tmp_path):
+    """「禁止调用 edit_file」→ enforceable(named_tool)+ edit_file 在真 authorize 链被拒、
+    其它工具照跑(per-tool 阻断,不殃及邻居)。"""
+    entry = "禁止调用 edit_file"
+    split = classify_forbid((entry,))
+    assert (CATEGORY_NAMED_TOOL, entry) in split.enforceable
+    assert split.named == ((entry, ("edit_file",)),)
+    assert split.soft == ()                      # 点名条目不再降软
+    with deontic_scope(build_scope((entry,), domain="内容组")):
+        d = authorize(PermissionContext(tool="edit_file", input={"path": str(tmp_path / "a.md")},
+                                        mode=Mode.WORKSPACE_WRITE, workspace_root=str(tmp_path)))
+        assert isinstance(d, Deny), f"点名的 edit_file 该被硬拦,实际 {d}"
+        assert d.reason == f"deontic:forbid:{CATEGORY_NAMED_TOOL}"
+        # 拒因说清:forbid 原文(条目 X)+ 域名 + 点名禁止
+        assert entry in d.message and "内容组" in d.message and "点名" in d.message
+        # 其它工具照跑(write_file/run_command/web_search 都不受牵连)
+        assert check_active("write_file", {"path": "a.md"}) is None
+        assert check_active("run_command", {"command": "echo hi"}) is None
+        assert check_active("web_search", {"query": "x"}) is None
+        d2 = authorize(PermissionContext(tool="run_command", input={"command": "echo hi"},
+                                         mode=Mode.WORKSPACE_WRITE, workspace_root=str(tmp_path)))
+        assert isinstance(d2, Allow), f"未点名工具被误拦: {d2}"
+        # FULL 模式也拦(step 6.5 免疫 FULL)
+        d3 = authorize(_ctx("edit_file", {"path": "b.md"}, mode=Mode.FULL))
+        assert isinstance(d3, Deny) and d3.reason == f"deontic:forbid:{CATEGORY_NAMED_TOOL}"
+
+
+def test_named_nonexistent_tool_stays_soft():
+    """点名不存在的工具 → 诚实降 soft(不硬拦也不炸;声称硬了拦不到任何东西=假接线)。"""
+    entry = "禁止调用 frobnicate_tool"
+    split = classify_forbid((entry,))
+    assert split.enforceable == () and split.named == ()
+    assert split.soft == (entry,)
+    assert build_scope((entry,)) is None         # 不武装
+    # 未武装下调用同名工具也不炸、不拦(它根本不存在,防御性锁行为)
+    assert check_active("frobnicate_tool", {}) is None
+
+
+def test_named_no_substring_or_fuzzy_match():
+    """精确 token 匹配锁死:「editor」不命中 edit_file;「edit」也不命中(edit_file 才是
+    工具名);点名 edit_file 也绝不拦叫别的名字的工具。"""
+    split = classify_forbid(("不要用 editor 乱改",))
+    assert split.named == () and split.enforceable == ()
+    assert split.soft == ("不要用 editor 乱改",)
+    assert classify_forbid(("禁止 edit",)).named == ()
+    with deontic_scope(build_scope(("禁止调用 edit_file",), domain="d")):
+        assert check_active("editor_file", {}) is None
+        assert check_active("edit", {}) is None
+        assert check_active("edit_file2", {}) is None
+        assert check_active("edit_file", {}) is not None   # 本尊才拦
+
+
+def test_named_plus_category_keywords_double_gate():
+    """一条 forbid 点名工具 + 又含 3 类关键词 → 两种硬闸都挂(不互斥)。"""
+    entry = "禁止调用 edit_file,也不得删除任何数据"
+    split = classify_forbid((entry,))
+    cats = {c for c, s in split.enforceable if s == entry}
+    assert cats == {CATEGORY_NAMED_TOOL, CATEGORY_DELETE}
+    assert split.soft == ()
+    with deontic_scope(build_scope((entry,), domain="ops")):
+        hit = check_active("edit_file", {"path": "x"})
+        assert hit is not None and hit.category == CATEGORY_NAMED_TOOL
+        hit2 = check_active("run_command", {"command": "rm -rf cache"})
+        assert hit2 is not None and hit2.category == CATEGORY_DELETE
+        hit3 = check_active("delete_file", {"path": "x"})
+        assert hit3 is not None and hit3.category == CATEGORY_DELETE
+        # 没点名、也非删除类 → 照跑
+        assert check_active("write_file", {"path": "x"}) is None
+
+
+def test_named_read_only_tool_still_blocked_tradeoff_locked():
+    """取舍锁死:被点名的工具**哪怕只读也拦**(用户指名道姓,意图明确 > 读语义豁免);
+    只读豁免对三类闸照旧成立(0 回归)。"""
+    with deontic_scope(build_scope(("don't use web_search", "禁止调用 read_file"), domain="d")):
+        hit = check_active("web_search", {"query": "x"})
+        assert hit is not None and hit.category == CATEGORY_NAMED_TOOL
+        hit2 = check_active("read_file", {"path": "a"})
+        assert hit2 is not None and hit2.category == CATEGORY_NAMED_TOOL
+        d = authorize(_ctx("web_search", {"query": "x"}, mode=Mode.FULL))   # FULL 也不豁免
+        assert isinstance(d, Deny) and d.reason == f"deontic:forbid:{CATEGORY_NAMED_TOOL}"
+        # 没被点名的只读工具不拦(只读豁免对三类闸的既有语义不动)
+        assert check_active("web_fetch", {"url": "u"}) is None
+    # 反向锁:只挂三类闸(无点名)时,只读工具豁免仍在
+    with deontic_scope(build_scope(FINANCE_FORBID, domain="fin")):
+        assert check_active("web_search", {"query": "转账手续费"}) is None
+
+
+def test_named_mixed_language_entry():
+    """中英混写条目:「don't use run_command 也不许联网外发」→ run_command 点名硬拦
+    (连 echo 也拦:点的是工具本身)+ 外发类硬闸同挂。"""
+    entry = "don't use run_command 也不许联网外发"
+    split = classify_forbid((entry,))
+    cats = {c for c, s in split.enforceable if s == entry}
+    assert CATEGORY_NAMED_TOOL in cats and CATEGORY_EXTERNAL_SEND in cats
+    assert split.soft == ()
+    with deontic_scope(build_scope((entry,), domain="pr")):
+        hit = check_active("run_command", {"command": "echo hi"})
+        assert hit is not None and hit.category == CATEGORY_NAMED_TOOL
+        assert check_active("send_email", {"to": "a@b.c"}) is not None
+        assert check_active("edit_file", {"path": "x"}) is None
+
+
+def test_named_runtime_toolset_is_source_of_truth():
+    """点名闸以运行时真实工具集为准(forge 武装时传本次 run 的 tools.keys(),含 MCP):
+    内置目录不认识的名字默认 soft;传 known_tools 后才升硬。"""
+    entry = "禁止调用 mcp_broker_place_order"
+    assert build_scope((entry,)) is None          # 内置目录没有 → 诚实留软
+    scope = build_scope((entry,), domain="fin",
+                        known_tools=("mcp_broker_place_order", "run_command"))
+    assert scope is not None and scope.named == ((entry, ("mcp_broker_place_order",)),)
+    with deontic_scope(scope):
+        hit = check_active("mcp_broker_place_order", {"symbol": "AAPL"})
+        assert hit is not None and hit.category == CATEGORY_NAMED_TOOL
+        assert check_active("run_command", {"command": "echo hi"}) is None   # 在工具集≠被点名
+
+    # scope_from_system 的 known_tools 接线口(forge 用的那条路)
+    class _Sys:
+        deontic_forbid = (entry,)
+        deontic_domain = "fin"
+    s2 = scope_from_system(_Sys(), known_tools=("mcp_broker_place_order",))
+    assert s2 is not None and s2.named
+    assert scope_from_system(_Sys()) is None      # 不传 = 内置目录里没有 → 不武装
+
+
+# ============ ⑩ 唯一许可句定向豁免(验收判决表 3c 五句) ============
+
+def test_whitelist_idioms_verdict_table_3c():
+    """判决表 3c 五句逐一锁行为:唯一许可句点名的工具**放行**(那是用户要留的);
+    「除 X 外随便用」是禁 X 本身 → 照拦。"""
+    # 句1:「除了 edit_file 其他工具都不许用」= 只留 edit_file → edit_file 放行
+    s1 = "除了 edit_file 其他工具都不许用"
+    split1 = classify_forbid((s1,))
+    assert split1.named == () and s1 in split1.soft
+    assert build_scope((s1,)) is None
+    # 句2:「只准用 read_file 查资料」→ read_file 放行
+    s2 = "只准用 read_file 查资料"
+    split2 = classify_forbid((s2,))
+    assert split2.named == () and s2 in split2.soft
+    # 句3:「仅允许 web_search」→ web_search 放行
+    s3 = "仅允许 web_search"
+    assert classify_forbid((s3,)).named == ()
+    # 句4:"don't use anything except read_file" → read_file 放行
+    s4 = "don't use anything except read_file"
+    split4 = classify_forbid((s4,))
+    assert split4.named == () and s4 in split4.soft
+    # 句5:「除 edit_file 外随便用」= 禁的是 edit_file 本身(禁用语义)→ 正确拦
+    s5 = "除 edit_file 外随便用"
+    split5 = classify_forbid((s5,))
+    assert split5.named == ((s5, ("edit_file",)),)
+    with deontic_scope(build_scope((s5,), domain="d")):
+        hit = check_active("edit_file", {"path": "x"})
+        assert hit is not None and hit.category == CATEGORY_NAMED_TOOL
+        assert check_active("write_file", {"path": "x"}) is None
+
+
+def test_whitelist_idiom_more_forms_and_plain_bans_unchanged():
+    """成语族其余形态放行;普通禁用句(「禁止 X」「别用 X」「don't use X」)行为不变。"""
+    # 放行族:只允许 / 只许 / 仅限 / 只能用 / only use / use only
+    for s in ("只允许 web_search 查资料", "只许 read_file", "仅限 read_file",
+              "只能用 web_search", "only use read_file for research",
+              "use only read_file here"):
+        assert classify_forbid((s,)).named == (), f"唯一许可句被误硬: {s}"
+    # 禁用句照拦(0 放松):
+    for s, tool in (("禁止调用 edit_file", "edit_file"),
+                    ("别用 run_command", "run_command"),
+                    ("don't use web_search", "web_search")):
+        split = classify_forbid((s,))
+        assert split.named == ((s, (tool,)),), f"普通禁用句被误豁免: {s}"
+
+
+def test_whitelist_idiom_edge_forms_fall_back_to_hard():
+    """成语覆盖不到的边缘形态**退回误硬**(安全侧,宁紧勿松)——在此锁死并注明:
+    这些句偏许可/带例外语义,但不在定向成语集内,点名工具仍拦。"""
+    # 「never use edit_file except for typos」:禁的对象是点名工具本身(except 后无
+    # anything/other)→ 主体是禁用,拦 edit_file 正确
+    s1 = "never use edit_file except for typo fixes"
+    assert classify_forbid((s1,)).named == ((s1, ("edit_file",)),)
+    # 变体 "do not invoke any tool except X":动词 invoke 不在成语集 → 误硬(安全侧退回)
+    s2 = "do not invoke any tool except web_search"
+    assert classify_forbid((s2,)).named == ((s2, ("web_search",)),)
+    # 中文变体「除了 X 之外的工具一律不用」:「不用」不在禁用动词集 → 误硬(安全侧退回)
+    s3 = "除了 read_file 之外的工具一律不用"
+    assert classify_forbid((s3,)).named == ((s3, ("read_file",)),)
+
+
+def test_whitelist_idiom_compound_entry_and_category_interplay():
+    """复合句取舍(锁 spec):一条里既显式禁用又唯一许可 → 点名闸整体退软
+    (一条规则写一件事,禁用请单列条目);类别闸不受豁免影响。"""
+    # 复合句:点名闸整体退软(edit_file 不再硬拦 —— 换单列条目就硬)
+    s = "不许调用 edit_file,只准用 read_file"
+    split = classify_forbid((s,))
+    assert split.named == () and s in split.soft
+    # 单列写法两条都如预期:禁用条硬、许可条软
+    split2 = classify_forbid(("不许调用 edit_file", "只准用 read_file"))
+    assert split2.named == (("不许调用 edit_file", ("edit_file",)),)
+    # 唯一许可句 + 三类关键词并存:豁免只免点名闸,类别闸照挂
+    s3 = "只允许 web_search,不许转账"
+    split3 = classify_forbid((s3,))
+    assert split3.named == ()
+    assert (CATEGORY_TRANSACTION, s3) in split3.enforceable
+    with deontic_scope(build_scope((s3,), domain="fin")):
+        assert check_active("web_search", {"query": "x"}) is None      # 留的工具真放行
+        assert check_active("transfer_funds", {}) is not None           # 类别闸照拦
+    # 「删除」词内的「除」不误触发白名单(负向后顾):禁删除+点名条目仍全硬
+    s4 = "禁止删除任何数据,也不许调用 edit_file,其他不禁"
+    split4 = classify_forbid((s4,))
+    assert split4.named == ((s4, ("edit_file",)),)
+    assert (CATEGORY_DELETE, s4) in split4.enforceable
+
+
+@pytest.mark.asyncio
+async def test_forge_end_to_end_named_tool_forbid_blocks_real_run(tmp_path):
+    """C-03 端到端(真 forge 咽喉,验 known_tools=tools.keys() 接线):域 forbid 点名
+    edit_file → 模型试图 edit_file 被确定性拦(文件从未被改)+ 收到诚实 reason;
+    未点名的 run_command 照跑。"""
+    from tests.test_forge import FakeSandbox, _gw, _tok
+    from karvyloop.atoms._scripted_mock import ScriptedMockAdapter, text_round, tool_round
+    from karvyloop.coding.forge import generate_and_run
+    from karvyloop.coding.paradigm_prompt import build_role_paradigm_prompt
+    from karvyloop.domain.deontic import Deontic
+    from karvyloop.domain.registry import BusinessDomainRegistry
+    from karvyloop.roles.registry import RoleRegistry
+
+    roles = RoleRegistry(tmp_path / "roles")
+    rv = roles.create("editor-role", identity="我是编辑", soul="尊重原稿", atom_ids=[])
+    reg = BusinessDomainRegistry()
+    domain = reg.create(
+        name="内容组", created_by="user:h",
+        value_md_raw="# 价值观\n- 不越权改稿",
+        deontic=Deontic(forbid=("禁止调用 edit_file",)),
+        member_query="user:h AND agent:editor-role",
+    )
+    cp = build_role_paradigm_prompt(rv, domain, intent="校对一下", cwd=str(tmp_path))
+    assert cp is not None
+    sb = FakeSandbox(str(tmp_path))
+    sb.files[str(tmp_path / "draft.md")] = "v1".encode("utf-8")
+    adapter = ScriptedMockAdapter(rounds=[
+        tool_round("c1", "edit_file", {"file_path": str(tmp_path / "draft.md"),
+                                       "old_string": "v1", "new_string": "v2"}),
+        tool_round("c2", "run_command", {"command": "echo checked"}),
+        text_round("好的,不动稿子,只做了检查。"),
+    ])
+    gw = _gw(adapter)
+    res = await generate_and_run("帮我改稿", _tok(), sb, gateway=gw,
+                                 workspace_root=str(tmp_path), model_ref="p/a",
+                                 system_prompt=cp)
+    assert res.terminal.value == "completed"
+    # 点名的 edit_file 被拦:文件内容原封不动
+    assert sb.files[str(tmp_path / "draft.md")] == b"v1", "点名禁止的 edit_file 居然真改了文件"
+    # 未点名的 run_command 照跑(exec_log 记 argv dict)
+    assert len(sb.exec_log) == 1 and "echo checked" in str(sb.exec_log[0]), \
+        f"未点名工具被误伤: {sb.exec_log}"
+    # 模型收到诚实 reason(capability_denied + forbid 原文)
+    fed_back = json.dumps(adapter.last_request["messages"], ensure_ascii=False)
+    assert "capability_denied" in fed_back and "禁止调用 edit_file" in fed_back
+    assert active_scope() is None   # scope 不泄漏
+
+
+def test_named_tool_normalization_matches_catalog_convention():
+    """归一与 atoms/tool_catalog 同规:'web-search' 认出 web_search(既有产品归一,非模糊);
+    其余不做任何别名/翻译。"""
+    split = classify_forbid(("don't use web-search",))
+    assert split.named == (("don't use web-search", ("web_search",)),)
+    with deontic_scope(build_scope(("don't use web-search",), domain="d")):
+        assert check_active("web_search", {"query": "x"}) is not None
+        assert check_active("web_fetch", {"url": "u"}) is None
 
 
 # ============ ⑧ apply_deontic enforce 真抛 ============

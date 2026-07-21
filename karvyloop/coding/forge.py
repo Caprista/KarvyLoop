@@ -233,13 +233,15 @@ async def generate_and_run(
     run_intent = _annotate_freshness(intent, has_web=_has_web)
 
     # 域 deontic 确定性硬闸(docs/54 B1):persona 带 deontic_forbid(paradigm_prompt 挂的
-    # 机器可读属性)→ 本次 run 期间武装工具闸(authorize step 6.5 真拦交易/删除/外发类 forbid)。
+    # 机器可读属性)→ 本次 run 期间武装工具闸(authorize step 6.5 真拦交易/删除/外发类
+    # + forbid 点名的工具,C-03)。known_tools 传本次 run 的真实工具集(含 MCP 注入)——
+    # 点名闸「运行时以真实工具目录为准」,不硬编码清单。
     # forge 是所有 drive/委派/圆桌慢脑的唯一咽喉,一处武装全覆盖;scope 随 with 退出复位,
     # 绝不泄漏到下一次 run。没挂(私聊/CLI/默认 coding 提示)= None → no-op,0 回归。
     from karvyloop.capability.deontic_gate import deontic_scope as _deontic_scope
     from karvyloop.capability.deontic_gate import scope_from_system as _deontic_from_system
 
-    with _deontic_scope(_deontic_from_system(sys_prompt)):
+    with _deontic_scope(_deontic_from_system(sys_prompt, known_tools=tools.keys())):
         async for ev in atom_run(atom, {"intent": run_intent}, token,
                               gateway=gateway, tools=tools,
                               max_turns=max_turns, system=sys_prompt,

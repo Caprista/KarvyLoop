@@ -268,6 +268,11 @@ def delete_model(mid: str, cfg_path=None) -> tuple[bool, str]:
         return False, f"模型 {mid} 不存在"
     for pname in emptied:
         provs.pop(pname, None)
+    # 历史空壳顺扫(内测台账小件):老版本删除逻辑留下的 models 为空的 provider 壳
+    # (占着 base_url/key 却啥也跑不了)趁本次删除动作一并清 —— 只在用户已在"删东西"
+    # 的语境里做,平时读取绝不动配置。
+    for pname in [k for k, v in provs.items() if not (v.get("models") or [])]:
+        provs.pop(pname, None)
     _save(cfg, cfg_path)
     return True, ""
 

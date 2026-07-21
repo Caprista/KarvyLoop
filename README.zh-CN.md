@@ -339,7 +339,14 @@ KarvyLoop **按版本发布**([CHANGELOG](CHANGELOG.md)),有新版会**提示你
 
 ### 卸载
 
-安装器碰过的东西全在这里,四步删干净(内测反馈:此前没有官方卸载说明):
+一条命令(默认保留实例数据;加 `--purge-data` / `-PurgeData` 连数据一起删):
+
+```bash
+sh scripts/uninstall.sh            # Linux / macOS(在 clone 里跑,或单独下载这个文件)
+# Windows: powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1
+```
+
+或者手动——安装器碰过的东西全在这里(内测反馈:此前没有官方卸载说明):
 
 ```bash
 # 1. 程序本体:venv + 启动软链

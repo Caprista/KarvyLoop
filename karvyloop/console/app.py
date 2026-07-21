@@ -234,6 +234,10 @@ def build_console_app(
         # 主事件循环句柄:给线程池里跑的 sync 路径(REST /api/h2a_decide 等)把
         # fire-and-forget 协程桥回环上用(run_coroutine_threadsafe;decision_wire P0-6)。
         app.state.main_event_loop = asyncio.get_running_loop()
+        # 二层心跳(监督者悖论收口):独立线程盯这个事件循环——task_monitor 等一切看门狗都
+        # 活在循环里,循环整体被同步调用堵死时它们全哑;只有线程侧还能喊(写日志/终端)。
+        from karvyloop.console.loop_watchdog import start_loop_watchdog
+        start_loop_watchdog(app)
         logger.info(
             f"[karvyloop console] 启动 workbench={bool(workbench)} "
             f"main_loop={main_loop is not None} "
@@ -728,6 +732,10 @@ def build_console_app(
 
         yield
 
+        # 二层心跳线程停表(daemon 本不阻退出,显式停干净)
+        _wd = getattr(app.state, "loop_watchdog", None)
+        if _wd is not None:
+            _wd.stop()
         # A:关 MCP 会话(断子进程)
         _gctx = getattr(app.state, "mcp_group_ctx", None)
         if _gctx is not None:

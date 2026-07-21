@@ -90,7 +90,9 @@ def deontic_guardrail_text(deontic: Deontic) -> str:
     ① 本函数 = 运行时软护栏(把规则摆进慢脑 system,让模型受约束)——对**纯语义** forbid/oblige
       (如"隐瞒下行风险只报收益""对外发邮件前必须复核")这是正确且唯一的 enforcement;
     ② `capability/deontic_gate.py` = 确定性硬闸(authorize step 6.5,与 fs_grants 敏感地板同层)
-      ——对**能映射到工具/命令模式**的 forbid(交易/转账、删除、对外发送)真拦,不靠模型自觉;
+      ——对**能映射到工具/命令模式**的 forbid 真拦,不靠模型自觉。「能映射才硬」含两路:
+      三类语义(交易/转账、删除、对外发送)+ **点名真实工具名**的条目(如「禁止调用
+      edit_file」→ per-tool 精确阻断,C-03;点名不存在的工具诚实留软);
     ③ **建时** skill×域冲突检测(rules_from_domain + LLM judge)。
     同一条 forbid 可同时受①②约束(软的说给模型听,硬的模型说了也不算)。
 
@@ -136,7 +138,7 @@ def apply_deontic(
         此前只有 docstring 声称会抛、代码从不抛(假接线);现已真实现。
 
     注:本函数是**精确字符串匹配**(action == forbid 条目),适合审计/编程式校验。
-    执行路径上的确定性硬闸(工具/命令级模糊到类别的匹配)在
+    执行路径上的确定性硬闸(工具/命令级的类别匹配 + forbid 点名工具的精确名阻断)在
     `capability/deontic_gate.py`(authorize step 6.5),两者分工:
     这里管"显式声明的行为标签",那里管"工具调用的确定性拦截"。
 

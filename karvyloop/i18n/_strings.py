@@ -1017,6 +1017,15 @@ _EN = {
     "route.delegate_hint": (
         "This belongs to business domain “{domain_name}” — hand it to “{role}”? (decide in 🤝 H2A)"
     ),
+    # U-03:私聊小卡 @角色 → 快通道委派卡(点名=已填好的单,拍一下就开工)
+    "route.mention_fastlane_hint": (
+        "Delegation card for “{role}” is ready — approve it on the right and they'll get started."
+    ),
+    "route.mention_multi_hint": (
+        "Mention one role at a time here — for several people working together, "
+        "@ them in a group, or say “open a roundtable”."
+    ),
+    "route.mention_no_domain": "Personal",
     # K② 卡侧 LLM prompt 的应答语言指令(跟界面语言;拼进 system prompt 末尾)
     "prompt.lang.answer": "Answer in English.",
     "prompt.lang.json_why": "Write the \"why\" values in English.",
@@ -1920,6 +1929,12 @@ _ZH = {
     "route.delegate_hint": (
         "这件事属于业务域「{domain_name}」 — 要不要转给「{role}」去做?(到 🤝 H2A 处置)"
     ),
+    # U-03:私聊小卡 @角色 → 快通道委派卡(点名=已填好的单,拍一下就开工)
+    "route.mention_fastlane_hint": "已给「{role}」备好委派单 —— 右边拍一下就开工。",
+    "route.mention_multi_hint": (
+        "这里一次 @ 一位;想让几个人一起干,去群里 @ 他们,或说「开个圆桌」。"
+    ),
+    "route.mention_no_domain": "个人",
     # K② 卡侧 LLM prompt 的应答语言指令(跟界面语言;拼进 system prompt 末尾)
     "prompt.lang.answer": "用中文回答。",
     "prompt.lang.json_why": "\"why\" 字段用中文写。",
