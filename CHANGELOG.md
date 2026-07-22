@@ -11,6 +11,54 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **@ someone in your private chat with Karvy and a delegation card is ready to approve.**
+  Mentioning a role by name ("@analyst do the weekly numbers") no longer goes nowhere — it
+  instantly prepares a filled-in hand-off card for one-tap approval (no model call needed;
+  you already said who). Group-chat @ behavior is unchanged; ordinary messages with an @ in
+  them (like emails) are never swallowed.
+- **"Don't use edit_file" now actually means it.** Naming a real tool in a domain's forbid
+  rules is enforced deterministically — the tool is blocked at the capability gate, even in
+  full-access mode, even for read-only tools you explicitly named. Whitelist phrasings
+  ("only use read_file") correctly spare the tool you want to keep. Adversarially verified:
+  no bypass across 18 phrasing variants.
+- **Related decision cards now arrive as one group.** Cards born from the same request fold
+  under a header ("🔗 About '…' — 3 for you to decide") with a plain line telling you where
+  they came from; high-risk cards never fold and pin to the top. When the backlog passes 7,
+  new low-priority cards tuck into a drawer at the bottom of the list (high-risk cards and
+  ones you triggered yourself always surface). A group that's all low-risk and same-type
+  gets a modest "Accept all" — it presses each card's own Accept in turn (every safety
+  check still fires; cancel one and the rest stop), and the ledger records each card
+  individually with a batch mark.
+- **The console now notices config edits made outside it.** Change `config.yaml` from a
+  terminal or editor and the console reloads it on your next message (or within its
+  maintenance tick) and says so — a broken edit is reported immediately with the reason,
+  instead of lying dormant until a restart ("it worked, then stopped working later" was
+  exactly this).
+- **A second-layer heartbeat watches the event loop itself.** If the console's main loop is
+  ever frozen by a stuck synchronous call, an independent thread notices within ~2 minutes
+  and says so loudly in the log (with recovery announced too) — previously every watchdog
+  lived inside the loop it was supposed to watch.
+- **An official uninstaller.** `scripts/uninstall.sh` / `uninstall.ps1` remove exactly what
+  the installer created (instance data kept by default; `--purge-data` to remove it), and
+  the README documents the manual steps for both platforms.
+
+### Fixed
+- **Attaching an image no longer crashes tasks on text-only models.** If a model declares
+  it can't see images (`input_modalities` in its config entry), the image is dropped with a
+  plain note and the text runs normally — instead of a raw 400 error killing the task.
+  Models that don't declare anything behave exactly as before.
+- **Decision cards now speak your interface language.** Card follow-up answers, violation
+  explanations and run titles follow the UI language; several hardcoded-Chinese fragments
+  went through i18n — English users no longer get mixed-language cards.
+- **`karvyloop run` shows progress while it works** (tool calls and text stream live in the
+  default path) instead of staying silent until the end.
+- **Raw internal error codes no longer reach the chat** ("✗ infra_dead" is now "model
+  service unavailable — check Models (Global), then rerun", with the same treatment for the
+  whole terminal-code family).
+- **macOS installs on zsh-only setups** (`.zlogin` covered) and stray empty provider blocks
+  in `config.yaml` are swept on the next delete.
+
 ## [2026.7.20] — 2026-07-20
 
 The learning-curve release: the interface got simpler to read, every running task got a stop
