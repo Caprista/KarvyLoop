@@ -168,8 +168,12 @@ def observe_decision(app: Any, sample: DecisionSample) -> None:
 
 def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
                             reason: str = "", domain: str = "", role: str = "",
-                            edits: Optional[dict] = None) -> None:
+                            edits: Optional[dict] = None, batch: str = "") -> None:
     """一次 H2A 拍板 → 三路信号(样本缓冲→结晶 / stats 复利 / decision_log 回看)**单一接缝**。
+
+    batch(docs/92 刀3):组批批次标(=组的 chain_id)。组级「全部接受」= 前端逐卡发
+    ACCEPT 每条带 batch → 这里透传进 decision_log 流水 + decision_made Trace(每卡一条、
+    可逐卡回溯,不是一个合并决策)。单卡拍板 batch=""(不落字段,老流水/老消息兼容)。
 
     P3-a 病根:此前只有 WS 路径接了这三路,REST `/api/h2a_decide` 一路都没接 ——
     走 REST 拍的板从不进偏好结晶回路(决策 loop 白拍)。两条传输路都调本函数,信号对齐。
@@ -252,7 +256,8 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
         log = getattr(app.state, "decision_log", None)
         if log is not None:
             log.record(decision=decision, summary=ctx, proposal_id=proposal_id,
-                       reason=eff_reason, kind=kind, domain=eff_domain, role=role or "")
+                       reason=eff_reason, kind=kind, domain=eff_domain, role=role or "",
+                       batch=batch or "")   # docs/92 刀3:组批标(每卡一条流水,可按批回溯)
     except Exception as e:
         logger.warning(f"[decision_wire] decision_log 记录失败(proposal_id={proposal_id}): {e}")
     # 段3b:挣来的静音(docs/49②/50 决定1)—— 命中率从仪表变控制器,单一接缝就在开奖处:
@@ -268,12 +273,15 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
     # 段3c(T3 decision_made,docs/85):拍板本体落 Trace —— 决策建成的第④站从此不蒸发
     # (decision_log 是给人回看的流水,这条是评价/lifeline 的事件底座;fail-soft 同各段)。
     try:
-        emit_decision_trace(app, "decision_made", proposal_id, {
+        _t3 = {
             "decision": (decision or "").upper(), "kind": kind,
             "domain": eff_domain, "role": role or "",
             "reason": (eff_reason or "")[:160],
             "edited": sorted(edits.keys())[:6] if edits else [],
-        })
+        }
+        if batch:
+            _t3["batch"] = batch   # docs/92 刀3:组批标(单卡不带字段,老事件读侧 .get 兼容)
+        emit_decision_trace(app, "decision_made", proposal_id, _t3)
     except Exception as e:
         logger.warning(f"[decision_wire] decision_made 埋点失败(proposal_id={proposal_id},"
                        f"不阻断): {e}")

@@ -61,16 +61,23 @@ class DecisionLog:
 
     def record(self, *, decision: str, summary: str = "", proposal_id: str = "",
                reason: str = "", kind: str = "", domain: str = "", role: str = "",
-               now: Optional[float] = None) -> None:
-        """记一条拍板流水。只认 ACCEPT/REJECT/DEFER/REVOKE(别的忽略)。"""
+               batch: str = "", now: Optional[float] = None) -> None:
+        """记一条拍板流水。只认 ACCEPT/REJECT/DEFER/REVOKE(别的忽略)。
+
+        batch(docs/92 刀3):组批批次标(=组的 chain_id)。组级「全部接受」逐卡各记一条
+        (不是一个合并决策),同批共享 batch 可回溯;单卡拍板不带字段(老流水读侧 .get 兼容)。
+        """
         d = (decision or "").upper()
         if d not in _VALID:
             return
-        self._entries.append({
+        entry = {
             "ts": now if now is not None else time.time(),
             "decision": d, "summary": summary or "", "proposal_id": proposal_id or "",
             "reason": reason or "", "kind": kind or "", "domain": domain or "", "role": role or "",
-        })
+        }
+        if batch:
+            entry["batch"] = batch
+        self._entries.append(entry)
         if len(self._entries) > _RETAIN:
             self._entries = self._entries[-_RETAIN:]   # 留存上限(审计够长,仍有界)
         self._persist()

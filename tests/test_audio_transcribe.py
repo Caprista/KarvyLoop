@@ -229,7 +229,15 @@ def test_real_faster_whisper_smoke(monkeypatch):
     # 但 [asr] 是可选 extra,依赖的 av DLL 可能被机器策略拦(实捕:应用程序控制策略
     # 阻止 av\audio\frame DLL)—— 装了却载不进 = 环境缺席,与没装同义,诚实跳过。
     # 双门(env 开关)仍在,不存在掩盖真回归的面。
-    pytest.importorskip("faster_whisper", exc_type=ImportError)
+    # 2026-07-22 第二形态:同一策略的拦截也会在 ctypes 层抛 OSError(WinError 4551),
+    # 穿过只认 ImportError 的门 → 仅对"应用控制策略"这一种 OSError 同判环境缺席跳过;
+    # 其它 OSError 照旧重抛(收窄豁免面,不掩真回归)。
+    try:
+        pytest.importorskip("faster_whisper", exc_type=ImportError)
+    except OSError as e:
+        if getattr(e, "winerror", None) == 4551 or "应用程序控制策略" in str(e):
+            pytest.skip(f"[asr] 依赖 DLL 被本机应用控制策略拦截(环境缺席): {e}")
+        raise
     import os
     if os.environ.get("KARVYLOOP_ASR_REAL_TEST") != "1":
         pytest.skip("真模型冒烟要显式 KARVYLOOP_ASR_REAL_TEST=1(涉及模型下载)")

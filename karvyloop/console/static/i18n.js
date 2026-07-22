@@ -870,6 +870,9 @@
         "chain.group_head": "About “{intent}” — {n} for you to decide",
         "chain.group_protect": "These all come from what you said: “{intent}”",
         "chain.group_risk": "Includes a high-risk item — kept open on top, never folded away",
+        // docs/92 刀3:低风险同 kind 组批(全批=逐卡 ACCEPT 带批次标,每张记独立流水)
+        "chain.batch_accept": "Accept all ({n})",
+        "chain.batch_confirm": "Accept all {n} “{kind}” cards at once? Each one will be logged as its own decision.",
         "h2a.drawer_more": "{n} more low-priority cards tucked away ▸",
         "h2a.drawer_open": "Low-priority cards ({n}) — click to tuck away ▴",
         "proposal.external_adopt.summary": 'Adopt output from "{citizen}"? (external runtime · untrusted data)',
@@ -2416,6 +2419,9 @@
         "chain.group_head": "关于「{intent}」— {n} 件待拍",
         "chain.group_protect": "这些都来自你说的『{intent}』",
         "chain.group_risk": "含高风险项 — 已展开置顶,绝不折叠收起",
+        // docs/92 刀3:低风险同 kind 组批(全批=逐卡 ACCEPT 带批次标,每张记独立流水)
+        "chain.batch_accept": "全部接受({n})",
+        "chain.batch_confirm": "一次接受这 {n} 张「{kind}」卡?每张都会记独立流水。",
         "h2a.drawer_more": "还有 {n} 张低优先卡收着 ▸",
         "h2a.drawer_open": "低优先卡({n})— 点一下收起 ▴",
         "proposal.external_adopt.summary": "采纳「{citizen}」的产出？（外部执行体·不可信数据）",

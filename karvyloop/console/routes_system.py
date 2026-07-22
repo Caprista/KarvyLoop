@@ -593,6 +593,10 @@ class H2ADecideRequest(BaseModel):
     # #42 优化①「改了再批」:就地改过的 payload 字段(白名单覆盖在 registry.decide 做;
     # 只许覆盖已有 str 键)。修改是楔子最富的偏好信号,记录在 record_decision_signals。
     edits: dict = Field(default_factory=dict)
+    # docs/92 刀3(低风险同 kind 组批):组级「全部接受」= 前端逐卡发 ACCEPT,每条带
+    # batch=chain_id 批次标 → 透传进 decision_log/Trace(流水每卡一条、可逐卡回溯,
+    # 不是一个合并决策)。单卡拍板不带(默认空);老客户端无此字段兼容。
+    batch: str = Field(default="", max_length=512)
     user_address_domain_id: str = Field(default="dom-1")
     user_address_role: str = Field(default="user")
     user_address_agent_id: str = Field(default="console-user")
@@ -657,7 +661,8 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
                             reason=eff_reason,
                             domain=req.to_address_domain_id or "",
                             role=req.to_address_role or "",
-                            edits=(req.edits or None))
+                            edits=(req.edits or None),
+                            batch=(req.batch or ""))   # docs/92 刀3:批次标落流水/Trace
 
     # D5:按 kind 兑现(若接了 registry)。reason 可选,不拦 REJECT。
     def _dispatch() -> dict[str, Any] | None:

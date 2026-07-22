@@ -1390,6 +1390,20 @@ html, body {
 .chain-head-text { flex: 1 1 auto; font-size: var(--fs-13); font-weight: 600; color: var(--text-1); }
 .chain-toggle { flex: 0 0 auto; font-size: 11px; color: var(--text-3); }
 .chain-risk { flex: 0 0 auto; color: var(--danger); font-size: var(--fs-13); }
+/* docs/92 刀3:组级「全部接受」小钮 —— 次要样式(ghost),别比逐卡 Accept 显眼:
+   逐张看仍是首选姿态,全批只是低风险同 kind 时的顺手捷径 */
+.chain-batch-accept {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.chain-batch-accept:hover { color: var(--teal-deep); border-color: var(--teal-line); background: var(--teal-soft); }
+.chain-batch-accept:disabled { opacity: 0.5; cursor: default; }
 .chain-protect { font-size: var(--fs-12); color: var(--text-2); margin: 4px 0 6px; }
 .chain-pin { margin-top: 6px; }   /* 高风险区:永远展开、置顶(不受折叠影响) */
 .chain-pin .h2a-card { border-color: var(--danger-line, var(--danger)); }

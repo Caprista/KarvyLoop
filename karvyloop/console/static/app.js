@@ -667,6 +667,17 @@
         // (Hardy「像 App 安全协议强制阅读后才能拍」)—— 存进 judgeState 供那道门读。
         const violations = c.violations || [];
         judgeState.violations = violations;
+        // docs/92 刀3:违背在懒加载后才可知 —— 一旦知道就标在卡上并撤所在组的全批钮
+        // (拍板边界:任一张高风险/有违背 → 永不出全批钮,只能逐张)。
+        if (violations.length && container.closest) {
+          const _host = container.closest(".h2a-card");
+          if (_host) {
+            _host.setAttribute("data-has-violation", "1");
+            const _grp = _host.closest(".h2a-chain-group");
+            if (_grp) _refreshChainBatchBtn(_grp,
+              Array.from(_grp.querySelectorAll(".h2a-card[data-chain-key]")));
+          }
+        }
         violations.forEach((v) => {
           const vb = el("div", { class: "dcard-violation" });
           vb.appendChild(el("div", { class: "dcard-violation-head",
@@ -978,9 +989,15 @@
   function _buildChainGroup(key) {
     const group = el("div", { class: "h2a-chain-group" });
     group.setAttribute("data-chain", String(key));
+    // docs/92 刀3:组级「全部接受」小钮(次要样式,别比逐卡 Accept 显眼——逐张看仍是首选姿态)。
+    // 默认 hidden;只在「组内全部低风险(非 HIGH_RISK)且同一个 kind」时由 _refreshChainBatchBtn 亮出。
+    const batchBtn = el("button", { class: "chain-batch-accept hidden", type: "button" });
+    batchBtn.addEventListener("click", (ev) => { ev.stopPropagation(); _runChainBatch(group); });
+    batchBtn.addEventListener("keydown", (ev) => ev.stopPropagation());   // Enter 别顺手折/展组头
     const head = el("div", { class: "chain-head", role: "button", tabindex: "0" },
       el("span", { class: "chain-risk hidden", text: "⚠", title: t("chain.group_risk") }),
       el("span", { class: "chain-head-text" }),
+      batchBtn,
       el("span", { class: "chain-toggle", "aria-hidden": "true", text: "▾" }));
     const toggle = () => _setChainOpen(group, !group.classList.contains("chain-open"));
     head.addEventListener("click", toggle);
@@ -1042,8 +1059,66 @@
       if (protect) protect.textContent = t("chain.group_protect", { intent: intent });
       const risk = g.querySelector(".chain-risk");
       if (risk) risk.classList.toggle("hidden", !hasRisk);
+      // docs/92 刀3:卡进出组都会重走到这里 → 组批钮在此重判(任一成员不满足即移除)
+      _refreshChainBatchBtn(g, members);
       _setChainOpen(g, !!_chainOpen[k]);   // 会话级展开态(默认收起;高风险 pin 区不受折叠影响)
     });
+  }
+
+  // ── docs/92 刀3:低风险同 kind 组批(Hardy 拍的边界,一字不差)──
+  // 组级「全部接受」按钮**只在**「组内全部是低风险(非 HIGH_RISK)且**同一个 kind**」时出现;
+  // 任一张高风险/已知违背 → 永不出全批钮,只能逐张。(docs/92 原文例"一组 merge_knowledge"
+  // 已过时:docs/52 §2 把 merge_knowledge(删除语义)补进了 HIGH_RISK_KINDS —— 判定源唯一
+  // =后端 silence.HIGH_RISK_KINDS 经 wire high_risk 派生,前端不另抄 kind 表,以它为准。)
+  // **全批 = 逐卡发 ACCEPT 带批次标(batch=chain_id),流水里每卡一条、可逐卡回溯**——
+  // 不是一个合并决策。全批只是"替你连点 N 次 Accept":每张卡的安全闸(违背强制阅读/
+  // 反投降/高价值 confirm)照触发;某张闸被取消 → **中止剩余**(你在犹豫就停,别机关枪),
+  // 已拍的不回滚,组头随 h2a_envelope 撤卡自动刷新剩余数。
+  function _chainBatchEligible(members) {
+    if (!members || members.length < 2) return false;
+    let kind = null;
+    for (var i = 0; i < members.length; i++) {
+      const c = members[i];
+      if (c.getAttribute("data-high-risk") === "1") return false;      // 任一高风险 → 永不全批
+      if (c.getAttribute("data-has-violation") === "1") return false;  // 已知违背(懒加载后可知)→ 只能逐张
+      const k = c.getAttribute("data-kind") || "";
+      if (!k) return false;                                            // kind 不明 → 保守不全批
+      if (kind === null) kind = k;
+      else if (k !== kind) return false;                               // 混 kind → 逐张
+    }
+    return true;
+  }
+  function _refreshChainBatchBtn(group, members) {
+    const btn = group.querySelector(".chain-batch-accept");
+    if (!btn) return;
+    const ok = _chainBatchEligible(members);
+    btn.classList.toggle("hidden", !ok);
+    if (ok) btn.textContent = "✔ " + t("chain.batch_accept", { n: members.length });
+  }
+  let _chainBatchBusy = false;   // 全批互斥:一次只跑一个组(连点/多组齐点不叠雷)
+  async function _runChainBatch(group) {
+    if (_chainBatchBusy) return;
+    const members = Array.from(group.querySelectorAll(".h2a-card[data-chain-key]"));
+    if (!_chainBatchEligible(members)) { _refreshChainBatchBtn(group, members); return; }
+    const kind = members[0].getAttribute("data-kind") || "";
+    // 二次轻确认:kind 用 #6 筛选条同一套人话映射(_kindLabel),不裸显键名
+    if (!window.confirm(t("chain.batch_confirm", { n: members.length, kind: _kindLabel(kind) }))) return;
+    const batchId = group.getAttribute("data-chain") || "";
+    const btn = group.querySelector(".chain-batch-accept");
+    if (btn) btn.disabled = true;
+    _chainBatchBusy = true;
+    try {
+      for (var i = 0; i < members.length; i++) {
+        const c = members[i];
+        if (!c.isConnected || typeof c._kvDecide !== "function") continue;   // 已被拍掉/撤下 → 跳过
+        if (c._kvEnsureDetail) c._kvEnsureDetail();   // 折叠体里 IO 不触发 → 手动踢懒加载(闸有料可拦)
+        const committed = await c._kvDecide("ACCEPT", batchId);   // 复用单卡 decide,不绕闸
+        if (!committed) break;   // 某道 confirm 被取消 → 中止剩余(已拍的不回滚)
+      }
+    } finally {
+      _chainBatchBusy = false;
+      if (btn) btn.disabled = false;
+    }
   }
 
   // ── docs/92 刀2:积压抽屉限流(低优先滞留区;只管右栏 #h2a-list,聊天流 inline 卡照旧双面出)──
@@ -1463,18 +1538,22 @@
     // 单卡 ~1.5s。积压 N 张若开屏全拉 → N 并发把 worker 池 + 限流堵成秒级齐返(实测 39 张→10s)。
     // 改为**卡真滚进视口才建 detail**:收在 dock 里没打开的卡一次都不拉;跑评分离(违背 LLM 只对你在看的
     // 那张跑,不对没人看的 38 张跑)。judgeState 随 detail 回填 —— 要操作必先看见=先触发,拍前拦不丢。
+    // docs/92 刀3:懒加载触发抽成 _ensureDetail —— IO 视口触发照旧;组批多一个手动入口
+    // (组壳折叠体里的卡 display:none,IO 永不触发 → 组批前踢一脚,违背/无脑拍闸照常有料可拦)。
+    let _ensureDetail = () => {};   // 无 IO(已即时渲染)时 = 空操作
     if (typeof IntersectionObserver === "function") {
       let _dcDone = false;
       const _io = new IntersectionObserver(function (ents) {
         if (_dcDone) return;
         for (var i = 0; i < ents.length; i++) {
-          if (ents[i].isIntersecting) {
-            _dcDone = true; _io.disconnect();
-            _renderDecisionCard(fold, proposalId, judgeState, uiRefs);
-            return;
-          }
+          if (ents[i].isIntersecting) { _ensureDetail(); return; }
         }
       }, { rootMargin: "300px" });
+      _ensureDetail = () => {
+        if (_dcDone) return;
+        _dcDone = true; _io.disconnect();
+        _renderDecisionCard(fold, proposalId, judgeState, uiRefs);
+      };
       _io.observe(card);
     } else {
       _renderDecisionCard(fold, proposalId, judgeState, uiRefs);   // 老浏览器无 IO → 退回即时(不劣化)
@@ -1514,7 +1593,10 @@
     });
     reasonInput.placeholder = t("proposal.reason_optional");
     // 拍板提交(shake→回喂→WS→终态)。从闸门里抽出:ACCEPT 过完强制阅读门再调;DEFER/REJECT 直调。
-    const _commitDecision = (decision, _edits) => {
+    // docs/92 刀3:_batch(组批时=组的 chain_id)随 h2a_decision 透传给后端落流水/Trace ——
+    // 全批=逐卡发 ACCEPT 带批次标,流水里每卡一条、可逐卡回溯,不是一个合并决策。
+    // 返回 Promise<true>(真提交了)—— 组批用返回值判断"继续下一张还是中止"。
+    const _commitDecision = (decision, _edits, _batch) => {
       // 微动效 P1-3 品位 shake:REJECT 拍下那刻本卡轻微横移抖一次(reduced-motion 时 CSS 关掉)
       if (decision === "REJECT") {
         card.classList.remove("kv-reject-shake");
@@ -1522,18 +1604,20 @@
         card.classList.add("kv-reject-shake");
       }
       // 回喂判断(engaged + 改/删的依据)→ 反投降计数;再走既有 K5 拍板路径(不动)。
-      _judgeDecisionCard(proposalId, decision, judgeState).then(() => {
+      return _judgeDecisionCard(proposalId, decision, judgeState).then(() => {
         const msg = {
           proposal_id: proposalId,
           decision: decision,
           reason: (decision === "REJECT") ? (reasonInput.value || "") : "",
         };
         if (_edits) msg.edits = _edits;
+        if (_batch) msg.batch = String(_batch);   // docs/92 刀3:批次标(后端透传进流水/Trace)
         sendWS("h2a_decision", msg);
         _finalizeInlineCards(proposalId, decision);   // S3:任一侧拍板,聊天流里的同卡即刻转终态
+        return true;
       });
     };
-    const decide = (decision) => {
+    const decide = (decision, _batch) => {
       // 「改了再批」:改动过 → 随 ACCEPT 带 edits。改过=亲手判断过(最强 engaged 信号),闸前标记。
       let _edits = null;
       if (decision === "ACCEPT" && editArea && editArea.value.trim() &&
@@ -1549,11 +1633,13 @@
         judgeState.engaged = true;
       }
       // DEFER/REJECT 不过闸,直接提交(拒绝一个违背/无脑拍是安全的,不必强制阅读)。
-      if (decision !== "ACCEPT") { _commitDecision(decision, _edits); return; }
+      if (decision !== "ACCEPT") { return _commitDecision(decision, _edits, _batch); }
       // ACCEPT:先等"核对你标准"的懒加载回来(≤6s 兜底)—— 卡片折叠后,违背绝不因"还没加载完"而漏过下面的门。
-      _readyWithin(judgeState, 6000).then(async (checked) => {
+      // docs/92 刀3:resolve true=真提交 / false=某道 confirm 被取消(组批据此**中止剩余**——
+      // 你在犹豫就停,别机关枪;已拍的不回滚)。单卡路径 onClick 不读返回值,行为一字不变。
+      return _readyWithin(judgeState, 6000).then(async (checked) => {
         // 超时降级也 fail-loud(对抗验收 B3 补):核对没回来 ≠ 静默放行 —— 明着问,你确认"不等了"才继续。
-        if (!checked && !window.confirm(t("dcard.gate_timeout"))) return;
+        if (!checked && !window.confirm(t("dcard.gate_timeout"))) return false;
         // 强制阅读门①(Hardy「像 App 安全协议:强制阅读后才能拍」):踩了你定的标准 → 展开折叠露出红 banner
         // + 必须确认才继续(取消=不拍)。总是弹(不受 engaged 影响):违背太重,每次批都要你亲眼确认过。
         const vios = judgeState.violations || [];
@@ -1561,15 +1647,15 @@
           _openFold();
           await _nextPaint();   // 让红 banner 先画出来,再弹阻塞式 confirm —— 真"强制阅读",不是盲弹
           const std = vios.map((v) => "『" + (v.standard || "") + "』" + (v.why ? " — " + v.why : "")).join("\n  ");
-          if (!window.confirm(t("dcard.violation_gate", { standard: std }))) return;
+          if (!window.confirm(t("dcard.violation_gate", { standard: std }))) return false;
         }
         // 逼判断闸②(高价值/无脑拍,仅"没真判断过"时拦):与原逻辑一致(改/删依据 或 陈述判断依据都算判断过)。
         if (!_engagedNow(judgeState)) {
           if (judgeState.highValue &&
-              !window.confirm(t("dcard.hv_confirm", { standard: judgeState.hvStandard || "" }))) return;
-          if (judgeState.needsRecheck && !window.confirm(t("dcard.surrender_confirm"))) return;
+              !window.confirm(t("dcard.hv_confirm", { standard: judgeState.hvStandard || "" }))) return false;
+          if (judgeState.needsRecheck && !window.confirm(t("dcard.surrender_confirm"))) return false;
         }
-        _commitDecision("ACCEPT", _edits);
+        return _commitDecision("ACCEPT", _edits, _batch);
       });
     };
     btnRow.appendChild(el("button", { class: "h2a-accept", onClick: () => decide("ACCEPT"), text: t("proposal.accept") }));
@@ -1577,6 +1663,10 @@
     btnRow.appendChild(el("button", { class: "h2a-reject", onClick: () => decide("REJECT"), text: t("proposal.reject") }));
     card.appendChild(btnRow);
     card.appendChild(reasonInput);   // 可选拒绝理由(不填也能拒)
+    // docs/92 刀3:组批入口 —— 全批只是"替你连点 N 次 Accept",逐卡复用**同一个** decide
+    // (绝不绕单卡闸:强制阅读门/反投降/高价值 confirm 照触发,触发了取消 → 组批中止剩余)。
+    card._kvDecide = decide;
+    card._kvEnsureDetail = _ensureDetail;
     return { card: card, proposalId: proposalId };
   }
 
