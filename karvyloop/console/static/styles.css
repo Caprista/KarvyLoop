@@ -1378,6 +1378,24 @@ html, body {
   padding: 10px;
   margin-bottom: 8px;
 }
+/* —— docs/92 刀1:同链组折叠(右栏)——组只是收纳壳,卡样式原样(0 视觉回归) —— */
+.h2a-chain-group {
+  border: 1px solid var(--accent-line, var(--border));
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: var(--accent-soft, var(--surface-2));
+}
+.chain-head { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.chain-head-text { flex: 1 1 auto; font-size: var(--fs-13); font-weight: 600; color: var(--text-1); }
+.chain-toggle { flex: 0 0 auto; font-size: 11px; color: var(--text-3); }
+.chain-risk { flex: 0 0 auto; color: var(--danger); font-size: var(--fs-13); }
+.chain-protect { font-size: var(--fs-12); color: var(--text-2); margin: 4px 0 6px; }
+.chain-pin { margin-top: 6px; }   /* 高风险区:永远展开、置顶(不受折叠影响) */
+.chain-pin .h2a-card { border-color: var(--danger-line, var(--danger)); }
+.chain-body { margin-top: 6px; }
+.chain-pin .h2a-card:last-child, .chain-body .h2a-card:last-child { margin-bottom: 0; }
+
 .h2a-summary, .h2a-proposal .summary { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .h2a-strength, .h2a-proposal .pid { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
 .h2a-buttons, .h2a-proposal .actions { display: flex; gap: 6px; }

@@ -237,6 +237,7 @@
         if (msg.payload && msg.payload.report_card) _renderReportCard(list, msg.payload.report_card);
         // 退场动画 160ms 后再判空回填(动画中的节点还在 DOM,立刻数会把空态吞掉)
         setTimeout(() => {
+          _regroupChains(list);     // docs/92 刀1:拍完出组 —— 组内剩 1 张时组壳解散回普通单卡
           _refreshDecideFilter();   // #6:卡拍掉了 → 重算筛选条(distinct<2 会自动收起 / 选中类拍光则复位)
           if (_countCards("h2a-list", "h2a-empty") === 0) {
             list.innerHTML = '<div class="h2a-empty">' + t("h2a.handled") + '</div>';
@@ -927,7 +928,9 @@
   // 幂等重推(_placeCard 同 id 换新)走瞬删(animate 不传),否则新旧两张短暂同屏。
   function _removeCardById(list, proposalId, animate) {
     if (!list || !proposalId) return;
-    Array.from(list.children).forEach((ch) => {
+    // docs/92 刀1:卡可能被收进同链组壳(.h2a-chain-group)里 → 深查不只扫直系子级。
+    // 语义不变:同 id 的卡(无论在不在组里)撤下;组壳自身无 data-proposal-id,不受影响。
+    Array.from(list.querySelectorAll("[data-proposal-id]")).forEach((ch) => {
       if (!(ch.getAttribute && ch.getAttribute("data-proposal-id") === String(proposalId))) return;
       if (animate && !_MOTION_REDUCED.matches && ch.animate) {
         ch.animate([{ opacity: 1, transform: "none" },
@@ -943,6 +946,99 @@
     card.setAttribute("data-proposal-id", String(proposalId));
     _removeCardById(list, proposalId);   // 同 id 先撤旧卡(幂等重推不叠)
     list.appendChild(card);
+  }
+
+  // ── docs/92 刀1:右栏同链组折叠(纯视觉收纳,不丢拍板粒度)──
+  // 同链键(data-chain-key)且 ≥2 张待决 → 收成一组:组头「🔗 关于:{链源意图} — {n} 件待拍」
+  // + 空理解保护句(「这些都来自你说的『…』」,直引链源意图,零 LLM)。组只是 DOM 分组壳:
+  // 卡的 id/事件/生命周期不变(原节点整体移动、不重建 → _buildProposalCard/decide/懒加载照旧);
+  // 每张卡仍独立拍(独立 h2a_decision),拍完出组,组内剩 1 张时组壳解散回普通单卡。
+  // 高风险卡(data-high-risk,后端按 silence.HIGH_RISK_KINDS 判)**永远展开置顶**在组头下
+  // 的 chain-pin 区,绝不收进折叠体(同刀1b 安全不折叠哲学);组头带红标 ⚠。
+  // 聊天流 inline 卡(S3 双面出)不经此 —— 组折叠只做右栏 #h2a-list。
+  const _chainOpen = {};   // 会话级展开态:chainKey → true(默认收起、组头可见;不记 localStorage)
+  function _chainEsc(k) {
+    return (window.CSS && CSS.escape) ? CSS.escape(String(k)) : String(k).replace(/["\\]/g, "\\$&");
+  }
+  function _setChainOpen(group, open) {
+    _chainOpen[group.getAttribute("data-chain") || ""] = !!open;
+    group.classList.toggle("chain-open", !!open);
+    const body = group.querySelector(".chain-body");
+    if (body) body.hidden = !open;
+    const head = group.querySelector(".chain-head");
+    if (head) head.setAttribute("aria-expanded", open ? "true" : "false");
+    const tog = group.querySelector(".chain-toggle");
+    if (tog) tog.textContent = open ? "▴" : "▾";
+  }
+  function _buildChainGroup(key) {
+    const group = el("div", { class: "h2a-chain-group" });
+    group.setAttribute("data-chain", String(key));
+    const head = el("div", { class: "chain-head", role: "button", tabindex: "0" },
+      el("span", { class: "chain-risk hidden", text: "⚠", title: t("chain.group_risk") }),
+      el("span", { class: "chain-head-text" }),
+      el("span", { class: "chain-toggle", "aria-hidden": "true", text: "▾" }));
+    const toggle = () => _setChainOpen(group, !group.classList.contains("chain-open"));
+    head.addEventListener("click", toggle);
+    head.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(); }
+    });
+    group.appendChild(head);
+    group.appendChild(el("div", { class: "chain-protect" }));   // 空理解保护句(组头下常显)
+    group.appendChild(el("div", { class: "chain-pin" }));       // 高风险区:永远展开、置顶
+    const body = el("div", { class: "chain-body" });            // 折叠体:普通成员逐卡原样渲染
+    body.hidden = true;
+    group.appendChild(body);
+    return group;
+  }
+  function _regroupChains(list) {
+    if (!list || list.id !== "h2a-list") return;
+    // 1) 按链键归堆(只看真正的决策卡;组壳/空态/提示/回报卡都没有 data-chain-key)
+    const byChain = new Map();
+    Array.from(list.querySelectorAll(".h2a-card[data-chain-key]")).forEach((c) => {
+      const k = c.getAttribute("data-chain-key") || "";
+      if (!k) return;
+      if (!byChain.has(k)) byChain.set(k, []);
+      byChain.get(k).push(c);
+    });
+    // 2) 掉到 <2 张的组壳解散:成员放回列表原位、壳移除(拍完出组 → 回普通单卡,0 视觉回归)
+    Array.from(list.querySelectorAll(".h2a-chain-group")).forEach((g) => {
+      const members = byChain.get(g.getAttribute("data-chain") || "") || [];
+      if (members.length >= 2) return;
+      members.forEach((c) => { c.style.removeProperty("display"); list.insertBefore(c, g); });
+      g.remove();
+    });
+    // 3) ≥2 张同链 → 建/更新组壳,成员按高风险分区收纳(高风险进 pin 永不折,其余进折叠体)
+    byChain.forEach((members, k) => {
+      if (members.length < 2) return;
+      let g = list.querySelector('.h2a-chain-group[data-chain="' + _chainEsc(k) + '"]');
+      if (!g) {
+        g = _buildChainGroup(k);
+        list.insertBefore(g, members[0]);   // 壳落在第一张成员卡的位置(不跳排序)
+      }
+      const pin = g.querySelector(".chain-pin");
+      const body = g.querySelector(".chain-body");
+      let hasRisk = false;
+      members.forEach((c) => {
+        const risky = c.getAttribute("data-high-risk") === "1";
+        hasRisk = hasRisk || risky;
+        const target = risky ? pin : body;
+        if (c.parentNode !== target) target.appendChild(c);
+      });
+      // 组头文案:链源意图 = 后端 chain_intent(直引原话);缺了(老卡)退最早成员的摘要
+      let intent = "";
+      members.forEach((c) => { if (!intent) intent = c.getAttribute("data-chain-intent") || ""; });
+      if (!intent) {
+        const s = members[0].querySelector(".h2a-summary");
+        intent = (s ? s.textContent.replace(/^💡\s*/, "") : "").slice(0, 60);
+      }
+      const headText = g.querySelector(".chain-head-text");
+      if (headText) headText.textContent = "🔗 " + t("chain.group_head", { intent: intent, n: members.length });
+      const protect = g.querySelector(".chain-protect");
+      if (protect) protect.textContent = t("chain.group_protect", { intent: intent });
+      const risk = g.querySelector(".chain-risk");
+      if (risk) risk.classList.toggle("hidden", !hasRisk);
+      _setChainOpen(g, !!_chainOpen[k]);   // 会话级展开态(默认收起;高风险 pin 区不受折叠影响)
+    });
   }
 
   // ── 两张新卡的专属渲染(通用 h2a 卡列表里按 kind 分支)──
@@ -1105,6 +1201,13 @@
     cards.forEach((c) => {
       c.style.display = (_decideFilter === null || c.dataset.kind === _decideFilter) ? "" : "none";
     });
+    // docs/92 刀1:组壳跟随成员显隐 —— 组内全被筛掉时壳(组头/保护句)也藏,别留空壳占地。
+    // 只做显隐(不动 DOM/不解散组),与本筛选"绝不增删 h2a-list 的 DOM"同一纪律。
+    Array.from(list.querySelectorAll(".h2a-chain-group")).forEach((g) => {
+      const anyVisible = Array.from(g.querySelectorAll(".h2a-card[data-kind]"))
+        .some((c) => c.style.display !== "none");
+      g.style.display = anyVisible ? "" : "none";
+    });
   }
   function _refreshDecideFilter() {
     const bar = document.getElementById("h2a-filter");
@@ -1170,6 +1273,7 @@
     } catch (e) { /* 无 localStorage(隐私模式)→ 不提示,不炸 */ }
     const built = _buildProposalCard(payload);
     _placeCard(list, built.proposalId, built.card);   // 多卡不覆盖:同 id 替换、新 id 追加
+    _regroupChains(list);                             // docs/92 刀1:同链 ≥2 张 → 收进组壳(纯视觉)
     _renderProposalInChat(payload, built.proposalId); // S3:决策卡双面出 —— 同时冒进聊天流
     // 桌面视图(docs/51 §4.2):⚖便签置顶 + 闪烁 + 卡皮巴拉冒泡(fail-loud,推回决策舱);
     // replay(开机回放存量卡)只保"在位可瞟",不演叼卡剧场 —— 事件 vs 快照在 desktop.ts 一处区分
@@ -1183,6 +1287,12 @@
   function _buildProposalCard(payload) {
     const card = el("div", { class: "h2a-card" });
     card.setAttribute("data-kind", String(payload.kind || ""));   // #6:按 kind 客户端筛选的数据源
+    // docs/92 刀1 同链合并:链键 = chain_id(派生卡带)|| 自己的 proposal_id(链根卡不回填)。
+    // 右栏 _regroupChains 按它把同链 ≥2 张收成一组;单链 1 张 = 无组壳,和现在一模一样。
+    card.setAttribute("data-chain-key",
+      String(payload.chain_id || payload.proposal_id || ("p-" + (payload.habit_id || 0))));
+    if (payload.chain_intent) card.setAttribute("data-chain-intent", String(payload.chain_intent));
+    if (payload.high_risk) card.setAttribute("data-high-risk", "1");   // 后端 silence.HIGH_RISK_KINDS 判定源
     card.appendChild(el("div", { class: "h2a-summary", text: "💡 " + (payload.summary || t("proposal.no_desc")) }));
     // ── 卡片折叠(docs/90 刀1b,Hardy 卡片模型):默认只留「摘要 + 拍板」,详情/依据收进「详情 ▾」。
     //    看懂摘要直接拍;要深究才点开。安全项(违背/无脑拍)不靠"始终可见"守 —— 靠 decide() 的
@@ -3127,7 +3237,13 @@
   function _countCards(containerId, emptyClass) {
     const c = document.getElementById(containerId);
     if (!c) return 0;
-    return Array.from(c.children).filter((ch) => !ch.classList.contains(emptyClass)).length;
+    // docs/92 刀1:同链组壳(.h2a-chain-group)按**组内卡数**计 —— 收纳是视觉的,
+    // 计数(脉搏/列头徽章/空态判定)必须仍数真实待拍张数,不因折叠少报。
+    return Array.from(c.children).reduce((n, ch) => {
+      if (ch.classList.contains(emptyClass)) return n;
+      if (ch.classList.contains("h2a-chain-group")) return n + ch.querySelectorAll(".h2a-card").length;
+      return n + 1;
+    }, 0);
   }
   // 微动效 P1-2:脉搏文案换字才交叉淡化(新旧两层叠同格,旧淡出新淡入;同字直接跳过,
   // 不整段闪重绘)。首次填充/reduced-motion 静态换字(降级);层由 CSS #pulse-text>span 叠。

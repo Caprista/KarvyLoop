@@ -180,6 +180,10 @@ class Proposal:
     # 否则"老板付 10 万接不接"凭啥拍(Hardy #6.1)。
     basis: str = ""                  # 人话决策依据:为什么提这个、发生了什么
     context_ref: dict = dataclasses.field(default_factory=dict)  # 跳转目标 {"kind":"task/conversation","id":...}
+    # docs/92 刀1(同链合并):同一件事派生出的多张卡共享 chain_id(链根 = 最早那张的
+    # proposal_id)。**纯视觉收纳**:前端右栏按它分组折叠,每张卡仍独立拍(独立 h2a_decision
+    # 流水,不丢拍板粒度)。老卡/不带链的卡 = 空串,前端按单卡渲染(0 视觉回归)。
+    chain_id: str = ""
 
     def __post_init__(self):
         if not self.proposal_id:
@@ -204,6 +208,7 @@ class Proposal:
             "proposal_id": self.proposal_id,
             "basis": self.basis,              # ch4:决策依据(为什么)
             "context_ref": dict(self.context_ref),  # ch4:上下文跳转目标
+            "chain_id": self.chain_id,       # docs/92 刀1:同链合并(空=无链,前端单卡渲染)
         }
 
     @classmethod
@@ -223,6 +228,7 @@ class Proposal:
             proposal_id=str(d.get("proposal_id", "") or ""),
             basis=str(d.get("basis", "") or ""),
             context_ref=dict(d.get("context_ref", {}) or {}),
+            chain_id=str(d.get("chain_id", "") or ""),  # docs/92 刀1;老落盘文件无此键 → ""
         )
 
 

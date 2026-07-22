@@ -31,6 +31,33 @@ logger = logging.getLogger(__name__)
 WS_TYPE_H2A_PROPOSAL = "h2a_proposal"
 
 
+def proposal_wire_payload(registry: Any, proposal: Any) -> dict:
+    """一张卡的对外 payload(WS 推送 / /api/proposals/pending 共用一个出口口径)。
+
+    docs/92 刀1 加两个**派生**字段(不进 Proposal 本体,消费侧口径):
+    - `chain_intent`:链源意图(registry.chain_intent,register 时算好 → O(1))——
+      前端组头「🔗 关于:{intent}」+ 空理解保护句直引它,零 LLM;
+    - `high_risk`:kind ∈ silence.HIGH_RISK_KINDS —— 前端组折叠对高风险卡**永远展开
+      置顶**(同刀1b 安全不折叠哲学),判定源唯一(不在前端另抄 kind 表)。
+    fail-soft:registry 缺/查询坏 → 只少 chain_intent,卡照常出。
+    """
+    d = proposal.to_dict()  # duck type:不直接 import Proposal
+    try:
+        cid = str(d.get("chain_id") or "") or str(d.get("proposal_id") or "")
+        intent = registry.chain_intent(cid) if (registry is not None and cid
+                                                and hasattr(registry, "chain_intent")) else ""
+        if intent:
+            d["chain_intent"] = intent
+    except Exception:
+        pass
+    try:
+        from karvyloop.karvy.silence import HIGH_RISK_KINDS
+        d["high_risk"] = str(d.get("kind") or "") in HIGH_RISK_KINDS
+    except Exception:
+        d["high_risk"] = False
+    return d
+
+
 async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = True) -> int:
     """把一条 Proposal 广播给所有 WS clients。
 
@@ -81,6 +108,11 @@ async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = T
     if registry is not None and getattr(proposal, "proposal_id", ""):
         try:
             registry.register(proposal)
+            # docs/92 刀1:register 可能做了"同任务兜底"补上 chain_id(frozen → 表里是
+            # 新对象)—— 推送 payload 要用登记后的那份,否则前端拿不到链。
+            stored = registry.get(getattr(proposal, "proposal_id", ""))
+            if stored is not None:
+                proposal = stored
         except Exception as e:  # 登记失败不该阻断推送
             logger.debug(f"[proposals] registry.register 失败(不阻断推送): {e}")
 
@@ -91,7 +123,7 @@ async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = T
     clients = getattr(app.state, "ws_clients", None)
     if not clients:
         return 0
-    payload = proposal.to_dict()  # duck type:不直接 import Proposal
+    payload = proposal_wire_payload(registry, proposal)  # docs/92 刀1:统一出口(chain_intent/high_risk)
     sent = 0
     dead: list = []
     for ws in list(clients):
@@ -377,6 +409,7 @@ __all__ = [
     "WS_TYPE_H2A_PROPOSAL",
     "ProposalPump",
     "broadcast_proposal",
+    "proposal_wire_payload",
     "raise_fs_access_cards",
     "trace_aged_defers",
 ]

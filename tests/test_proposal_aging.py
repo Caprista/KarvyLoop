@@ -94,7 +94,8 @@ class TestPersistenceCompat:
         meta = reloaded.proposal_meta(pid)
         assert meta["created_ts"] == T0 and meta["deferred_at"] == T0 + 100
         data = json.loads(p.read_text(encoding="utf-8"))
-        assert data["version"] == 2 and pid in data["meta"]
+        # docs/92 刀1:落盘升 v3(多了 chains 链意图表);meta 卡龄戳语义不变
+        assert data["version"] == 3 and pid in data["meta"]
 
     def test_v1_file_without_meta_stamps_load_time(self, tmp_path):
         """向后兼容:旧 pending.json 无戳 → 按加载时刻记,不误报老龄。"""

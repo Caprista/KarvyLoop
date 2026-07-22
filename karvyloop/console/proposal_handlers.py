@@ -208,6 +208,10 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
         role = payload.get("role") or "agent"
         if not requirement:
             return False, "委派需求为空"
+        # docs/92 刀1:处理 A 卡过程中注册的派生卡(结果确认/不可行报告)透传 A 的链 ——
+        # A 自己没 chain_id 则 A.proposal_id 当链根(chain_root_of)。前端右栏按它分组折叠。
+        from karvyloop.karvy.proposal_registry import chain_root_of, with_chain
+        _chain = chain_root_of(proposal)
         try:
             from karvyloop.runtime.main_loop import forge_slow_brain_factory
             from karvyloop.coding.checker import verdict_suffix
@@ -283,9 +287,10 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
                               for a in _minted if _areg is not None and _areg.get(a) is not None]
                     _preg = getattr(app.state, "proposal_registry", None)
                     if _mints and _preg is not None:
-                        _preg.register(proposal_for_confirm_result(
+                        # docs/92 刀1:派生卡透传 A 卡的链(同一件事在右栏收成一组)
+                        _preg.register(with_chain(proposal_for_confirm_result(
                             role=str(role), requirement=requirement, minted=_mints,
-                            domain_id=payload.get("domain_id", ""), ts=_t2.time()))
+                            domain_id=payload.get("domain_id", ""), ts=_t2.time()), _chain))
                 except Exception as e:
                     logger.warning(f"[route_to_role] 升结果确认卡失败: {e}")
         if getattr(result, "error", "") and not (outcome.infeasible or outcome.infra_dead):
@@ -303,6 +308,7 @@ def _route_to_role_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
                 card = proposal_for_infeasible_report(
                     goal=requirement, role=str(role), attempts=outcome.attempts, ts=_t.time(),
                     domain_id=payload.get("domain_id", ""), domain_name=payload.get("domain_name", ""))
+                card = with_chain(card, _chain)   # docs/92 刀1:派生卡透传 A 卡的链
                 reg = getattr(app.state, "proposal_registry", None)
                 if reg is not None:
                     reg.register(card)  # 进 pending → 前端 boot-fetch 取(live WS 推为 P1 增量)

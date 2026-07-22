@@ -138,9 +138,11 @@ async def api_proposals_pending(request: Request) -> dict[str, Any]:
     except Exception:
         pass
     out: list[dict[str, Any]] = []
+    from karvyloop.console.proposals import proposal_wire_payload
     for p in registry.pending():
         try:
-            out.append(p.to_dict())
+            # docs/92 刀1:与 WS 推送同一出口口径(chain_intent/high_risk 派生字段)
+            out.append(proposal_wire_payload(registry, p))
         except Exception:
             pass
     return {"proposals": out}

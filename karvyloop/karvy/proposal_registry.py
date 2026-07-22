@@ -34,6 +34,43 @@ logger = logging.getLogger(__name__)
 # DEFER 过的卡满该阈值重新计入下一封 digest(DEFER≠消失,只是暂缓)。
 AGING_THRESHOLD_S = 48 * 3600
 
+# docs/92 刀1:链源意图(链根卡的人话摘要)截断长度 —— 组头一行放得下的量。
+CHAIN_INTENT_MAX = 60
+
+
+def chain_root_of(proposal) -> str:
+    """一张卡的**有效链根**:自带 chain_id 用之;没有则它自己就是链根(proposal_id)。
+
+    docs/92 刀1 约定:链根卡自己**不**回填 chain_id(frozen 语义对象不回改),派生卡
+    带 chain_id=链根的 proposal_id —— 消费侧(前端分组/链意图登记)统一用本函数取键。
+    """
+    return (getattr(proposal, "chain_id", "") or "") or (getattr(proposal, "proposal_id", "") or "")
+
+
+def with_chain(proposal, chain_id: str):
+    """返回带上 chain_id 的新 Proposal(frozen → dataclasses.replace;原对象不动)。
+
+    fail-soft:非 dataclass / replace 失败 → 原样返回(链只是视觉收纳,绝不因它丢卡)。"""
+    cid = (chain_id or "").strip()
+    if not cid or (getattr(proposal, "chain_id", "") or "") == cid:
+        return proposal
+    try:
+        return dataclasses.replace(proposal, chain_id=cid)
+    except Exception:
+        return proposal
+
+
+def _chain_intent_of(proposal) -> str:
+    """一张卡的"人话意图"(链根登记用):route 卡取 requirement(原话),其余取 summary。"""
+    text = ""
+    if getattr(proposal, "kind", "") == KIND_ROUTE_TO_ROLE:
+        text = str((getattr(proposal, "payload", {}) or {}).get("requirement", "") or "").strip()
+    if not text:
+        text = str(getattr(proposal, "summary", "") or "").strip()
+    if len(text) > CHAIN_INTENT_MAX:
+        text = text[:CHAIN_INTENT_MAX - 1] + "…"
+    return text
+
 # ---- kind 常量(docs/30 PR-1)----
 KIND_CRYSTALLIZE_SKILL = "crystallize_skill"
 KIND_RUN_TASK = "run_task"
@@ -137,6 +174,10 @@ class PendingProposalRegistry:
         # 卡龄元数据(docs/43 ⑤a DEFER 老化):pid → {"created_ts": float, "deferred_at": float|None}。
         # 放 registry 不放 Proposal 本体(Proposal 是 frozen 语义对象;挂龄是登记表的事)。
         self._meta: Dict[str, dict] = {}
+        # docs/92 刀1 链意图表:chain_id → {"intent": 链上最早那张的人话摘要, "ts": 那张的 ts}。
+        # **register 时算好存好**(有界:查询 O(1),不在渲染路径全表扫);链根被拍掉后
+        # 意图仍在(只要链上还有待决卡),链上最后一张离开才随之清掉。
+        self._chain_meta: Dict[str, dict] = {}
         self._persist_path = Path(persist_path) if persist_path else None
         if self._persist_path:
             self._load()
@@ -179,6 +220,16 @@ class PendingProposalRegistry:
                 # docs/81 B-5 #7:DEFER 老化"已报过"标记跨重启保留(否则重启后同卡再报一次,分布掺水)
                 "defer_aged_reported": bool(m.get("defer_aged_reported")),
             }
+        # docs/92 刀1 链意图:v3 文件带 chains 直接还原(链根已被拍掉时唯一的意图来源);
+        # 老文件无 chains → 从 pending 卡重建(链根还挂着就能重建,丢的只是"根已拍掉"边角)。
+        raw_chains = data.get("chains") or {}
+        if isinstance(raw_chains, dict):
+            for cid, cm in raw_chains.items():
+                if isinstance(cm, dict) and str(cm.get("intent") or "").strip():
+                    self._chain_meta[str(cid)] = {"intent": str(cm.get("intent") or ""),
+                                                  "ts": float(cm.get("ts") or 0.0)}
+        for prop in self._pending.values():
+            self._record_chain(prop)
 
     def _save(self) -> None:
         p = self._persist_path
@@ -187,9 +238,10 @@ class PendingProposalRegistry:
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             payload = {
-                "version": 2,  # v2:多了 meta(卡龄戳);v1 读者忽略之,v2 读者兼容 v1(无 meta 按加载时刻)
+                "version": 3,  # v3:多了 chains(docs/92 刀1 链意图);v2 读者忽略之,v3 读者兼容 v1/v2
                 "pending": [prop.to_dict() for prop in self._pending.values() if hasattr(prop, "to_dict")],
                 "meta": {pid: dict(self._meta.get(pid) or {}) for pid in self._pending},
+                "chains": {cid: dict(cm) for cid, cm in self._chain_meta.items()},
             }
             p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as e:  # 落盘失败不阻断内存操作
@@ -200,25 +252,81 @@ class PendingProposalRegistry:
 
         卡龄戳:首次登记记 created_ts;同 id 重复登记(幂等收敛卡,如 ops_fix)**不重置**
         created_ts / deferred_at —— 挂龄从第一次出现算,DEFER 状态不被重复建议洗掉。
+
+        docs/92 刀1 同链:①同任务兜底 —— 提案带 context_ref.kind=="task" 且已有**待决**
+        提案同 task_id → 自动继承其链(都没 chain_id 则先来的 proposal_id 当链根)。此兜底
+        在 registry 内做,不靠 handler 自觉。②链意图登记(register 时算好存好,查询 O(1))。
         """
         pid = getattr(proposal, "proposal_id", "") or ""
         if not pid:
             raise ValueError("proposal 缺 proposal_id(应由 Proposal.__post_init__ 派生)")
+        proposal = self._chain_task_fallback(proposal)
         self._pending[pid] = proposal
         if pid not in self._meta:
             self._meta[pid] = {"created_ts": time.time() if now is None else float(now),
                                "deferred_at": None}
+        self._record_chain(proposal)
         self._save()
         return pid
+
+    # ---- docs/92 刀1:同链合并(chain_id 贯通,确定性零 LLM)----
+
+    def _chain_task_fallback(self, proposal):
+        """同任务兜底:无 chain_id 但 context_ref 指向某 task,且已有待决卡同 task →
+        继承那张的链(它没链就以它的 proposal_id 当链根)。O(n) 只在 register 时跑一次
+        (n=待决卡数,量小);渲染路径零扫描。返回(可能换了 chain_id 的)proposal。"""
+        if getattr(proposal, "chain_id", "") or "":
+            return proposal   # 已带链(handler 透传)→ 不覆盖
+        ctx = getattr(proposal, "context_ref", None) or {}
+        if not (isinstance(ctx, dict) and ctx.get("kind") == "task" and ctx.get("id")):
+            return proposal
+        tid = str(ctx.get("id"))
+        pid = getattr(proposal, "proposal_id", "") or ""
+        best = None   # 同 task 的最早待决卡(按 created_ts)
+        for opid, other in self._pending.items():
+            if opid == pid:
+                continue
+            octx = getattr(other, "context_ref", None) or {}
+            if isinstance(octx, dict) and octx.get("kind") == "task" and str(octx.get("id") or "") == tid:
+                o_ts = (self._meta.get(opid) or {}).get("created_ts") or 0.0
+                if best is None or o_ts < best[0]:
+                    best = (o_ts, other)
+        if best is None:
+            return proposal
+        return with_chain(proposal, chain_root_of(best[1]))
+
+    def _record_chain(self, proposal) -> None:
+        """把这张卡计入链意图表:链键 = chain_id or proposal_id;保留链上**最早**那张的
+        人话摘要当"链源意图"(ts 更早者胜;单卡链也登记 —— 派生卡稍后加入时意图已就位)。"""
+        cid = chain_root_of(proposal)
+        if not cid:
+            return
+        intent = _chain_intent_of(proposal)
+        if not intent:
+            return
+        ts = float(getattr(proposal, "ts", 0.0) or 0.0)
+        cur = self._chain_meta.get(cid)
+        if cur is None or ts < float(cur.get("ts") or 0.0):
+            self._chain_meta[cid] = {"intent": intent, "ts": ts}
+
+    def chain_intent(self, chain_id: str) -> str:
+        """链源意图(docs/92 刀1):链上最早那张卡的人话摘要(route 卡取 requirement),
+        截 ~60 字。register 时已算好 → O(1);未知链 → ""。"""
+        cm = self._chain_meta.get(str(chain_id or ""))
+        return str(cm.get("intent") or "") if cm else ""
 
     def get(self, proposal_id: str) -> Optional[object]:
         return self._pending.get(proposal_id)
 
     def remove(self, proposal_id: str) -> Optional[object]:
-        """移除并返回(ACCEPT 兑现后 / REJECT 丢弃)。卡龄元数据随卡清。"""
+        """移除并返回(ACCEPT 兑现后 / REJECT 丢弃)。卡龄元数据随卡清;链上最后一张
+        离开时链意图随之清(链根先被拍掉不清 —— 剩下的派生卡还要靠它显示组头)。"""
         removed = self._pending.pop(proposal_id, None)
         self._meta.pop(proposal_id, None)
         if removed is not None:
+            cid = chain_root_of(removed)
+            if cid and not any(chain_root_of(p) == cid for p in self._pending.values()):
+                self._chain_meta.pop(cid, None)
             self._save()
         return removed
 
@@ -1062,6 +1170,9 @@ def proposal_for_schedule_suggest(
 __all__ = [
     "PendingProposalRegistry",
     "AGING_THRESHOLD_S",
+    "CHAIN_INTENT_MAX",
+    "chain_root_of",
+    "with_chain",
     "NO_HANDLER_KEEP_DETAIL",
     "DispatchResult",
     "dispatch_accept",
