@@ -58,6 +58,9 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   whole terminal-code family).
 - **macOS installs on zsh-only setups** (`.zlogin` covered) and stray empty provider blocks
   in `config.yaml` are swept on the next delete.
+- **`karvyloop url` no longer hands you a dead link.** It now probes the port first; if the
+  console isn't actually running (only a stale record from a previous run), it says so and
+  tells you to start it — instead of "successfully" printing a link that can't open.
 
 ## [2026.7.20] — 2026-07-20
 
