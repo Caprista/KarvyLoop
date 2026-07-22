@@ -76,14 +76,41 @@ def test_gate_requires_token_for_non_loopback(client):
 
 
 def test_url_command_reads_runtime(tmp_path, monkeypatch, capsys):
+    import socket
     monkeypatch.setattr(acc, "runtime_path", lambda: tmp_path / "console.runtime.json")
     from karvyloop.cli.main import _cmd_url
     assert _cmd_url() == 1   # 没 runtime → 1
-    acc.write_runtime("TK123", "0.0.0.0", 8766)
-    monkeypatch.setattr(acc, "_lan_ip", lambda: "192.168.1.5")
-    assert _cmd_url() == 0
-    out = capsys.readouterr().out
-    assert "http://192.168.1.5:8766/?token=TK123" in out   # 打印带 token 的跨设备链接
+    # 内测实拍修:url 现在先验活(0.5s TCP 探本机端口)→ 测试起一个真监听占住端口才算"在跑"
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    try:
+        acc.write_runtime("TK123", "0.0.0.0", port)
+        monkeypatch.setattr(acc, "_lan_ip", lambda: "192.168.1.5")
+        assert _cmd_url() == 0
+        out = capsys.readouterr().out
+        assert f"http://192.168.1.5:{port}/?token=TK123" in out   # 打印带 token 的跨设备链接
+    finally:
+        srv.close()
+
+
+def test_url_command_fails_loud_when_console_dead(tmp_path, monkeypatch, capsys):
+    """内测实拍(Hardy 转述:「url 能返回,网页打不开,多歧义」):console 停了但 runtime.json
+    还在 → 此前照打死链接。现在:端口连不上 = 明说没在跑并退 1,绝不打印必然打不开的链接。"""
+    import socket
+    monkeypatch.setattr(acc, "runtime_path", lambda: tmp_path / "console.runtime.json")
+    from karvyloop.cli.main import _cmd_url
+    # 拿一个刚释放的空闲端口(必然无人监听)
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    dead_port = s.getsockname()[1]
+    s.close()
+    acc.write_runtime("TK123", "0.0.0.0", dead_port)
+    assert _cmd_url() == 1                       # 验活失败 → 退 1
+    err = capsys.readouterr().err
+    assert str(dead_port) in err                 # 文案带端口
+    assert "http://" not in capsys.readouterr().out   # 绝不打死链接
 
 
 # ---- 同源门(P0-C1/H2:堵 CSRF + 跨站 WebSocket 劫持)----

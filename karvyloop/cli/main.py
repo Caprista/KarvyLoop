@@ -509,6 +509,17 @@ def _cmd_url() -> int:
     if not rt:
         sys.stderr.write(t("cli.url.no_runtime") + "\n")
         return 1
+    # fail-loud 验活(内测实拍:console 停了但 runtime.json 还在 → url 照打死链接,浏览器
+    # 打不开还以为是网络/防火墙问题):一发 0.5s TCP 探本机端口,连不上=没在跑,明说退 1
+    # —— 绝不打印一个必然打不开的链接。
+    import socket as _socket
+    _port = int(rt.get("port", 8766))
+    try:
+        with _socket.create_connection(("127.0.0.1", _port), timeout=0.5):
+            pass
+    except OSError:
+        sys.stderr.write(t("cli.url.not_running", port=_port) + "\n")
+        return 1
     urls = access_urls(str(rt.get("host", "127.0.0.1")), int(rt.get("port", 8766)), str(rt.get("token", "")))
     lines = [t("cli.url.local", url=urls["local"])]
     if urls["remote"]:

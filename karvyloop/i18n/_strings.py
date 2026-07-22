@@ -43,6 +43,11 @@ _EN = {
     "cli.help.update": "check whether a newer version exists (only checks + tells you — never auto-upgrades)",
     "cli.help.url": "print the running console's access links (local + tokened cross-device link)",
     "cli.url.no_runtime": "No running console found (no runtime recorded). Start it with `karvyloop console` first.",
+    "cli.url.not_running": (
+        "The console is NOT running right now (port {port} refused — only a stale record from a "
+        "previous run was found, so any link would not open). Start it with `karvyloop console`, "
+        "then run `karvyloop url` again."
+    ),
     "cli.url.local": "Local (no token):     {url}",
     "cli.url.remote": "Cross-device (token): {url}",
     "cli.url.remote_none": "Cross-device: this console is bound to localhost only. To reach it from another device, restart with `--host 0.0.0.0`.",
@@ -1066,6 +1071,10 @@ _ZH = {
     "cli.help.update": "检查有没有新版本(只检测+提示,绝不自动升级)",
     "cli.help.url": "打印当前运行中 console 的访问链接(本机免密 + 跨设备带 token 链接)",
     "cli.url.no_runtime": "没有正在运行的 console(未记录 runtime)。先 `karvyloop console` 起服务。",
+    "cli.url.not_running": (
+        "console 现在没有在运行(端口 {port} 连不上——找到的只是上次运行留下的记录,"
+        "链接打出来也打不开)。先 `karvyloop console` 起服务,再跑 `karvyloop url`。"
+    ),
     "cli.url.local": "本机访问(免 token):    {url}",
     "cli.url.remote": "跨设备访问(带 token):  {url}",
     "cli.url.remote_none": "跨设备:当前 console 只绑了本机(localhost)。要从别的设备访问,用 `--host 0.0.0.0` 重启。",
