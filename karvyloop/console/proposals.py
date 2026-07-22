@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 # WS 消息类型(与 ws.py 协议一致)
 WS_TYPE_H2A_PROPOSAL = "h2a_proposal"
 
+# docs/92 刀2:右栏待决卡积压限流阈值 —— 可视区(含组壳内卡)已 ≥N 张时,**新来的低价值卡**
+# 不再压进可视列,落前端「待办抽屉」(点开才展;高风险 / 用户主动触发的卡永远直出)。
+# 后端只当配置源:随 /api/proposals/pending 响应带给前端(boot 配置),不参与判定 ——
+# 溢出判定在前端**入列时刻**用 wire 已有字段(high_risk / payload.user_initiated)完成,
+# 零新 API 调用。第一版不做 UI 设置项(Hardy 拍 N=7)。
+OVERFLOW_DRAWER_N = 7
+
 
 def proposal_wire_payload(registry: Any, proposal: Any) -> dict:
     """一张卡的对外 payload(WS 推送 / /api/proposals/pending 共用一个出口口径)。
@@ -407,6 +414,7 @@ def trace_aged_defers(app: Any) -> int:
 
 __all__ = [
     "WS_TYPE_H2A_PROPOSAL",
+    "OVERFLOW_DRAWER_N",
     "ProposalPump",
     "broadcast_proposal",
     "proposal_wire_payload",

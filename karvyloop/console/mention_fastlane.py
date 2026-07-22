@@ -66,6 +66,7 @@ async def mention_fastlane(app, peer, intent: str, *, roster_fn):
     dom = dom_reg.get(a.domain_id) if (dom_reg is not None and a.domain_id) else None
     # 独立角色(不归任何域,如批量导入的)没有域名 → 卡上标"个人"(l0 直聊同款:无域治理)
     domain_name = (getattr(dom, "name", "") if dom is not None else "") or _i18n.t("route.mention_no_domain")
+    import dataclasses
     import time as _t
     from karvyloop.console.proposals import broadcast_proposal
     from karvyloop.karvy.proposal_registry import proposal_for_route
@@ -73,6 +74,15 @@ async def mention_fastlane(app, peer, intent: str, *, roster_fn):
     proposal = proposal_for_route(ts=_t.time(), requirement=requirement,
                                   domain_id=a.domain_id or "", role=display,
                                   agent_id=a.agent_id or "", domain_name=domain_name)
+    # docs/92 刀2:显式来源标 —— 这张卡是**用户主动动作**(@ 点名)直接触发的,payload 塞
+    # user_initiated=true(wire 经 to_dict 带出)。前端积压抽屉限流据此永不把它收进抽屉
+    # (用户刚 @ 完就找不到自己的卡 = 反模式)。frozen dataclass → replace 出新对象
+    # (proposal_id 已派生非空,不会重算);失败 fail-soft:少个标,卡照常出。
+    try:
+        proposal = dataclasses.replace(
+            proposal, payload={**proposal.payload, "user_initiated": True})
+    except Exception:
+        pass
     registry.register(proposal)
     try:
         await broadcast_proposal(app, proposal)   # 推到 H2A 列(与既有委派卡同一条路)

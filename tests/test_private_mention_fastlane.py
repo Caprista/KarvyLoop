@@ -109,6 +109,26 @@ def test_private_at_role_emits_prefilled_card(setup, monkeypatch):
     assert recorded and recorded[-1] == ("@设计师 出一版海报", body["text"])
 
 
+# ---- docs/92 刀2: fastlane 卡带 user_initiated 显式来源标(积压抽屉限流的直出判据) ----
+def test_fastlane_card_carries_user_initiated_flag(setup, monkeypatch):
+    """用户主动 @ 出的委派卡 payload 塞 user_initiated=true 且 wire 带出 —— 前端积压
+    抽屉限流据此永不把它收进抽屉(用户刚 @ 完就找不到自己的卡 = 反模式)。"""
+    app, mgr, reg, d = setup
+    import karvyloop.console.routes as routes_mod
+    _boom_drive(routes_mod, monkeypatch)
+
+    TestClient(app).post("/api/intent", json={"intent": "@设计师 出一版海报"})
+    p = app.state.proposal_registry.pending()[0]
+    assert p.payload.get("user_initiated") is True
+    # wire 出口(WS 广播 / pending API 同源)把标带给前端入列时刻
+    from karvyloop.console.proposals import proposal_wire_payload
+    wire = proposal_wire_payload(app.state.proposal_registry, p)
+    assert wire["payload"]["user_initiated"] is True
+    # 打标不改卡的其余语义(id 稳定、kind/requirement 原样 —— ACCEPT 兑现路径零回归)
+    assert p.kind == KIND_ROUTE_TO_ROLE
+    assert p.payload["requirement"] == "出一版海报"
+
+
 # ---- AC2a: @不存在的名字 → 走原 drive(不误吞) ----
 def test_private_at_unknown_name_falls_to_drive(setup, monkeypatch):
     app, mgr, reg, d = setup

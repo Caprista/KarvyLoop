@@ -120,7 +120,8 @@ async def api_proposals_pending(request: Request) -> dict[str, Any]:
     """
     registry = getattr(request.app.state, "proposal_registry", None)
     if registry is None:
-        return {"proposals": []}
+        from karvyloop.console.proposals import OVERFLOW_DRAWER_N
+        return {"proposals": [], "drawer_n": OVERFLOW_DRAWER_N}   # docs/92 刀2:阈值口径一致
     # 原住民引荐(docs/60 空屋子解法):开机拉取是前端必经的第一口 → 在此做一次幂等检查
     # (角色库空 + 从没引荐过才出卡;REJECT 后由状态文件保证永不纠缠;卡直接出现在本次
     # 响应里,不吃 WS 时序、不用等 boot_poll 延迟)。fail-soft:引荐失败绝不影响待决列表。
@@ -138,14 +139,16 @@ async def api_proposals_pending(request: Request) -> dict[str, Any]:
     except Exception:
         pass
     out: list[dict[str, Any]] = []
-    from karvyloop.console.proposals import proposal_wire_payload
+    from karvyloop.console.proposals import OVERFLOW_DRAWER_N, proposal_wire_payload
     for p in registry.pending():
         try:
             # docs/92 刀1:与 WS 推送同一出口口径(chain_intent/high_risk 派生字段)
             out.append(proposal_wire_payload(registry, p))
         except Exception:
             pass
-    return {"proposals": out}
+    # docs/92 刀2:积压抽屉阈值 N(后端唯一配置源)随开机拉取带给前端 —— boot 配置,
+    # 不做每卡字段、不做 UI 设置项;老前端/移动页/接入页不认识此键 = 自然忽略(纯增量)。
+    return {"proposals": out, "drawer_n": OVERFLOW_DRAWER_N}
 
 
 @router.get("/residents")

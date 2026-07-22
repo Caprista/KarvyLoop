@@ -238,6 +238,7 @@
         // 退场动画 160ms 后再判空回填(动画中的节点还在 DOM,立刻数会把空态吞掉)
         setTimeout(() => {
           _regroupChains(list);     // docs/92 刀1:拍完出组 —— 组内剩 1 张时组壳解散回普通单卡
+          _refreshDrawerRow(list);  // docs/92 刀2:抽屉卡被拍掉 → 行计数刷新 / 空抽屉整行退场
           _refreshDecideFilter();   // #6:卡拍掉了 → 重算筛选条(distinct<2 会自动收起 / 选中类拍光则复位)
           if (_countCards("h2a-list", "h2a-empty") === 0) {
             list.innerHTML = '<div class="h2a-empty">' + t("h2a.handled") + '</div>';
@@ -421,6 +422,10 @@
       const r = await fetch("/api/proposals/pending");
       if (!r.ok) return;
       const data = await r.json();
+      // docs/92 刀2:抽屉阈值 N(后端唯一配置源 proposals.OVERFLOW_DRAWER_N)随 pending 带出;
+      // 在回放存量卡**之前**校准(否则第一批按默认值分区)。坏值/缺键 → 守同值默认 7。
+      const dn = Number(data.drawer_n);
+      if (Number.isFinite(dn) && dn >= 1) _drawerN = dn;
       (data.proposals || []).forEach((p) => _routeProposal(p, { replay: true }));   // 按 kind 分流(拍板/预判)
       _refreshDecideFilter();   // #6:开机回放存量卡后一次性算筛选条(多 kind 积压才现身)
     } catch (e) {
@@ -1041,6 +1046,84 @@
     });
   }
 
+  // ── docs/92 刀2:积压抽屉限流(低优先滞留区;只管右栏 #h2a-list,聊天流 inline 卡照旧双面出)──
+  // 可视区(含刀1组壳内卡)已 ≥N 张时,**新来的低价值卡**不再压进可视列 → 落列底「待办抽屉」,
+  // 点开才展(展开=普通渲染,同一套卡:拍板/懒加载/kind 筛选照旧)。**直出(永不进抽屉)**:
+  // ① high_risk(wire 派生字段,判定源=后端 silence.HIGH_RISK_KINDS,刀1 统一出口);
+  // ② payload.user_initiated(用户主动动作直接触发的卡,如 @ 快通道委派 —— fastlane 注册时显式打标)。
+  // 边界:违背/needs_recheck 在 decision_card **懒加载后**才知道,入列时刻不可得 → 不作入抽屉判据
+  // (判定必须只用 wire 已有字段、零每卡 API;安全兜底 = high_risk kind 白名单直出)。
+  // 不做回填搬运:可视区拍掉一张后**不**自动把抽屉卡提上来(搬运=卡片跳动;抽屉是滞留区不是队列,
+  // 点开随时全看)。抽屉卡不参与刀1同链组折叠:data-chain-key 改存 data-drawer-chain-key
+  // (_regroupChains 选择器只认 data-chain-key)—— 否则组壳搬动会把卡拽出抽屉。defer aging
+  // 住后端 registry,抽屉卡照走不受影响。展开态记内存(会话级,不记 localStorage)。
+  let _drawerN = 7;          // 后端 proposals.OVERFLOW_DRAWER_N 同值默认;boot 从 pending 响应校准
+  let _drawerOpen = false;   // 会话级展开态
+  function _visibleCardCount(list) {
+    // 可视区卡数 = 抽屉外全部 .h2a-card(含组壳内卡)。报告卡/空态/提示不是 .h2a-card,不计。
+    return Array.from(list.querySelectorAll(".h2a-card")).filter((c) => !c.closest(".h2a-drawer")).length;
+  }
+  function _isDirectOut(payload) {
+    if (payload.high_risk) return true;                                   // 安全不收纳(同刀1哲学)
+    if (payload.payload && payload.payload.user_initiated) return true;   // 用户主动触发的卡
+    return false;
+  }
+  function _cardZone(list, proposalId) {
+    // 幂等重推保区:同 id 旧卡在哪个区,新卡就回哪个区(换卡不换区,不跳动)。null = 新卡。
+    const old = list.querySelector('[data-proposal-id="' + _chainEsc(proposalId) + '"]');
+    if (!old) return null;
+    return old.closest(".h2a-drawer") ? "drawer" : "visible";
+  }
+  function _setDrawerOpen(drawer, open) {
+    _drawerOpen = !!open;
+    drawer.classList.toggle("drawer-open", _drawerOpen);
+    const body = drawer.querySelector(".h2a-drawer-body");
+    if (body) body.hidden = !_drawerOpen;
+    const row = drawer.querySelector(".h2a-drawer-row");
+    if (row) row.setAttribute("aria-expanded", _drawerOpen ? "true" : "false");
+    _refreshDrawerRow(drawer.parentNode);
+  }
+  function _ensureDrawer(list) {
+    let drawer = list.querySelector(".h2a-drawer");
+    if (!drawer) {
+      drawer = el("div", { class: "h2a-drawer", id: "h2a-drawer" });
+      const row = el("div", { class: "h2a-drawer-row", role: "button", tabindex: "0",
+        "aria-expanded": "false" });
+      const toggle = () => _setDrawerOpen(drawer, !_drawerOpen);
+      row.addEventListener("click", toggle);
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(); }
+      });
+      drawer.appendChild(row);
+      const body = el("div", { class: "h2a-drawer-body" });
+      body.hidden = true;
+      drawer.appendChild(body);
+      list.appendChild(drawer);
+      if (_drawerOpen) _setDrawerOpen(drawer, true);   // 会话内重建(拍空又溢出)恢复展开态
+    }
+    return drawer;
+  }
+  // 抽屉行刷新:行计数(抽屉行自身显示抽屉内张数)+ 空抽屉自拆 + 永远保持在列底。
+  function _refreshDrawerRow(list) {
+    if (!list) return;
+    const drawer = list.querySelector(".h2a-drawer");
+    if (!drawer) return;
+    const n = drawer.querySelectorAll(".h2a-card").length;
+    if (n === 0) { drawer.remove(); return; }   // 抽屉里的卡逐张拍完 → 整行退场
+    const row = drawer.querySelector(".h2a-drawer-row");
+    if (row) row.textContent = t(_drawerOpen ? "h2a.drawer_open" : "h2a.drawer_more", { n: n });
+    if (list.lastElementChild !== drawer) list.appendChild(drawer);   // 抽屉永远在列底
+  }
+  function _placeCardInDrawer(list, proposalId, card) {
+    card.setAttribute("data-proposal-id", String(proposalId));
+    _removeCardById(list, proposalId);   // 幂等:同 id 先撤旧卡(不管此前在可视区还是抽屉)
+    // 抽屉卡退出刀1组折叠(链键改名存着,不丢信息;抽屉内不建组壳)
+    const ck = card.getAttribute("data-chain-key");
+    if (ck) { card.removeAttribute("data-chain-key"); card.setAttribute("data-drawer-chain-key", ck); }
+    _ensureDrawer(list).querySelector(".h2a-drawer-body").appendChild(card);
+    _refreshDrawerRow(list);
+  }
+
   // ── 两张新卡的专属渲染(通用 h2a 卡列表里按 kind 分支)──
   // revise_skill:old/new steps 上下对照(简单 del/ins 行级对比)+ "依据:N 次运行信号" + trace 引用。
   // weekly_digest:payload.markdown 经 KarvyRender(DOMPurify 消毒)渲染,缺库回退 pre 裸文本。
@@ -1208,6 +1291,15 @@
         .some((c) => c.style.display !== "none");
       g.style.display = anyVisible ? "" : "none";
     });
+    // docs/92 刀2:#6 筛选对抽屉内外一视同仁(上面的 cards 查询天然含抽屉卡)。抽屉行跟随
+    // 成员显隐:抽屉内全被筛掉时整行也藏(同组壳纪律,只显隐不搬 DOM);筛选条计数
+    // (_refreshDecideFilter)含抽屉卡 → "全部 N" 与 可视+抽屉 对得上。
+    const drawer = list.querySelector(".h2a-drawer");
+    if (drawer) {
+      const anyVisible = Array.from(drawer.querySelectorAll(".h2a-card[data-kind]"))
+        .some((c) => c.style.display !== "none");
+      drawer.style.display = anyVisible ? "" : "none";
+    }
   }
   function _refreshDecideFilter() {
     const bar = document.getElementById("h2a-filter");
@@ -1272,8 +1364,17 @@
       }
     } catch (e) { /* 无 localStorage(隐私模式)→ 不提示,不炸 */ }
     const built = _buildProposalCard(payload);
-    _placeCard(list, built.proposalId, built.card);   // 多卡不覆盖:同 id 替换、新 id 追加
-    _regroupChains(list);                             // docs/92 刀1:同链 ≥2 张 → 收进组壳(纯视觉)
+    // docs/92 刀2:**入列时刻**溢出判定(只用 wire 已有字段 high_risk/payload.user_initiated,
+    // 零每卡 API)。幂等重推保区(同 id 换卡不换区);新卡且非直出且可视区已 ≥N → 落抽屉。
+    const zone = _cardZone(list, built.proposalId);
+    if (zone === "drawer" ||
+        (zone === null && !_isDirectOut(payload) && _visibleCardCount(list) >= _drawerN)) {
+      _placeCardInDrawer(list, built.proposalId, built.card);
+    } else {
+      _placeCard(list, built.proposalId, built.card); // 多卡不覆盖:同 id 替换、新 id 追加
+      _regroupChains(list);                           // docs/92 刀1:同链 ≥2 张 → 收进组壳(纯视觉)
+      _refreshDrawerRow(list);                        // 刀2:直出卡 append 在抽屉后 → 抽屉回列底
+    }
     _renderProposalInChat(payload, built.proposalId); // S3:决策卡双面出 —— 同时冒进聊天流
     // 桌面视图(docs/51 §4.2):⚖便签置顶 + 闪烁 + 卡皮巴拉冒泡(fail-loud,推回决策舱);
     // replay(开机回放存量卡)只保"在位可瞟",不演叼卡剧场 —— 事件 vs 快照在 desktop.ts 一处区分
@@ -3239,9 +3340,12 @@
     if (!c) return 0;
     // docs/92 刀1:同链组壳(.h2a-chain-group)按**组内卡数**计 —— 收纳是视觉的,
     // 计数(脉搏/列头徽章/空态判定)必须仍数真实待拍张数,不因折叠少报。
+    // docs/92 刀2:积压抽屉(.h2a-drawer)同理按**抽屉内卡数**计 —— 总徽章含抽屉卡
+    // (反投降:限流是视觉收纳,待拍总数一张不少报;空态判定也因此不会误吞非空抽屉)。
     return Array.from(c.children).reduce((n, ch) => {
       if (ch.classList.contains(emptyClass)) return n;
       if (ch.classList.contains("h2a-chain-group")) return n + ch.querySelectorAll(".h2a-card").length;
+      if (ch.classList.contains("h2a-drawer")) return n + ch.querySelectorAll(".h2a-card").length;
       return n + 1;
     }, 0);
   }

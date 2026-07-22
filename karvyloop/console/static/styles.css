@@ -1395,6 +1395,23 @@ html, body {
 .chain-pin .h2a-card { border-color: var(--danger-line, var(--danger)); }
 .chain-body { margin-top: 6px; }
 .chain-pin .h2a-card:last-child, .chain-body .h2a-card:last-child { margin-bottom: 0; }
+/* —— docs/92 刀2:积压抽屉(低优先滞留区,列底一行;展开=普通渲染同一套卡) —— */
+.h2a-drawer {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: var(--surface-2, transparent);
+}
+.h2a-drawer-row {
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+.h2a-drawer-row:hover { color: var(--text-1); }
+.h2a-drawer-body { margin-top: 6px; }
+.h2a-drawer-body .h2a-card:last-child { margin-bottom: 0; }
 
 .h2a-summary, .h2a-proposal .summary { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .h2a-strength, .h2a-proposal .pid { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
