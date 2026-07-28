@@ -45,6 +45,40 @@ def read_only_token(token: CapabilityToken) -> CapabilityToken:
     return token.model_copy(update={"grants": new_grants})
 
 
+def staging_scoped_token(token: CapabilityToken, staging_root: str):
+    """派生**场景预执行专属** token(docs/94 刀2 B1 修):沙箱可写面由 token 决定
+    (mounts_from_token → rw_bind),不是 workspace_root —— 只换 workspace_root 挡不住 bash。
+
+    规则(read_only_token 同款能力层口径):
+      - 原 `fs:` grant 全部**剥离写权**(降为只读)—— 诊断仍可读用户工作区,但 bash/沙箱
+        对它一律 ro-bind,写不动;
+      - 另授 `fs:<staging_root>` read+write 与 exec —— 产物(含 bash 落盘)只能进 staging,
+        且 staging 真进挂载(此前 staging 不在 token 里:mac/Win 下 bash 可写用户真实工作区
+        =逃逸;Linux 下 staging 没进挂载 bash 起不来);
+      - 非 fs grant(net: 等)原样保留(预执行调研要联网)。
+    非标准 token(无 grants 的测试桩/损坏)/ staging_root 空 → **None**,调用方必须
+    fail-closed(铸不出隔离 token 就不预执行 —— 隔离铁律优先于功能)。
+    """
+    root = (staging_root or "").strip()
+    grants = getattr(token, "grants", None)
+    if not root or grants is None:
+        return None
+    try:
+        from karvyloop.schemas import Capability
+        new_grants = []
+        for g in grants:
+            if g.resource.startswith("fs:"):
+                ops = [o for o in (g.ops or []) if o != "write"]
+                new_grants.append(g.model_copy(update={"ops": ops or ["read"]}))
+            else:
+                new_grants.append(g)
+        new_grants.append(Capability(resource=f"fs:{root}", ops=["read", "write"]))
+        new_grants.append(Capability(resource=f"fs:{root}", ops=["exec"]))
+        return token.model_copy(update={"grants": new_grants})
+    except Exception:
+        return None   # 派生不了 = 绝不静默降级成"复用原 token"(fail-closed)
+
+
 def has_net(token: CapabilityToken) -> bool:
     """是否存在任何 net: 能力。二元网络(有/无);域名级收紧见 net_allowlist_of。"""
     return any(g.resource.startswith("net:") for g in token.grants)

@@ -91,8 +91,15 @@ def distill_raw_to_summary(index: TraceIndex, *, recent_n: int = 50) -> Optional
             break
     by_kind: dict[str, int] = {}
     intents: list[str] = []
+    machine_skipped = 0
     for rec in raw:
         p = rec.payload if isinstance(rec.payload, dict) else {}
+        # docs/94 刀2 B2:机器发起的 drive(场景预执行,事件 source="scene_preexec")
+        # **不进**习惯蒸馏 —— 它的 goal 是系统构造的诊断指令,不是"你"的行为模式,
+        # 进了就是轻自我反馈环(机器教机器像机器)。watermark 照常越过(不重扫)。
+        if p.get("source") == "scene_preexec":
+            machine_skipped += 1
+            continue
         k = p.get("kind", "event")
         by_kind[k] = by_kind.get(k, 0) + 1
         it = p.get("intent")
@@ -100,7 +107,7 @@ def distill_raw_to_summary(index: TraceIndex, *, recent_n: int = 50) -> Optional
             intents.append(str(it))
     summary = {
         "kind": "distilled_summary",
-        "from_raw_count": len(raw),
+        "from_raw_count": len(raw) - machine_skipped,
         "by_kind": by_kind,
         "recent_intents": intents,
         "up_to_raw_seq": newest_seq,

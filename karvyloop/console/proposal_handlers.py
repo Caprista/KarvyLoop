@@ -26,7 +26,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
     KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER, KIND_MEMORY_CONFLICT,
     KIND_SCHEDULE_CATCHUP, KIND_SCHEDULE_SUGGEST, KIND_PURSUIT_COMMIT, KIND_PURSUIT_REVISE,
-    KIND_ROUNDTABLE_CONCLUSION,
+    KIND_ROUNDTABLE_CONCLUSION, KIND_SCENE_READY,
 )
 
 logger = logging.getLogger(__name__)
@@ -1041,6 +1041,78 @@ def _pursuit_revise_reject_handler(app: Any) -> Callable[[object], Tuple[bool, s
     return handler
 
 
+def _scene_ready_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """KIND_SCENE_READY ACCEPT 兑现(docs/94 刀2):把预执行的 staging 产物**落地**。
+
+    第一版两类(payload.action):
+    - `deliver`(调研/草稿/试跑结果类):产物文本作为一条聊天消息发进私聊会话
+      (「这是我提前备好的:…」)+ work/ 里的文件移入工作区 karvy_prepared/<sid>/。
+      **这是产物穿出 staging 隔离的唯一时刻**(ACCEPT 之前 staging 外零写入铁律)。
+    - `rerun`(重跑类,task_failed 诊断):把备好的诊断/修法草稿注入原 intent,
+      **沿用既有 run_task handler 语义**重跑一次(同一条 Ring-1 路径,照 mesh_takeover 先例;
+      优先取 app.state.proposal_handlers 里注册的同一个 run_task handler)。
+    产物已被过期巡检清掉 → 诚实回执"已过期清理",不假装落了。落地成功才清 staging
+    (失败保留,48h 巡检兜底)。K5:只在你 ACCEPT 后被调。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        import dataclasses
+        from karvyloop import i18n
+        from karvyloop.console.scene_preexec import (
+            discard_staging, deliver_to_private_chat, load_product,
+            move_files_to_workspace,
+        )
+        payload = getattr(proposal, "payload", None) or {}
+        sid = str(payload.get("staging_id") or "")
+        action = (payload.get("action") or "deliver").strip()
+        product = load_product(app, sid)
+        if product is None:
+            return True, i18n.t("receipt.scene_ready.gone")
+        text = (product.get("text") or "").strip()
+        if action == "rerun":
+            intent = (payload.get("intent") or product.get("intent") or "").strip()
+            if not intent:
+                return False, i18n.t("receipt.scene_ready.no_intent")
+            enriched = intent + "\n\n" + i18n.t(
+                "scene_ready.rerun.diagnosis_block", text=text[:4000])
+            shim = dataclasses.replace(proposal, payload={**payload, "intent": enriched})
+            handlers = getattr(getattr(app, "state", None), "proposal_handlers", None) or {}
+            rt = handlers.get(KIND_RUN_TASK) or _run_task_handler(app)
+            ok, detail = rt(shim)
+            if ok:
+                discard_staging(app, sid)
+            return ok, detail
+        # deliver:文本半发进私聊会话 + 文件半移入工作区
+        moved = move_files_to_workspace(app, sid)
+        user_line = i18n.t("scene_ready.deliver.user_line",
+                           what=(getattr(proposal, "summary", "") or "")[:80])
+        delivered = deliver_to_private_chat(
+            app, user_line, i18n.t("scene_ready.deliver.message", text=text))
+        if not delivered and moved <= 0:
+            return False, i18n.t("receipt.scene_ready.deliver_failed")
+        discard_staging(app, sid)
+        files = i18n.t("receipt.scene_ready.files_moved", n=moved, sid=sid) if moved else ""
+        if not delivered:
+            # 会话没送达但文件已落工作区 → 回执诚实说清(不说"已发进会话")
+            return True, i18n.t("receipt.scene_ready.files_only", files=files)
+        return True, i18n.t("receipt.scene_ready.delivered", files=files)
+    return handler
+
+
+def _scene_ready_reject_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """KIND_SCENE_READY 的 **REJECT 钩子**(约定 key = f"{kind}:reject"):产物隔离铁律的
+    丢弃半 —— REJECT = staging 目录删除、零残留(负反馈冷却由拍板咽喉的 note_scene_reject
+    凭 payload.scene_kind 回钩,不在此)。回执留空 = 保持通用 "rejected"。"""
+    def handler(proposal) -> Tuple[bool, str]:
+        try:
+            from karvyloop.console.scene_preexec import discard_staging
+            payload = getattr(proposal, "payload", None) or {}
+            discard_staging(app, str(payload.get("staging_id") or ""))
+        except Exception:
+            logger.debug("[scene_ready] REJECT 清 staging 失败(48h 巡检兜底)", exc_info=True)
+        return True, ""
+    return handler
+
+
 def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool, str]]]:
     """构造 ACCEPT 兑现 handler 表(注入 app.state.proposal_handlers)。
 
@@ -1082,6 +1154,11 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         # docs/90 刀3c:时机能力提示的 ACCEPT 兑现 = 无副作用回执(真落地在前端预填→create_schedule)。
         # ∈ taste_eval.SKIP_KINDS,永不被"挣来的静音"自动兑现;∉ HIGH_RISK_KINDS(温和提示非安全拦截)。
         KIND_SCHEDULE_SUGGEST: _schedule_suggest_handler,
+        # docs/94 刀2:「已备好」卡 —— ACCEPT 按 payload.action 落地(deliver=产物发进会话+
+        # 文件移入工作区 / rerun=带诊断沿 run_task 语义重跑);REJECT 钩子清 staging 零残留。
+        # ∈ taste_eval.SKIP_KINDS(永不被静音自动兑现);∉ HIGH_RISK_KINDS。
+        KIND_SCENE_READY: _scene_ready_handler(app),
+        f"{KIND_SCENE_READY}:reject": _scene_ready_reject_handler(app),
         KIND_MEMORY_CONFLICT: _memory_conflict_handler(app),     # D2:按你的裁决处置钉住/人审记忆冲突
         KIND_MESH_TAKEOVER: make_mesh_takeover_handler(app),     # mesh 接活:claim→重跑→complete
         KIND_CONFIRM_DECISION_PREF: _confirm_decision_pref_handler(app),

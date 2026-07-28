@@ -318,12 +318,22 @@ class MainLoop:
 
     def _emit_funnel_event(self, payload: dict) -> None:
         """把一个事件落漏斗原文层(docs/27 TR-1:trace 是提炼真相源)。失败不阻断。
-        大字符串字段先过 HR-9 截断(基建),防大输出把容量环冲爆。"""
+        大字符串字段先过 HR-9 截断(基建),防大输出把容量环冲爆。
+
+        docs/94 刀2 B2:事件**加性**带 `source`(token_source contextvar 现值)——
+        机器发起的 drive(场景预执行外层裹 token_source("scene_preexec"))由此可辨,
+        习惯蒸馏侧(trace_poll)凭它把机器诊断 goal 挡在"你的习惯"之外(轻自我反馈环)。
+        普通用户路径 source 多为默认 "unknown",蒸馏行为一字不变。"""
         if self._trace_funnel is None:
             return
         try:
             from karvyloop.context.truncate import truncate_str_utf8
             cap = self._FUNNEL_FIELD_BYTES
+            try:
+                from karvyloop.llm.token_ledger import current_source
+                payload = {**payload, "source": current_source()}
+            except Exception:
+                pass
 
             def _slim(v, depth=0):
                 if isinstance(v, str) and len(v) > cap:

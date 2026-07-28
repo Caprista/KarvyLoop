@@ -78,9 +78,15 @@ def recent_failed_task_signals(task_registry: Any, *, now: Optional[float] = Non
     now = time.time() if now is None else float(now)
     out: list = []
     try:
-        from .proactive import resume_proposal_for
+        from .proactive import is_user_task, resume_proposal_for
         for t in task_registry.list():   # newest-first 的 dict 列表
             if t.get("status") != "error":
+                continue
+            # docs/94 刀2 A4:只收**用户语义**任务(USER_TASK_KINDS 白名单;""=老记录)。
+            # 机器内部预执行(kind=scene_preexec)失败=静默弃,绝不当新场景信号自我繁殖
+            # (新 task_id=新指纹会绕过 attempted/指纹门);pursuit 失败有自己的挂起/修订卡
+            # 回路(pursuit_tick),别双弹。
+            if not is_user_task(t):
                 continue
             try:
                 finished = float(t.get("finished") or 0.0)

@@ -292,11 +292,23 @@ async def scene_tick(app: Any, *, now: Optional[float] = None) -> int:
     """一次场景检查:采集当下信号 → 逐条过门 → 放行的广播。返回出卡数;任何异常返 0。
 
     挂点:慢侧维护 loop 每 tick(app.py)+ drive 收尾旁路(scene_check_after_drive)。
-    确定性零 LLM,不阻塞热路径(调用方 fire-and-forget / 维护 tick 侧)。"""
+    刀1 判定确定性零 LLM,不阻塞热路径(调用方 fire-and-forget / 维护 tick 侧)。
+    docs/94 刀2 例外:被消费面接走的信号会烧一次便宜 relevance LLM(按指纹缓存只判一次;
+    --no-llm / 门拒 / 忙 时消费面直接 False,零 LLM 回落刀1 原路)。"""
     try:
         from karvyloop.karvy.scene_signals import collect_scene_signals
         emitted = 0
         for sig in collect_scene_signals(app, now=now):
+            # docs/94 刀2:预测定向预执行的**消费面**(只加消费,门/信号判定不动)——
+            # schedule_due/task_failed 且 relevance 判"值得先干" → 空闲把活干了,完成后
+            # 它自己经本门出「已备好」卡(同一份预算,成功出卡才扣);不适用/不值得/资源
+            # 不空闲/消费面异常 → 回落下面的刀1 普通卡路径(0 回归)。
+            try:
+                from karvyloop.console.scene_preexec import maybe_consume_signal
+                if await maybe_consume_signal(app, sig, now=now):
+                    continue
+            except Exception as e:  # noqa: BLE001 —— 刀2 坏了绝不连坐刀1
+                logger.debug("[scene_gate] 刀2 消费面异常(回落普通卡): %s", e)
             sent = await emit_gated(app, sig.proposal, fingerprint=sig.fingerprint,
                                     scene_kind=sig.scene_kind, now=now)
             if sent is not None:

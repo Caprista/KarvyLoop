@@ -104,10 +104,24 @@ def catchup_proposal_for(t, missed_count: int, latest_missed: Optional[float], *
     )
 
 
+# docs/94 刀2 A4:重试卡/停滞卡/场景信号只认**用户语义**的任务 kind(""=老记录无 kind 字段)。
+# 排除 scene_preexec —— 机器内部预执行任务:失败=静默弃(设计定值),绝不能被任何"失败任务
+# 出重试卡"路径捡走当新场景(新 task_id=新指纹会绕过 attempted/指纹门 → 自我繁殖:逐轮烧
+# relevance、蚕食日预算、向用户弹机器内部卡)。排除 pursuit —— 它的失败有自己的挂起/修订卡
+# 回路(pursuit_tick),别双弹。
+USER_TASK_KINDS = frozenset({"drive", "workflow", "roundtable", "schedule", "proposal", ""})
+
+
+def is_user_task(t: dict) -> bool:
+    """这条任务 dict 是不是用户语义的活(重试/停滞/场景信号只认这些)。"""
+    return (t.get("kind") or "") in USER_TASK_KINDS
+
+
 def propose_from_tasks(task_registry, *, now: Optional[float] = None) -> Optional[Proposal]:
     """观察任务看板:最近若有失败/中断的任务,提议重试它;否则返 None(沉默)。
 
-    deterministic、可测;不挖 LLM 模式(那是 M3+)。
+    deterministic、可测;不挖 LLM 模式(那是 M3+)。只认用户语义任务(A4:机器内部
+    scene_preexec / 有自己回路的 pursuit 不出重试卡)。
     """
     if task_registry is None:
         return None
@@ -116,11 +130,12 @@ def propose_from_tasks(task_registry, *, now: Optional[float] = None) -> Optiona
     except Exception:
         return None
     for t in tasks:
-        if t.get("status") == "error":
+        if t.get("status") == "error" and is_user_task(t):
             p = resume_proposal_for(t, now=now)
             if p is not None:
                 return p
     return None
 
 
-__all__ = ["propose_from_tasks", "resume_proposal_for", "catchup_proposal_for"]
+__all__ = ["propose_from_tasks", "resume_proposal_for", "catchup_proposal_for",
+           "USER_TASK_KINDS", "is_user_task"]

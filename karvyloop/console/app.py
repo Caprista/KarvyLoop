@@ -339,6 +339,17 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 场景唤醒:出 {_scn} 张场景卡(docs/94 刀1)")
                         except Exception as ie:
                             logger.debug(f"[karvyloop console] 场景唤醒 tick 异常(旁路忽略): {ie}")
+                        # docs/94 刀2:错时撤卡 + staging 巡检(确定性零 LLM,每 tick)——
+                        # 场景过期的「已备好」卡 registry 撤卡+弃产物+日志一行(不打扰用户);
+                        # 超龄 48h 且无待决卡引用的 staging 目录清掉(有界)。旁路纪律同上。
+                        try:
+                            from karvyloop.console.scene_preexec import scene_ready_maintenance
+                            _srm = scene_ready_maintenance(app)
+                            if _srm.get("expired"):
+                                logger.info(f"[karvyloop console] 错时撤卡:{_srm['expired']} 张"
+                                            f"「已备好」卡过期撤下并弃产物(docs/94 刀2)")
+                        except Exception as ie:
+                            logger.debug(f"[karvyloop console] 刀2 巡检异常(旁路忽略): {ie}")
                         # docs/88 招牌"闭环完整性"外环(真伤1 跑评分离):committed/revised Pursuit —
                         # **廉价门每 tick 确定性 verify**(过则自动 done+回执);贵的 test_pass 门求值 + pursue
                         # 推进受 6h 节流(非热路径,慢侧维护节奏)。放在 idle 判断之前 = 不受 daily 节流影响。

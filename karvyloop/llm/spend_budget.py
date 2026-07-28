@@ -61,6 +61,8 @@ AUTOMATIC_SOURCES = frozenset({
     "weekly_digest",        # 周报
     "凝习惯",                # trace 凝习惯(后台)
     "ops_diagnose",         # 运维诊断(后台自愈)
+    "scene_relevance",      # docs/94 刀2:预执行 relevance 判断(空闲后台,一次便宜调用)
+    "scene_preexec",        # docs/94 刀2:场景预执行(空闲后台干活;launch 前显式 check 同名 source)
 })
 
 

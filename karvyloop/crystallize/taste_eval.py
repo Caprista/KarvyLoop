@@ -32,7 +32,9 @@ _OUTCOME_RETAIN = 500         # 对账记录留存上限(够画趋势,有界)
 # schedule_suggest(docs/90 刀3c 时机能力提示):温和建议卡,**永不被"挣来的静音"自动兑现**
 # (加个定时任务=改系统行为,必须人点)—— 进 SKIP_KINDS 让 silence.try_silence 直接放行不接管,
 # 且不押注(它不是"替你拍板"的决策信号,是"你要不要自动化"的提示)。不进 HIGH_RISK_KINDS。
-SKIP_KINDS = ("confirm_decision_pref", "schedule_suggest")
+# scene_ready(docs/94 刀2「已备好」卡):预执行产物落地 = 系统产出穿进你的工作面(发进会话/
+# 重跑)—— 同 schedule_suggest 先例,永不被静音自动兑现、不押注;不进 HIGH_RISK_KINDS。
+SKIP_KINDS = ("confirm_decision_pref", "schedule_suggest", "scene_ready")
 
 
 class TastePredictionStore:

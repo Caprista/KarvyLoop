@@ -95,6 +95,14 @@ async def run_task_monitor(app: Any, *, now: Optional[float] = None,
             reg.finish(tid, error="疑似中断:长时间无进展,已停止推进")
         except Exception:
             pass
+        # docs/94 刀2 A4:非用户语义任务(机器内部 scene_preexec / 有自己回路的 pursuit)
+        # 只做①②诚实标注,**不弹重跑卡**(向用户弹机器内部卡 = 自我繁殖面之一)。
+        try:
+            from karvyloop.karvy.proactive import is_user_task
+            if not is_user_task(t):
+                continue
+        except Exception:
+            pass   # 判不了 → 保持旧行为(出卡),别把监控整个哑掉
         # ③ 升"要我接着跑吗"卡(人拍板,K5;续跑=从头重跑)。带来源标便于区分开机兜底 vs 持续监控。
         #    docs/94 刀1:重试卡=场景主动卡(源A)→ 过统一唤醒门(日预算+同任务指纹永不重复)。
         #    门拦下也无妨:①② 的诚实标注/blocked 推送已让中断可见,卡只是"要不要重跑"的建议。

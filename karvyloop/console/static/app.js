@@ -1156,6 +1156,7 @@
   function _isDirectOut(payload) {
     if (payload.high_risk) return true;                                   // 安全不收纳(同刀1哲学)
     if (payload.payload && payload.payload.user_initiated) return true;   // 用户主动触发的卡
+    if (String(payload.kind || "") === "scene_ready") return true;        // docs/94 刀2 C3:「已备好」卡高时效(带 expiry,过期即撤卡弃产物)——收进抽屉=白烧的预执行悄悄过期,直出
     return false;
   }
   function _cardZone(list, proposalId) {

@@ -111,6 +111,15 @@ KIND_SPEND_BUDGET_ALERT = "spend_budget_alert"
 # ACCEPT ≠ 直接建定时任务:cron 需要用户定"多久一次/几点",接受只把这条 intent 带到定时设置
 # 让用户补节奏(前端预填聊天/开面板),**绝不替用户假设 cron**;handler 只回诚实回执(无副作用)。
 KIND_SCHEDULE_SUGGEST = "schedule_suggest"
+# docs/94 刀2「预测定向预执行」:场景信号(schedule_due/task_failed)过刀1 唤醒门 + relevance
+# 判断后,系统**趁空闲把活先干了**(隔离 staging,绝不写知识库/记忆/技能)→ 完成且过验证才出
+# 这张「已备好」卡:干了什么+产物一句摘要+查看入口。**不进** HIGH_RISK_KINDS(它是"已备好的
+# 建议"不是安全拦截),但进 taste_eval.SKIP_KINDS —— 产物落地(发进会话/重跑)= 系统产出穿进
+# 你的工作面,**永不被"挣来的静音"自动兑现**(同 schedule_suggest 先例)。ACCEPT 按 payload.action
+# 落地(deliver=产物发进会话+文件移入工作区 / rerun=沿用既有 run_task handler 语义);
+# REJECT/过期 = staging 丢弃 + scene_kind 负反馈(payload 带标,拍板咽喉回钩 7 天冷却)。
+# 它占刀1 场景卡**同一份日预算**(emit_gated 记账:预执行成功才出卡才扣;失败/放弃不扣不出)。
+KIND_SCENE_READY = "scene_ready"
 
 ALL_KINDS = (
     KIND_CRYSTALLIZE_SKILL,
@@ -134,6 +143,7 @@ ALL_KINDS = (
     KIND_ROUNDTABLE_CONCLUSION,
     KIND_SPEND_BUDGET_ALERT,
     KIND_SCHEDULE_SUGGEST,
+    KIND_SCENE_READY,
 )
 
 # Handler 协议:(proposal) -> (ok: bool, detail: str)。注入式,默认无副作用。
@@ -1167,6 +1177,78 @@ def proposal_for_schedule_suggest(
     )
 
 
+def proposal_for_scene_ready(
+    *,
+    scene_kind: str,
+    action: str,
+    what: str,
+    gist: str,
+    staging_id: str,
+    intent: str,
+    ts: float,
+    domain_id: str = "l0",
+    role: str = "",
+    schedule_id: str = "",
+    expiry_ts: float = 0.0,
+    task_id: str = "",
+    scene_basis: str = "",
+    strength: float = 0.6,
+):
+    """docs/94 刀2:预执行完成且过验证 → 「已备好」卡(唤醒后不说"你可能想做 X",而是
+    "X 我已趁空干好了 —— 查收?")。
+
+    - **天然带 user 场景依据**:basis = 场景人话(scene_basis,沿用刀1 信号的 basis)+
+      干了什么 + 产物一句摘要(gist)+ ACCEPT/REJECT 会发生什么(按 action 口径诚实)。
+    - `action` ∈ {"deliver", "rerun"}:deliver=调研/草稿类(产物发进会话+文件移入工作区);
+      rerun=重跑类(带着备好的诊断/修法沿既有 run_task handler 语义重跑一次)。
+    - `context_ref` 指向预执行的任务卡(kind="scene_preexec")= 查看入口(下钻看它干活的过程)。
+    - payload 带 scene_kind(REJECT 负反馈回钩)+ staging_id(产物指针)+ expiry_ts(错时撤卡)。
+    - 幂等:proposal_id 按 staging_id 稳定派生(一次预执行至多一张卡)。
+    """
+    from karvyloop import i18n
+    from .atoms import Proposal
+    act = "rerun" if (action or "").strip() == "rerun" else "deliver"
+    w = (what or "").strip()
+    if len(w) > 40:
+        w = w[:40] + "…"
+    g = (gist or "").strip().replace("\n", " ")
+    if len(g) > 120:
+        g = g[:120] + "…"
+    sb = (scene_basis or "").strip()
+    if len(sb) > 200:
+        sb = sb[:200] + "…"
+    parts: List[str] = []
+    if sb:
+        parts.append(sb)
+    parts.append(i18n.t("proposal.scene_ready.basis_done", gist=g))
+    parts.append(i18n.t(f"proposal.scene_ready.basis_{act}"))
+    digest = hashlib.sha1(str(staging_id or w).encode("utf-8")).hexdigest()[:8]
+    return Proposal(
+        summary=i18n.t("proposal.scene_ready.summary", what=w),
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_SCENE_READY,
+        payload={
+            "scene_kind": scene_kind or "",
+            "action": act,
+            "staging_id": str(staging_id or ""),
+            "intent": (intent or "").strip(),
+            "domain_id": domain_id or "l0",
+            "role": role or "",
+            "schedule_id": schedule_id or "",
+            "expiry_ts": float(expiry_ts or 0.0),
+            "product_gist": g,
+        },
+        proposal_id=f"{KIND_SCENE_READY}-0-{digest}",
+        basis="  ".join(parts),
+        context_ref=({"kind": "task", "id": task_id} if task_id else {}),
+    )
+
+
 __all__ = [
     "PendingProposalRegistry",
     "AGING_THRESHOLD_S",
@@ -1198,6 +1280,8 @@ __all__ = [
     "proposal_for_roundtable_conclusion",
     "proposal_for_schedule_suggest",
     "KIND_SCHEDULE_SUGGEST",
+    "proposal_for_scene_ready",
+    "KIND_SCENE_READY",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",
