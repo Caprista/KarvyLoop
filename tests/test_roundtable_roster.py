@@ -114,12 +114,23 @@ def test_roster_no_citizen_registry_degrades(setup):
     assert not any(m.get("is_external") for m in body["members"])
 
 
-# ---- AC3: 私聊非群场 → ok:False ----
-def test_roster_rejected_in_private(setup):
+# ---- AC3(docs/91 候选池·@可发现性改判):小卡私聊场也返回名册(私聊 @ 下拉用,与
+# mention_fastlane 同源);**业务域私聊(单角色场)照旧 ok:False**。私聊场细则在
+# test_private_mention_discovery.py。----
+def test_roster_rejected_in_business_private(setup):
+    app, mgr, reg, d1, d2 = setup
+    # 业务域私聊 = 单角色场(对面就一个角色,@ 没意义,快通道也不跑)→ 照旧拒绝
+    mgr.set_peer(Address(domain_id=d1.id, role="agent", agent_id="设计师"))
+    body = TestClient(app).get("/api/roundtable/roster").json()
+    assert body["ok"] is False and body["members"] == []
+
+
+def test_roster_returned_in_karvy_private(setup):
     app, mgr, reg, d1, d2 = setup
     mgr.set_peer(karvy_world_peer())   # 私聊小卡(observer,非 group)
     body = TestClient(app).get("/api/roundtable/roster").json()
-    assert body["ok"] is False and body["members"] == []
+    assert body["ok"] is True          # docs/91:私聊 @ 下拉的名册(与快通道同源)
+    assert sorted(m["agent_id"] for m in body["members"]) == ["会计", "设计师"]
 
 
 # ---- AC4: _roundtable_roster 纯函数跨域聚合 ----

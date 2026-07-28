@@ -706,6 +706,8 @@
         "chat.you": "You",
         "chat.karvy": "Karvy",
         "group.no_mention_nudge": "In a group, @ the role you want to talk to — otherwise I don't know who your message is for. (@ one to reply here, @ two or more to start a workflow.)",
+        // docs/91 候选池·@可发现性:私聊 @ 下拉顶部时机教学行(教在使用时刻,不加说明页)
+        "mention.private_hint": "@ someone and a delegation order gets prepped for them — work starts only after you sign off.",
         "mgmt.memory_title": "📚 Personal Knowledge Base",
         "mem.feed_label": "Feed material",
         "mem.feed_hint": "Paste anything about you — Karvy compiles it into facts/preferences it'll remember. (It also learns from your conversations automatically.)",
@@ -2255,6 +2257,8 @@
         "chat.you": "你",
         "chat.karvy": "小卡",
         "group.no_mention_nudge": "群里请 @ 你想找的角色哦~ 不然我不知道该发给谁。(@ 一个人就在群里回你,@ 两个及以上会进入工作流。)",
+        // docs/91 候选池·@可发现性:私聊 @ 下拉顶部时机教学行(教在使用时刻,不加说明页)
+        "mention.private_hint": "@ 谁,就给谁备好委派单(你拍板后才开工)",
         "mgmt.memory_title": "📚 个人知识库",
         "mem.feed_label": "喂材料",
         "mem.feed_hint": "粘贴任何关于你的材料 —— 小卡会编译成它记得住的事实/偏好。(它也会从你的对话里自动学。)",

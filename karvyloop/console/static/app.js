@@ -2988,15 +2988,27 @@
   // ============ ch4 #1:群里 @ 角色(微信式选择器,contenteditable 行内高亮)============
   // 群场里输 @ → 弹角色列表、可筛、↑↓/点选 → 插入**行内高亮 @花名 chip**(不可编辑、整体删,
   // 可多个);发送时从 DOM 读出被 @ 的 agent_id。后端:带 mention → 那个角色照自己人格/域回话。
+  // docs/91 候选池·@可发现性:**小卡私聊场也弹同一套下拉**(私聊 @ 快通道早就认「@+agent_id」
+  // 文本,只是没人知道能 @)——但私聊选中插的是**纯文本「@agent_id + 空格」**(快通道对原始文本
+  // 精确匹配,不读 mention 参数,chip 在私聊是死路);下拉项带所属域名 → 跨域同名当场看得见。
 
-  let _groupRoster = [];       // 当前群场可 @ 的角色 [{agent_id, display, domain_name, role}]
+  let _groupRoster = [];       // 当前场可 @ 的角色 [{agent_id, display, domain_name, role}](群/小卡私聊同一后端名册端点)
   let _mentionMatches = [];    // 当前下拉候选
   let _mentionActive = -1;     // 键盘高亮项
   let _mentionRange = null;    // @词在 contenteditable 里的位置(选中后替换)
 
+  // docs/91:小卡私聊场判定(与 l0 私聊线判定同款:l0 + 非群 + 非直聊角色)。
+  // 没切过场(null)= 默认就落在小卡私聊(_setChatTitle 同约定;服务端 start 也默认 karvy world
+  // 私聊)—— 不算上它,刚打开页面的默认状态反而弹不出 @,可发现性白做。
+  // 业务域私聊(单角色场)不弹 —— 后端 roster 对那些场也 ok:False,双保险。
+  function _isKarvyPrivatePeer(p) {
+    if (!p) return true;
+    return !!(p.domain_id === "l0" && !p.is_group && !(p.role === "agent" && p.agent_id));
+  }
+
   async function _loadGroupRoster(peer) {
     _groupRoster = [];
-    if (!peer || !peer.is_group) return;
+    if (!(peer && peer.is_group) && !_isKarvyPrivatePeer(peer)) return;
     const data = await _getJSON("/api/roundtable/roster");
     if (data && data.ok) _groupRoster = data.members || [];
   }
@@ -3027,9 +3039,11 @@
   }
 
   // 输入时(contenteditable):光标前末尾出现 @词(无空格)→ 弹筛选后的角色
+  // docs/91:群场 + 小卡私聊场都弹(私聊名册与后端 @ 快通道同源,选出的名字必然命中)。
   function _onChatInputMention() {
     _ceUpdateEmpty();
-    if (!_currentPeer || !_currentPeer.is_group || !_groupRoster.length) { _hideMentionPop(); return; }
+    const _scopeOk = (_currentPeer && _currentPeer.is_group) || _isKarvyPrivatePeer(_currentPeer);
+    if (!_scopeOk || !_groupRoster.length) { _hideMentionPop(); return; }
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) { _hideMentionPop(); return; }
     const range = sel.getRangeAt(0);
@@ -3051,12 +3065,18 @@
     pop.innerHTML = "";
     if (!_mentionMatches.length) { pop.classList.add("hidden"); return; }
     if (_mentionActive < 0 || _mentionActive >= _mentionMatches.length) _mentionActive = 0;
+    const priv = _isKarvyPrivatePeer(_currentPeer);
+    // docs/91 时机教学:私聊下拉顶部一行浅色提示 —— 把快通道的行为(@=备好委派单,你拍板才开工)
+    // 教在使用时刻,不加说明页。纯提示行,不参与 ↑↓/点选。
+    if (priv) pop.appendChild(el("div", { class: "mention-hint", text: t("mention.private_hint") }));
     let _activeRow = null;
     _mentionMatches.forEach((m, i) => {
       const row = el("div", { class: "mention-item" + (i === _mentionActive ? " active" : ""),
         onMousedown: (ev) => { ev.preventDefault(); _selectMention(m); } });
       row.appendChild(el("span", { class: "mention-at", text: "@" }));
-      row.appendChild(el("span", { class: "mention-disp", text: m.display }));
+      // docs/91:私聊主显 agent_id(快通道对它精确匹配 = 所见即所插);群场照旧显花名。
+      row.appendChild(el("span", { class: "mention-disp", text: priv ? (m.agent_id || m.display) : m.display }));
+      // 所属域名(跨域同名可分辨 —— 正好补快通道"同名取第一"的消歧盲区:从下拉选就看得见域)
       if (m.domain_name) row.appendChild(el("span", { class: "mention-dom", text: m.domain_name }));
       if (i === _mentionActive) _activeRow = row;
       pop.appendChild(row);
@@ -3068,6 +3088,8 @@
   }
 
   // 选中 → 把 @词替换成行内高亮 chip(contenteditable=false → 整体删)+ 尾随 nbsp
+  // docs/91:小卡私聊场例外 —— 插**纯文本「@agent_id + 空格」**(后端快通道 mention_fastlane
+  // 对原始文本做 "@"+agent_id 精确匹配、不读 mention 参数;chip 文本是花名,在私聊命不中)。
   function _selectMention(m) {
     const ce = _ceInput();
     const r = _mentionRange;
@@ -3076,6 +3098,18 @@
     const full = node.textContent || "";
     const before = full.slice(0, r.atOffset);
     const after = full.slice(r.caretOffset);
+    if (_isKarvyPrivatePeer(_currentPeer)) {
+      const insert = "@" + (m.agent_id || m.display) + " ";   // nbsp:发送时 _readChatInput 归一成空格
+      node.textContent = before + insert + after;
+      const selP = window.getSelection();
+      const rangeP = document.createRange();
+      rangeP.setStart(node, (before + insert).length); rangeP.collapse(true);
+      selP.removeAllRanges(); selP.addRange(rangeP);
+      _hideMentionPop();
+      _ceUpdateEmpty();
+      ce.focus();
+      return;
+    }
     const chip = document.createElement("span");
     chip.className = "mention-tag";
     chip.setAttribute("contenteditable", "false");
@@ -5044,6 +5078,9 @@
     _wireSkillLifelineEntries();   // 技能库每张技能卡挂「🧬 生命线」入口(观察面板渲染补挂)
     refreshPeers();
     refreshConversations();
+    // docs/91 候选池·@可发现性:默认落地 = 小卡私聊(还没切过场,_currentPeer=null,服务端
+    // current_peer 也默认 karvy world 私聊)→ 开机就预拉名册,首屏敲 @ 即弹下拉。
+    _loadGroupRoster(_currentPeer);
     // 立即拉 1 次
     pollSnapshot();
     pollStats();

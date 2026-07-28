@@ -1179,6 +1179,11 @@ html, body {
 .mention-at { color: var(--accent-strong); font-weight: 700; }
 .mention-disp { font-size: 13px; color: var(--text); font-weight: 600; }
 .mention-dom { font-size: 11px; color: var(--text-dim); margin-left: auto; }
+/* docs/91 候选池·@可发现性:私聊 @ 下拉顶部的浅色时机教学行(纯提示,不参与选择) */
+.mention-hint {
+  padding: 5px 9px 6px; font-size: 11px; color: var(--text-dim);
+  border-bottom: 1px solid var(--border); margin-bottom: 3px; cursor: default;
+}
 
 /* ch4 #1:contenteditable 输入框(像 input)+ 行内高亮 @花名 chip */
 .chat-input-ce {

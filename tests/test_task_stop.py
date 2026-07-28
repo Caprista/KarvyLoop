@@ -303,10 +303,12 @@ def test_frontend_stop_button_on_every_running_card():
 
 
 def test_producer_sites_all_tag_kind():
-    """7 个 task_reg.start 产生点全部带显式 kind(锁死回归:新产生点漏标会被 grep 出来)。"""
+    """8 个 task_reg.start 产生点全部带显式 kind(锁死回归:新产生点漏标会被 grep 出来)。
+    docs/90 刀3a 收口:WS 直聊 drive(ws.py)补齐后也是产生点。"""
     console = ROOT / "karvyloop" / "console"
     expectations = {
         "routes.py": ['kind="drive"', 'kind="workflow"'],
+        "ws.py": ['kind="drive"'],
         "roundtable_engine.py": ['kind="roundtable"'],
         "pursuit_tick.py": ['kind="pursuit"'],
         "routes_schedules.py": ['kind="schedule"'],
@@ -316,3 +318,203 @@ def test_producer_sites_all_tag_kind():
         src = (console / fname).read_text(encoding="utf-8")
         for k in kinds:
             assert k in src, f"{fname} 缺 {k}"
+
+
+# ================= ⑤ docs/90 刀3a 收口:WS 直聊 drive 补任务记录 =================
+# 此前 WS _handle_intent_ws(桌面/移动 UI 的主路径,sendWS("intent") 优先)不建 TaskRecord →
+# 看板无卡、⏹ 停止够不到、abort_scope 没挂。这里钉死:真 drive 建卡+包旗+finish;
+# 早返回分支(无执行体)不建卡;drive_done 带 task_id;cancel 端点旗真拉响。
+
+
+class _WsFakeRoleView:
+    """duck-type 角色(同 test_direct_role_chat;无 COMPOSITION.yaml → 轻量人格回退)。"""
+
+    def __init__(self, role_id: str, nickname: str = "", title: str = "") -> None:
+        self.id = role_id
+        self.identity = f"{role_id} 的身份"
+        self.atom_ids: list = []
+        self.skill_ids: list = []
+        self.model = ""
+        self.nickname = nickname
+        self.title = title
+        self.path = Path("/nonexistent")
+
+    def display_name(self) -> str:
+        name = self.nickname or self.id
+        return f"{name}({self.title})" if self.title else name
+
+
+class _WsFakeRoleReg:
+    def __init__(self, roles: list) -> None:
+        self._roles = {r.id: r for r in roles}
+
+    def get(self, role_id: str):
+        return self._roles.get(role_id)
+
+    def list_all(self):
+        return list(self._roles.values())
+
+
+def _ws_drive_app(tmp_path, *, peer=None):
+    """WS 真 drive 的最小 app:l0 直聊角色(不路由/不共创,确定性直落 drive 分支)。"""
+    from karvyloop.cognition.conversation import ConversationManager, ConversationStore
+    from karvyloop.console import build_console_app
+    from karvyloop.domain.registry import Address, BusinessDomainRegistry
+    from karvyloop.karvy.observer import WorkbenchObserver
+    reg = BusinessDomainRegistry()
+    mgr = ConversationManager(ConversationStore(tmp_path / "conv"), domain_registry=reg)
+    mgr.start()
+    a = build_console_app(workbench=WorkbenchObserver(), main_loop=object())
+    a.state.conversation_manager = mgr
+    a.state.domain_registry = reg
+    a.state.task_registry = TaskRegistry()
+    a.state.config_path = str(tmp_path / "config.yaml")
+    a.state.runtime_kwargs = {"gateway": object(), "model_ref": "x", "workspace_root": "/"}
+    a.state.role_registry = _WsFakeRoleReg([_WsFakeRoleView("文案", nickname="小文", title="文案")])
+    mgr.set_peer(peer or Address(domain_id="l0", role="agent", agent_id="文案"))
+    return a, mgr
+
+
+def _outcome(intent: str, *, text: str = "", error: str = "", trace: str = "trace-77"):
+    from karvyloop.runtime.main_loop import Brain
+    from karvyloop.workbench.main_loop_bridge import DriveOutcome
+    return DriveOutcome(intent=intent, brain=Brain.SLOW, text=text, skill_name="",
+                        fast_brain_hit=False, crystallized=False, error=error, task_id=trace)
+
+
+def _ws_intent(client, intent: str) -> dict:
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()   # 首次 snapshot
+        ws.send_json({"type": "intent", "payload": {"intent": intent}})
+        for _ in range(20):   # 中间可能插 ambient_recall 等广播
+            msg = ws.receive_json()
+            if msg["type"] == "drive_done":
+                return msg["payload"]
+    raise AssertionError("没等到 drive_done")
+
+
+def test_ws_intent_drive_creates_task_record_and_finishes(tmp_path, monkeypatch):
+    """WS intent 真 drive:进行中就有 running 卡(kind=drive/who/intent 对)+ abort_scope 真挂;
+    完成后 finish(done+结果)+ 挂对话/trace_id(点卡跳转键)+ drive_done 带 task_id。"""
+    import karvyloop.console.ws as ws_mod
+    a, mgr = _ws_drive_app(tmp_path)
+    seen = {}
+
+    async def fake_drive(intent, ml, **kw):
+        running = [t for t in a.state.task_registry.list() if t["status"] == "running"]
+        seen["running"] = running
+        seen["flag"] = current_abort_flag()
+        seen["registered"] = bool(running) and running_runs.is_running(running[0]["id"])
+        return _outcome(intent, text="做完了")
+
+    monkeypatch.setattr(ws_mod, "drive_in_tui", fake_drive)
+    payload = _ws_intent(TestClient(a), "帮我写段文案")
+
+    # ④ drive_done 带 task_id(= drive trace id,与 turn.task_id 同一 id 空间)
+    assert payload.get("task_id") == "trace-77"
+    # ① drive 进行中已有 running 卡,字段对
+    assert len(seen["running"]) == 1, "WS drive 进行中看板必须已有 running 卡"
+    rec = seen["running"][0]
+    assert rec["kind"] == "drive" and rec["intent"] == "帮我写段文案"
+    assert rec["who"] == "小文(文案)"       # 当轮 speaker 显示名(直聊角色=角色花名)
+    # abort_scope 真包住 drive(contextvar 可见 + 注册表在册 → ⏹ 有处发力)
+    assert seen["flag"] is not None and seen["registered"] is True
+    # 完成后 finish + 对话回链(照 REST:conversation_id + trace_id 两样都补)
+    d = a.state.task_registry.get(rec["id"])
+    assert d["status"] == "done" and d["result"] == "做完了"
+    assert d["conversation_id"] == mgr.current().id
+    assert d["trace_id"] == "trace-77"
+    # run 完注册表清干净(不留死旗)
+    assert not running_runs.is_running(rec["id"])
+
+
+def test_ws_intent_drive_error_outcome_finishes_error(tmp_path, monkeypatch):
+    """outcome.error → 卡落 error 终态(error 传法照 REST:finish(result, error) 双传)。"""
+    import karvyloop.console.ws as ws_mod
+    a, _ = _ws_drive_app(tmp_path)
+
+    async def fake_drive(intent, ml, **kw):
+        return _outcome(intent, text="", error="模型炸了")
+
+    monkeypatch.setattr(ws_mod, "drive_in_tui", fake_drive)
+    payload = _ws_intent(TestClient(a), "会失败的活")
+    assert payload["error"] == "模型炸了"
+    recs = a.state.task_registry.list()
+    assert len(recs) == 1 and recs[0]["status"] == "error"
+    assert "模型炸了" in recs[0]["result"]
+
+
+def test_ws_intent_drive_exception_finishes_error(tmp_path, monkeypatch):
+    """drive 抛异常 → 卡也落 error 终态(不留永远 running 的僵尸卡)。"""
+    import karvyloop.console.ws as ws_mod
+    a, _ = _ws_drive_app(tmp_path)
+
+    async def fake_drive(intent, ml, **kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ws_mod, "drive_in_tui", fake_drive)
+    payload = _ws_intent(TestClient(a), "会炸的活")
+    assert "boom" in payload["error"]
+    recs = a.state.task_registry.list()
+    assert len(recs) == 1 and recs[0]["status"] == "error"
+    assert "boom" in recs[0]["result"]
+    assert not running_runs.is_running(recs[0]["id"])   # 异常路径注册表也清
+
+
+def test_ws_drive_cancellable_via_task_cancel_endpoint(tmp_path, monkeypatch):
+    """② WS drive 进行中打 /api/task/cancel → executor 侧的旗**真拉响**(此前 WS 路径没接
+    abort_scope,这一停永远够不到)。桩 drive 中途打真端点(同上文桩活 run 手法)。"""
+    import asyncio
+
+    import karvyloop.console.ws as ws_mod
+    a, _ = _ws_drive_app(tmp_path)
+    seen = {}
+
+    async def fake_drive(intent, ml, **kw):
+        tid = next(t["id"] for t in a.state.task_registry.list() if t["status"] == "running")
+        # drive 进行中,从"另一个客户端"打真 cancel 端点(to_thread 防塞死本事件循环)
+        resp = await asyncio.to_thread(
+            lambda: TestClient(a).post("/api/task/cancel", json={"task_id": tid}))
+        seen["cancel"] = resp.json()
+        flag = current_abort_flag()
+        seen["flag_set"] = flag is not None and flag.is_set()
+        return _outcome(intent, text="(中途被叫停)")
+
+    monkeypatch.setattr(ws_mod, "drive_in_tui", fake_drive)
+    _ws_intent(TestClient(a), "跑长活")
+    assert seen["cancel"]["ok"] is True
+    assert seen["cancel"]["abort_signalled"] is True, "cancel 端点必须找到 WS drive 的活 run"
+    assert seen["flag_set"] is True, "executor 侧 contextvar 旗必须真拉响(协作式停的前提)"
+
+
+def test_ws_early_return_no_mention_nudge_builds_no_card(tmp_path, monkeypatch):
+    """③ 早返回分支不建卡:群里 @0(no_mention_nudge)没有执行体在跑,建卡=看板垃圾。"""
+    from karvyloop.domain.registry import Address
+
+    import karvyloop.console.ws as ws_mod
+    a, _ = _ws_drive_app(tmp_path, peer=Address(domain_id="l0", role="group", agent_id=""))
+
+    async def fake_drive(intent, ml, **kw):   # 不该被调到;调到也别误判成"没建卡"
+        raise AssertionError("nudge 分支不该 drive")
+
+    monkeypatch.setattr(ws_mod, "drive_in_tui", fake_drive)
+    payload = _ws_intent(TestClient(a), "大家好啊")
+    assert payload.get("no_mention_nudge") is True
+    assert a.state.task_registry.list() == [], "早返回分支(无执行体)绝不建 TaskRecord"
+
+
+def test_ws_schedule_suggest_called_exactly_once(tmp_path, monkeypatch):
+    """刀3c 回归:补建卡后 schedule_suggest_after_drive 仍只调一次(不因 finish/记账多触发)。"""
+    import karvyloop.console.schedule_suggest as sched_mod
+    import karvyloop.console.ws as ws_mod
+    a, _ = _ws_drive_app(tmp_path)
+    calls = []
+    monkeypatch.setattr(sched_mod, "schedule_suggest_after_drive",
+                        lambda app, intent, error="": calls.append((intent, error)))
+
+    async def fake_drive(intent, ml, **kw):
+        return _outcome(intent, text="好了")
+
+    monkeypatch.setattr(ws_mod, "drive_in_tui", fake_drive)
+    _ws_intent(TestClient(a), "记一下这个活")
+    assert calls == [("记一下这个活", "")], f"schedule_suggest_after_drive 应恰好调一次,实际 {calls}"

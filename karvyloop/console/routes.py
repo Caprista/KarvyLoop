@@ -1624,17 +1624,43 @@ from .routes_lines import (  # noqa: E402
 )
 
 
+def _is_karvy_private_mention_peer(peer) -> bool:
+    """docs/91 候选池·@可发现性:当前场是不是**小卡私聊场**(@ 快通道会跑的那个场)。
+
+    与 maybe_route_to_role 里 fastlane 的门同判据:l0(karvy world)+ 非群 + 非 l0 直聊角色
+    + 非知识线。业务域私聊(单角色场)domain_id≠l0 天然不进 —— @ 在那没意义(对面就一个角色),
+    快通道也不跑。
+    """
+    from karvyloop.cognition.knowledge_chat import is_knowledge_peer
+    from karvyloop.karvy.capability import is_direct_role_peer, is_karvy_peer
+    if peer is None or getattr(peer, "role", "") == "group":
+        return False
+    return (is_karvy_peer(getattr(peer, "domain_id", ""))
+            and not is_direct_role_peer(peer)
+            and not is_knowledge_peer(peer))
+
+
 @router.get("/roundtable/roster")
 def api_roundtable_roster(request: Request) -> dict[str, Any]:
-    """圆桌可选参与者名册(随当前群场:大群=跨域全员,域群=本域)。前端勾选谁上桌。"""
+    """圆桌可选参与者名册(随当前群场:大群=跨域全员,域群=本域)。前端勾选谁上桌。
+
+    docs/91 候选池·@可发现性:**小卡私聊场(l0)也返回名册** —— 私聊 @ 快通道(mention_fastlane)
+    一直认「@+精确 agent_id」,但用户得手打全名才触发;前端要在私聊也弹 @ 下拉,名册必须与
+    快通道**同一来源**(_roundtable_roster),下拉选出的名字才必然命中。私聊场**不**并入外部
+    公民名册(快通道不认外部公民,列了=下拉选了快通道不接)。业务域私聊(单角色场)/l0 直聊
+    角色/知识线照旧 ok:False(@ 在那些场没意义,快通道也不跑)。
+    """
     app = request.app
     mgr = getattr(app.state, "conversation_manager", None)
     dom_reg = getattr(app.state, "domain_registry", None)
     peer = mgr.current_peer() if mgr is not None else None
-    if peer is None or getattr(peer, "role", "") != "group":
+    is_group = peer is not None and getattr(peer, "role", "") == "group"
+    if not is_group and not _is_karvy_private_mention_peer(peer):
         return {"ok": False, "reason": "圆桌在群场里开(先切到大群或某个域群)", "members": []}
     members = []
     for a in _roundtable_roster(app, peer):
+        if not is_group and not (a.agent_id or ""):
+            continue   # docs/91:快通道只认「@+agent_id」,无 agent_id 的成员列了也命不中 → 私聊不列
         dom = dom_reg.get(a.domain_id) if dom_reg is not None else None
         members.append({
             "agent_id": a.agent_id, "role": a.role, "domain_id": a.domain_id,
@@ -1642,7 +1668,9 @@ def api_roundtable_roster(request: Request) -> dict[str, Any]:
             "display": _member_display(app, a),
         })
     # 圆桌客人席入口:能进这个场的外部公民也列进名册(逻辑在 roundtable_engine,routes 只调用)。
-    members.extend(_roundtable_external_roster(app, peer))
+    # 仅群场:私聊 @ 快通道的名册没有外部公民(同源纪律,见 docstring)。
+    if is_group:
+        members.extend(_roundtable_external_roster(app, peer))
     return {"ok": True, "members": members}
 
 

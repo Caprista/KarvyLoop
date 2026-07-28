@@ -339,7 +339,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         pass
 
     # ch4 #1:群里 @ 角色 → 定向给它;@ 命中跳过路由 PROPOSE(你已点名)。
-    from .routes import _resolve_mention, _persona_for_current_peer, scope_for_peer
+    from .routes import _resolve_mention, _persona_for_current_peer, scope_for_peer, speaker_display
     ws_root = runtime_kwargs.get("workspace_root", "/")
     mention = (payload.get("mention") or "").strip()
     mention_domain = (payload.get("mention_domain") or "").strip()
@@ -386,6 +386,25 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
             governance.endswith(_domain_gov):
         governance = governance[: -len(_domain_gov)].strip()
 
+    # docs/90 刀3a 收口:WS 直聊 drive(桌面/移动 UI 的**主路径**:sendWS("intent") 优先,REST 只是
+    # fallback)也登任务记录 —— 此前只有 REST api_intent 建卡,这条路没有 TaskRecord →
+    # 看板无卡、⏹ 停止按钮够不到、abort_scope 没挂(停止控件唯一没盖住的主路径)。
+    # 语义照抄 REST 模板(routes.api_intent):start(kind="drive") → abort_scope+token_task 包
+    # drive → finish(result/error,error 咽喉人话化在 tasks.finish 内)。
+    # 边界(建卡=有执行体在跑):上面的早返回分支 —— 共创轮(状态机应答)/ 无 main_loop 桩 /
+    # 群 no_mention_nudge(一句提示)/ 路由提案·@快通道(PROPOSE 卡,执行在 ACCEPT 兑现点自建卡)
+    # —— **不建卡**:它们没有执行体在跑,建卡=看板垃圾。真跑 drive 的只有下面这条。
+    task_reg = getattr(app.state, "task_registry", None)   # 未接(--no-llm/测试桩)→ None,照常跑
+    task_id = None
+    if task_reg is not None:
+        _peer = mgr.current_peer() if mgr is not None else None
+        _did = (_peer.domain_id if _peer is not None else "l0") or "l0"
+        _role = (getattr(_peer, "role", "") or "") if _peer is not None else ""
+        # @ 命中/l0 直聊角色 → 是那个角色在忙(speaker_display 返角色名,私聊小卡/群返 "")
+        _who = m_speaker or speaker_display(app, mgr) or ("小卡" if _did == "l0" else (_role or "角色"))
+        task_id = task_reg.start(who=_who, domain_id=_did, role=_role, intent=intent,
+                                 kind="drive")   # 显式任务类型(⏹ 停止按钮按它路由 cancel 端点)
+
     # P4 逐字流式:drive 在 worker 线程跑,每个 render 事件经 run_coroutine_threadsafe 桥回本 loop
     # 推 `drive_event`(loop 不被 to_thread 阻塞,可即时广播)→ 前端逐字追加。失败不拖垮 drive。
     _loop = asyncio.get_running_loop()
@@ -404,24 +423,33 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
 
     try:
         from .routes import _normalize_images, self_create_role_id
-        outcome = await drive_in_tui(intent, main_loop, ctx=ctx, governance=governance,
-                                     persona=persona, scope=eff_scope, on_event=_on_event,
-                                     images=_normalize_images(payload.get("images")),
-                                     # §15.5:直接聊天也挂 create_atom(角色标配,Hardy)+ 归属当前角色
-                                     atom_registry=getattr(app.state, "atom_registry", None),
-                                     role_registry=getattr(app.state, "role_registry", None),
-                                     self_create_role=self_create_role_id(mgr),
-                                     # 小卡自我认知落地:建 agent 意图 → 挂 instantiate_domain_template
-                                     domain_registry=getattr(app.state, "domain_registry", None),
-                                     domain_store=getattr(app.state, "domain_store", None),
-                                     # 跨 runtime 协作(docs/71 M1):小卡人格 + 接了 citizen_registry →
-                                     # 挂 external_agent/attach/list/revoke(WS 聊天里也能接入/派活外部 runtime)。
-                                     # drive_in_tui 内再门一道(persona.karvy_self);业务角色不挂(0 回归)。
-                                     citizen_registry=getattr(app.state, "citizen_registry", None),
-                                     external_bridge_factory=getattr(app.state, "external_bridge_factory", None),
-                                     external_token_recorder=getattr(app.state, "external_token_recorder", None),
-                                     **runtime_kwargs)
+        # docs/90 刀3a 收口:与 REST api_intent 同一包法 —— abort_scope 把 task_id 登进
+        # running-run 注册表(/api/task/cancel 拉旗 → executor 下一轮循环边界协作式停),
+        # token_task 做 per-task token 归因(#42)。task_id 空(registry 未接)→ 两者都 no-op。
+        from karvyloop.atoms.abort import abort_scope as _abort_scope
+        from karvyloop.llm.token_ledger import token_task as _token_task
+        with _abort_scope(task_id or ""), _token_task(task_id or ""):
+            outcome = await drive_in_tui(intent, main_loop, ctx=ctx, governance=governance,
+                                         persona=persona, scope=eff_scope, on_event=_on_event,
+                                         images=_normalize_images(payload.get("images")),
+                                         # §15.5:直接聊天也挂 create_atom(角色标配,Hardy)+ 归属当前角色
+                                         atom_registry=getattr(app.state, "atom_registry", None),
+                                         role_registry=getattr(app.state, "role_registry", None),
+                                         self_create_role=self_create_role_id(mgr),
+                                         # 小卡自我认知落地:建 agent 意图 → 挂 instantiate_domain_template
+                                         domain_registry=getattr(app.state, "domain_registry", None),
+                                         domain_store=getattr(app.state, "domain_store", None),
+                                         # 跨 runtime 协作(docs/71 M1):小卡人格 + 接了 citizen_registry →
+                                         # 挂 external_agent/attach/list/revoke(WS 聊天里也能接入/派活外部 runtime)。
+                                         # drive_in_tui 内再门一道(persona.karvy_self);业务角色不挂(0 回归)。
+                                         citizen_registry=getattr(app.state, "citizen_registry", None),
+                                         external_bridge_factory=getattr(app.state, "external_bridge_factory", None),
+                                         external_token_recorder=getattr(app.state, "external_token_recorder", None),
+                                         **runtime_kwargs)
     except Exception as e:
+        # docs/90 刀3a 收口:异常也落卡终态(与 REST 同语义;人话化在 tasks.finish 咽喉)
+        if task_reg is not None and task_id is not None:
+            task_reg.finish(task_id, error=str(e))
         await websocket.send_json({
             "type": "drive_done",
             "payload": {"intent": intent, "error": str(e), "brain": "SLOW", "text": "",
@@ -433,6 +461,11 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     # 这里对**权威终态文本**再整段剥一次(drive_done 清草稿后渲染 + 落历史的是它;只剥流式=半拉子)。
     if not outcome.error and outcome.text:
         outcome.text = _scrub_full_text(outcome.text)
+
+    # docs/90 刀3a 收口:任务终态落卡(照 REST:result/error 双传,人话化在 tasks.finish 内)。
+    # 放在权威文本 scrub 之后 → 看板卡/结果文档存的与聊天一致(净文本);共创递口等追加不入卡(同 REST)。
+    if task_reg is not None and task_id is not None:
+        task_reg.finish(task_id, result=(outcome.text or ""), error=(outcome.error or ""))
 
     # 共创递口(docs/47 §3.1):建 agent 意图命中(L0 关键词 / L1 LLM build 分类)→
     # 本轮回复末尾主动递"一起共创"的口,并挂 OFFERED 会话态(下一轮应答不再依赖关键词)。
@@ -455,7 +488,6 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         await raise_fs_access_cards(app)
     except Exception:
         pass
-    from .routes import speaker_display
     _turn_speaker = m_speaker or speaker_display(app, mgr)   # @ 命中=角色花名,否则当前场署名
     if workbench_app is not None and not outcome.error:
         try:
@@ -476,6 +508,15 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                 brain=outcome.brain.value, task_id=outcome.task_id,
                 data=({"attachments": _att} if _att else None),  # 多模态:落历史给人回看
             )
+            # docs/90 刀3a 收口(照 REST api_intent):任务卡挂上这条对话 + 回填 trace_id
+            # (= turn.task_id = drive trace id;≠ 本任务 registry id,两个 id 空间对不上
+            # 则「去聊天」只能切场不能定位到那一轮)。
+            if task_reg is not None and task_id is not None:
+                try:
+                    task_reg.set_conversation(task_id, mgr.current().id,
+                                              trace_id=outcome.task_id or "")
+                except Exception:
+                    pass
         except Exception:
             pass
         # loop step4b:轮后自动蒸馏(fire-and-forget,不阻塞 WS 响应)
@@ -500,6 +541,9 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     _payload = drive_outcome_to_dict(outcome)
     _payload["speaker"] = _turn_speaker   # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
     _payload["recall_used"] = _recall_used   # Q1 召回解释:垫了哪几条记忆(空=没垫)
+    # docs/90 刀3a 收口:带 drive trace id(与 turn.task_id 同源/同 REST outcome.task_id 语义)——
+    # 前端任务卡点击跳转按它定位那一轮(data-task-id 空间,既有机制),registry id 不混进来。
+    _payload["task_id"] = outcome.task_id or ""
     if _recall_as_of is not None:
         _payload["recall_as_of"] = _recall_as_of   # docs/69 Q4:按此时点召回(chip 标"按 X 时点的记忆")
     await websocket.send_json({"type": "drive_done", "payload": _payload})
