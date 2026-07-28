@@ -207,7 +207,11 @@ def make_task_change_sink(app: Any, trace: Any) -> Callable[[dict], None]:
                     payload={"registry_id": task.get("id"), "who": task.get("who", ""),
                              "intent": task.get("intent", ""), "status": task.get("status"),
                              "result": (task.get("result") or "")[:280],
-                             "domain": task.get("domain_id", ""), "role": task.get("role", "")},
+                             "domain": task.get("domain_id", ""), "role": task.get("role", ""),
+                             # docs/94 刀3 ①:登记 kind 落账(加性)—— 机器预执行任务
+                             # (kind="scene_preexec")的 task_run 事件由此可辨,慢侧洞察
+                             # 沉淀(is_machine_event 唯一判定)不吃机器留痕。
+                             "kind": task.get("kind", "") or ""},
                     agent=task.get("who", ""), source="task_registry"))
         except Exception as e:
             # fail-loud(闭环审计断⑤):落 Trace 失败绝不拖垮任务流(评是慢侧的事),

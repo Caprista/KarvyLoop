@@ -11,7 +11,29 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.7.29] — 2026-07-29
+
+The proactive release: "guess what you want" got rebuilt on evidence — cards now fire on
+what's happening right now (not habit statistics), and when Karvy is confident it does the
+prep work during idle time and shows up with "I already did it — want it?". Plus the
+decision-card chain/drawer/batch trio, private-chat @ hand-offs, hard tool bans, and a
+batch of beta-feedback fixes.
+
 ### Added
+- **Karvy now works ahead when it's confident — "I already did it, want it?"** When a scene
+  fires (say, a scheduled job due soon whose last run failed), instead of just suggesting,
+  Karvy uses idle time to actually do the prep — a test run, a failure diagnosis — inside an
+  isolated staging area (its own sandbox token: your workspace is read-only to it, and
+  nothing touches your knowledge base), then presents a "prepared while idle" card: accept
+  and the result lands in your chat and workspace; decline or let it expire and the product
+  is discarded without a trace. Hard limits: one pre-run at a time, only when you're idle,
+  turn- and token-budgeted, sharing the same 3-a-day card budget. Isolation, spend,
+  self-feeding and timing were independently adversarially verified (three real bugs found,
+  fixed, and re-verified green). Machine pre-runs are also excluded from every learning
+  pipeline (habit distillation and insight mining share one filter) — Karvy never mistakes
+  its own busywork for your behavior; declining once quiets that scene for a week, while
+  "later" keeps the card without penalty. All timing thresholds are config-overridable and
+  listed in one calibration table for tuning on real usage data.
 - **Proactive suggestions now fire on what's happening right now — capped at 3 a day.**
   The "you might want to…" quadrant switched hearts: instead of habit statistics guessing,
   cards come from the current scene — a task that just failed (retry card), a scheduled job

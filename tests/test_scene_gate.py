@@ -393,6 +393,40 @@ def test_scene_i18n_keys_present_and_parity():
     assert set(TABLES["en"]) == set(TABLES["zh"])   # 全表 parity(与既有门同口径)
 
 
+# ================================================================ docs/94 刀3 ④ 判据窗口可配
+def test_dao3_recent_failure_window_configurable(tmp_path):
+    """④:刚失败判据窗可经 app.state.scene_recent_failure_window_s 覆盖(默认 30min 不动)。"""
+    app = make_app(tmp_path)
+    _failed_task(app.state.task_registry, "导出季度报表", finished_ago=45 * 60)  # 45min 前失败
+    now = time.time()
+    kinds = [s.scene_kind for s in collect_scene_signals(app, now=now)]
+    assert SCENE_TASK_FAILED not in kinds            # 默认 30min 窗:窗外不触发
+    app.state.scene_recent_failure_window_s = 3600   # 覆盖成 1h → 触发
+    kinds2 = [s.scene_kind for s in collect_scene_signals(app, now=now)]
+    assert SCENE_TASK_FAILED in kinds2
+    app.state.scene_recent_failure_window_s = "bad"  # 坏值退默认(不炸)
+    kinds3 = [s.scene_kind for s in collect_scene_signals(app, now=now)]
+    assert SCENE_TASK_FAILED not in kinds3
+
+
+def test_dao3_schedule_due_window_configurable(tmp_path):
+    """④:日程将至判据窗可经 app.state.scene_schedule_due_window_s 覆盖(默认 15min 不动)。"""
+    app = make_app(tmp_path)
+    st = app.state.scheduler_store
+    t = st.add("0 * * * *", "拉取汇率数据", title="整点同步")   # 整点触发
+    st.mark_run(t.id, "error", error="上游 500")
+    lt = time.localtime()
+    now = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 12, 30, 0, 0, 0, -1))  # 今天 12:30
+    kinds = [s.scene_kind for s in collect_scene_signals(app, now=now)]
+    assert SCENE_SCHEDULE_DUE not in kinds           # 下一场 13:00,离 30min > 默认 15min 窗
+    app.state.scene_schedule_due_window_s = 3600     # 覆盖成 1h → 触发
+    kinds2 = [s.scene_kind for s in collect_scene_signals(app, now=now)]
+    assert SCENE_SCHEDULE_DUE in kinds2
+    app.state.scene_schedule_due_window_s = 0        # 非正数退默认
+    kinds3 = [s.scene_kind for s in collect_scene_signals(app, now=now)]
+    assert SCENE_SCHEDULE_DUE not in kinds3
+
+
 def test_gate_store_bad_file_is_empty_not_crash(tmp_path):
     p = tmp_path / "gate.json"
     p.write_text("{ not json", encoding="utf-8")

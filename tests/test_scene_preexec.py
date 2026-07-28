@@ -822,6 +822,206 @@ def test_b2_distill_filters_machine_source(tmp_path):
         idx.close()
 
 
+# ================================================================ docs/94 刀3 收尾
+# ①污染面残余:cognition Trace 执行事件带 source 标 + is_machine_event 唯一判定;
+# ②scene_ready REJECT 负反馈端到端 + DEFER 不算负反馈;③relevance 供料质量;
+# ④拍脑袋阈值可配(staging max/ttl、schedule_due 过期宽限)。
+
+
+def test_dao3_is_machine_event_single_predicate():
+    """①:唯一判定函数覆盖三种事件形态(funnel source / atom_run·error source / task_run kind)。"""
+    from karvyloop.karvy.fastbrain.trace_poll import is_machine_event
+    assert is_machine_event({"source": "scene_preexec"}) is True          # funnel / atom_run / error
+    assert is_machine_event({"kind": "scene_preexec"}) is True            # task_run(登记 kind)
+    assert is_machine_event({"source": "unknown", "kind": "intent"}) is False
+    assert is_machine_event({}) is False
+    assert is_machine_event(None) is False                                # 老数据/坏数据不冤枉
+    assert is_machine_event("not a dict") is False
+
+
+def test_dao3_machine_drive_stamps_source_on_cognition_trace(tmp_path):
+    """①接线:预执行的 drive(外层 token_source="scene_preexec")落 cognition Trace 的
+    atom_run 事件带 source 标;普通 drive 不带机器标 —— 与漏斗事件同判据。"""
+    from karvyloop.cognition.trace import TraceStore
+    from karvyloop.karvy.fastbrain.trace_poll import is_machine_event
+    from karvyloop.llm.token_ledger import token_source
+    from karvyloop.runtime.main_loop import MainLoop
+    from karvyloop.schemas import AtomRun
+
+    def _sb(intent, *, ctx=None):
+        return "诊断完了", AtomRun(atom_id="forge", input={"intent": intent},
+                                   output={"text": "诊断完了"}, success=True,
+                                   tool_calls=[{"name": "read_file", "input": {}}],
+                                   trace_ref="tr-m", ts=1.0)
+
+    trace = TraceStore()
+    ml = MainLoop(skills_dir=tmp_path / "s", trace=trace)
+    with token_source(sp.TOKEN_SOURCE):
+        ml.drive("任务「导出」上次失败。请诊断失败原因", slow_brain=_sb, fresh=True)
+    ml.drive("用户自己让干的活", slow_brain=_sb, fresh=True)
+    runs = [e for tid in trace.all_tasks() for e in trace.query(tid, kind="atom_run")]
+    assert len(runs) == 2
+    machine = [e for e in runs if is_machine_event(e.payload)]
+    assert len(machine) == 1
+    assert machine[0].payload["source"] == "scene_preexec"
+    user = [e for e in runs if not is_machine_event(e.payload)][0]
+    assert user.payload.get("source") != "scene_preexec"    # 普通路径不被冤枉
+
+
+def test_dao3_task_run_carries_registry_kind(tmp_path):
+    """①接线:task_events 落账的 task_run 事件带登记 kind —— 机器预执行任务可辨。"""
+    from karvyloop.cognition.trace import TraceStore
+    from karvyloop.console.task_events import make_task_change_sink
+    from karvyloop.karvy.fastbrain.trace_poll import is_machine_event
+    app = make_app(tmp_path)
+    trace = TraceStore()
+    reg = app.state.task_registry
+    reg.on_change = make_task_change_sink(app, trace)
+    m = reg.start(who="小卡", domain_id="l0", intent="Pre-run", kind="scene_preexec")
+    reg.finish(m, error="没跑完")
+    u = reg.start(who="小卡", domain_id="l0", intent="导出季度报表", kind="drive")
+    reg.finish(u, result="done")
+    events = [e for tid in trace.all_tasks() for e in trace.query(tid, kind="task_run")]
+    assert len(events) == 2
+    by_reg = {e.payload["registry_id"]: e for e in events}
+    assert by_reg[m].payload["kind"] == "scene_preexec" and is_machine_event(by_reg[m].payload)
+    assert by_reg[u].payload["kind"] == "drive" and not is_machine_event(by_reg[u].payload)
+
+
+@pytest.mark.asyncio
+async def test_dao3_scene_ready_reject_cools_same_kind_end_to_end(tmp_path, monkeypatch):
+    """②端到端:拒一张 scene_ready(已备好)卡 → 同 scene_kind 7 天内新信号被拦
+    (门 rejected + 消费面不烧 relevance + tick 不出普通卡)。走生产顺序:
+    先 record_decision_signals(读得到卡)再 registry.decide(移卡 + reject 钩子清 staging)。"""
+    from karvyloop.console.decision_wire import record_decision_signals
+    from karvyloop.console.proposal_handlers import _scene_ready_reject_handler
+    app = make_app(tmp_path)
+    ws = FakeWS(); app.state.ws_clients = {ws}
+    card, staging = _make_ready_card_with_staging(app)   # scene_kind=task_failed
+    assert card.payload["scene_kind"] == SCENE_TASK_FAILED   # 回钩键在卡上(刀2 约定)
+    record_decision_signals(app, decision="REJECT", proposal_id=card.proposal_id)
+    handlers = {f"{KIND_SCENE_READY}:reject": _scene_ready_reject_handler(app)}
+    res = app.state.proposal_registry.decide(card.proposal_id, "REJECT", handlers=handlers)
+    assert res.ok and not staging.exists()               # 驳回语义 + staging 零残留照旧
+    # 负反馈真喂到了门:同 kind 新指纹被拦
+    assert scene_gate(app).check("task_failed:new", SCENE_TASK_FAILED, budget=3,
+                                 now=time.time()) == "rejected"
+    # 端到端:新的用户任务失败(同 kind 场景)→ 消费面回落且不烧 relevance,tick 零出卡
+    judge_calls = {"n": 0}
+
+    async def counting_judge(*a, **kw):
+        judge_calls["n"] += 1
+        return _worth()
+
+    monkeypatch.setattr(sp, "_judge", counting_judge)
+    reg = app.state.task_registry
+    tid = reg.start(who="小卡", domain_id="l0", intent="导出季度报表")
+    reg.finish(tid, error="网络又断了")
+    assert await scene_tick(app) == 0
+    assert _cards(ws) == []                              # 普通卡也被 REJECT 冷却拦下
+    assert judge_calls["n"] == 0                         # 刀1 门先行:relevance 一次没烧
+
+
+def test_dao3_defer_is_not_negative_feedback(tmp_path):
+    """②DEFER 语义:稍后 ≠ 拒 —— DEFER 不进 scene_gate 负反馈,卡留在待决表。"""
+    from karvyloop.console.decision_wire import record_decision_signals
+    app = make_app(tmp_path)
+    card, staging = _make_ready_card_with_staging(app)
+    record_decision_signals(app, decision="DEFER", proposal_id=card.proposal_id)
+    res = app.state.proposal_registry.decide(card.proposal_id, "DEFER", handlers={})
+    assert res.ok and res.detail == "deferred"
+    assert app.state.proposal_registry.get(card.proposal_id) is not None   # 卡挂着
+    assert staging.exists()                                                # 产物不丢
+    # 同 kind 新指纹照常放行(用户没拒,只是稍后)
+    assert scene_gate(app).check("task_failed:new", SCENE_TASK_FAILED, budget=3,
+                                 now=time.time()) == "allow"
+
+
+def test_dao3_habit_lines_clean_and_capped(tmp_path):
+    """③供料质量:空/纯空白习惯行干净滤掉(不占位注水),行数封顶、单行截 80。"""
+    app = make_app(tmp_path)
+    rows = [SimpleNamespace(pattern=p) for p in
+            ["", "   ", "早上先看邮件", "长" * 200, "\n", "每周五出周报"]]
+    app.state.habit_store = SimpleNamespace(list_habits=lambda n: rows[:n])
+    got = sp._habit_lines(app)
+    assert got and all(line.strip() for line in got)          # 零空行
+    assert len(got) <= sp._HABIT_LINES_MAX
+    assert all(len(line) <= 80 for line in got)
+    # 无习惯 → [](judge 侧整段干净省略)
+    app.state.habit_store = SimpleNamespace(list_habits=lambda n: [])
+    assert sp._habit_lines(app) == []
+    # 坏 store → fail-soft 空
+    app.state.habit_store = SimpleNamespace(
+        list_habits=lambda n: (_ for _ in ()).throw(RuntimeError("db 坏")))
+    assert sp._habit_lines(app) == []
+
+
+@pytest.mark.asyncio
+async def test_dao3_relevance_prompt_no_habit_filler_and_capped(tmp_path):
+    """③供料质量(judge 侧双关):无习惯 → prompt 里整段省略(没有占位);
+    习惯超量 → 只进 _HABITS_CAP 条(防 prompt 膨胀)。"""
+    from karvyloop.karvy.scene_relevance import _HABITS_CAP
+
+    captured = {}
+
+    class _CapGW(FakeGateway):
+        async def complete(self, messages, tools, model_ref, system=None, **kw):
+            captured["material"] = messages[0]["content"]
+            yield TextDelta(json.dumps({"worth": False, "action_intent": "", "reason": "r"}))
+
+    gw = _CapGW()
+    await judge_relevance(gw, "m", scene_desc="任务刚失败", conversation_gist="", habits=[])
+    assert "已观察到的用户习惯" not in captured["material"]      # 空 = 干净省略
+    assert "(无)" not in captured["material"]                    # 不占位注水
+    await judge_relevance(gw, "m", scene_desc="任务刚失败",
+                          habits=[f"习惯{i}" for i in range(9)] + ["", "  "])
+    line = [ln for ln in captured["material"].splitlines() if "已观察到的用户习惯" in ln]
+    assert len(line) == 1
+    assert line[0].count("习惯") - 1 == _HABITS_CAP              # 标签自带一个"习惯"词,条目=CAP
+
+
+def test_dao3_staging_max_and_ttl_configurable(tmp_path):
+    """④:staging 目录数上限 / 超龄清理阈值可经 app.state 覆盖(默认不动,坏值退默认)。"""
+    import os
+    app = make_app(tmp_path)
+    app.state.scene_staging_max = 2
+    d1 = sp.create_staging(app); time.sleep(0.01)
+    d2 = sp.create_staging(app); time.sleep(0.01)
+    d3 = sp.create_staging(app)                       # 满 2 → 清最老未引用的 d1 腾位
+    assert d1 is not None and d2 is not None and d3 is not None
+    root = sp.staging_root(app)
+    assert len([d for d in root.iterdir() if d.is_dir()]) <= 2
+    assert not d1.exists()
+    # ttl 覆盖:2h 龄目录,默认 48h 不清;覆盖成 1h → 巡检清掉
+    old = time.time() - 2 * 3600
+    os.utime(d3, (old, old))
+    assert sp.scene_ready_maintenance(app)["pruned"] == 0     # 默认 48h:不清
+    app.state.scene_staging_ttl_s = 3600
+    assert sp.scene_ready_maintenance(app)["pruned"] == 1     # 覆盖 1h:清
+    # 坏值退默认(不炸)
+    app.state.scene_staging_max = "not-a-number"
+    assert sp._staging_max(app) == sp.STAGING_MAX
+    app.state.scene_staging_ttl_s = -5
+    assert sp._staging_ttl_s(app) == sp.STAGING_TTL_S
+
+
+def test_dao3_schedule_due_expiry_slack_configurable(tmp_path):
+    """④:schedule_due 场景过期宽限(触发点 + slack)可配;默认 +1h 不动。"""
+    from karvyloop.karvy.scheduler import SchedulerStore, next_run_after
+    app = make_app(tmp_path)
+    st = SchedulerStore(tmp_path / "schedules.json")
+    t = st.add("*/5 * * * *", "拉取汇率数据", title="汇率同步")
+    app.state.scheduler_store = st
+    now = time.time()
+    nxt = next_run_after(t.cron, now)
+    sig = _sig(SCENE_SCHEDULE_DUE, fp=f"schedule_due:{t.id}:x", schedule_id=t.id)
+    assert sp._expiry_for(app, sig, now=now) == nxt + sp.SCHEDULE_DUE_EXPIRY_SLACK_S
+    app.state.scene_schedule_due_expiry_slack_s = 120
+    assert sp._expiry_for(app, sig, now=now) == nxt + 120
+    app.state.scene_schedule_due_expiry_slack_s = -1          # 坏值退默认
+    assert sp._expiry_for(app, sig, now=now) == nxt + sp.SCHEDULE_DUE_EXPIRY_SLACK_S
+
+
 # ================================================================ 持久状态宁空勿毒
 def test_preexec_store_bad_file_and_day_roll(tmp_path):
     p = tmp_path / "scene_preexec.json"

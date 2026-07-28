@@ -60,9 +60,12 @@ DEFAULT_DAILY_MAX_TOKENS = 30_000
 # "上限只剩一丝仍放行整个 run"的溢出。
 SCENE_PREEXEC_RUN_RESERVE = 10_000
 # staging 有界:最多保 5 个目录,超龄 48h 清(待决卡引用的不清 —— 卡还挂着产物不能丢)。
+# docs/94 刀3 ④:可配 app.state.scene_staging_max / scene_staging_ttl_s(待标定清单见
+# scene_gate.py 头注总表;默认不动)。
 STAGING_MAX = 5
 STAGING_TTL_S = 48 * 3600
-# 错时 expiry:schedule_due = 触发点 + 1h(设计定值);task_failed = 24h(当下场景视界)。
+# 错时 expiry:schedule_due = 触发点 + 1h(可配 app.state.scene_schedule_due_expiry_slack_s);
+# task_failed = 24h(当下场景视界)。
 SCHEDULE_DUE_EXPIRY_SLACK_S = 3600
 TASK_FAILED_EXPIRY_S = 24 * 3600
 # 产物/诊断文本进卡摘要与重跑注入的封顶。
@@ -70,6 +73,8 @@ _PRODUCT_GIST_CAP = 120
 _RERUN_DIAGNOSIS_CAP = 4000
 # 持久状态有界(attempted/relevance 指纹表,超了按 ts 砍最老)。
 _MAX_ENTRIES = 500
+# relevance 供料的习惯行数封顶(docs/94 刀3 ③:防 prompt 膨胀;judge 侧另有同级截断双关)。
+_HABIT_LINES_MAX = 5
 
 TOKEN_SOURCE = "scene_preexec"
 
@@ -231,23 +236,24 @@ def _pending_staging_ids(app: Any) -> set:
 def create_staging(app: Any, *, now: Optional[float] = None) -> Optional[pathlib.Path]:
     """建一个新 staging 目录 <root>/<sid>/(含 work/ 子目录 = drive 的 workspace)。
 
-    有界:已有 ≥ STAGING_MAX 个 → 先清最老的**未被待决卡引用**目录;还挤不出位 → None
-    (本次不预执行,宁可少干)。"""
+    有界:已有 ≥ 上限(默认 STAGING_MAX,可配 scene_staging_max)个 → 先清最老的
+    **未被待决卡引用**目录;还挤不出位 → None(本次不预执行,宁可少干)。"""
     try:
+        cap = _staging_max(app)   # docs/94 刀3 ④:上限可配(默认不变)
         root = staging_root(app)
         root.mkdir(parents=True, exist_ok=True)
         dirs = sorted([d for d in root.iterdir() if d.is_dir()],
                       key=lambda d: d.stat().st_mtime)
-        if len(dirs) >= STAGING_MAX:
+        if len(dirs) >= cap:
             keep = _pending_staging_ids(app)
             for d in dirs:
                 if d.name not in keep:
                     shutil.rmtree(d, ignore_errors=True)
                     dirs.remove(d)
                     break
-        if len(dirs) >= STAGING_MAX:
+        if len(dirs) >= cap:
             logger.info("[scene_preexec] staging 已满(%s 个都被待决卡引用)→ 本次不预执行",
-                        STAGING_MAX)
+                        cap)
             return None
         sid = uuid.uuid4().hex[:12]
         d = root / sid
@@ -373,6 +379,37 @@ def _run_reserve(app: Any) -> int:
         return SCENE_PREEXEC_RUN_RESERVE
 
 
+# docs/94 刀3 ④:以下三个拍脑袋常数补 app.state 覆盖(模式照 scene_big_job_s:读不到/
+# 坏值退默认;不改默认值,内测真数据来了照 scene_gate.py 头注的待标定清单表标定)。
+def _staging_max(app: Any) -> int:
+    """staging 目录数上限(可配 app.state.scene_staging_max;<1 视为默认)。"""
+    try:
+        n = int(getattr(app.state, "scene_staging_max", STAGING_MAX))
+        return n if n >= 1 else STAGING_MAX
+    except (TypeError, ValueError):
+        return STAGING_MAX
+
+
+def _staging_ttl_s(app: Any) -> float:
+    """staging 目录超龄清理阈值(可配 app.state.scene_staging_ttl_s;<=0 视为默认)。"""
+    try:
+        v = float(getattr(app.state, "scene_staging_ttl_s", STAGING_TTL_S))
+        return v if v > 0 else float(STAGING_TTL_S)
+    except (TypeError, ValueError):
+        return float(STAGING_TTL_S)
+
+
+def _due_expiry_slack_s(app: Any) -> float:
+    """schedule_due 场景过期宽限(触发点 + slack;可配 app.state.
+    scene_schedule_due_expiry_slack_s;<0 视为默认,0 合法=触发点即过期)。"""
+    try:
+        v = float(getattr(app.state, "scene_schedule_due_expiry_slack_s",
+                          SCHEDULE_DUE_EXPIRY_SLACK_S))
+        return v if v >= 0 else float(SCHEDULE_DUE_EXPIRY_SLACK_S)
+    except (TypeError, ValueError):
+        return float(SCHEDULE_DUE_EXPIRY_SLACK_S)
+
+
 # ---------------------------------------------------------------- relevance 供料
 def _conversation_gist(app: Any) -> str:
     """当前对话摘要(最近几轮 user 说了什么;纯读,fail-soft 空)。"""
@@ -389,7 +426,12 @@ def _conversation_gist(app: Any) -> str:
 
 
 def _habit_lines(app: Any) -> list:
-    """(供料)HabitStore 习惯 pattern(纯读,fail-soft 空;测试可注 app.state.habit_store)。"""
+    """(供料)HabitStore 习惯 pattern(纯读,fail-soft 空;测试可注 app.state.habit_store)。
+
+    docs/94 刀3 ③ 供料质量:空/纯空白 pattern **不注水**(干净滤掉,不是 "(无)" 占位;
+    没有习惯 → 返 [],judge 侧整段干净省略);行数封顶 _HABIT_LINES_MAX、单行截 80
+    (防 prompt 膨胀 —— relevance 是便宜调用,料要小)。
+    """
     try:
         store = getattr(app.state, "habit_store", None)
         if store is None:
@@ -398,7 +440,15 @@ def _habit_lines(app: Any) -> list:
             store = getattr(analyst, "habit_store", None) if analyst is not None else None
         if store is None:
             return []
-        return [(getattr(h, "pattern", "") or "")[:80] for h in store.list_habits(5)]
+        out = []
+        for h in store.list_habits(_HABIT_LINES_MAX):
+            line = str(getattr(h, "pattern", "") or "").strip()
+            if not line:
+                continue   # 空/坏习惯行:干净省略,绝不占位注水
+            out.append(line[:80])
+            if len(out) >= _HABIT_LINES_MAX:
+                break
+        return out
     except Exception:
         return []
 
@@ -522,7 +572,7 @@ def _expiry_for(app: Any, sig: Any, *, now: float) -> float:
                 if str(getattr(t, "id", "")) == sid:
                     nxt = next_run_after(getattr(t, "cron", "") or "", now)
                     if nxt is not None:
-                        return float(nxt) + SCHEDULE_DUE_EXPIRY_SLACK_S
+                        return float(nxt) + _due_expiry_slack_s(app)   # docs/94 刀3 ④:宽限可配
         except Exception:
             pass
         return now + 2 * 3600
@@ -772,6 +822,7 @@ def scene_ready_maintenance(app: Any, *, now: Optional[float] = None) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.debug("[scene_preexec] 错时撤卡巡检异常(下轮再来): %s", e)
     try:
+        ttl = _staging_ttl_s(app)   # docs/94 刀3 ④:超龄阈值可配(默认 48h 不变)
         root = staging_root(app)
         if root.is_dir():
             keep = _pending_staging_ids(app)
@@ -779,7 +830,7 @@ def scene_ready_maintenance(app: Any, *, now: Optional[float] = None) -> dict:
                 if not d.is_dir() or d.name in keep:
                     continue
                 try:
-                    if n_ts - d.stat().st_mtime > STAGING_TTL_S:
+                    if n_ts - d.stat().st_mtime > ttl:
                         shutil.rmtree(d, ignore_errors=True)
                         counts["pruned"] += 1
                 except Exception:

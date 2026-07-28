@@ -39,11 +39,13 @@ SCENE_SCHEDULE_DUE = "schedule_due"
 SCENE_MANUAL_REPEAT = "manual_repeat"   # 刀3c schedule_suggest 的记账归类(采集不在本模块)
 SCENE_BIG_JOB_DONE = "big_job_done"     # 只做 basis 前缀,不独立出卡
 
-# ---- 确定性判据阈值(〔待 Trace 标定〕首版拍脑袋值;可经 app.state 覆盖的在函数里读)----
+# ---- 确定性判据阈值(〔待 Trace 标定〕首版拍脑袋值;总表见 scene_gate.py 头注,
+# docs/94 刀3 ④:全部可经 app.state 覆盖,collect_scene_signals 统一读)----
 # 刚失败:只看最近这段时间内失败的任务(太老的失败不是"当下场景";开机兜底那条路
 # propose_from_tasks 不设窗,历史失败由它管,两路共用指纹不重复)。
+# 可配 app.state.scene_recent_failure_window_s。
 RECENT_FAILURE_WINDOW_S = 30 * 60
-# 日程将至:T-15min 内将触发(设计定值)。
+# 日程将至:T-15min 内将触发(可配 app.state.scene_schedule_due_window_s)。
 SCHEDULE_DUE_WINDOW_S = 15 * 60
 # 刚完成大活:drive 任务耗时超过它才算"大活"(可配 app.state.scene_big_job_s)。
 BIG_JOB_THRESHOLD_S = 120.0
@@ -183,6 +185,16 @@ def upcoming_schedule_signals(scheduler_store: Any, *, now: Optional[float] = No
 
 
 # ---------------------------------------------------------------- 汇总采集(scene_tick 用)
+def _window_override(app: Any, attr: str, default: float) -> float:
+    """docs/94 刀3 ④:判据窗口的 app.state 覆盖(模式照 scene_big_job_s:读不到/坏值/
+    非正数退默认;不改默认值,内测真数据来了照 scene_gate.py 头注待标定清单表标定)。"""
+    try:
+        v = float(getattr(app.state, attr, default))
+        return v if v > 0 else float(default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def collect_scene_signals(app: Any, *, now: Optional[float] = None) -> list:
     """从既有数据源采集全部当下场景信号(信号1+2;信号3 在 schedule_suggest 侧记账,
     信号4 只做 basis 前缀)。每类各自兜异常,坏一类不连坐。"""
@@ -190,7 +202,9 @@ def collect_scene_signals(app: Any, *, now: Optional[float] = None) -> list:
     out: list = []
     try:
         out.extend(recent_failed_task_signals(
-            getattr(app.state, "task_registry", None), now=now))
+            getattr(app.state, "task_registry", None), now=now,
+            window_s=_window_override(app, "scene_recent_failure_window_s",
+                                      RECENT_FAILURE_WINDOW_S)))
     except Exception:
         pass
     try:
@@ -199,7 +213,10 @@ def collect_scene_signals(app: Any, *, now: Optional[float] = None) -> list:
             # 生产同款懒加载(schedules.json 同家);失败当无(保守不提)
             from karvyloop.console.routes_schedules import _scheduler_store
             store = _scheduler_store(app)
-        out.extend(upcoming_schedule_signals(store, now=now))
+        out.extend(upcoming_schedule_signals(
+            store, now=now,
+            window_s=_window_override(app, "scene_schedule_due_window_s",
+                                      SCHEDULE_DUE_WINDOW_S)))
     except Exception:
         pass
     return out

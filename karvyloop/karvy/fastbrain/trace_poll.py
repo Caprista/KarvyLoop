@@ -30,6 +30,24 @@ logger = logging.getLogger(__name__)
 # Daily poll 间隔(秒)= 24h。9.0a 仅占位,9.0b 可换外部 cron。
 DAILY_POLL_INTERVAL_S = 24 * 60 * 60
 
+# docs/94 刀3 ①:机器预执行事件的**唯一判定**(慢侧全部消费者共用,别各写一份字符串比对)。
+# 标记来源(刀2 B2 既有约定,值都 == "scene_preexec"):
+# - 漏斗原文事件:payload["source"](main_loop._emit_funnel_event 盖 token_source contextvar 现值);
+# - cognition Trace 的 atom_run/error:payload["source"](drive 落 Trace 时同源加性盖戳,刀3);
+# - cognition Trace 的 task_run:payload["kind"](任务登记 kind="scene_preexec",task_events 落账带上,刀3)。
+MACHINE_TOKEN_SOURCE = "scene_preexec"
+
+
+def is_machine_event(payload: object) -> bool:
+    """这条事件是不是机器发起的场景预执行留痕(docs/94 刀3 ①)。
+
+    习惯蒸馏(distill_raw_to_summary)与洞察沉淀(console/insight_tick)都用**这一个**
+    判定排除机器事件 —— 机器诊断 goal 不是"你"的行为模式/洞察,吃进去就是轻自我反馈环
+    (机器教机器像机器)。非 dict payload → False(老数据/坏数据不冤枉)。
+    """
+    p = payload if isinstance(payload, dict) else {}
+    return MACHINE_TOKEN_SOURCE in (p.get("source"), p.get("kind"))
+
 
 def boot_poll(index: TraceIndex) -> dict:
     """启动时跑一次:健康检查 + 容量审计。
@@ -94,10 +112,10 @@ def distill_raw_to_summary(index: TraceIndex, *, recent_n: int = 50) -> Optional
     machine_skipped = 0
     for rec in raw:
         p = rec.payload if isinstance(rec.payload, dict) else {}
-        # docs/94 刀2 B2:机器发起的 drive(场景预执行,事件 source="scene_preexec")
-        # **不进**习惯蒸馏 —— 它的 goal 是系统构造的诊断指令,不是"你"的行为模式,
-        # 进了就是轻自我反馈环(机器教机器像机器)。watermark 照常越过(不重扫)。
-        if p.get("source") == "scene_preexec":
+        # docs/94 刀2 B2(刀3 收敛到 is_machine_event 唯一判定):机器发起的 drive
+        # (场景预执行)**不进**习惯蒸馏 —— 它的 goal 是系统构造的诊断指令,不是"你"的
+        # 行为模式,进了就是轻自我反馈环(机器教机器像机器)。watermark 照常越过(不重扫)。
+        if is_machine_event(p):
             machine_skipped += 1
             continue
         k = p.get("kind", "event")
@@ -155,8 +173,10 @@ def install_pollers(
 
 __all__ = [
     "DAILY_POLL_INTERVAL_S",
+    "MACHINE_TOKEN_SOURCE",
     "boot_poll",
     "daily_poll",
     "distill_raw_to_summary",
     "install_pollers",
+    "is_machine_event",
 ]

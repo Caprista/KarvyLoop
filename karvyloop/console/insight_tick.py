@@ -119,10 +119,16 @@ async def task_insight_tick(app: Any, *, state_path: Optional[Path] = None,
     )
 
     # ---- 捞料(只读三种执行事件;不读 eval_fact/satisfaction/lesson,不双记账)----
+    # docs/94 刀3 ①:机器发起的场景预执行留痕(atom_run/error 的 payload.source、
+    # task_run 的 payload.kind == "scene_preexec")**不进**洞察沉淀 —— 机器自嗨的诊断
+    # 事件不能被沉成"你的洞察"。判定与 trace_poll 习惯蒸馏**同一个函数**(is_machine_event,
+    # 别写两份);在捞料口就滤(机器事件也不该改池指纹 —— 机器活动不唤醒 LLM)。
+    from karvyloop.karvy.fastbrain.trace_poll import is_machine_event
     entries: list = []
     for tid in trace.all_tasks():
         for k in HARVEST_KINDS:
-            entries.extend(trace.query(tid, kind=k))
+            entries.extend(e for e in trace.query(tid, kind=k)
+                           if not is_machine_event(getattr(e, "payload", None)))
 
     state = _load_state(state_path)
     # ③ 读时顺手驱逐过期冷却项(防 seen 台账长跑无界;仍在冷却期的保留)——落盘在下方各 _save_state。

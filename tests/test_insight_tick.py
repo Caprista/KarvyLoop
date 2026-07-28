@@ -329,6 +329,76 @@ def test_insight_tick_routes_supersede_conflicts_to_cards(tmp_path, monkeypatch)
     assert seen.get("conflicts") and seen["conflicts"][0]["idem_key"] == "memory_conflict-abc12345"
 
 
+# ============ ⑬ docs/94 刀3 ①:机器预执行事件不沉成"你的洞察" ============
+
+def _seed_machine_retry_run(trace, task_id, *, ts=1.0):
+    """一条**机器预执行**的重试 run:与 _seed_retry_run 同模式,但 payload 带
+    source="scene_preexec"(drive 在 token_source 内落 Trace 的加性盖戳,刀3 接线)。"""
+    return trace.append(TraceEntry(
+        task_id=task_id, kind="atom_run",
+        payload={"atom_id": "a1", "input": {}, "output": {"text": "诊断好了"}, "success": True,
+                 "tool_calls": [{"id": "c0", "name": "pip_install", "input": {"index": "pypi"}},
+                                {"id": "c1", "name": "pip_install", "input": {"index": "mirror"}}],
+                 "trace_ref": f"trace://a1/{task_id}", "terminal": "completed",
+                 "source": "scene_preexec"},
+        ts=ts, source="main_loop"))
+
+
+def test_dao3_machine_preexec_events_not_sunk(tmp_path):
+    """只有机器预执行事件 → 零信号零 LLM 零写入(机器自嗨不沉成"你的洞察",
+    也不该改池指纹唤醒 tick);判定与 trace_poll 习惯蒸馏共用 is_machine_event。"""
+    trace, mem = TraceStore(), MemoryManager()
+    gw = _GW(insight_reply=_echo_env())
+    app = _app(trace, mem, gw)
+    sp = tmp_path / "s.json"
+    _seed_machine_retry_run(trace, "m1", ts=10.0)
+    r = _run(task_insight_tick(app, state_path=sp, now=1000.0))
+    assert r["ran"] is False and r["written"] == 0 and gw.insight_calls == 0
+    assert _insights(mem) == []
+    # 机器事件不改(过滤后的)池指纹:再加一条机器事件 → 仍 watermark 跳过,零 LLM
+    _seed_machine_retry_run(trace, "m2", ts=20.0)
+    r2 = _run(task_insight_tick(app, state_path=sp, now=2000.0))
+    assert r2["ran"] is False and gw.insight_calls == 0
+
+
+def test_dao3_machine_and_user_mixed_only_user_sinks(tmp_path):
+    """机器 + 用户事件混池:只有用户事件进料(材料里绝无机器 ref),照常沉淀。"""
+    trace, mem = TraceStore(), MemoryManager()
+    gw = _GW(insight_reply=_echo_env())
+    app = _app(trace, mem, gw)
+    machine_ref = _seed_machine_retry_run(trace, "m1", ts=10.0)
+    user_ref = _seed_retry_run(trace, "u1", ts=20.0)
+    r = _run(task_insight_tick(app, state_path=tmp_path / "s.json", now=1000.0))
+    assert r["ran"] is True and r["written"] == 1 and gw.insight_calls == 1
+    assert user_ref in gw.last_material
+    assert machine_ref not in gw.last_material           # 机器 ref 一个不进料
+    assert _insights(mem)[0].provenance["trace_ref"] == user_ref
+
+
+def test_dao3_machine_task_run_not_sunk(tmp_path):
+    """task_run 形态:机器预执行任务(payload.kind="scene_preexec")的 error→done
+    不算 task_recovery;同形态用户任务(kind="drive")照常沉。"""
+    def _seed_task_pair(trace, task_id, *, kind, ts=1.0):
+        for i, (st, res) in enumerate((("error", "没跑完"), ("done", "跑完了,结论 X"))):
+            trace.append(TraceEntry(
+                task_id=task_id, kind="task_run",
+                payload={"registry_id": task_id, "who": "小卡", "intent": "导出季度报表",
+                         "status": st, "result": res, "domain": "l0", "role": "",
+                         "kind": kind},
+                ts=ts + i, source="task_registry"))
+
+    trace, mem = TraceStore(), MemoryManager()
+    gw = _GW(insight_reply=_echo_env())
+    app = _app(trace, mem, gw)
+    _seed_task_pair(trace, "tm", kind="scene_preexec", ts=10.0)
+    r = _run(task_insight_tick(app, state_path=tmp_path / "s.json", now=1000.0))
+    assert r["ran"] is False and gw.insight_calls == 0    # 机器任务恢复不是"你的洞察"
+    _seed_task_pair(trace, "tu", kind="drive", ts=20.0)
+    r2 = _run(task_insight_tick(app, state_path=tmp_path / "s.json", now=2000.0))
+    assert r2["ran"] is True and gw.insight_calls == 1 and r2["written"] >= 1
+    assert "tm" not in gw.last_material                   # 材料里只有用户任务
+
+
 # ============ ⑫ ③:冷却台账驱逐过期项(防长跑无界) ============
 
 def test_cooldown_ledger_evicts_expired(tmp_path):

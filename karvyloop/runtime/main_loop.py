@@ -547,6 +547,16 @@ class MainLoop:
             # (纠正段必须遵守、冲突时优先),否则 `## Remove` 混在"上次的打法"里被照抄。
             from karvyloop.crystallize import compose_rerun_context
             brain_intent = compose_rerun_context(guided_skill, intent)
+        # docs/94 刀3 ①:cognition Trace 的执行事件(atom_run/error)payload 加性带
+        # token_source contextvar 现值 —— 与 _emit_funnel_event 的漏斗事件**同一判据**
+        # (机器预执行 = "scene_preexec"):慢侧洞察沉淀(insight_tick)凭它把机器诊断
+        # goal 挡在"你的洞察"之外(is_machine_event 唯一判定)。普通路径值多为
+        # "unknown"/"chat" 等,消费方行为一字不变(加性字段,读侧 .get 兼容)。
+        try:
+            from karvyloop.llm.token_ledger import current_source
+            _event_source = current_source()
+        except Exception:
+            _event_source = ""
         self.stats.slow_brain_runs += 1
         try:
             if ctx is not None and _slow_brain_accepts_ctx(slow_brain):
@@ -566,6 +576,7 @@ class MainLoop:
                         "error": str(e),
                         "traceback": _tb.format_exc(),
                         "stage": "slow_brain",
+                        "source": _event_source,   # docs/94 刀3 ①:机器预执行留痕可辨(加性)
                     },
                     ts=self._clock(), source="main_loop",
                 ))
@@ -594,6 +605,7 @@ class MainLoop:
                 "trace_ref": run.trace_ref,
                 "ts": run.ts,
                 "terminal": getattr(run, "terminal", None) or "",  # §15:终止语义入 Trace(不可行报告卡溯源)
+                "source": _event_source,   # docs/94 刀3 ①:与漏斗事件同判据(机器预执行可辨,加性)
             },
             ts=run.ts or now,
             source="main_loop",

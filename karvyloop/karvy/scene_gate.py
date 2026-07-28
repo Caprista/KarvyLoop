@@ -16,6 +16,22 @@
 落盘:`~/.karvyloop/scene_gate.json`(与 schedules.json / manual_run_counts.json 同家;
 path=None = 纯内存,测试不污染真实 home)。**宁空勿毒**:坏文件当空、落盘失败不阻断。
 旁路纪律:本模块任何函数**任何异常都吞掉**,绝不冒泡到 drive / 维护 loop。
+
+〔待标定清单〕scene 系拍脑袋阈值总表(docs/94 刀3 ④;全部可经 app.state 覆盖,坏值/
+越界退默认 —— 内测 Trace 真数据来了照本表逐一标定,别硬编当定律):
+
+  名(所在模块)                          默认        覆盖键(app.state.*)
+  ---------------------------------------- ---------- ------------------------------------
+  场景卡日预算(scene_gate)               3 张/天    scene_daily_budget
+  刚失败判据窗(scene_signals)            30 min     scene_recent_failure_window_s
+  日程将至判据窗(scene_signals)          15 min     scene_schedule_due_window_s
+  大活耗时阈值(scene_signals)            120 s      scene_big_job_s
+  预执行单次轮数(scene_preexec)          8 turns    scene_preexec_max_turns
+  预执行日 token 上限(scene_preexec)     30_000     scene_preexec_max_tokens
+  预执行单次预留(scene_preexec)          10_000     scene_preexec_run_reserve
+  staging 目录数上限(scene_preexec)      5 个       scene_staging_max
+  staging 超龄清理(scene_preexec)        48 h       scene_staging_ttl_s
+  schedule_due 过期宽限(scene_preexec)   +1 h       scene_schedule_due_expiry_slack_s
 """
 from __future__ import annotations
 
