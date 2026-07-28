@@ -61,6 +61,12 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 - **`karvyloop url` no longer hands you a dead link.** It now probes the port first; if the
   console isn't actually running (only a stale record from a previous run), it says so and
   tells you to start it — instead of "successfully" printing a link that can't open.
+- **Every chat now shows up as a stoppable task.** Chats sent from the web UI (the main
+  path) previously ran without a task card — no ⏹, no interrupt. They now get the same
+  card, stop button and cost attribution as everything else.
+- **Type @ in your private chat and a picker appears** (same one as group chats), with each
+  role's business domain shown for disambiguation and a one-line hint the first time:
+  "@ someone and a hand-off card is prepared — nothing runs until you approve."
 
 ## [2026.7.20] — 2026-07-20
 
