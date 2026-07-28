@@ -445,13 +445,15 @@ def test_boot_poll_reads_recent_summaries(workbench, trace_index, habit_store) -
     assert len(fake.last_summaries) == 5
 
 
-def test_daily_poll_reads_recent_summaries(workbench, trace_index, habit_store) -> None:
-    """daily_poll 同理。"""
+def test_daily_poll_distills_to_store_never_cards(workbench, trace_index, habit_store) -> None:
+    """docs/94 刀1(拍③):daily_poll 凝练管线照跑(读摘要 → LLM 凝习惯),但**不再出卡**
+    (恒返 None);凝出的习惯**全部落 HabitStore 持久化**(场景判断的融合供料)。"""
     for i in range(1, 4):
         trace_index.append_summary({"kind": "task", "i": i})
 
     strong = _habit(strength=0.8, id=20)
-    fake = _FakeBehaviorAnalyzer(habits_to_return=[strong])
+    weak = _habit(pattern="用户偶尔看盘", strength=0.3, id=21, evidence=(4,))
+    fake = _FakeBehaviorAnalyzer(habits_to_return=[strong, weak])
     analyzer = IntentAnalyst(
         workbench=workbench,
         habit_store=habit_store,
@@ -459,9 +461,25 @@ def test_daily_poll_reads_recent_summaries(workbench, trace_index, habit_store) 
         behavior_analyzer=fake,
     )
     p = analyzer.daily_poll(recent_n=5)
-    assert p is not None
-    assert p.habit_id == 20
-    assert len(fake.last_summaries) == 3
+    assert p is None                      # 源B 出卡出口关死:恒 None,永不进 broadcast
+    assert len(fake.last_summaries) == 3  # 凝练管线照跑(摘要真的喂给了 LLM)
+    patterns = {h.pattern for h in habit_store.list_habits()}
+    assert {"用户偏好 X", "用户偶尔看盘"} <= patterns  # 强弱习惯**全量**落库(供料,不挑最强)
+
+
+def test_daily_poll_no_signal_no_llm_no_store(workbench, trace_index, habit_store) -> None:
+    """daily 供料仍走 can_propose 快脑门:摘要无 signal kind → 不调 LLM、不落库(省钱同旧)。"""
+    trace_index.append_summary({"kind": "background", "i": 1})
+    fake = _FakeBehaviorAnalyzer(habits_to_return=[_habit()])
+    analyzer = IntentAnalyst(
+        workbench=workbench,
+        habit_store=habit_store,
+        trace_index=trace_index,
+        behavior_analyzer=fake,
+    )
+    assert analyzer.daily_poll(recent_n=5) is None
+    assert fake.call_count == 0
+    assert habit_store.count() == 0
 
 
 def test_boot_poll_empty_trace_returns_none(workbench, trace_index, habit_store) -> None:

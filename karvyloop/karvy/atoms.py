@@ -377,11 +377,53 @@ class IntentAnalyst:
     def daily_poll(self, recent_n: int = 50) -> Optional[Proposal]:
         """每天定时跑一次(9.0b trace_poll.install_pollers 调度入口)。
 
+        docs/94 刀1(Hardy 拍③):**习惯 = 场景判断的融合供料,不再独立弹卡** ——
+        世界雷达证实纯习惯统计触发是死路(采样稀/冷启动空转/骚扰),预判触发已换成
+        当下场景(scene_signals + scene_gate,零 LLM)。daily 的凝练管线**照跑不删**
+        (can_propose 门 → LLM 凝习惯),凝出的习惯**全部落 HabitStore 持久化**
+        (刀3 要拿它进 relevance prompt 当供料),但**恒返 None**:不再产 Proposal、
+        不再进 broadcast(源B 出卡出口关死)。boot_poll / on_event 语义不变。
+
         Args:
             recent_n: 取最近 N 条摘要(默认 50 — 一天的量级)
         """
         chunk = self._build_chunk(source=TRIGGER_DAILY, recent_n=recent_n)
-        return self.analyze(chunk)
+        self._distill_habits_to_store(chunk)
+        return None   # 拍③:daily 只凝练供料,永不出卡
+
+    def _distill_habits_to_store(self, chunk: TraceChunk) -> int:
+        """凝练供料(不出卡):快脑门控 → LLM 凝习惯 → **全量** upsert 进 HabitStore
+        (dedup 合并由 store 保证)。此前 analyze 只挑最强一条做 Proposal、习惯从不落库 ——
+        供料语义下全部持久,才够刀3 的 relevance prompt 用。
+
+        返回落库条数;任何失败返 0(旁路纪律:凝练坏了绝不冒泡到 daily loop)。"""
+        try:
+            if not self.can_propose(chunk):
+                return 0
+            model_ref = self.model_ref_resolver(self.agent_name)
+            try:
+                habits = self.behavior_analyzer.analyze(chunk.summaries, model_ref)
+            except NotImplementedError:
+                return 0   # 9.0b 骨架无 LLM:graceful degradation(同 analyze)
+            upsert = getattr(self.habit_store, "upsert", None)
+            if not habits or not callable(upsert):
+                return 0
+            n = 0
+            for h in habits:
+                try:
+                    upsert(h.pattern,
+                           strength=max(0.0, min(1.0, float(h.strength))),
+                           evidence_refs=tuple(h.evidence_refs or ()),
+                           model_ref=(h.model_ref or getattr(model_ref, "name", "") or ""))
+                    n += 1
+                except Exception:
+                    continue   # 单条坏跳过,不整批失败(宁空勿毒)
+            if n:
+                logger.debug(f"[IntentAnalyst] daily 凝练供料:{n} 条习惯落 HabitStore(不出卡)")
+            return n
+        except Exception as e:  # noqa: BLE001 —— 旁路绝不外溢
+            logger.debug(f"[IntentAnalyst] daily 凝练供料失败(忽略): {e}")
+            return 0
 
     def _build_chunk(self, source: str, recent_n: int) -> TraceChunk:
         """从 trace_index 摘要层读最近 N 条,包成 TraceChunk。"""

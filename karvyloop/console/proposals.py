@@ -275,11 +275,15 @@ async def raise_memory_conflict_cards(app: Any, conflicts: list, *,
     return n
 
 
-async def proactive_from_state(app: Any):
+async def proactive_from_state(app: Any, *, user_initiated: bool = False):
     """loop-step2b:小卡基于**持久化状态**(任务看板)主动产一条建议并广播。
 
     不依赖 LLM pump —— 是 pump 沉默/未接时的确定性兜底(观察任务看板:有失败任务 → 提议重试)。
     返回 (proposal_or_None, sent_count)。K5:只推建议,用户拍板仍走 h2a_decide。
+
+    docs/94 刀1:这条失败重试卡是**场景主动卡**(源A)—— 系统自发出(开机兜底)时过
+    scene_gate 统一唤醒门(日预算记账 + 同任务指纹永不重复);`user_initiated=True`
+    (用户点了"来点建议" /api/propose、WS propose)= 用户主动要的,不是打扰,不扣不拦。
     """
     try:
         from karvyloop.karvy.proactive import propose_from_tasks
@@ -290,6 +294,21 @@ async def proactive_from_state(app: Any):
         return None, 0
     if proposal is None:
         return None, 0
+    if not user_initiated:
+        try:
+            from karvyloop.karvy.scene_gate import emit_gated
+            from karvyloop.karvy.scene_signals import (
+                SCENE_TASK_FAILED, task_failed_fingerprint)
+            tid = str((getattr(proposal, "context_ref", {}) or {}).get("id") or "")
+            sent = await emit_gated(
+                app, proposal, fingerprint=task_failed_fingerprint(tid or proposal.proposal_id),
+                scene_kind=SCENE_TASK_FAILED)
+            if sent is None:   # 门拦(同任务提过 / 预算用尽 / REJECT 冷却)→ 诚实沉默
+                return None, 0
+            return proposal, sent
+        except Exception as e:   # 门坏了退回直出?不 —— 宁可少提(旁路纪律,门失效不放大打扰)
+            logger.debug(f"[proposals] 场景门失败,保守不提: {e}")
+            return None, 0
     sent = await broadcast_proposal(app, proposal)
     return proposal, sent
 

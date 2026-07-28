@@ -77,7 +77,6 @@ async def run_task_monitor(app: Any, *, now: Optional[float] = None,
         seen = set()
         app.state._stalled_seen = seen
 
-    from karvyloop.console.proposals import broadcast_proposal
     from karvyloop.karvy.proactive import resume_proposal_for
 
     handled = 0
@@ -97,14 +96,21 @@ async def run_task_monitor(app: Any, *, now: Optional[float] = None,
         except Exception:
             pass
         # ③ 升"要我接着跑吗"卡(人拍板,K5;续跑=从头重跑)。带来源标便于区分开机兜底 vs 持续监控。
+        #    docs/94 刀1:重试卡=场景主动卡(源A)→ 过统一唤醒门(日预算+同任务指纹永不重复)。
+        #    门拦下也无妨:①② 的诚实标注/blocked 推送已让中断可见,卡只是"要不要重跑"的建议。
         t2 = dict(t)
         t2["_resume_source"] = "task_monitor.stalled"
         t2["status"] = "error"
         prop = resume_proposal_for(t2, now=now)
         if prop is not None:
             try:
-                await broadcast_proposal(app, prop)
-                handled += 1
+                from karvyloop.karvy.scene_gate import emit_gated
+                from karvyloop.karvy.scene_signals import (
+                    SCENE_TASK_FAILED, task_failed_fingerprint)
+                sent = await emit_gated(app, prop, fingerprint=task_failed_fingerprint(tid),
+                                        scene_kind=SCENE_TASK_FAILED, now=now)
+                if sent is not None:
+                    handled += 1
             except Exception as e:
                 logger.debug(f"[task_monitor] 升停滞卡失败(下轮再来): {e}")
     return handled

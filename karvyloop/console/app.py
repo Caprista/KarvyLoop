@@ -328,6 +328,17 @@ def build_console_app(
                                 logger.info(f"[karvyloop console] 任务监控:{stalled} 条疑似中断 → 升重试卡")
                         except Exception as ie:
                             _maintenance_item_failed(app, "task_monitor", ie)
+                        # docs/94 刀1:场景唤醒门 —— 确定性场景信号(刚失败/日程将至 T-15min)
+                        # 经统一日预算+指纹冷却+REJECT 负反馈出卡(零 LLM)。每 tick 都跑
+                        # (放在 idle 判断之前;T-15min 窗口靠短 tick 才接得住)。旁路纪律:
+                        # 异常吞掉只 debug,不升 system_error(场景卡少一张不是事故)。
+                        try:
+                            from karvyloop.karvy.scene_gate import scene_tick
+                            _scn = await scene_tick(app)
+                            if _scn:
+                                logger.info(f"[karvyloop console] 场景唤醒:出 {_scn} 张场景卡(docs/94 刀1)")
+                        except Exception as ie:
+                            logger.debug(f"[karvyloop console] 场景唤醒 tick 异常(旁路忽略): {ie}")
                         # docs/88 招牌"闭环完整性"外环(真伤1 跑评分离):committed/revised Pursuit —
                         # **廉价门每 tick 确定性 verify**(过则自动 done+回执);贵的 test_pass 门求值 + pursue
                         # 推进受 6h 节流(非热路径,慢侧维护节奏)。放在 idle 判断之前 = 不受 daily 节流影响。

@@ -218,6 +218,15 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
     except Exception as e:
         logger.warning(f"[decision_wire] 读回提案失败(proposal_id={proposal_id},"
                        f"样本 context 降级为 id): {e}")
+    # docs/94 刀1:场景卡负反馈 —— 带 scene_kind 标的场景主动卡被 REJECT → 同场景 kind
+    # 7 天内不再主动出(scene_gate 持久冷却)。必须在 SKIP_KINDS 早返回**之前**
+    # (schedule_suggest ∈ SKIP_KINDS,但它也是场景卡,拒了同样要冷却)。fail-soft。
+    try:
+        if orig_payload.get("scene_kind"):
+            from karvyloop.karvy.scene_gate import note_scene_reject
+            note_scene_reject(app, orig_payload, decision)
+    except Exception as e:
+        logger.debug(f"[decision_wire] 场景负反馈记录失败(忽略,不阻断决策流): {e}")
     if kind in _taste_eval.SKIP_KINDS:
         # 元循环闸与押注侧共用同一份 SKIP_KINDS(单一来源,防两处独立 check 漂移):
         # 确认"决策偏好"本身不是工作决策(否则确认偏好又生样本、又被口味对账开奖)。

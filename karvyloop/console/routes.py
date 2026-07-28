@@ -1074,6 +1074,10 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     # 「要不要每周自动跑」建议卡。绝不阻塞热路径、任何异常不冒泡。
     from karvyloop.console.schedule_suggest import schedule_suggest_after_drive
     schedule_suggest_after_drive(request.app, req.intent, error=(outcome.error or ""))
+    # docs/94 刀1:场景唤醒(镜像 ws 同款)—— drive 收尾旁路检查当下场景,经统一
+    # 日预算+冷却门出卡;零 LLM、fire-and-forget、任何异常不冒泡。
+    from karvyloop.karvy.scene_gate import scene_check_after_drive
+    scene_check_after_drive(request.app)
 
     # 共创递口(docs/47 §3.1,镜像 ws 同款):建 agent 意图命中 → 回复末尾递"一起共创"口
     # 并挂 OFFERED 会话态;零副作用,失败静默=旧行为。

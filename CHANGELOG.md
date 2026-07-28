@@ -12,6 +12,18 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
 ### Added
+- **Proactive suggestions now fire on what's happening right now — capped at 3 a day.**
+  The "you might want to…" quadrant switched hearts: instead of habit statistics guessing,
+  cards come from the current scene — a task that just failed (retry card), a scheduled job
+  due in the next 15 minutes whose last run failed ("want a test run before the slot?"),
+  and the existing "you've done this by hand N times" nudge now says *why now* ("you just
+  finished X, took ~5 min"). All of it is deterministic — zero model calls. One shared
+  daily budget (default 3) covers every proactive scene card; when it's spent you get a
+  one-line receipt ("that's all for today — ask if you want more") and silence until
+  tomorrow. The same card never repeats (fingerprint memory survives restarts), rejecting a
+  scene card mutes that scene for 7 days, and high-risk or user-requested cards are never
+  counted or blocked — they're not interruptions. The daily habit-mining pass no longer
+  pops its own cards; what it learns is stored as fuel for smarter relevance judging later.
 - **@ someone in your private chat with Karvy and a delegation card is ready to approve.**
   Mentioning a role by name ("@analyst do the weekly numbers") no longer goes nowhere — it
   instantly prepares a filled-in hand-off card for one-tap approval (no model call needed;

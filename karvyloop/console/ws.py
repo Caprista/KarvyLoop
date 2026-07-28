@@ -553,6 +553,11 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     # 全过 → 递「要不要每周自动跑」建议卡。失败不计数、任何异常不冒泡到 drive。
     from karvyloop.console.schedule_suggest import schedule_suggest_after_drive
     schedule_suggest_after_drive(app, intent, error=(outcome.error or ""))
+    # docs/94 刀1:场景唤醒 —— drive 收尾旁路检查当下场景(刚失败/日程将至),经统一
+    # 日预算+指纹冷却+REJECT 负反馈门出卡。确定性零 LLM;成功/失败都查(「刚失败」本身
+    # 就是场景);fire-and-forget,任何异常绝不冒泡 drive。
+    from karvyloop.karvy.scene_gate import scene_check_after_drive
+    scene_check_after_drive(app)
 
 
 # ---- ⑤c 环境感知召回(ambient recall):工作台"料"的主动浮出 ----
@@ -739,8 +744,9 @@ async def _handle_propose_ws(websocket: WebSocket, app, payload: dict) -> None:
         proposal, sent = await pump.boot(recent_n=recent_n)
     # loop-step2b:pump 未接 / 沉默 → 确定性兜底(观察任务看板:失败任务 → 提议重试)。
     # proactive_from_state 内部已 broadcast 给所有 client(含本 client)。
+    # docs/94 刀1:用户显式点了"来点建议"= 用户主动触发,不过场景日预算门。
     if proposal is None:
-        proposal, sent = await proactive_from_state(app)
+        proposal, sent = await proactive_from_state(app, user_initiated=True)
     if proposal is None:
         # 真的没啥可提的:只回本 client 一条空提示(不广播)
         await websocket.send_json({"type": "h2a_proposal", "payload": None, "sent": 0})

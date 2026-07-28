@@ -568,8 +568,9 @@ async def api_propose(request: Request) -> dict[str, Any]:
     if pump is not None:
         proposal, sent = await pump.boot()
     # loop-step2b:pump 未接 / 沉默 → 用确定性的状态观察兜底(任务看板:失败任务 → 提议重试)
+    # docs/94 刀1:用户显式点了"来点建议"= 用户主动触发,不是打扰 → 不过场景日预算门。
     if proposal is None:
-        proposal, sent = await proactive_from_state(request.app)
+        proposal, sent = await proactive_from_state(request.app, user_initiated=True)
     if proposal is None:
         return {"proposal": None, "sent": 0}
     return {"proposal": proposal.to_dict(), "sent": sent}

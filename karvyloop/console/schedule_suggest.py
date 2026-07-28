@@ -116,12 +116,48 @@ async def maybe_suggest_schedule(app: Any, intent: str, *,
         if _already_pending(app, card.proposal_id) is not False:
             counter.mark_suggested(fp, now=n_ts)   # 挂着=已提过,顺手落 already_suggested
             return None
-        # 全过 → **先**落 already_suggested(宁可少提也别乱提:哪怕广播失败也不再提),再出卡
+        # docs/94 刀1:统一唤醒门记账 —— schedule_suggest 也是"场景主动卡"(手动重复 =
+        # 场景信号之一),与源A失败重试/新场景卡扣**同一份**日预算。三门逻辑不动,只加记账。
+        # 门拒(预算用尽 / manual_repeat 场景 REJECT 冷却)→ 不出卡,且**不烧** already_suggested
+        # (今天没轮到 ≠ 永不再提,改天手动再跑到还能提)。
+        from karvyloop.karvy.scene_gate import scene_budget, scene_gate
+        from karvyloop.karvy.scene_signals import SCENE_MANUAL_REPEAT
+        _gate = scene_gate(app)
+        _budget = scene_budget(app)
+        _gate_fp = f"schedule_suggest:{fp}"
+        if _gate.check(_gate_fp, SCENE_MANUAL_REPEAT, budget=_budget, now=n_ts) != "allow":
+            logger.debug("[schedule_suggest] 场景门拦下(预算/冷却),already_suggested 不烧")
+            return None
+        # docs/94 刀1(信号4「刚完成大活」):这张卡本来就会出 —— 若这条 intent 刚跑完一票
+        # 大活(kind=drive、耗时>阈值),basis 前缀场景依据人话「你刚跑完 X(用时约 N 分钟)」。
+        # 不新造建议类型,只让"为什么现在提"更像此刻。fail-soft:算不出就不加。
+        import dataclasses
+        try:
+            from karvyloop.karvy.scene_signals import recent_big_job_basis
+            _sb = recent_big_job_basis(app, text, now=n_ts)
+            if _sb:
+                card = dataclasses.replace(card, basis=(_sb + " " + (card.basis or "")).strip())
+        except Exception:
+            pass
+        # payload 打 scene_kind 标(REJECT 负反馈在拍板咽喉凭它回钩;加性字段,前端预填不受扰)
+        try:
+            card = dataclasses.replace(
+                card, payload={**card.payload, "scene_kind": SCENE_MANUAL_REPEAT})
+        except Exception:
+            pass
+        # 全过 → **先**落 already_suggested + 预算记账(宁可少提也别乱提:广播失败也算提过),再出卡
         counter.mark_suggested(fp, now=n_ts)
+        _charge = _gate.charge(_gate_fp, SCENE_MANUAL_REPEAT, budget=_budget, now=n_ts)
         from karvyloop.console.proposals import broadcast_proposal
         # allow_silence 默认 True,但 schedule_suggest ∈ taste_eval.SKIP_KINDS → try_silence 直接
         # 放行不接管(永远要人点);走正门只为 register + 广播进预判象限。
         await broadcast_proposal(app, card)
+        if _charge.get("exhausted_now"):   # 用尽当刻:一次性轻回执(每天至多一次)
+            try:
+                from karvyloop.karvy.scene_gate import _broadcast_receipt
+                await _broadcast_receipt(app, budget=_budget)
+            except Exception:
+                pass
         logger.info("[schedule_suggest] 手动第 %s 次『%s』→ 递每周自动跑建议卡",
                     entry.get("count"), text[:40])
         return card

@@ -265,6 +265,9 @@
     } else if (msg.type === "silence_notice") {
       // 挣来的静音(docs/49):已授权桶的卡被小卡按你的口味静音处理了 → 轻通知(不打断,可回看)。
       onSilenceNotice(msg.payload);
+    } else if (msg.type === "scene_budget_receipt") {
+      // docs/94 刀1:场景日预算用尽的一次性轻回执(文本后端 i18n 已定稿,纯展示,不打断)。
+      onSceneBudgetReceipt(msg.payload);
     } else if (msg.type === "error") {
       console.warn("[server] error", msg.payload);
     }
@@ -323,6 +326,18 @@
       notice.appendChild(document.createTextNode(" "));
       notice.appendChild(btn);
     }
+    log.appendChild(notice);
+    if (follow) log.scrollTop = log.scrollHeight;
+  }
+  // 场景日预算回执(docs/94 刀1):今天的主动建议出满了 → 一句话轻提示(每天至多一次)。
+  // 文本由后端 i18n 定稿(payload.text),前端纯展示 —— 不新增前端 i18n key,不打断。
+  function onSceneBudgetReceipt(p) {
+    if (!p || !p.text) return;
+    const log = document.getElementById("chat-log");
+    if (!log) return;
+    const follow = isNearBottom(log);
+    const notice = el("div", { class: "chat-notice scene-budget-receipt" });
+    notice.appendChild(document.createTextNode(p.text));
     log.appendChild(notice);
     if (follow) log.scrollTop = log.scrollHeight;
   }

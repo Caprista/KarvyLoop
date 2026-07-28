@@ -792,6 +792,21 @@ _EN = {
         "Brought it to the schedule setup — tell me how often and when (e.g. “every Monday 8am”) "
         "and I'll set it up. I won't pick the timing for you."
     ),
+    # ---- scene 段(docs/94 刀1:场景触发换心脏 —— 当下场景卡文案 + 日预算回执)----
+    "proposal.scene_schedule_due.summary": (
+        "“{title}” fires in {mins} min — it failed last time. Want me to do a test run now?"
+    ),
+    "proposal.scene_schedule_due.basis": (
+        "The scheduled task “{title}” is due within {mins} min, and its last run ended in "
+        "error: {err}. A test run = run the same intent once right now, so if it fails again "
+        "you'll know before the scheduled slot. The schedule itself is untouched."
+    ),
+    "scene.big_job.basis_prefix": (
+        "You just finished “{intent}” (took about {mins} min)."
+    ),
+    "scene.budget.receipt": (
+        "That's all my proactive suggestions for today ({n}/{n}) — if you want more, just ask."
+    ),
     # ---- system-import 段(docs/84 #3 多 agent 系统导入:plan/apply 用户可见文案)----
     "system_import.note.no_llm": (
         "No LLM wired (--no-llm?), so the topology can't be read. You can still import each agent "
@@ -1748,6 +1763,20 @@ _ZH = {
     "receipt.schedule_suggest.accepted": (
         "已把这件事带到定时设置 —— 告诉我多久一次、几点(比如「每周一早八」),我就替你建。"
         "时间我不替你拍。"
+    ),
+    # ---- scene 段(docs/94 刀1:场景触发换心脏 —— 当下场景卡文案 + 日预算回执)----
+    "proposal.scene_schedule_due.summary": (
+        "「{title}」还有 {mins} 分钟就要跑了 —— 上次它失败了。要我现在先试跑一遍吗?"
+    ),
+    "proposal.scene_schedule_due.basis": (
+        "定时任务「{title}」{mins} 分钟内到点,而它上次跑失败了:{err}。"
+        "试跑 = 立刻按原意图先跑一次 —— 再失败你能赶在正点前知道。定时任务本身不动。"
+    ),
+    "scene.big_job.basis_prefix": (
+        "你刚跑完「{intent}」(用时约 {mins} 分钟)。"
+    ),
+    "scene.budget.receipt": (
+        "今天的主动建议就这些({n}/{n})—— 要更多跟我说。"
     ),
     # ---- system-import 段(docs/84 #3 多 agent 系统导入:plan/apply 用户可见文案)----
     "system_import.note.no_llm": (
