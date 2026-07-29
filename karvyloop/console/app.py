@@ -350,6 +350,18 @@ def build_console_app(
                                             f"「已备好」卡过期撤下并弃产物(docs/94 刀2)")
                         except Exception as ie:
                             logger.debug(f"[karvyloop console] 刀2 巡检异常(旁路忽略): {ie}")
+                        # docs/96 刀0:外发草稿兜底扫(每 tick,零 LLM,队列空=瞬间返 0)——
+                        # 聊天/委派收尾已即时升卡;这里兜**非聊天路径**的 drive(定时任务/
+                        # Pursuit 推进/场景预执行)里被咽喉截住的外发调用,保证草稿最迟一个
+                        # tick 内升卡,不悬在队列里等下一次聊天。旁路纪律:异常只 debug。
+                        try:
+                            from karvyloop.console.proposals import raise_outbound_draft_cards
+                            _obn = await raise_outbound_draft_cards(app)
+                            if _obn:
+                                logger.info(f"[karvyloop console] 外发草稿兜底扫:{_obn} 张升卡"
+                                            f"(docs/96 刀0)")
+                        except Exception as ie:
+                            logger.debug(f"[karvyloop console] 外发草稿兜底扫异常(旁路忽略): {ie}")
                         # docs/88 招牌"闭环完整性"外环(真伤1 跑评分离):committed/revised Pursuit —
                         # **廉价门每 tick 确定性 verify**(过则自动 done+回执);贵的 test_pass 门求值 + pursue
                         # 推进受 6h 节流(非热路径,慢侧维护节奏)。放在 idle 判断之前 = 不受 daily 节流影响。
@@ -724,19 +736,24 @@ def build_console_app(
 
         # A:接 MCP server(若 config.yaml 配了 mcp.servers)→ **在主循环上**连,工具注入 agent 工具集。
         # agent 跑在 worker 线程的另一个 asyncio.run 循环里,McpAgentTool 会跨循环桥回这个主循环。
-        # 没配 → 不连(0 影响);连失败 → 降级无 MCP 工具,不挡 console 启动。
-        app.state.mcp_group_ctx = None
+        # docs/96 刀1:连接生命周期抽进 McpConnectionManager(可重入)—— 启动 = 第一次
+        # reconnect;/api/mcp/{preset/apply,server/add,reconnect} 复用同一函数 → 装上即用,
+        # 不再要求重启。失败按 server fail-loud(连得上的照常装,连不上的 name+原因明说)。
+        app.state.mcp_group_ctx = None    # 旧接口占位(生命周期已归 mcp_manager)
+        app.state.mcp_manager = None
         try:
-            from karvyloop.coding.tools.mcp_tool import (
-                connect_mcp_agent_tools, read_mcp_server_configs)
-            mcp_cfgs = read_mcp_server_configs(getattr(app.state, "config_path", "") or "")
-            if mcp_cfgs:
-                group_ctx, mcp_tools = await connect_mcp_agent_tools(mcp_cfgs)
-                app.state.mcp_group_ctx = group_ctx   # 保活,关闭时 __aexit__
-                rk = getattr(app.state, "runtime_kwargs", None)
-                if isinstance(rk, dict):
-                    rk["mcp_tools"] = mcp_tools        # 慢脑工厂取它注入 agent 工具集
-                print(f"[karvyloop console] MCP 接入 {len(mcp_tools)} 个工具: {list(mcp_tools)}", flush=True)
+            from karvyloop.console.mcp_manager import McpConnectionManager
+            _mcp_mgr = McpConnectionManager()
+            app.state.mcp_manager = _mcp_mgr
+            _mcp_res = await _mcp_mgr.reconnect(
+                getattr(app.state, "config_path", "") or "",
+                runtime_kwargs=getattr(app.state, "runtime_kwargs", None))
+            if _mcp_res["tool_names"]:
+                print(f"[karvyloop console] MCP 接入 {len(_mcp_res['tool_names'])} 个工具: "
+                      f"{_mcp_res['tool_names']}", flush=True)
+            for _f in _mcp_res["failed"]:   # fail-loud:连不上哪个 server 明说,不静默装成功
+                print(f"[karvyloop console] ⚠ MCP server '{_f['name']}' 接入失败(其余照常): "
+                      f"{_f['reason']}", flush=True)
         except Exception as e:
             logger.warning(f"[karvyloop console] MCP 接入失败(降级无 MCP 工具,不影响启动): {e}")
 
@@ -758,8 +775,14 @@ def build_console_app(
         _wd = getattr(app.state, "loop_watchdog", None)
         if _wd is not None:
             _wd.stop()
-        # A:关 MCP 会话(断子进程)
-        _gctx = getattr(app.state, "mcp_group_ctx", None)
+        # A:关 MCP 会话(断子进程)—— docs/96 刀1 后归 mcp_manager(强断,限时收栈)
+        _mcp_mgr = getattr(app.state, "mcp_manager", None)
+        if _mcp_mgr is not None:
+            try:
+                await _mcp_mgr.shutdown()
+            except Exception:
+                pass
+        _gctx = getattr(app.state, "mcp_group_ctx", None)   # 旧接口兜底(正常恒 None)
         if _gctx is not None:
             try:
                 await _gctx.__aexit__(None, None, None)
@@ -806,6 +829,7 @@ def build_console_app(
     app.state.workbench = workbench
     app.state.main_loop = main_loop
     app.state.runtime_kwargs = runtime_kwargs or {}
+    app.state.mcp_manager = None   # docs/96 刀1:lifespan 起时接 McpConnectionManager;无 lifespan(单测)= None → MCP 端点退回 requires_restart
     app.state.workbench_app = workbench_app
     app.state.proposal_pump = proposal_pump  # 9.0d:IntentAnalyst → console 推送桥(可 None)
     app.state.proposal_close = None           # 9.0e:entry 接线时设(关 trace/habit sqlite)

@@ -138,6 +138,7 @@ HIGH_RISK_KINDS = frozenset({
     "merge_knowledge",       # 合并后删原知识点(先写后删)——删除语义,护城河资产,与 merge_atoms 同口径
     "inbox_decision",        # 收件箱"需要拍板":报价/合同/付款类 —— 付款语义,永不自动
     "inbox_reply",           # 收件箱"需要回复":外发(邮件)语义的入口 + 信息送达(静音=漏报杀信任)
+    "outbound_draft",        # docs/96 刀0:外发草稿卡 —— ACCEPT 会**真发出去**(比 inbox_reply 的"存草稿"更硬);对外动作绝不被"挣来的静音"自动兑现,逐张拍
     "revise_skill",          # 改写既有 SKILL.md —— 对护城河资产的生产写,与 merge_atoms/confirm_result 同口径
     "mesh_takeover",         # 跨设备接活重跑(docs/74 §6.3):设备"判死"是 lease 推断不是事实,自动接=双跑风险;产品裁决=H2A 确认才动,永不自动
     "memory_conflict",       # D2:推翻你钉住/人审记忆的冲突卡 —— 静音=系统背着你改你确认过的东西(你钉的东西系统绝不背着你改),永不自动

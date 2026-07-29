@@ -44,3 +44,10 @@ from .deontic_gate import (  # noqa: E402
     DeonticScope, DeonticHit, build_scope, classify_forbid,
     deontic_scope, scope_from_system, check_active as check_deontic,
 )
+
+# docs/96 刀0:对外发送永不直发 —— 全局外发判定 + 草稿队列(执行咽喉截,console 升卡)
+from .outbound_gate import (  # noqa: E402
+    OutboundDraftStore, is_outbound_send_tool, note_outbound_draft,
+    register_curated_outbound, register_store as register_outbound_drafts,
+    get_store as get_outbound_drafts,
+)

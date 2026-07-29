@@ -1277,6 +1277,33 @@
         box.appendChild(el("div", { class: "inbox-hint", text: t("inbox.decision_hint") }));
       }
       card.appendChild(box);
+    } else if (payload.kind === "outbound_draft") {
+      // docs/96 刀0 对抗验收 BUG-1(盲拍修):外发的唯一 H2A 检查点,人必须什么都看得见 ——
+      // ① 收件人类键**逐条**铺出(后端 recipient_lines 单一事实源,含嵌套路径,to/cc/bcc/
+      //    reply_to… 一个不落;绝不只显示第一个命中键);
+      // ② 完整入参全文(payload.tool_input 原样 JSON)—— ACCEPT 发出的就是这一份,逐字可核;
+      // ③ 隐藏收件人:参数里有渲不出来的收件人类键 → 详情里点名(卡顶另有红条,折叠也可见)。
+      const box = el("div", { class: "outbound-card" });
+      if (Array.isArray(p.hidden_recipient_keys) && p.hidden_recipient_keys.length) {
+        box.appendChild(el("div", { class: "outbound-hidden-warn",
+          text: t("outbound.hidden_warn") + " · " + p.hidden_recipient_keys.join(", ") }));
+      }
+      const rLines = Array.isArray(p.recipient_lines) ? p.recipient_lines : [];
+      if (rLines.length) {
+        box.appendChild(el("div", { class: "outbound-label", text: t("outbound.recipients_label") }));
+        rLines.forEach((ln) => box.appendChild(
+          el("div", { class: "outbound-recipient", text: String(ln) })));
+      }
+      if (p.subject) box.appendChild(el("div", { class: "outbound-meta",
+        text: t("inbox.subject") + p.subject }));
+      let obArgs = "";
+      try { obArgs = JSON.stringify(p.tool_input, null, 2); } catch (e) { obArgs = String(p.tool_input || ""); }
+      if (obArgs && obArgs !== "undefined" && obArgs !== "null") {
+        box.appendChild(el("div", { class: "outbound-label", text: t("outbound.full_args_label") }));
+        box.appendChild(el("pre", { class: "outbound-args", text: obArgs }));
+      }
+      box.appendChild(el("div", { class: "outbound-hint", text: t("outbound.hint") }));
+      card.appendChild(box);
     } else if (payload.kind === "butler_plan") {
       // 文件管家第一课方案卡:moves 预览(封顶 12 条,余量如实计数,绝不静默漏)+
       // 查重/占位大户发现。数据全来自后端确定性扫描(payload.plan JSON,零 LLM)——
@@ -1486,6 +1513,15 @@
     if (payload.chain_intent) card.setAttribute("data-chain-intent", String(payload.chain_intent));
     if (payload.high_risk) card.setAttribute("data-high-risk", "1");   // 后端 silence.HIGH_RISK_KINDS 判定源
     card.appendChild(el("div", { class: "h2a-summary", text: "💡 " + (payload.summary || t("proposal.no_desc")) }));
+    // docs/96 刀0 对抗验收 BUG-1:外发草稿卡含"渲不出来的收件人类键" → **卡顶红条**
+    // (折叠态也可见,逼展开核对;详情区另把这些键点名 + 完整入参全文铺出)。
+    const _obHid = (payload.kind === "outbound_draft"
+                    && payload.payload && Array.isArray(payload.payload.hidden_recipient_keys))
+                   ? payload.payload.hidden_recipient_keys : [];
+    if (_obHid.length) {
+      card.appendChild(el("div", { class: "outbound-hidden-warn outbound-hidden-top",
+        text: t("outbound.hidden_warn") }));
+    }
     // ── 卡片折叠(docs/90 刀1b,Hardy 卡片模型):默认只留「摘要 + 拍板」,详情/依据收进「详情 ▾」。
     //    看懂摘要直接拍;要深究才点开。安全项(违背/无脑拍)不靠"始终可见"守 —— 靠 decide() 的
     //    强制阅读门(Hardy「像 App 安全协议一样,强制阅读后才能拍」):折叠不损失,安全也不损失。──

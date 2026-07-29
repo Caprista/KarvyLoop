@@ -573,22 +573,78 @@ var KarvySkillsPanelBundle = (function(exports) {
     b.appendChild(_mcpPresetsSection());
   }
   function _mcpPresetsSection() {
-    const wrap = el("div", { class: "mgmt-buysugar" });
-    wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("mcpp.title") }));
-    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.hint") }));
-    const list = el("div", { class: "mgmt-list" });
-    wrap.appendChild(list);
-    const remote = el("div");
-    wrap.appendChild(remote);
-    (async () => {
+    const wrap = el("div");
+    let note = "";
+    const render = async () => {
       const data = await _getJSON("/api/mcp/presets");
+      wrap.innerHTML = "";
       const presets = data && data.presets || [];
-      if (presets.length) {
-        for (const p of presets) list.appendChild(_mcpPresetRow(p));
-      } else list.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") }));
-      remote.appendChild(_mcpRemoteAddSection(data && data.remote_servers || []));
-    })();
+      const status = data && data.mcp_status || null;
+      const hot = !!(data && data.hot_reload);
+      const apps = presets.filter((p) => p && p.category === "app");
+      const channels = presets.filter((p) => !p || p.category !== "app");
+      const appsWrap = el("div", { class: "mgmt-buysugar mcp-apps" });
+      appsWrap.appendChild(el("div", { class: "mgmt-section-title", text: "🔗 " + t("mcpp.apps_title") }));
+      appsWrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.apps_hint") }));
+      if (hot) appsWrap.appendChild(_mcpReconnectRow(render, (s) => {
+        note = s;
+      }, note));
+      const appList = el("div", { class: "mgmt-list" });
+      for (const p of apps) appList.appendChild(_mcpPresetRow(p, status, hot));
+      appsWrap.appendChild(appList);
+      wrap.appendChild(appsWrap);
+      const chWrap = el("div", { class: "mgmt-buysugar" });
+      chWrap.appendChild(el("div", { class: "mgmt-section-title", text: t("mcpp.title") }));
+      chWrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.hint") }));
+      const chList = el("div", { class: "mgmt-list" });
+      if (channels.length) {
+        for (const p of channels) chList.appendChild(_mcpPresetRow(p, status, hot));
+      } else chList.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") }));
+      chWrap.appendChild(chList);
+      wrap.appendChild(chWrap);
+      wrap.appendChild(_mcpRemoteAddSection(data && data.remote_servers || []));
+    };
+    render();
     return wrap;
+  }
+  function _mcpReconnectRow(refresh, setNote, note) {
+    const btn = el("button", {
+      class: "dpref-edit",
+      text: "🔄 " + t("mcpp.reconnect"),
+      onclick: async () => {
+        btn.disabled = true;
+        btn.textContent = t("mcpp.reconnecting");
+        const r = await _postJSON("/api/mcp/reconnect", {});
+        if (r.ok && r.data && r.data.ok) {
+          setNote(t("mcpp.reconnect_done", { n: (r.data.tool_names || []).length }));
+        } else if (r.ok && r.data && (r.data.failed || []).length) {
+          setNote(t(
+            "mcpp.reconnect_partial",
+            { names: r.data.failed.map((f) => f.name).join(", ") }
+          ));
+        } else {
+          setNote(t("mgmt.failed", { err: r.data && (r.data.reason || r.data.detail) || r.status }));
+        }
+        await refresh();
+      }
+    });
+    const row = el("div", { class: "dpref-actions" }, btn);
+    if (note) row.appendChild(el("span", { class: "mgmt-hint", text: " " + note }));
+    return row;
+  }
+  function _presetLight(p, status, hot) {
+    if (p.disabled) return { cls: "provisional", label: "🔒 " + t("mcpp.st_oauth"), failReason: "" };
+    if (status && status.connected && status.connected[p.id])
+      return { cls: "confirmed", label: "🟢 " + t("mcpp.st_connected"), failReason: "" };
+    const f = status && status.failed ? status.failed.find((x) => x && x.name === p.id) : null;
+    if (f) return {
+      cls: "provisional",
+      label: "🔴 " + t("mcpp.st_failed"),
+      failReason: String(f.reason || "")
+    };
+    if (p.configured)
+      return { cls: "provisional", label: hot ? "⚪ " + t("mcpp.st_not_connected") : t("mcpp.st_saved"), failReason: "" };
+    return { cls: "", label: "⚪ " + t("mcpp.st_not_connected"), failReason: "" };
   }
   function _mcpRemoteAddSection(existing) {
     const wrap = el("div", { class: "mgmt-buysugar" });
@@ -623,7 +679,11 @@ var KarvySkillsPanelBundle = (function(exports) {
         tokenInput.value = "";
         if (r.ok && r.data && r.data.ok) {
           btn.textContent = t("mcpp.remote_added") + " · " + (r.data.name || "");
-          msg.textContent = t("mcpp.restart_note");
+          msg.textContent = r.data.connected ? t("mcpp.live_note", { n: (r.data.tools || []).length }) : t("mcpp.restart_note");
+        } else if (r.ok && r.data && r.data.saved && !r.data.connected) {
+          btn.disabled = false;
+          btn.textContent = t("mcpp.remote_add");
+          msg.textContent = t("mcpp.conn_failed", { err: r.data.reason || "" });
         } else {
           btn.disabled = false;
           btn.textContent = t("mcpp.remote_add");
@@ -644,16 +704,30 @@ var KarvySkillsPanelBundle = (function(exports) {
     ));
     return wrap;
   }
-  function _mcpPresetRow(p) {
+  function _mcpPresetRow(p, status, hot) {
     const msg = el("div", { class: "mgmt-hint" });
+    const light = _presetLight(p, status, hot);
+    const lightBadge = el("span", { class: "dpref-badge " + light.cls, text: light.label });
+    if (light.failReason) msg.textContent = t("mcpp.conn_failed", { err: light.failReason });
+    const badges = [
+      el("span", { text: (p.icon || "🔌") + " " + p.name }),
+      " ",
+      lightBadge
+    ];
+    if (p.needs_secret && !p.disabled) {
+      badges.push(" ");
+      badges.push(el("span", { class: "dpref-badge provisional", text: "🔑 " + t("mcpp.needs_secret") }));
+    }
     const inputs = [];
     const paramRow = el("div", { class: "mgmt-row" });
-    for (const prm of p.params || []) {
-      const ph = prm.secret ? p.secret_hint || prm.key : prm.default_resolved ? t("mcpp.param_default_ph", { key: prm.key, def: prm.default_resolved }) : prm.key;
-      const input = el("input", { type: prm.secret ? "password" : "text", placeholder: ph });
-      input.style.flex = "1";
-      inputs.push({ key: prm.key, input });
-      paramRow.appendChild(input);
+    if (!p.disabled) {
+      for (const prm of p.params || []) {
+        const ph = prm.secret ? p.secret_hint || prm.key : prm.default_resolved ? t("mcpp.param_default_ph", { key: prm.key, def: prm.default_resolved }) : prm.key;
+        const input = el("input", { type: prm.secret ? "password" : "text", placeholder: ph });
+        input.style.flex = "1";
+        inputs.push({ key: prm.key, input });
+        paramRow.appendChild(input);
+      }
     }
     const btn = el("button", {
       class: "dpref-confirm",
@@ -666,10 +740,25 @@ var KarvySkillsPanelBundle = (function(exports) {
         }
         btn.disabled = true;
         btn.textContent = t("mcpp.applying");
+        for (const rec of inputs) {
+          if (rec.input.type === "password") rec.input.value = "";
+        }
         const r = await _postJSON("/api/mcp/preset/apply", { preset_id: p.id, params });
         if (r.ok && r.data && r.data.ok) {
           btn.textContent = t("mcpp.connected");
-          msg.textContent = t("mcpp.restart_note");
+          if (r.data.connected) {
+            msg.textContent = t("mcpp.live_note", { n: (r.data.tools || []).length });
+            lightBadge.textContent = "🟢 " + t("mcpp.st_connected");
+            lightBadge.className = "dpref-badge confirmed";
+          } else {
+            msg.textContent = t("mcpp.restart_note");
+          }
+        } else if (r.ok && r.data && r.data.saved && !r.data.connected) {
+          btn.disabled = false;
+          btn.textContent = t("mcpp.update");
+          msg.textContent = t("mcpp.conn_failed", { err: r.data.reason || "" });
+          lightBadge.textContent = "🔴 " + t("mcpp.st_failed");
+          lightBadge.className = "dpref-badge provisional";
         } else {
           btn.disabled = false;
           btn.textContent = p.configured ? t("mcpp.update") : t("mcpp.connect");
@@ -677,29 +766,35 @@ var KarvySkillsPanelBundle = (function(exports) {
         }
       }
     });
-    const badges = [el("span", { text: "🔌 " + p.name })];
-    if (p.configured) {
-      badges.push(" ");
-      badges.push(el("span", { class: "dpref-badge confirmed", text: t("mcpp.connected") }));
-    }
-    if (p.needs_secret) {
-      badges.push(" ");
-      badges.push(el("span", { class: "dpref-badge provisional", text: "🔑 " + t("mcpp.needs_secret") }));
-    }
-    return el(
+    const credLink = p.credential_url && !p.disabled ? el(
       "div",
-      { class: "mgmt-card" },
+      { class: "mc-meta" },
+      el("a", {
+        href: p.credential_url,
+        target: "_blank",
+        rel: "noopener noreferrer",
+        class: "mgmt-inline-link",
+        text: t("mcpp.get_credential")
+      })
+    ) : null;
+    const card = el(
+      "div",
+      { class: "mgmt-card" + (p.disabled ? " mcp-card-disabled" : "") },
       el(
         "div",
         { class: "mc-main" },
         el("div", { class: "mc-name" }, ...badges),
         el("div", { class: "mc-meta", text: p.description || "" }),
-        p.risk_note ? el("div", { class: "mc-meta", text: "⚠ " + p.risk_note }) : null,
+        p.risk_note ? el("div", { class: "mc-meta", text: "🛡 " + t("mcpp.perm_label") + " " + p.risk_note }) : null,
+        p.disabled ? el("div", { class: "mc-meta", text: "⏳ " + (p.disabled_reason || "") }) : null,
+        credLink,
         inputs.length ? paramRow : null,
-        el("div", { class: "dpref-actions" }, btn),
+        p.disabled ? null : el("div", { class: "dpref-actions" }, btn),
         msg
       )
     );
+    if (p.disabled) card.style.opacity = "0.65";
+    return card;
   }
   function _renderCapabilityOverviewCard(body) {
     const actions = el("div", { class: "dpref-actions" });

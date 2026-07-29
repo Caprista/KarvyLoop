@@ -15,11 +15,47 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from typing import Any, Optional
 
 from karvyloop.mcp_client import sanitize_untrusted_text
 
 from ._result import CodingResult
+
+
+class McpUsageCounter:
+    """线程安全的 inflight 计数 + 最近活动时刻(docs/96 刀1:MCP 热加载换组时给旧组
+    **排水**用 —— 旧 server 退休后等在途 tool call 归零再断,不掐正在跑的任务)。
+
+    tool call 从 agent 的 worker 线程发起(跨循环桥回主循环)→ 计数必须线程安全。
+    """
+
+    def __init__(self) -> None:
+        self._n = 0
+        self._lock = threading.Lock()
+        self._last = time.monotonic()
+
+    def acquire(self) -> None:
+        with self._lock:
+            self._n += 1
+            self._last = time.monotonic()
+
+    def release(self) -> None:
+        with self._lock:
+            self._n = max(0, self._n - 1)
+            self._last = time.monotonic()
+
+    @property
+    def inflight(self) -> int:
+        with self._lock:
+            return self._n
+
+    @property
+    def last_activity(self) -> float:
+        """最近一次 acquire/release 的 time.monotonic()(创建时刻打底)。"""
+        with self._lock:
+            return self._last
 
 
 def _first_text(content: list) -> str:
@@ -57,7 +93,8 @@ class McpAgentTool:
     """
 
     def __init__(self, *, server_name: str, mcp_tool_name: str, description: str,
-                 parameters: dict, session: Any, loop: Optional[asyncio.AbstractEventLoop] = None):
+                 parameters: dict, session: Any, loop: Optional[asyncio.AbstractEventLoop] = None,
+                 usage: Optional[McpUsageCounter] = None):
         self.name = f"mcp_{server_name}_{mcp_tool_name}"
         # 描述来自 server(untrusted,remote 尤甚)→ 只当数据:去控制字符+封长。
         # 它改不了权限:capability 下限由工具名 `mcp_` 前缀定(policy.required_mode),
@@ -71,6 +108,8 @@ class McpAgentTool:
         # MCP 会话绑定它创建时的事件循环(console 主循环);agent 跑在 worker 线程的**另一个**
         # asyncio.run 循环里(main_loop.py:asyncio.run(generate_and_run))。所以调用要跨循环桥回去。
         self._loop = loop
+        # docs/96 刀1:同一 server 的工具共享一个 inflight 计数(热加载退休排水用);None=不计
+        self._usage = usage
 
     def is_concurrency_safe(self, inp: dict) -> bool:
         return False   # 保守:MCP 工具可能触网/写文件/有副作用
@@ -84,6 +123,15 @@ class McpAgentTool:
         return await coro
 
     async def __call__(self, inp: dict) -> CodingResult:
+        if self._usage is not None:
+            self._usage.acquire()
+        try:
+            return await self._do_call(inp)
+        finally:
+            if self._usage is not None:
+                self._usage.release()
+
+    async def _do_call(self, inp: dict) -> CodingResult:
         try:
             result = await self._call_tool(inp)
         except Exception as e:
@@ -102,8 +150,10 @@ class McpAgentTool:
 
 
 def mcp_tools_from_session(session: Any, tools_list: list, server_name: str,
-                           loop: Optional[asyncio.AbstractEventLoop] = None) -> dict:
-    """把一个 MCP server 的 list_tools 结果包成 {tool_name: McpAgentTool}(键带 mcp_ 前缀)。"""
+                           loop: Optional[asyncio.AbstractEventLoop] = None,
+                           usage: Optional[McpUsageCounter] = None) -> dict:
+    """把一个 MCP server 的 list_tools 结果包成 {tool_name: McpAgentTool}(键带 mcp_ 前缀)。
+    `usage` 给了则该 server 的所有工具共享同一 inflight 计数(docs/96 刀1 热加载排水)。"""
     out: dict = {}
     for t in tools_list or []:
         tool = McpAgentTool(
@@ -113,6 +163,7 @@ def mcp_tools_from_session(session: Any, tools_list: list, server_name: str,
             parameters=getattr(t, "inputSchema", None) or {"type": "object", "properties": {}},
             session=session,
             loop=loop,
+            usage=usage,
         )
         out[tool.name] = tool
     return out
@@ -223,6 +274,9 @@ def read_mcp_server_configs(config_path: str) -> list:
             transport = str(s.get("transport", "") or "").strip().lower()
             if not name or (not command and not url):
                 continue
+            # docs/96 刀0:策展元数据 —— 该 server 的发送类工具显式名单(短名/全名皆可;
+            # 显式 > 名字猜测,console 接入时登记进 outbound_gate,判不出名字的也拦)。
+            ob = [str(x).strip() for x in (s.get("outbound_tools") or []) if str(x).strip()]
             # remote(streamable HTTP):有 url(或显式 transport: http)
             if url and transport != "stdio":
                 headers = {str(k): _resolve_env_value(v, data)
@@ -231,7 +285,7 @@ def read_mcp_server_configs(config_path: str) -> list:
                 if token and "authorization" not in {k.lower() for k in headers}:
                     headers["Authorization"] = f"Bearer {token}"
                 out.append(McpServerConfig(name=name, url=url, transport="http",
-                                           headers=headers))
+                                           headers=headers, outbound_tools=ob))
                 continue
             # local(stdio):原有形状
             if not command:
@@ -240,11 +294,12 @@ def read_mcp_server_configs(config_path: str) -> list:
             if s.get("env"):
                 env = {str(k): _resolve_env_value(v, data) for k, v in s["env"].items()}
             out.append(McpServerConfig(name=name, command=command,
-                                       args=[str(a) for a in (s.get("args") or [])], env=env))
+                                       args=[str(a) for a in (s.get("args") or [])], env=env,
+                                       outbound_tools=ob))
     except Exception:
         return []
     return out
 
 
-__all__ = ["McpAgentTool", "mcp_tools_from_session", "connect_mcp_agent_tools",
-           "read_mcp_server_configs", "sanitize_untrusted_text"]
+__all__ = ["McpAgentTool", "McpUsageCounter", "mcp_tools_from_session",
+           "connect_mcp_agent_tools", "read_mcp_server_configs", "sanitize_untrusted_text"]

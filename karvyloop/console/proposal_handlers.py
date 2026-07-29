@@ -26,7 +26,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_RESOLVE_CONFLICT, KIND_ROUNDTABLE, KIND_ROUTE_TO_ROLE, KIND_RUN_TASK,
     KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER, KIND_MEMORY_CONFLICT,
     KIND_SCHEDULE_CATCHUP, KIND_SCHEDULE_SUGGEST, KIND_PURSUIT_COMMIT, KIND_PURSUIT_REVISE,
-    KIND_ROUNDTABLE_CONCLUSION, KIND_SCENE_READY,
+    KIND_ROUNDTABLE_CONCLUSION, KIND_SCENE_READY, KIND_OUTBOUND_DRAFT,
 )
 
 logger = logging.getLogger(__name__)
@@ -1113,6 +1113,73 @@ def _scene_ready_reject_handler(app: Any) -> Callable[[object], Tuple[bool, str]
     return handler
 
 
+def _outbound_draft_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """docs/96 刀0:outbound_draft ACCEPT 兑现 —— **真调原工具原参数**把被截住的外发发出去。
+
+    - 事实源 = payload.tool_input(咽喉截获时的完整原始入参,一个字节不改);
+    - 工具从 runtime_kwargs["mcp_tools"](console 启动连好的 MCP 工具集,CodingTool 形状
+      `async __call__(inp)`)按名回查 —— server 已断/工具不在 → 诚实回执"没发出去",不装成功;
+    - K5:只在你 ACCEPT 后被调;REJECT 走 registry 通用丢弃(零副作用,流水在 decision_log);
+    - kind ∈ silence.HIGH_RISK_KINDS:永不被静音自动兑现,逐张拍。
+    - 线程模型:decide 在 FastAPI 线程池 / WS asyncio.to_thread(无运行 loop)→ asyncio.run
+      起临时 loop;McpAgentTool 自带跨循环桥回 console 主循环。意外在事件循环线程被调 →
+      丢旁线程跑(绝不阻塞事件循环,也绝不因此放弃发送)。
+    - 凭证纪律:入参绝不进日志(失败日志只记工具名 + 异常类别)。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        import asyncio
+        from karvyloop import i18n
+        payload = getattr(proposal, "payload", None) or {}
+        tool_name = str(payload.get("tool") or "").strip()
+        tool_input = payload.get("tool_input")
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        if not tool_name:
+            return False, i18n.t("receipt.outbound.tool_missing", tool="?")
+        rk = getattr(app.state, "runtime_kwargs", None) or {}
+        pool = rk.get("mcp_tools")
+        tool = pool.get(tool_name) if isinstance(pool, dict) else None
+        if tool is None or not callable(tool):
+            return False, i18n.t("receipt.outbound.tool_missing", tool=tool_name)
+
+        def _run():
+            return asyncio.run(tool(dict(tool_input)))
+
+        try:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                res = _run()   # 正常路径:线程池/to_thread 线程,无运行 loop
+            else:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    res = ex.submit(_run).result()
+        except Exception as e:
+            logger.warning(f"[outbound_draft] 发送失败 tool={tool_name}: {type(e).__name__}")
+            return False, i18n.t("receipt.outbound.send_failed", tool=tool_name,
+                                 err=f"{type(e).__name__}: {e}"[:200])
+        # CodingResult(ok=False) / 同形 dict 的失败报法也要认(照 executor._tool_call_fact 口径)
+        ok_field = res.get("ok") if isinstance(res, dict) else getattr(res, "ok", None)
+        if ok_field is False:
+            err = ""
+            for key in ("error_message", "error", "message", "reason"):
+                v = res.get(key) if isinstance(res, dict) else getattr(res, key, None)
+                if isinstance(v, str) and v.strip():
+                    err = v.strip()
+                    break
+            return False, i18n.t("receipt.outbound.send_failed", tool=tool_name,
+                                 err=(err or "tool_reported_failure")[:200])
+        # 成功:回执带结果一句摘要(payload 可能是 {"text": …}/str/dict,尽力抽人话)
+        body = res.get("payload") if isinstance(res, dict) else getattr(res, "payload", res)
+        if isinstance(body, dict):
+            gist = str(body.get("text") or body)
+        else:
+            gist = str(body if body is not None else "")
+        gist = gist.replace("\n", " ").strip()[:120]
+        return True, i18n.t("receipt.outbound.sent", tool=tool_name, gist=(gist or "-"))
+    return handler
+
+
 def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool, str]]]:
     """构造 ACCEPT 兑现 handler 表(注入 app.state.proposal_handlers)。
 
@@ -1159,6 +1226,9 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         # ∈ taste_eval.SKIP_KINDS(永不被静音自动兑现);∉ HIGH_RISK_KINDS。
         KIND_SCENE_READY: _scene_ready_handler(app),
         f"{KIND_SCENE_READY}:reject": _scene_ready_reject_handler(app),
+        # docs/96 刀0:外发草稿卡 —— ACCEPT 真调原工具原参数发出(∈ HIGH_RISK_KINDS,
+        # 永不静音,逐张拍);REJECT 走通用丢弃(零副作用,卡里的草稿随卡消失)。
+        KIND_OUTBOUND_DRAFT: _outbound_draft_handler(app),
         KIND_MEMORY_CONFLICT: _memory_conflict_handler(app),     # D2:按你的裁决处置钉住/人审记忆冲突
         KIND_MESH_TAKEOVER: make_mesh_takeover_handler(app),     # mesh 接活:claim→重跑→complete
         KIND_CONFIRM_DECISION_PREF: _confirm_decision_pref_handler(app),

@@ -119,6 +119,27 @@ function _card(title: string, status: string, ...rest: Child[]): HTMLElement {
 
 function _mcpCard(u: any): HTMLElement {
   const bits: Child[] = [el("div", { class: "mc-meta", text: t("unlock.mcp.value") })];
+  // docs/96 刀1「接上你的应用」:生活应用预设的状态小灯(🟢已接 / ⚪未接 / 🔒需OAuth),
+  // 异步填充 —— /api/mcp/presets 拿不到(如 mcp 包缺)就整行不画,主信息不受影响。
+  const appsRow = el("div", { class: "mc-meta unlock-mcp-apps" });
+  bits.push(appsRow);
+  (async () => {
+    try {
+      const d = await _getJSON("/api/mcp/presets");
+      const apps = ((d && d.presets) || []).filter((p: any) => p && p.category === "app");
+      if (!apps.length) return;
+      const st = (d && d.mcp_status) || null;
+      appsRow.appendChild(el("span", { text: t("unlock.mcp.apps_label") + " " }));
+      apps.forEach((p: any, i: number) => {
+        const connected = !!(st && st.connected && st.connected[p.id]);
+        const dot = p.disabled ? "🔒" : (connected ? "🟢" : "⚪");
+        if (i) appsRow.appendChild(document.createTextNode(" "));
+        appsRow.appendChild(el("span", {
+          class: "dpref-badge " + (connected ? "confirmed" : "provisional"),
+          text: dot + " " + (p.icon || "") + " " + p.name }));
+      });
+    } catch (e) { /* 预设目录拿不到 → 小灯行留空 */ }
+  })();
   if (u.status === "missing_dep") {
     bits.push(_enableBlock(u));                                          // 一键启用(主动作)
     bits.push(el("div", { class: "mc-meta unlock-manual", text: t("unlock.or_manual") }));

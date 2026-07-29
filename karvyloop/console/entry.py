@@ -560,6 +560,13 @@ def cmd_console(args: argparse.Namespace) -> int:
         from karvyloop.capability.fs_grants import FsGrantsStore, register_store as _reg_fs
         app.state.fs_grants = FsGrantsStore(_Path.home() / ".karvyloop" / "fs_grants.json")
         _reg_fs(app.state.fs_grants)
+        # docs/96 刀0:对外发送草稿队列(执行咽喉截住的外发调用记这里,drive 收尾升
+        # outbound_draft H2A 卡;fs_grants 同款全局注册模式)。内存即可 —— 卡本体经
+        # proposal_registry 持久化;没注册 store 的场景(CLI 裸跑)咽喉 fail-closed 不放行。
+        from karvyloop.capability.outbound_gate import (
+            OutboundDraftStore, register_store as _reg_outbound)
+        app.state.outbound_drafts = OutboundDraftStore()
+        _reg_outbound(app.state.outbound_drafts)
         # 口味命中率:押注/对账存储(前瞻预测,"越用越像你"的可证明刻度)。落盘。
         from karvyloop.crystallize.taste_eval import TastePredictionStore
         app.state.taste_predictions = TastePredictionStore(

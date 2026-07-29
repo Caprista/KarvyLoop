@@ -308,19 +308,19 @@ _DELETE_PROGRAMS = frozenset({
     "rm", "del", "rmdir", "rd", "erase", "shred", "unlink", "trash", "remove-item", "ri",
 })
 
-# external_send:工具名 token / 命令层邮件程序
-_SEND_STRONG = frozenset({"email", "emails", "smtp", "sendmail", "mail"})
-_SEND_VERB = "send"
-_SEND_NOUNS = frozenset({"message", "messages", "msg", "sms", "dm", "tweet", "mail", "email"})
-_MAIL_PROGRAMS = frozenset({"mail", "sendmail", "mutt", "msmtp", "mailx", "swaks"})
-
-
-def _tool_tokens(tool: str) -> list[str]:
-    # 对抗验收 Gap1:camelCase(placeOrder/transferFunds)先按大小写边界切开再归一,
-    # 否则整串成单 token 绕过匹配(FULL 模式下会漏)。全小写连写(buyshares)无词典切不了,
-    # 是诚实的保守漏拦(未知工具本就 FULL 下限 fail-closed 兜底)。
-    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", tool or "")
-    return [t for t in re.split(r"[^a-z0-9]+", s.lower()) if t]
+# external_send:工具名 token / 命令层邮件程序。
+# docs/96 刀0:token 表与 capability/outbound_gate(全局「对外发送→草稿卡」判定)**共用一份**
+# (单一事实源,别写两份)。表从 send-only 动词扩成 SEND_VERBS × SEND_NOUNS(reply/post/
+# publish/tweet/dm/notify + create_message/create_email 组合形态)—— 对本闸是**纯收紧**
+# (只多拦不少拦;安全方向只收紧不放松)。本闸自身的匹配结构(首 token 读豁免 + 强 token +
+# 动词×名词)不变。
+from .outbound_gate import (  # noqa: E402 —— 表定义唯一住在 outbound_gate(无回环:它不 import 本模块)
+    MAIL_PROGRAMS as _MAIL_PROGRAMS,
+    SEND_NOUNS as _SEND_NOUNS,
+    SEND_STRONG as _SEND_STRONG,
+    SEND_VERBS as _SEND_VERBS,
+    tool_tokens as _tool_tokens,  # camelCase 切分同一实现(对抗验收 Gap1 语义原样保留)
+)
 
 
 def _command_program(command: str) -> str:
@@ -393,8 +393,11 @@ def _match_external_send(tool: str, inp: dict) -> Optional[str]:
         tset = set(tokens)
         if tset & _SEND_STRONG and low != "web_fetch":
             return f"tool:{tool} 含外发 token {sorted(tset & _SEND_STRONG)}"
-        if _SEND_VERB in tset and tset & _SEND_NOUNS:
-            return f"tool:{tool} 含 send + {sorted(tset & _SEND_NOUNS)}"
+        # docs/96 刀0:动词面从单一 send 扩成共享 SEND_VERBS(reply/post/publish/tweet/dm/
+        # notify/create…),名词面同扩 —— 纯收紧(旧命中集是新命中集的子集)。
+        if (tset & _SEND_VERBS) and (tset & _SEND_NOUNS):
+            return (f"tool:{tool} 含外发动词 {sorted(tset & _SEND_VERBS)}"
+                    f" + {sorted(tset & _SEND_NOUNS)}")
     if low == "run_command":
         prog = _command_program(str((inp or {}).get("command", "") or ""))
         if prog in _MAIL_PROGRAMS:

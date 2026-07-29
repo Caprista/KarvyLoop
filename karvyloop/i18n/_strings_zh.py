@@ -758,6 +758,52 @@ ZH = {
     "scene_preexec.product_error_diag": (
         "试跑又失败了。错误:{err}\n\n试跑过程中看到的:\n{text}"
     ),
+    # ---- outbound_draft 段(docs/96 刀0:对外发送永不直发,一律草稿决策卡)----
+    # 执行咽喉给 agent 的合成回执(诚实:不是发送成功,也永远不会自动发出)
+    "outbound.draft_submitted": (
+        "对外发送已截住:本次调用**没有执行**。这份调用({tool},原参数)已包成草稿决策卡"
+        "递交主人拍板 —— 只有主人批准才会发出,绝不会自动发送。你可以继续做别的。"
+    ),
+    "outbound.draft_channel_missing": (
+        "对外发送已截住:本次调用没有执行,且外发草稿通道未接(无 console)—— 草稿未能递交。"
+        "没有发出任何东西,也不会自动发出。"
+    ),
+    # 卡面(summary/basis;对抗验收 BUG-1 盲拍修:收件人全集逐条 + 隐藏收件人红标 + 完整入参可核)
+    "proposal.outbound_draft.summary": "📨 对外发送待你拍板:{what}",
+    "proposal.outbound_draft.hidden_warn": "⚠️[含隐藏收件人,展开核对]",
+    "proposal.outbound_draft.hidden_detail": (
+        "⚠ 这些收件人键没能直接展示 —— 请在下方完整入参里逐一核对:{keys}"
+    ),
+    "proposal.outbound_draft.who_default": "一个 agent",
+    "proposal.outbound_draft.task_default": "(交互会话)",
+    "proposal.outbound_draft.recipient_line": "收件人 {line}",
+    "proposal.outbound_draft.subject": "主题:{v}",
+    "proposal.outbound_draft.body": "内容:{v}",
+    "proposal.outbound_draft.full_args": (
+        "完整入参(ACCEPT 就按这份逐字节原样发出):{v}"
+    ),
+    "proposal.outbound_draft.args_truncated": (
+        " …[已截断 —— 完整入参附在这张卡上]"
+    ),
+    "proposal.outbound_draft.no_details": (
+        "(入参里抽不出收件人/主题 —— 完整原始入参已附在这张卡上,可逐字核对。)"
+    ),
+    "proposal.outbound_draft.basis": (
+        "{who} 在做「{task}」时想调用 {tool} 对外发送,已被截住,**没有发出**。  {details}  "
+        "ACCEPT = 用这份原参数真正发出;REJECT = 丢弃草稿。未经你批准,任何东西都不会发出去(硬规矩)。"
+    ),
+    # 并发拍板(对抗验收 BUG-2):后来的那一路拿到的诚实回执 —— 绝不重复执行
+    "proposal.decide.already_handled": (
+        "这张卡已被另一路处置过(别处已拍)—— 本次没有重复执行任何动作。"
+    ),
+    # ACCEPT 兑现回执
+    "receipt.outbound.sent": "已发出({tool}):{gist}",
+    "receipt.outbound.send_failed": (
+        "发送失败({tool}):{err} —— 草稿没有发出。"
+    ),
+    "receipt.outbound.tool_missing": (
+        "工具 {tool} 已不可用(server 断开?)—— 没有发出任何东西;重新接入渠道后再试。"
+    ),
     # ---- system-import 段(docs/84 #3 多 agent 系统导入:plan/apply 用户可见文案)----
     "system_import.note.no_llm": (
         "未接 LLM(--no-llm?),读不了协作拓扑。可以改走常规 agent 导入,把每个 agent 逐个导进来"

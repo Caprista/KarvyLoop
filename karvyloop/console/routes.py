@@ -1093,10 +1093,10 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         except Exception:
             logger.debug("[api_intent] 共创递口失败(静默)", exc_info=True)
 
-    # fs_grants:这轮 drive 里碰壁的工作区外路径 → 升授权卡(去重;敏感路径永不出卡)
+    # drive 收尾升卡(fs_grants 授权 + docs/96 刀0 外发草稿;两路各自 fail-soft 不阻断)
     try:
-        from karvyloop.console.proposals import raise_fs_access_cards
-        await raise_fs_access_cards(request.app)
+        from karvyloop.console.proposals import raise_drive_wrapup_cards
+        await raise_drive_wrapup_cards(request.app)
     except Exception:
         pass
 

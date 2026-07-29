@@ -63,6 +63,12 @@ class McpServerConfig:
     transport: str = ""                    # ""=按 url/command 推断;或显式 "http"/"stdio"
     headers: dict[str, str] = dataclasses.field(
         default_factory=dict, repr=False)  # http:鉴权 header(repr=False 防泄露)
+    # docs/96 刀0:策展元数据 —— 该 server 的**发送类工具**显式名单(短名或全名皆可)。
+    # 显式标注 > 名字猜测:列进来的工具即使名字判不出外发也会被截成草稿卡。
+    # 纯元数据:连接/调用不吃它。来源 = config.yaml 手写 `outbound_tools:`(read_mcp_
+    # server_configs 读回);预设的策展标注**不落 config**,由 mcp_manager 接入时按
+    # server 名回查 PRESETS 合并登记(老 config 也吃得到)。
+    outbound_tools: list[str] = dataclasses.field(default_factory=list)
 
     @property
     def transport_kind(self) -> str:

@@ -440,25 +440,84 @@ function _openCodingDetail(cap: any): void {
   b.appendChild(_mcpPresetsSection());
 }
 
-// #42 优化:MCP 渠道预设区 —— 知名 server(文件/抓网页/GitHub/记忆/时间/SQLite)一键写进
-// config.yaml。诚实:server 只在 console 启动时连接(无热加载)→ 接入后明示"要重启"。
+// docs/96 刀1:MCP 预设区 ——「接上你的应用」(Notion/GitHub/Gmail…,category=app)+
+// 通用渠道(文件/抓网页/记忆/时间/SQLite,category=channel)。卡片式:图标/人话名/说明/
+// 权限范围/状态灯(已接/未接/连接失败/需OAuth)+ 一键接入。热加载可用时装上即用
+// (响应带真结果);不可用时如实退回"要重启"。手动"重连 server"按钮:server 挂了
+// 不用重启 console。
 function _mcpPresetsSection(): HTMLElement {
-  const wrap = el("div", { class: "mgmt-buysugar" });
-  wrap.appendChild(el("div", { class: "mgmt-section-title", text: t("mcpp.title") }));
-  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.hint") }));
-  const list = el("div", { class: "mgmt-list" });
-  wrap.appendChild(list);
-  const remote = el("div");
-  wrap.appendChild(remote);
-  (async () => {
+  const wrap = el("div");
+  let note = "";   // 最近一次重连的结果话术(render 重画后仍显示)
+  const render = async (): Promise<void> => {
     const data = await _getJSON("/api/mcp/presets");
+    wrap.innerHTML = "";
     const presets = (data && data.presets) || [];
-    if (presets.length) { for (const p of presets) list.appendChild(_mcpPresetRow(p)); }
-    else list.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") }));
+    const status = (data && data.mcp_status) || null;
+    const hot = !!(data && data.hot_reload);
+    const apps = presets.filter((p: any) => p && p.category === "app");
+    const channels = presets.filter((p: any) => !p || p.category !== "app");
+    // ——「接上你的应用」——
+    const appsWrap = el("div", { class: "mgmt-buysugar mcp-apps" });
+    appsWrap.appendChild(el("div", { class: "mgmt-section-title", text: "🔗 " + t("mcpp.apps_title") }));
+    appsWrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.apps_hint") }));
+    if (hot) appsWrap.appendChild(_mcpReconnectRow(render, (s) => { note = s; }, note));
+    const appList = el("div", { class: "mgmt-list" });
+    for (const p of apps) appList.appendChild(_mcpPresetRow(p, status, hot));
+    appsWrap.appendChild(appList);
+    wrap.appendChild(appsWrap);
+    // —— 通用渠道预设(原 #42 区)——
+    const chWrap = el("div", { class: "mgmt-buysugar" });
+    chWrap.appendChild(el("div", { class: "mgmt-section-title", text: t("mcpp.title") }));
+    chWrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.hint") }));
+    const chList = el("div", { class: "mgmt-list" });
+    if (channels.length) { for (const p of channels) chList.appendChild(_mcpPresetRow(p, status, hot)); }
+    else chList.appendChild(el("div", { class: "mgmt-empty", text: t("mcpp.empty") }));
+    chWrap.appendChild(chList);
+    wrap.appendChild(chWrap);
     // remote(vendor 托管)server:贴 URL + 可选 token 就能加(streamable HTTP)
-    remote.appendChild(_mcpRemoteAddSection((data && data.remote_servers) || []));
-  })();
+    wrap.appendChild(_mcpRemoteAddSection((data && data.remote_servers) || []));
+  };
+  render();
   return wrap;
+}
+
+// 手动重连:当场重建 MCP 连接组并重注入工具(正在跑的任务用旧组跑完,新任务用新组)。
+function _mcpReconnectRow(refresh: () => Promise<void>, setNote: (s: string) => void,
+                          note: string): HTMLElement {
+  const btn = el("button", { class: "dpref-edit", text: "🔄 " + t("mcpp.reconnect"),
+    onclick: async () => {
+      (btn as HTMLButtonElement).disabled = true; btn.textContent = t("mcpp.reconnecting");
+      const r = await _postJSON("/api/mcp/reconnect", {});
+      if (r.ok && r.data && r.data.ok) {
+        setNote(t("mcpp.reconnect_done", { n: (r.data.tool_names || []).length }));
+      } else if (r.ok && r.data && (r.data.failed || []).length) {
+        setNote(t("mcpp.reconnect_partial",
+          { names: (r.data.failed as any[]).map((f) => f.name).join(", ") }));
+      } else {
+        setNote(t("mgmt.failed", { err: (r.data && (r.data.reason || r.data.detail)) || r.status }));
+      }
+      await refresh();   // 重画状态灯(note 由闭包保住)
+    } });
+  const row = el("div", { class: "dpref-actions" }, btn);
+  if (note) row.appendChild(el("span", { class: "mgmt-hint", text: " " + note }));
+  return row;
+}
+
+// 状态灯:disabled → 需OAuth;真连上 → 已接;连失败 → 失败+原因;已配置没连上(热加载
+// 不可用)→ 已配置·重启装上;其余 → 未接。
+function _presetLight(p: any, status: any, hot: boolean):
+    { cls: string; label: string; failReason: string } {
+  if (p.disabled) return { cls: "provisional", label: "🔒 " + t("mcpp.st_oauth"), failReason: "" };
+  if (status && status.connected && status.connected[p.id])
+    return { cls: "confirmed", label: "🟢 " + t("mcpp.st_connected"), failReason: "" };
+  const f = status && (status.failed as any[] | undefined)
+    ? (status.failed as any[]).find((x) => x && x.name === p.id) : null;
+  if (f) return { cls: "provisional", label: "🔴 " + t("mcpp.st_failed"),
+                  failReason: String(f.reason || "") };
+  if (p.configured)
+    return { cls: "provisional", label: hot ? "⚪ " + t("mcpp.st_not_connected")
+                                            : t("mcpp.st_saved"), failReason: "" };
+  return { cls: "", label: "⚪ " + t("mcpp.st_not_connected"), failReason: "" };
 }
 
 // remote MCP server(vendor 托管,streamable HTTP):贴 URL + 可选 token。
@@ -487,7 +546,15 @@ function _mcpRemoteAddSection(existing: any[]): HTMLElement {
       tokenInput.value = "";   // token 只发一次,不留在输入框
       if (r.ok && r.data && r.data.ok) {
         btn.textContent = t("mcpp.remote_added") + " · " + (r.data.name || "");
-        msg.textContent = t("mcpp.restart_note");   // 诚实:启动时才连,要重启才装上
+        // docs/96 刀1:热加载真结果 —— 连上=装上即用;无 manager=如实"要重启"
+        msg.textContent = r.data.connected
+          ? t("mcpp.live_note", { n: (r.data.tools || []).length })
+          : t("mcpp.restart_note");
+      } else if (r.ok && r.data && r.data.saved && !r.data.connected) {
+        // 配置已保存但连不上:fail-loud 明说原因,别装成功
+        (btn as HTMLButtonElement).disabled = false;
+        btn.textContent = t("mcpp.remote_add");
+        msg.textContent = t("mcpp.conn_failed", { err: r.data.reason || "" });
       } else {
         (btn as HTMLButtonElement).disabled = false;
         btn.textContent = t("mcpp.remote_add");
@@ -502,45 +569,80 @@ function _mcpRemoteAddSection(existing: any[]): HTMLElement {
   return wrap;
 }
 
-function _mcpPresetRow(p: any): HTMLElement {
+// docs/96 刀1:一张预设卡 —— 图标+人话名 / 状态灯 / 一句话说明 / 权限范围人话 /
+// 凭证指路链接 / 一键接入(disabled 占位卡只亮"需 OAuth"灯 + 诚实文案,不给按钮撞墙)。
+function _mcpPresetRow(p: any, status: any, hot: boolean): HTMLElement {
   const msg = el("div", { class: "mgmt-hint" });
+  const light = _presetLight(p, status, hot);
+  const lightBadge = el("span", { class: "dpref-badge " + light.cls, text: light.label });
+  if (light.failReason) msg.textContent = t("mcpp.conn_failed", { err: light.failReason });
+  const badges: (HTMLElement | string | null)[] = [
+    el("span", { text: (p.icon || "🔌") + " " + p.name }), " ", lightBadge];
+  if (p.needs_secret && !p.disabled) {
+    badges.push(" ");
+    badges.push(el("span", { class: "dpref-badge provisional", text: "🔑 " + t("mcpp.needs_secret") }));
+  }
   // 参数输入(有才显):folder 之类明文;token 之类走 password,值只发一次、绝不回显
   const inputs: Array<{ key: string; input: HTMLInputElement }> = [];
   const paramRow = el("div", { class: "mgmt-row" });
-  for (const prm of p.params || []) {
-    const ph = prm.secret ? (p.secret_hint || prm.key)
-      : (prm.default_resolved ? t("mcpp.param_default_ph", { key: prm.key, def: prm.default_resolved }) : prm.key);
-    const input = el("input", { type: prm.secret ? "password" : "text", placeholder: ph }) as HTMLInputElement;
-    input.style.flex = "1";
-    inputs.push({ key: prm.key, input });
-    paramRow.appendChild(input);
+  if (!p.disabled) {
+    for (const prm of p.params || []) {
+      const ph = prm.secret ? (p.secret_hint || prm.key)
+        : (prm.default_resolved ? t("mcpp.param_default_ph", { key: prm.key, def: prm.default_resolved }) : prm.key);
+      const input = el("input", { type: prm.secret ? "password" : "text", placeholder: ph }) as HTMLInputElement;
+      input.style.flex = "1";
+      inputs.push({ key: prm.key, input });
+      paramRow.appendChild(input);
+    }
   }
   const btn = el("button", { class: "dpref-confirm", text: p.configured ? t("mcpp.update") : t("mcpp.connect"),
     onclick: async () => {
       const params: Record<string, string> = {};
       for (const rec of inputs) { const v = rec.input.value.trim(); if (v) params[rec.key] = v; }
       (btn as HTMLButtonElement).disabled = true; btn.textContent = t("mcpp.applying");
+      for (const rec of inputs) { if (rec.input.type === "password") rec.input.value = ""; }  // 密钥只发一次
       const r = await _postJSON("/api/mcp/preset/apply", { preset_id: p.id, params: params });
       if (r.ok && r.data && r.data.ok) {
         btn.textContent = t("mcpp.connected");
-        msg.textContent = t("mcpp.restart_note");   // 诚实:启动时才连,要重启才装上
+        if (r.data.connected) {
+          // 热加载真结果:装上即用(工具数如实报),状态灯就地转绿
+          msg.textContent = t("mcpp.live_note", { n: (r.data.tools || []).length });
+          lightBadge.textContent = "🟢 " + t("mcpp.st_connected");
+          lightBadge.className = "dpref-badge confirmed";
+        } else {
+          msg.textContent = t("mcpp.restart_note");   // 无热加载(manager 不在):如实要重启
+        }
+      } else if (r.ok && r.data && r.data.saved && !r.data.connected) {
+        // 配置已保存但连不上:fail-loud 明说原因,状态灯转红,别装成功
+        (btn as HTMLButtonElement).disabled = false;
+        btn.textContent = t("mcpp.update");
+        msg.textContent = t("mcpp.conn_failed", { err: r.data.reason || "" });
+        lightBadge.textContent = "🔴 " + t("mcpp.st_failed");
+        lightBadge.className = "dpref-badge provisional";
       } else {
         (btn as HTMLButtonElement).disabled = false;
         btn.textContent = p.configured ? t("mcpp.update") : t("mcpp.connect");
         msg.textContent = t("mgmt.failed", { err: (r.data && (r.data.reason || r.data.detail)) || r.status });
       }
     } });
-  const badges: (HTMLElement | string | null)[] = [el("span", { text: "🔌 " + p.name })];
-  if (p.configured) { badges.push(" "); badges.push(el("span", { class: "dpref-badge confirmed", text: t("mcpp.connected") })); }
-  if (p.needs_secret) { badges.push(" "); badges.push(el("span", { class: "dpref-badge provisional", text: "🔑 " + t("mcpp.needs_secret") })); }
-  return el("div", { class: "mgmt-card" },
+  // 凭证指路:要密钥的卡给"怎么拿凭证"外链(只作 <a> 展示,不进请求逻辑)
+  const credLink = (p.credential_url && !p.disabled)
+    ? el("div", { class: "mc-meta" },
+        el("a", { href: p.credential_url, target: "_blank", rel: "noopener noreferrer",
+                  class: "mgmt-inline-link", text: t("mcpp.get_credential") }))
+    : null;
+  const card = el("div", { class: "mgmt-card" + (p.disabled ? " mcp-card-disabled" : "") },
     el("div", { class: "mc-main" },
       el("div", { class: "mc-name" }, ...badges),
       el("div", { class: "mc-meta", text: p.description || "" }),
-      p.risk_note ? el("div", { class: "mc-meta", text: "⚠ " + p.risk_note }) : null,
+      p.risk_note ? el("div", { class: "mc-meta", text: "🛡 " + t("mcpp.perm_label") + " " + p.risk_note }) : null,
+      p.disabled ? el("div", { class: "mc-meta", text: "⏳ " + (p.disabled_reason || "") }) : null,
+      credLink,
       inputs.length ? paramRow : null,
-      el("div", { class: "dpref-actions" }, btn),
+      p.disabled ? null : el("div", { class: "dpref-actions" }, btn),
       msg));
+  if (p.disabled) card.style.opacity = "0.65";   // 占位卡可见但压暗(诚实的"还没通")
+  return card;
 }
 
 // P3-d:能力合一清单 —— 此前工具能力(capability 决策链)和技能授予(grants/锁)两套账,

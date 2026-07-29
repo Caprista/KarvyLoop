@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -455,10 +455,34 @@ async def api_coding_config(request: Request) -> dict[str, Any]:
 
 
 # ---- #42 优化:MCP 渠道预设(拧开就有水)—— 一键把知名 MCP server 写进 config.yaml ----
+# docs/96 刀1:apply/add 成功后**热加载**(McpConnectionManager.reconnect,装上即用);
+# manager 不在(console 未跑完整 lifespan,如单测)→ 如实退回 requires_restart=True。
 
 class McpPresetApplyRequest(BaseModel):
     preset_id: str = Field(..., min_length=1, max_length=64)
     params: dict[str, str] = Field(default_factory=dict)   # 如 {folder}/{token};绝不回显
+
+
+async def _mcp_hot_reconnect(app) -> Optional[dict[str, Any]]:
+    """有 manager(lifespan 起过)→ 真重连,返回真结果;没有 → None(调用方退回
+    requires_restart 的诚实话术)。跑在 console 主循环上(MCP 会话生命周期所在)。"""
+    mgr = getattr(app.state, "mcp_manager", None)
+    if mgr is None:
+        return None
+    cfgp = getattr(app.state, "config_path", "") or ""
+    return await mgr.reconnect(cfgp, runtime_kwargs=getattr(app.state, "runtime_kwargs", None))
+
+
+def _mcp_server_outcome(res: dict[str, Any], name: str) -> dict[str, Any]:
+    """从 reconnect 结果里挑出某个 server 的真结局:connected+工具 或 失败原因。"""
+    for c in res.get("connected", []):
+        if c.get("name") == name:
+            return {"connected": True, "tools": list(c.get("tools", [])), "reason": ""}
+    for f in res.get("failed", []):
+        if f.get("name") == name:
+            return {"connected": False, "tools": [], "reason": f.get("reason", "")}
+    return {"connected": False, "tools": [],
+            "reason": f"server '{name}' not found after reconnect"}
 
 
 @router.get("/mcp/presets")
@@ -466,7 +490,8 @@ def api_mcp_presets(request: Request) -> dict[str, Any]:
     """渠道预设目录 + 哪些已在 config.yaml 配好(只比对名字,**绝不回显 env/密钥**)。
     另带已配置的 remote(http)server 列表(只有 name / 去 query 的 url / 有没有凭证
     这个 bool,**绝不含 token/headers 值**)。
-    诚实:MCP server 只在 console 启动时连(app.py lifespan),无热加载 → requires_restart。"""
+    docs/96 刀1:带 mcp_status(哪些 server 真连上/连失败+原因)—— 前端状态灯数据源;
+    manager 不在(无 lifespan)时 mcp_status=None + requires_restart=True(诚实)。"""
     from karvyloop.console.mcp_presets import (
         configured_names, configured_remote_servers, list_presets)
     cfgp = getattr(request.app.state, "config_path", "") or ""
@@ -477,16 +502,22 @@ def api_mcp_presets(request: Request) -> dict[str, Any]:
     except Exception:
         pass
     names = configured_names(cfgp)
+    mgr = getattr(request.app.state, "mcp_manager", None)
+    status = mgr.status() if mgr is not None else None
     return {"presets": [{**p, "configured": p["id"] in names} for p in list_presets(ws)],
             "remote_servers": configured_remote_servers(cfgp),
-            "requires_restart": True}
+            "mcp_status": status,
+            "hot_reload": status is not None,
+            "requires_restart": status is None}
 
 
 @router.post("/mcp/preset/apply")
-def api_mcp_preset_apply(req: McpPresetApplyRequest, request: Request) -> dict[str, Any]:
+async def api_mcp_preset_apply(req: McpPresetApplyRequest, request: Request) -> dict[str, Any]:
     """把一个预设 upsert 进 config.yaml 的 mcp.servers。密钥只落 config.yaml(它本来就是
-    密钥之家,仓外);响应**绝不回显 params/token**。工具只在启动时连接(无热加载)→
-    如实返回 requires_restart=True,不假装已生效。"""
+    密钥之家,仓外);响应**绝不回显 params/token**。
+    docs/96 刀1:写完当场热加载(reconnect)→ 返回该 server 的**真结果**
+    (connected+工具数 / 连失败+原因,fail-loud 不假装已生效);无 manager 时退回
+    requires_restart=True。disabled 预设(如需 OAuth 的 Gmail 占位)fail-closed。"""
     from karvyloop.console.mcp_presets import apply_preset
     cfgp = getattr(request.app.state, "config_path", "") or ""
     if not cfgp:
@@ -494,7 +525,13 @@ def api_mcp_preset_apply(req: McpPresetApplyRequest, request: Request) -> dict[s
     ok, reason = apply_preset(req.preset_id, dict(req.params or {}), cfgp)
     if not ok:
         return {"ok": False, "reason": reason}
-    return {"ok": True, "requires_restart": True, "preset_id": req.preset_id}
+    res = await _mcp_hot_reconnect(request.app)
+    if res is None:
+        return {"ok": True, "requires_restart": True, "preset_id": req.preset_id}
+    out = _mcp_server_outcome(res, req.preset_id)
+    return {"ok": out["connected"], "saved": True, "connected": out["connected"],
+            "tools": out["tools"], "reason": out["reason"],
+            "requires_restart": False, "preset_id": req.preset_id}
 
 
 class McpRemoteAddRequest(BaseModel):
@@ -506,11 +543,12 @@ class McpRemoteAddRequest(BaseModel):
 
 
 @router.post("/mcp/server/add")
-def api_mcp_server_add(req: McpRemoteAddRequest, request: Request) -> dict[str, Any]:
+async def api_mcp_server_add(req: McpRemoteAddRequest, request: Request) -> dict[str, Any]:
     """"贴个 URL + 可选 token"加 remote MCP server(vendor 托管,streamable HTTP)。
     upsert 进 config.yaml 的 mcp.servers(`{name, url, transport: http, [token]}`)。
     凭证只落 config.yaml(仓外,export 排除);响应**绝不回显 token**;
-    校验失败的 reason 只含参数名/URL host,不含 token 值。无热加载 → requires_restart。"""
+    校验失败的 reason 只含参数名/URL host,不含 token 值。
+    docs/96 刀1:写完当场热加载 → 返回该 server 真结果;无 manager 时退回 requires_restart。"""
     from karvyloop.console.mcp_presets import add_remote_server
     cfgp = getattr(request.app.state, "config_path", "") or ""
     if not cfgp:
@@ -518,7 +556,28 @@ def api_mcp_server_add(req: McpRemoteAddRequest, request: Request) -> dict[str, 
     ok, reason, name = add_remote_server(req.url, req.name, req.token, cfgp)
     if not ok:
         return {"ok": False, "reason": reason}
-    return {"ok": True, "requires_restart": True, "name": name}
+    res = await _mcp_hot_reconnect(request.app)
+    if res is None:
+        return {"ok": True, "requires_restart": True, "name": name}
+    out = _mcp_server_outcome(res, name)
+    return {"ok": out["connected"], "saved": True, "connected": out["connected"],
+            "tools": out["tools"], "reason": out["reason"],
+            "requires_restart": False, "name": name}
+
+
+@router.post("/mcp/reconnect")
+async def api_mcp_reconnect(request: Request) -> dict[str, Any]:
+    """手动"重连 MCP"(docs/96 刀1):server 挂了/改了 config 不用重启 console ——
+    当场重建连接组并重注入工具(正在跑的 drive 继续用旧组跑完,新 drive 用新组)。
+    按 server fail-loud:连不上哪个明说(name+原因,凭证已抹)。"""
+    res = await _mcp_hot_reconnect(request.app)
+    if res is None:
+        return {"ok": False, "requires_restart": True,
+                "reason": "hot reload unavailable (console lifespan not running) — "
+                          "restart to load MCP servers · 热加载不可用(console 未跑完整"
+                          "生命周期),重启后生效"}
+    return {"ok": res["ok"], "connected": res["connected"], "failed": res["failed"],
+            "tool_names": res["tool_names"], "requires_restart": False}
 
 
 def _skill_status(body: str) -> str:

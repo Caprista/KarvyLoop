@@ -24,6 +24,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -120,6 +121,12 @@ KIND_SCHEDULE_SUGGEST = "schedule_suggest"
 # REJECT/过期 = staging 丢弃 + scene_kind 负反馈(payload 带标,拍板咽喉回钩 7 天冷却)。
 # 它占刀1 场景卡**同一份日预算**(emit_gated 记账:预执行成功才出卡才扣;失败/放弃不扣不出)。
 KIND_SCENE_READY = "scene_ready"
+# docs/96 刀0「对外发送永不直发」:agent 调用被判定为外发类的工具(MCP 发信/发帖/私信等)
+# → 执行咽喉(atoms/executor)截住不真执行,完整入参包成这张**草稿决策卡**。
+# ACCEPT = handler 真调原工具原参数发出(回执:成/败人话);REJECT = 丢弃(零副作用,流水在
+# decision_log)。∈ silence.HIGH_RISK_KINDS:对外动作绝不被"挣来的静音"自动兑现,逐张拍。
+# 域 deontic_forbid 硬闸叠加在截点之前(域里禁了外发 → authorize 直接拒,连这张卡都不出)。
+KIND_OUTBOUND_DRAFT = "outbound_draft"
 
 ALL_KINDS = (
     KIND_CRYSTALLIZE_SKILL,
@@ -144,6 +151,7 @@ ALL_KINDS = (
     KIND_SPEND_BUDGET_ALERT,
     KIND_SCHEDULE_SUGGEST,
     KIND_SCENE_READY,
+    KIND_OUTBOUND_DRAFT,
 )
 
 # Handler 协议:(proposal) -> (ok: bool, detail: str)。注入式,默认无副作用。
@@ -180,6 +188,12 @@ class PendingProposalRegistry:
     """
 
     def __init__(self, persist_path=None) -> None:
+        # docs/96 刀0 对抗验收 BUG-2:decide 并发双兑现(WS+REST/双设备两路同时 ACCEPT 同一
+        # 张卡,都过 get() → 双 dispatch → 邮件/付款发两遍)。处置权必须原子:remove(取走)
+        # 加锁,decide **先 pop 后 dispatch** —— 拿到卡的那一路才兑现,后来者返"已被处置"。
+        # 全 kind 生效(双兑现是通用病,不只 outbound_draft)。threading.Lock:decide 跑在
+        # FastAPI 线程池 / WS asyncio.to_thread 的 OS 线程上,GIL 不保证 检查+pop 的原子性。
+        self._lock = threading.Lock()
         self._pending: Dict[str, object] = {}
         # 卡龄元数据(docs/43 ⑤a DEFER 老化):pid → {"created_ts": float, "deferred_at": float|None}。
         # 放 registry 不放 Proposal 本体(Proposal 是 frozen 语义对象;挂龄是登记表的事)。
@@ -329,15 +343,17 @@ class PendingProposalRegistry:
         return self._pending.get(proposal_id)
 
     def remove(self, proposal_id: str) -> Optional[object]:
-        """移除并返回(ACCEPT 兑现后 / REJECT 丢弃)。卡龄元数据随卡清;链上最后一张
-        离开时链意图随之清(链根先被拍掉不清 —— 剩下的派生卡还要靠它显示组头)。"""
-        removed = self._pending.pop(proposal_id, None)
-        self._meta.pop(proposal_id, None)
-        if removed is not None:
-            cid = chain_root_of(removed)
-            if cid and not any(chain_root_of(p) == cid for p in self._pending.values()):
-                self._chain_meta.pop(cid, None)
-            self._save()
+        """**原子**移除并返回(ACCEPT 兑现前的取走 / REJECT 丢弃;BUG-2 修)。并发两路只有
+        一路拿到非 None = 只有一路有处置权。卡龄元数据随卡清;链上最后一张离开时链意图
+        随之清(链根先被拍掉不清 —— 剩下的派生卡还要靠它显示组头)。"""
+        with self._lock:
+            removed = self._pending.pop(proposal_id, None)
+            self._meta.pop(proposal_id, None)
+            if removed is not None:
+                cid = chain_root_of(removed)
+                if cid and not any(chain_root_of(p) == cid for p in self._pending.values()):
+                    self._chain_meta.pop(cid, None)
+                self._save()
         return removed
 
     def pending(self) -> List[object]:
@@ -410,9 +426,11 @@ class PendingProposalRegistry:
     ) -> Optional[DispatchResult]:
         """按用户决策处置一条 Proposal(PR-3)。
 
-        - ACCEPT → 查回 Proposal → 按 kind dispatch 兑现 → 移除 → 返 DispatchResult。
-        - REJECT → 移除丢弃 → 返 DispatchResult(ok=True, detail=reject 钩子的人话回执,
-          无钩子/回执空 → 通用 "rejected")。
+        - ACCEPT → 查回 Proposal → **原子取走(先 pop 后 dispatch,BUG-2)** → 按 kind
+          dispatch 兑现 → 返 DispatchResult。并发两路 ACCEPT 同一张卡:先拿到的那路兑现,
+          后来者返 ok=False + "已被处置"回执 —— 邮件/付款绝不发两遍(全 kind 生效)。
+        - REJECT → 原子移除丢弃 → 返 DispatchResult(ok=True, detail=reject 钩子的人话回执,
+          无钩子/回执空 → 通用 "rejected");并发后来者同上返"已被处置"。
         - DEFER  → 留在 registry(下次再呈现)→ 返 DispatchResult(ok=True, "deferred")。
 
         edits(#42 优化①「改了再批」):ACCEPT 时把用户就地改过的 payload 字段**覆盖后兑现**。
@@ -428,7 +446,13 @@ class PendingProposalRegistry:
             return None
 
         if decision == "REJECT":
-            self.remove(proposal_id)
+            # BUG-2:原子取走 —— 并发另一路已处置(ACCEPT 兑现/REJECT 丢弃)→ 诚实回执,不重复
+            taken = self.remove(proposal_id)
+            if taken is None:
+                from karvyloop import i18n as _i18n
+                return DispatchResult(proposal_id, getattr(proposal, "kind", ""), False,
+                                      _i18n.t("proposal.decide.already_handled"))
+            proposal = taken
             kind = getattr(proposal, "kind", "")
             # REJECT 生命周期钩子(业界做法:卡被驳回时给来源一次清理机会,如判型建的
             # pursuit 记录随卡清掉不留垃圾)。约定 key = f"{kind}:reject",协议同
@@ -468,10 +492,16 @@ class PendingProposalRegistry:
             if (handlers or {}).get(kind) is None:
                 logger.info("[proposal] ACCEPT %s kind=%s 无 handler → 卡保留待决,不吞", proposal_id, kind)
                 return DispatchResult(proposal_id, kind, False, NO_HANDLER_KEEP_DETAIL)
-            eff = apply_payload_edits(proposal, edits) if edits else proposal
-            result = dispatch_accept(eff, handlers or {})
-            self.remove(proposal_id)  # 兑现后离开待决议表
-            return result
+            # BUG-2(对抗验收):**先原子 pop,拿到者才 dispatch** —— 旧序(先 dispatch 后
+            # remove)下 WS+REST/双设备两路并发都过 get() → 双 dispatch → 邮件发两遍/付款
+            # 付两遍。后来者 pop 到 None → 诚实回执"已被处置",零副作用。
+            taken = self.remove(proposal_id)
+            if taken is None:
+                from karvyloop import i18n as _i18n
+                return DispatchResult(proposal_id, kind, False,
+                                      _i18n.t("proposal.decide.already_handled"))
+            eff = apply_payload_edits(taken, edits) if edits else taken
+            return dispatch_accept(eff, handlers or {})
 
         return DispatchResult(proposal_id, getattr(proposal, "kind", ""), False, f"unknown decision: {decision}")
 
@@ -1249,6 +1279,210 @@ def proposal_for_scene_ready(
     )
 
 
+# outbound_draft:入参里"收件人/主题/正文"的抽取(确定性,零 LLM)。
+# **对抗验收 BUG-1(盲拍)**:旧版只显示第一个命中键 → cc/bcc/reply_to 全被丢,prompt 注入把
+# bcc:["exfil@…"] 塞进参数在唯一 H2A 检查点隐形通过。修死口径:
+#   - **每个**收件人类键逐条铺出(递归扫嵌套,深度 3;绝不"首个非空即返");
+#   - summary 收件人 = 全集拼接(超量截断带 +N,绝不静默丢);
+#   - 参数里出现**展示不出来**的收件人类键(值是嵌套结构等渲不成串)→ hidden_recipient_keys
+#     红标「含隐藏收件人,展开核对」(保守检测:键名 token 含 to/cc/bcc/recipient 等都算)。
+# 展示只是人话面 —— handler 兑现永远用 payload.tool_input 完整原参,不用这些摘要。
+_OB_SUBJECT_KEYS = ("subject", "title", "topic")
+_OB_BODY_KEYS = ("body", "message", "text", "content", "html", "markdown", "draft")
+# 收件人类键判定(保守):键名切 token 后含任一 → 算收件人键(reply_to/to_addrs/send_to 都中;
+# "topic"/"token" 整 token 不等于 "to",不误中)。
+_OB_RECIPIENT_KEY_TOKENS = frozenset({
+    "to", "cc", "bcc", "recipient", "recipients", "rcpt", "addressee",
+    "dest", "destination",
+})
+# 地址类键(展示面,收件人键的超集):渠道/账号型收件方也逐条铺出。
+_OB_ADDRESS_KEY_TOKENS = _OB_RECIPIENT_KEY_TOKENS | frozenset({
+    "channel", "chat", "phone", "number", "user", "username", "handle",
+    "email", "address", "target",
+})
+_OB_WALK_DEPTH = 3        # 嵌套扫描深度(保守够用;更深的塞法值渲不出→照样进 hidden 红标)
+_OB_MAX_SHOWN = 8         # summary/明细逐条铺出的上限(超出截断带 +N,绝不静默丢)
+
+
+def _ob_key_tokens(key: str) -> set:
+    """键名 → token 集(camelCase/下划线/连字符都切;与工具名切分同法,本地实现避免跨层 import)。"""
+    import re as _re
+    s = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(key or ""))
+    return {t for t in _re.split(r"[^a-z0-9]+", s.lower()) if t}
+
+
+def _ob_render_value(v) -> str:
+    """值 → 可核字符串;渲不成(dict/嵌套列表等)→ ""(调用方把该键打进 hidden 红标)。"""
+    try:
+        if isinstance(v, str):
+            return v.strip()
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return str(v)
+        if isinstance(v, (list, tuple)):
+            parts = [x.strip() if isinstance(x, str) else
+                     (str(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else "")
+                     for x in v]
+            if any(p == "" for p in parts):
+                return ""   # 列表里混着渲不出的元素 → 整键当隐藏(宁红标勿半显)
+            return ", ".join(p for p in parts if p)
+        return ""
+    except Exception:
+        return ""
+
+
+def _ob_walk_address_keys(obj, *, _depth: int = 0, _path: str = "") -> List[tuple]:
+    """递归收集地址/收件人类键 → [(路径键, 渲染串或"", 是否收件人关键键)]。
+    深度封顶 _OB_WALK_DEPTH;list 里的 dict 也扫(常见 {"personalizations":[{"to":…}]} 形态)。"""
+    out: List[tuple] = []
+    if _depth > _OB_WALK_DEPTH:
+        return out
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            toks = _ob_key_tokens(k)
+            path = f"{_path}.{k}" if _path else str(k)
+            if toks & _OB_ADDRESS_KEY_TOKENS:
+                if v is None or v == "" or (isinstance(v, (list, tuple)) and not v):
+                    continue   # 空值藏不了收件人,不铺也不红标
+                out.append((path, _ob_render_value(v), bool(toks & _OB_RECIPIENT_KEY_TOKENS)))
+                if isinstance(v, (dict, list, tuple)):
+                    out.extend(_ob_walk_address_keys(v, _depth=_depth + 1, _path=path))
+            elif isinstance(v, (dict, list, tuple)):
+                out.extend(_ob_walk_address_keys(v, _depth=_depth + 1, _path=path))
+    elif isinstance(obj, (list, tuple)):
+        for i, item in enumerate(obj):
+            if isinstance(item, (dict, list, tuple)):
+                out.extend(_ob_walk_address_keys(item, _depth=_depth + 1,
+                                                 _path=f"{_path}[{i}]"))
+    return out
+
+
+def _ob_pick(inp: dict, keys: tuple) -> str:
+    """(主题/正文用)按键序取第一个非空可渲染值。收件人**不许**走这条首中即返路径(BUG-1)。"""
+    for k in keys:
+        v = (inp or {}).get(k)
+        if v is None or v == "":
+            continue
+        s = _ob_render_value(v)
+        if s:
+            return s
+    return ""
+
+
+def proposal_for_outbound_draft(
+    *,
+    tool: str,
+    tool_input: dict,
+    ts: float,
+    atom_id: str = "",
+    intent: str = "",
+    draft_id: str = "",
+    strength: float = 0.9,
+):
+    """docs/96 刀0:被截住的对外发送调用 → 「外发草稿」决策卡。
+
+    - summary =「要发给谁/干什么」:收件人**全集拼接**(BUG-1:绝不单键;超量截断带 +N)
+      + 主题;都抽不出 → 工具名 + server 名。参数里有展示不出来的收件人类键 →
+      summary 顶上红标「⚠ 含隐藏收件人,展开核对」+ payload.hidden_recipient_keys
+      (前端卡顶红条同源)。
+    - 详情(basis + payload.recipient_lines)= 完整可核:**每个**收件人类键逐条铺出
+      (含嵌套,深度 3)+ 主题/正文 + 完整入参 JSON;前端专属分支再把 tool_input 全文
+      铺在详情区(刀1b 折叠形态:摘要可见收件人全集,详情=全参数)。
+    - payload.tool_input = **完整原始入参**(用户自己的数据,进卡可核;绝不进 log)——
+      ACCEPT handler 真调原工具时用的就是它,一个字节不改。
+    - **逐张拍**:proposal_id 按 draft_id 派生(每次截获一张卡,不幂等收敛);
+      kind ∈ silence.HIGH_RISK_KINDS,绝不被静音自动兑现。
+    """
+    from karvyloop import i18n
+    from .atoms import Proposal
+    t = (tool or "").strip()
+    inp = dict(tool_input or {})
+    server = ""
+    if t.startswith("mcp_"):
+        parts = t.split("_")
+        server = parts[1] if len(parts) > 1 else ""
+    # ---- 收件人全集(BUG-1 核心):每个地址/收件人类键逐条,嵌套也扫 ----
+    pairs = _ob_walk_address_keys(inp)
+    shown = [(path, disp) for path, disp, _crit in pairs if disp]
+    # 隐藏收件人红标:**收件人关键键**(to/cc/bcc/recipient…)值渲不成串,且其嵌套下也没有
+    # 任何已展示行(有嵌套行=内容其实可核,不算隐形)→ 保守红标「展开核对」。
+    shown_paths = [p for p, _d in shown]
+    hidden = [path for path, disp, crit in pairs
+              if crit and not disp
+              and not any(sp.startswith(path + ".") or sp.startswith(path + "[")
+                          for sp in shown_paths)]
+    def _entry(path: str, disp: str) -> str:
+        d = disp if len(disp) <= 80 else disp[:79] + "…"
+        return d if path == "to" else f"{path}:{d}"
+    recip_entries = [_entry(p, d) for p, d in shown]
+    recips_all = "、".join(recip_entries[:_OB_MAX_SHOWN])
+    if len(recip_entries) > _OB_MAX_SHOWN:
+        recips_all += f" +{len(recip_entries) - _OB_MAX_SHOWN}"
+    subject = _ob_pick(inp, _OB_SUBJECT_KEYS)[:200]
+    body = _ob_pick(inp, _OB_BODY_KEYS)
+    # summary 的"要发给谁/干什么":收件人全集/主题优先;都抽不出 → 工具名(+server)
+    if recips_all and subject:
+        what = f"{recips_all}「{subject}」"
+    elif recips_all or subject:
+        what = recips_all or subject
+    else:
+        what = f"{t}({server})" if server else t
+    summary = i18n.t("proposal.outbound_draft.summary", what=what)
+    if hidden:
+        summary = i18n.t("proposal.outbound_draft.hidden_warn") + " " + summary
+    who = (atom_id or "").strip() or i18n.t("proposal.outbound_draft.who_default")
+    task = (intent or "").strip()[:120] or i18n.t("proposal.outbound_draft.task_default")
+    recipient_lines = [f"{p}: {d}" for p, d in shown[:_OB_MAX_SHOWN]]
+    if len(shown) > _OB_MAX_SHOWN:
+        recipient_lines.append(f"… +{len(shown) - _OB_MAX_SHOWN}")
+    details: List[str] = []
+    if hidden:
+        details.append(i18n.t("proposal.outbound_draft.hidden_detail",
+                              keys=", ".join(hidden[:8])))
+    for line in recipient_lines:
+        details.append(i18n.t("proposal.outbound_draft.recipient_line", line=line))
+    if subject:
+        details.append(i18n.t("proposal.outbound_draft.subject", v=subject))
+    if body:
+        details.append(i18n.t("proposal.outbound_draft.body",
+                              v=(body[:800] + ("…" if len(body) > 800 else ""))))
+    # 完整入参 JSON 也进 basis(文本面消费者同样可核;前端另有 tool_input 全文铺出)
+    try:
+        args_json = json.dumps(inp, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        args_json = str(inp)
+    if len(args_json) > 4000:
+        args_json = args_json[:4000] + i18n.t("proposal.outbound_draft.args_truncated")
+    details.append(i18n.t("proposal.outbound_draft.full_args", v=args_json))
+    did = (draft_id or "").strip() or hashlib.sha1(
+        f"{t}|{ts}".encode("utf-8")).hexdigest()[:12]
+    return Proposal(
+        summary=summary,
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_OUTBOUND_DRAFT,
+        payload={
+            "tool": t,
+            "server": server,
+            "tool_input": inp,      # 完整原参(ACCEPT 兑现的唯一事实源)
+            "recipients_all": recips_all,
+            "recipient_lines": recipient_lines,           # 前端逐条铺出(单一事实源在后端)
+            "hidden_recipient_keys": hidden,              # 非空 → 前端卡顶红标
+            "subject": subject,
+            "atom_id": (atom_id or "").strip(),
+            "intent": (intent or "").strip()[:400],
+            "draft_id": did,
+        },
+        proposal_id=f"{KIND_OUTBOUND_DRAFT}-0-{did}",
+        basis=i18n.t("proposal.outbound_draft.basis", who=who, task=task, tool=t,
+                     details=("  ".join(details) if details
+                              else i18n.t("proposal.outbound_draft.no_details"))),
+    )
+
+
 __all__ = [
     "PendingProposalRegistry",
     "AGING_THRESHOLD_S",
@@ -1282,6 +1516,8 @@ __all__ = [
     "KIND_SCHEDULE_SUGGEST",
     "proposal_for_scene_ready",
     "KIND_SCENE_READY",
+    "proposal_for_outbound_draft",
+    "KIND_OUTBOUND_DRAFT",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",

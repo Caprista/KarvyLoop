@@ -438,6 +438,8 @@ __all__ = [
     "broadcast_proposal",
     "proposal_wire_payload",
     "raise_fs_access_cards",
+    "raise_outbound_draft_cards",
+    "raise_drive_wrapup_cards",
     "trace_aged_defers",
 ]
 
@@ -525,5 +527,56 @@ async def raise_fs_access_cards(app: Any) -> int:
             raised += 1
         except Exception as e:
             logger.debug(f"[fs_grants] 升授权卡失败: {e}")
+    return raised
+
+
+async def raise_drive_wrapup_cards(app: Any) -> int:
+    """drive/委派收尾统一升卡口:fs_grants 授权卡 + docs/96 刀0 外发草稿卡。
+
+    两路各自 fail-soft(一路失败不影响另一路;收尾绝不阻断聊天/决策回执)。四个收尾点
+    (WS drive / REST api_intent / WS decide / REST h2a_decide)统一走这里 —— 单一咽喉,
+    也顺带守住 routes.py 的 god-module 行数预算。返回共升卡数。"""
+    n = 0
+    try:
+        n += await raise_fs_access_cards(app)
+    except Exception:
+        logger.debug("[proposals] 收尾升 fs_access 卡失败(不阻断)", exc_info=True)
+    try:
+        n += await raise_outbound_draft_cards(app)
+    except Exception:
+        logger.debug("[proposals] 收尾升外发草稿卡失败(不阻断)", exc_info=True)
+    return n
+
+
+async def raise_outbound_draft_cards(app: Any) -> int:
+    """drive 收尾(docs/96 刀0):执行咽喉截住的外发调用草稿 → 升 outbound_draft H2A 卡。
+
+    fs_grants 同款旁路模式:执行层只记待办(outbound_gate 全局 store),console 在
+    drive/委派收尾把草稿捞起升卡。**逐张升**(不去重不收敛 —— 每次想发都是一个独立决策);
+    outbound_draft ∈ silence.HIGH_RISK_KINDS,broadcast 里的静音判定被硬排除,必人拍。
+    单张失败跳过并 warning(入参不进日志,只记工具名)。返回升卡数。"""
+    from karvyloop.capability.outbound_gate import get_store
+    st = get_store()
+    if st is None:
+        return 0
+    drafts = st.pop_drafts()
+    if not drafts:
+        return 0
+    import time as _t
+    from karvyloop.karvy.proposal_registry import proposal_for_outbound_draft
+    raised = 0
+    for d in drafts:
+        try:
+            card = proposal_for_outbound_draft(
+                tool=str(d.get("tool") or ""),
+                tool_input=(d.get("tool_input") if isinstance(d.get("tool_input"), dict) else {}),
+                atom_id=str(d.get("atom_id") or ""),
+                intent=str(d.get("intent") or ""),
+                draft_id=str(d.get("draft_id") or ""),
+                ts=float(d.get("ts") or _t.time()))
+            await broadcast_proposal(app, card)
+            raised += 1
+        except Exception as e:
+            logger.warning(f"[outbound] 升外发草稿卡失败(tool={d.get('tool')!r},该草稿丢失): {e}")
     return raised
 

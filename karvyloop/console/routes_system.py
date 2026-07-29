@@ -682,11 +682,11 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
         # 授权卡,否则委派活的授权卡永远不出(缺口)。sync 端点在 FastAPI 线程池(无运行
         # loop)→ asyncio.run 安全;失败不阻断决策回执。
         import asyncio
-        from karvyloop.console.proposals import raise_fs_access_cards
+        from karvyloop.console.proposals import raise_drive_wrapup_cards
         try:
-            asyncio.run(raise_fs_access_cards(request.app))
+            asyncio.run(raise_drive_wrapup_cards(request.app))   # fs_grants + docs/96 刀0 外发草稿
         except Exception:
-            logger.debug("[h2a_decide] 委派收尾升 fs_access 卡失败(不阻断)", exc_info=True)
+            logger.debug("[h2a_decide] 委派收尾升卡失败(不阻断)", exc_info=True)
         return res.to_dict() if res is not None else None
 
     if req.decision == _H2A_DEFER:

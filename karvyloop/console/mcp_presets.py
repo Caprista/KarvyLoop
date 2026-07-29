@@ -6,16 +6,28 @@
 
 事实对齐(别发明形状):
 - 消费方是 `karvyloop/coding/tools/mcp_tool.py:read_mcp_server_configs` —— 它读
-  config.yaml 的 `mcp.servers: [{name, command, args, env}]`,build_server_config
-  产出的就是这个形状(不多不少)。
-- MCP server 只在 console 启动时连(console/app.py lifespan → connect_mcp_agent_tools
-  → runtime_kwargs["mcp_tools"]),**没有热加载** → apply 后如实返回 requires_restart=True。
+  config.yaml 的 `mcp.servers: [{name, command, args, env}]`(stdio)或
+  `[{name, url, transport: http, token}]`(remote),build_server_config 按预设形状
+  产出其中之一(不多不少)。
+- **热加载(docs/96 刀1)**:连接生命周期已抽进 `console/mcp_manager.McpConnectionManager`
+  (启动 = 第一次 reconnect;apply/add/手动重连端点复用同一函数)→ apply 成功后**装上即用**,
+  不再要求重启;manager 不在(如 console 未跑完整 lifespan)时端点如实退回 requires_restart。
 - 密钥(如 GitHub token)落 config.yaml —— 它本来就是密钥之家(仓外);本模块**绝不
   log/print 密钥**,API 响应绝不回显 params。
 
 安全默认:
 - filesystem 预设默认圈定 **KarvyLoop 工作区**(config_workspace.resolve_workspace),
   **不是家目录** —— 用户可自选文件夹,但默认不把整台机器递出去。
+
+预设字段(docs/96 刀1 扩展,向后兼容加):
+- icon:emoji,前端卡片用。
+- category:"app"(生活/工作应用 ——「接上你的应用」区)| "channel"(通用渠道/开发向)。
+- credential_url:凭证怎么拿的指路链接(空 = 不需要凭证)。
+- outbound_tools:该 server **发送/写出类**工具名(server 侧原始名,不带我们的 `mcp_<srv>_`
+  前缀)—— 显式标注供刀0(deontic 外发闸门)消费;本模块只提供数据,不做任何判定。
+- disabled + disabled_reason:占位预设(如需 OAuth 的 Gmail)—— 卡片可见但不可接入,
+  文案诚实;apply 会 fail-closed。
+- url:remote(streamable HTTP)预设 —— 有 url 走 remote 形状,无 url 走 command/args stdio。
 """
 from __future__ import annotations
 
@@ -26,12 +38,128 @@ from typing import Any, Optional
 # 参数默认值里的哨兵:解析成用户工作区(resolve_workspace;绝不默认家目录)
 _WS = "@workspace"
 
-# 预设目录:知名 MCP server,uvx/npx 可直接跑,无需额外安装步骤。
-# description / risk_note 双语一条(en · zh),前端原样展示。
-PRESETS: list[dict[str, Any]] = [
+# 所有预设共有的扩展字段默认值(docs/96 刀1;缺省即"无",_with_defaults 统一补齐,
+# 前端/测试可以放心按全字段读)。
+_PRESET_DEFAULTS: dict[str, Any] = {
+    "icon": "🔌",
+    "category": "channel",
+    "credential_url": "",
+    "outbound_tools": [],
+    "disabled": False,
+    "disabled_reason": "",
+    "command": "",
+    "args_template": [],
+    "env_template": {},
+    "url": "",
+    "params": [],
+    "needs_secret": False,
+    "secret_hint": "",
+}
+
+
+def _with_defaults(p: dict[str, Any]) -> dict[str, Any]:
+    return {**_PRESET_DEFAULTS, **p}
+
+
+# 预设目录:知名 MCP server。stdio 的 uvx/npx 一条命令能跑;remote 的贴 token 即通。
+# description / risk_note / disabled_reason 双语一条(en · zh),前端原样展示。
+# 「接上你的应用」(category=app)排前面 —— 生活应用策展第一批(docs/96 刀1)。
+PRESETS: list[dict[str, Any]] = [_with_defaults(p) for p in [
+    {
+        "id": "notion",
+        "name": "Notion",
+        "icon": "📝",
+        "category": "app",
+        "description": "Search, read and write your Notion pages & databases — notes, docs, tasks. "
+                       "· 搜索、读写你的 Notion 页面和数据库 —— 笔记、文档、任务。",
+        "url": "https://mcp.notion.com/mcp",
+        "params": [{"key": "token", "required": True, "secret": True}],
+        "needs_secret": True,
+        "secret_hint": "Notion internal integration token (ntn_…) — create one and share the pages "
+                       "you want it to see. · Notion 内部集成令牌(ntn_…),建好后把要用的页面分享给它。",
+        "credential_url": "https://www.notion.so/profile/integrations",
+        # server 侧原始工具名(notion- 前缀是 Notion hosted MCP 自带的),写出/发送类。
+        # 来源:developers.notion.com/docs/mcp-supported-tools(2026-07 核对)。
+        "outbound_tools": ["notion-create-pages", "notion-update-page", "notion-move-pages",
+                           "notion-duplicate-page", "notion-create-database",
+                           "notion-update-data-source", "notion-create-view",
+                           "notion-update-view", "notion-create-comment"],
+        "risk_note": "Reads and writes only the pages you share with the integration — share "
+                     "narrowly. · 只能读写你分享给该集成的页面 —— 按需分享,别全给。",
+    },
+    {
+        "id": "github",
+        "name": "GitHub",
+        "icon": "🐙",
+        "category": "app",
+        "description": "Search repos, read code, manage issues & PRs — GitHub's official hosted MCP "
+                       "server (upgraded from the old community stdio server). "
+                       "· 搜仓库、读代码、管 issue 和 PR —— GitHub 官方托管 MCP server"
+                       "(已从旧的社区版 stdio server 升级)。",
+        "url": "https://api.githubcopilot.com/mcp/",
+        "params": [{"key": "token", "required": True, "secret": True}],
+        "needs_secret": True,
+        "secret_hint": "GitHub personal access token — prefer fine-grained with minimal scopes. "
+                       "· GitHub 个人访问令牌 —— 建议最小权限的 fine-grained token。",
+        "credential_url": "https://github.com/settings/tokens",
+        # server 侧原始工具名,发送/写出类(github/github-mcp-server 文档,2026-07 核对)。
+        "outbound_tools": ["create_issue", "update_issue", "add_issue_comment",
+                           "create_pull_request", "merge_pull_request", "update_pull_request",
+                           "create_or_update_file", "push_files", "create_branch",
+                           "create_repository", "fork_repository"],
+        "risk_note": "Acts on GitHub with your token's permissions — prefer a fine-grained token "
+                     "with minimal scopes. · 用你令牌的权限操作 GitHub —— 建议用最小权限的 fine-grained token。",
+    },
+    {
+        "id": "gmail",
+        "name": "Gmail",
+        "icon": "📧",
+        "category": "app",
+        "description": "Read and send email from your Gmail. · 读你的 Gmail、代你发邮件。",
+        "disabled": True,
+        "disabled_reason": "Needs Google OAuth sign-in — coming in a later release. There is no "
+                           "token you can paste today, honestly. · 需要 Google OAuth 授权 —— "
+                           "下个版本解锁;现在没有可贴的令牌,如实说。",
+        "risk_note": "Would read your mailbox and send mail as you. · 会读你的邮箱、以你的身份发信。",
+    },
+    {
+        "id": "gcalendar",
+        "name": "Google Calendar",
+        "icon": "📅",
+        "category": "app",
+        "description": "See your schedule and create events. · 看你的日程、代你建日历事件。",
+        "disabled": True,
+        "disabled_reason": "Needs Google OAuth sign-in — coming in a later release. There is no "
+                           "token you can paste today, honestly. · 需要 Google OAuth 授权 —— "
+                           "下个版本解锁;现在没有可贴的令牌,如实说。",
+        "risk_note": "Would read and modify your calendar. · 会读并修改你的日历。",
+    },
+    {
+        "id": "slack",
+        "name": "Slack",
+        "icon": "💬",
+        "category": "app",
+        "description": "Read channels and post messages in your Slack workspace. "
+                       "· 读你 Slack 工作区的频道、代你发消息。",
+        "disabled": True,
+        "disabled_reason": "Needs Slack OAuth sign-in — coming in a later release. There is no "
+                           "token you can paste today, honestly. · 需要 Slack OAuth 授权 —— "
+                           "下个版本解锁;现在没有可贴的令牌,如实说。",
+        "risk_note": "Would read channel history and post as you. · 会读频道历史、以你的身份发言。",
+        # docs/96 刀0 对抗验收 LEAK③：Slack 发送类工具策展（占位卡也先备好 —— 刀2 OAuth 解锁
+        # 那天接入即受「永不直发」闸，不等补名单）。名单 = 官方已归档 server
+        # （@modelcontextprotocol/server-slack：slack_post_message/slack_reply_to_thread）
+        # + korotovsky/slack-mcp-server（conversations_add_message）
+        # + Slack Web API chat.* 直用名（post/postEphemeral/scheduleMessage/meMessage）。
+        # 只列**发送**类；读类（get_channel_history/list_channels）绝不进策展。
+        "outbound_tools": ["slack_post_message", "slack_reply_to_thread",
+                           "conversations_add_message", "chat_postMessage",
+                           "chat_postEphemeral", "chat_scheduleMessage", "chat_meMessage"],
+    },
     {
         "id": "filesystem",
         "name": "Filesystem",
+        "icon": "📁",
         "description": "Let roles read & write files in one folder you pick — the classic first channel. "
                        "· 让角色在你指定的一个文件夹里读写文件 —— 最经典的第一路渠道。",
         "command": "npx",
@@ -46,6 +174,7 @@ PRESETS: list[dict[str, Any]] = [
     {
         "id": "fetch",
         "name": "Web Fetch",
+        "icon": "🌐",
         "description": "Fetch a web page and convert it to markdown for the model to read. "
                        "· 抓一个网页并转成 markdown 给模型读。",
         "command": "uvx",
@@ -57,22 +186,9 @@ PRESETS: list[dict[str, Any]] = [
         "risk_note": "Can reach arbitrary URLs on the internet. · 能访问互联网上的任意网址。",
     },
     {
-        "id": "github",
-        "name": "GitHub",
-        "description": "Search repos, read files, manage issues & PRs on GitHub. "
-                       "· 在 GitHub 上搜仓库、读文件、管 issue 和 PR。",
-        "command": "npx",
-        "args_template": ["-y", "@modelcontextprotocol/server-github"],
-        "env_template": {"GITHUB_PERSONAL_ACCESS_TOKEN": "{token}"},
-        "params": [{"key": "token", "required": True, "secret": True}],
-        "needs_secret": True,
-        "secret_hint": "GitHub personal access token — github.com/settings/tokens · GitHub 个人访问令牌",
-        "risk_note": "Acts on GitHub with your token's permissions — prefer a fine-grained token "
-                     "with minimal scopes. · 用你令牌的权限操作 GitHub —— 建议用最小权限的 fine-grained token。",
-    },
-    {
         "id": "memory",
         "name": "Memory (knowledge graph)",
+        "icon": "🧠",
         "description": "A local knowledge-graph scratch memory the model can read & write across calls. "
                        "· 本地知识图谱便签记忆,模型跨调用可读写。",
         "command": "npx",
@@ -86,6 +202,7 @@ PRESETS: list[dict[str, Any]] = [
     {
         "id": "time",
         "name": "Time",
+        "icon": "⏰",
         "description": "Current time and timezone conversions. · 当前时间与时区换算。",
         "command": "uvx",
         "args_template": ["mcp-server-time"],
@@ -98,6 +215,7 @@ PRESETS: list[dict[str, Any]] = [
     {
         "id": "sqlite",
         "name": "SQLite",
+        "icon": "🗄️",
         "description": "Query and update a local SQLite database. · 查询/更新一个本地 SQLite 数据库。",
         "command": "uvx",
         "args_template": ["mcp-server-sqlite", "--db-path", "{db_path}"],
@@ -109,7 +227,7 @@ PRESETS: list[dict[str, Any]] = [
         "risk_note": "Can modify the chosen database file. Defaults to a new file inside your "
                      "workspace. · 会修改所选数据库文件;默认在工作区里新建一个。",
     },
-]
+]]
 
 
 def _by_id(preset_id: str) -> Optional[dict[str, Any]]:
@@ -146,15 +264,22 @@ def list_presets(workspace: Optional[str] = None) -> list[dict[str, Any]]:
 
 def build_server_config(preset_id: str, params: Optional[dict[str, str]] = None, *,
                         workspace: Optional[str] = None) -> dict[str, Any]:
-    """把预设 + 用户参数拼成 config.yaml `mcp.servers` 的**真实消费形状**:
-    `{name, command, args, [env]}`(read_mcp_server_configs 吃的就是这个,不发明新形状)。
+    """把预设 + 用户参数拼成 config.yaml `mcp.servers` 的**真实消费形状**
+    (read_mcp_server_configs 吃的形状,不发明):
+    - stdio 预设(有 command)→ `{name, command, args, [env]}`;
+    - remote 预设(有 url,docs/96 刀1)→ `{name, url, transport: http, [token]}`
+      (复用 build_remote_server_config 的校验:https、token 不走明文 http)。
 
+    disabled 预设(如需 OAuth 的 Gmail 占位)→ ValueError(fail-closed,文案诚实)。
     占位符(如 {folder}/{token})从 params 取,缺了用默认(@workspace → workspace);
     仍为空 → ValueError(信息只含参数名,**绝不含密钥值**)。
     """
     p = _by_id(preset_id)
     if p is None:
         raise ValueError(f"unknown preset: {preset_id}")
+    if p.get("disabled"):
+        raise ValueError(p.get("disabled_reason")
+                         or f"preset '{preset_id}' is not available yet")
     supplied = dict(params or {})
     values: dict[str, str] = {}
     for prm in p["params"]:
@@ -165,6 +290,13 @@ def build_server_config(preset_id: str, params: Optional[dict[str, str]] = None,
         if not v:
             raise ValueError(f"preset '{preset_id}' missing parameter: {key}")
         values[key] = v
+
+    # remote(streamable HTTP)预设:走 build_remote_server_config(校验/形状统一收口)
+    # (docs/96 刀0:预设的 outbound_tools **不落 config entry** —— 接入时 mcp_manager 按
+    # server 名回查 PRESETS 登记进 outbound_gate,老 config 也吃得到策展名单。)
+    if p.get("url"):
+        return build_remote_server_config(p["url"], name=p["id"],
+                                          token=values.get("token", ""))
 
     def _subst(s: str) -> str:
         out = s

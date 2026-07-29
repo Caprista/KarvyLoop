@@ -482,10 +482,10 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         except Exception:
             logger.debug("[ws] 共创递口失败(静默)", exc_info=True)
 
-    # fs_grants:这轮 drive 里碰壁的工作区外路径 → 升授权卡(去重;敏感路径永不出卡)
+    # drive 收尾升卡(fs_grants 授权 + docs/96 刀0 外发草稿;两路各自 fail-soft 不阻断)
     try:
-        from karvyloop.console.proposals import raise_fs_access_cards
-        await raise_fs_access_cards(app)
+        from karvyloop.console.proposals import raise_drive_wrapup_cards
+        await raise_drive_wrapup_cards(app)
     except Exception:
         pass
     _turn_speaker = m_speaker or speaker_display(app, mgr)   # @ 命中=角色花名,否则当前场署名
@@ -701,13 +701,13 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
                                           decision=req.decision, handlers=handlers,
                                           edits=(req.edits or None))
             )
-            # 委派兑现同步 drive 后:被委派 role 碰壁工作区外路径攒的「想要」→ 这一轮升 H2A
-            # 授权卡(与顶层 drive 收尾同待遇;REST 端点同调)。已在事件循环里 → 直接 await。
+            # 委派兑现同步 drive 后:与顶层 drive 收尾同待遇升卡(fs_grants 想要 +
+            # docs/96 刀0 外发草稿;REST 端点同调)。已在事件循环里 → 直接 await。
             try:
-                from karvyloop.console.proposals import raise_fs_access_cards
-                await raise_fs_access_cards(app)
+                from karvyloop.console.proposals import raise_drive_wrapup_cards
+                await raise_drive_wrapup_cards(app)
             except Exception:
-                logger.debug("[ws] 委派收尾升 fs_access 卡失败(不阻断)", exc_info=True)
+                logger.debug("[ws] 委派收尾升卡失败(不阻断)", exc_info=True)
             return res.to_dict() if res is not None else None
 
         if req.decision == H2A_DEFER:

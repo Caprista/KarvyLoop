@@ -1,10 +1,15 @@
-"""MCP 渠道预设(#42 优化:拧开就有水)—— 目录有效性 / 真实消费形状 / apply 端点 / 前端接线。
+"""MCP 渠道预设(#42 优化:拧开就有水 / docs/96 刀1:生活应用策展)—— 目录有效性 /
+真实消费形状 / apply 端点 / 前端接线。
 
 关键不变量:
 - build_server_config 产出的形状必须是 read_mcp_server_configs **真实消费**的形状
-  (config.yaml `mcp.servers: [{name, command, args, env}]`),不发明新形状 → 用真读取函数验证。
+  (stdio `{name, command, args, env}` / remote `{name, url, transport, token}`),
+  不发明新形状 → 用真读取函数验证。
 - 密钥只落 config.yaml,API 响应**绝不回显**(fixture key 带 FAKE/DO-NOT-LEAK 字样)。
-- 诚实:MCP 只在启动时连 → apply 必须返回 requires_restart=True。
+- 诚实(docs/96 刀1):有 manager(lifespan)→ apply 返回真结果;无 manager(本文件的
+  TestClient 不跑 lifespan)→ 必须退回 requires_restart=True,不假装已生效。
+  真热加载路径在 tests/test_mcp_hotload.py(真 stdio 桩 server)。
+- disabled 占位预设(Gmail/GCal/Slack 需 OAuth)fail-closed,文案诚实。
 """
 from __future__ import annotations
 
@@ -19,6 +24,11 @@ from karvyloop.console.mcp_presets import (
 
 FAKE_TOKEN = "ghp_FAKE-DO-NOT-LEAK-0123456789abcdef"
 
+# 目录三形态(docs/96 刀1):stdio(command)/ remote(url)/ disabled 占位(都没有)
+STDIO_IDS = {"filesystem", "fetch", "memory", "time", "sqlite"}
+REMOTE_IDS = {"notion", "github"}
+DISABLED_IDS = {"gmail", "gcalendar", "slack"}
+
 
 # ---------- 目录有效性 ----------
 
@@ -29,15 +39,31 @@ class TestCatalog:
 
     def test_wellknown_presets_present(self):
         ids = {p["id"] for p in PRESETS}
-        assert {"filesystem", "fetch", "github", "memory", "time", "sqlite"} <= ids
+        assert (STDIO_IDS | REMOTE_IDS | DISABLED_IDS) <= ids
 
     def test_required_fields(self):
         for p in PRESETS:
             for field in ("id", "name", "description", "command", "args_template",
-                          "env_template", "params", "needs_secret", "secret_hint", "risk_note"):
+                          "env_template", "params", "needs_secret", "secret_hint", "risk_note",
+                          # docs/96 刀1 扩展字段(向后兼容加,全预设齐)
+                          "icon", "category", "credential_url", "outbound_tools",
+                          "disabled", "disabled_reason", "url"):
                 assert field in p, f"{p.get('id')} 缺字段 {field}"
-            assert p["command"] in ("npx", "uvx")   # 只收"一条命令就能跑"的
             assert isinstance(p["needs_secret"], bool)
+            assert isinstance(p["disabled"], bool)
+            assert isinstance(p["outbound_tools"], list)
+            assert p["category"] in ("app", "channel")
+            if p["id"] in STDIO_IDS:
+                assert p["command"] in ("npx", "uvx")   # 只收"一条命令就能跑"的
+                assert not p["url"]
+            elif p["id"] in REMOTE_IDS:
+                assert p["url"].startswith("https://")  # remote 一律 https
+                assert not p["command"]
+            elif p["id"] in DISABLED_IDS:
+                assert p["disabled"] is True
+                assert p["disabled_reason"].strip()     # 占位必须有诚实文案
+                assert "OAuth" in p["disabled_reason"]
+                assert not p["command"] and not p["url"]
 
     def test_needs_secret_coverage(self):
         """needs_secret=True ⟺ 有 secret 参数 + 有 secret_hint(前端要能提示去哪拿 key)。"""
@@ -46,8 +72,20 @@ class TestCatalog:
             assert p["needs_secret"] == has_secret_param, p["id"]
             if p["needs_secret"]:
                 assert p["secret_hint"].strip(), p["id"]
+        for pid in ("github", "notion"):
+            p = next(x for x in PRESETS if x["id"] == pid)
+            assert p["needs_secret"] is True
+            assert p["credential_url"].startswith("https://")   # 凭证怎么拿的指路链接
+
+    def test_outbound_tools_marked_for_write_capable_apps(self):
+        """刀0 消费:发送/写出类工具名显式标注(server 侧原始名,不带 mcp_ 前缀)。"""
+        notion = next(p for p in PRESETS if p["id"] == "notion")
+        assert "notion-create-pages" in notion["outbound_tools"]
         gh = next(p for p in PRESETS if p["id"] == "github")
-        assert gh["needs_secret"] is True
+        assert {"create_issue", "create_pull_request"} <= set(gh["outbound_tools"])
+        for p in PRESETS:
+            for t in p["outbound_tools"]:
+                assert not t.startswith("mcp_"), f"{p['id']}: outbound_tools 应是 server 侧原始名"
 
     def test_placeholders_resolve(self):
         """模板里的每个 {placeholder} 都必须有对应声明的参数(否则永远填不上)。"""
@@ -57,6 +95,8 @@ class TestCatalog:
             for blob in blobs:
                 for ph in re.findall(r"\{(\w+)\}", blob):
                     assert ph in declared, f"{p['id']} 模板占位符 {{{ph}}} 没有声明参数"
+            if p["id"] in REMOTE_IDS:   # remote 预设的凭证走 token 参数(→ Bearer)
+                assert "token" in declared, p["id"]
 
     def test_list_presets_resolves_workspace_default(self, tmp_path):
         ws = str(tmp_path / "work")
@@ -95,15 +135,38 @@ class TestBuildServerConfig:
         entry = build_server_config("filesystem", {"folder": folder}, workspace=str(tmp_path))
         assert entry["args"][-1] == folder
 
-    def test_github_token_lands_in_env(self):
+    def test_github_is_remote_with_bearer_token(self, tmp_path):
+        """docs/96 刀1:github 预设升级为官方 remote server —— `{name,url,transport,token}`,
+        读回后 token → Authorization: Bearer(真消费函数验证)。"""
+        from karvyloop.coding.tools.mcp_tool import read_mcp_server_configs
         entry = build_server_config("github", {"token": FAKE_TOKEN})
-        assert entry["env"] == {"GITHUB_PERSONAL_ACCESS_TOKEN": FAKE_TOKEN}
+        assert entry == {"name": "github", "url": "https://api.githubcopilot.com/mcp/",
+                         "transport": "http", "token": FAKE_TOKEN}
+        cfg_path = tmp_path / "config.yaml"
+        cfg_path.write_text(yaml.safe_dump({"mcp": {"servers": [entry]}}, allow_unicode=True),
+                            encoding="utf-8")
+        (got,) = read_mcp_server_configs(str(cfg_path))
+        assert got.transport_kind == "http"
+        assert got.headers == {"Authorization": f"Bearer {FAKE_TOKEN}"}
+
+    def test_notion_is_remote_hosted(self):
+        entry = build_server_config("notion", {"token": "ntn_FAKE-DO-NOT-LEAK"})
+        assert entry == {"name": "notion", "url": "https://mcp.notion.com/mcp",
+                         "transport": "http", "token": "ntn_FAKE-DO-NOT-LEAK"}
 
     def test_github_without_token_refused(self):
         with pytest.raises(ValueError) as ei:
             build_server_config("github", {})
         assert "token" in str(ei.value)
         assert FAKE_TOKEN not in str(ei.value)   # 错误信息只含参数名,绝不含密钥值
+
+    def test_disabled_placeholder_fails_closed_with_honest_reason(self):
+        """Gmail/GCal/Slack 占位(需 OAuth):build/apply 都 fail-closed,别让人贴 token 撞墙。"""
+        for pid in ("gmail", "gcalendar", "slack"):
+            with pytest.raises(ValueError) as ei:
+                build_server_config(pid, {"token": FAKE_TOKEN})
+            assert "OAuth" in str(ei.value)
+            assert FAKE_TOKEN not in str(ei.value)
 
     def test_no_env_key_when_empty(self):
         entry = build_server_config("fetch", {})
@@ -136,13 +199,26 @@ class TestApplyEndpoint:
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] is True
-        assert body["requires_restart"] is True      # 诚实:启动时才连,无热加载
+        # 本 fixture 不跑 lifespan → 无 mcp_manager → 如实退回"要重启"(不假装热加载了);
+        # 真热加载路径(装上即用)在 tests/test_mcp_hotload.py 用真桩 server 验。
+        assert body["requires_restart"] is True
         assert FAKE_TOKEN not in r.text              # 响应绝不回显密钥
         data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
         servers = data["mcp"]["servers"]
         assert len(servers) == 1 and servers[0]["name"] == "github"
-        assert servers[0]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] == FAKE_TOKEN
+        # docs/96 刀1:github 预设已升级为官方 remote server(token → Bearer,读回时展开)
+        assert servers[0]["url"] == "https://api.githubcopilot.com/mcp/"
+        assert servers[0]["token"] == FAKE_TOKEN
         assert data["lang"] == "en"                  # 其余配置键原样保留
+
+    def test_apply_disabled_placeholder_fails_closed(self, client):
+        """Gmail 占位卡(需 OAuth)从端点 apply → fail-closed + 诚实 reason,config 不落条目。"""
+        c, cfg = client
+        body = c.post("/api/mcp/preset/apply",
+                      json={"preset_id": "gmail", "params": {}}).json()
+        assert body["ok"] is False and "OAuth" in body["reason"]
+        data = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+        assert not (data.get("mcp") or {}).get("servers")
 
     def test_apply_upsert_no_duplicates(self, client):
         c, cfg = client
@@ -197,10 +273,31 @@ class TestFrontendWiring:
         src = self._read("karvyloop/console/frontend/src/skills_panel.ts")
         assert "/api/mcp/presets" in src
         assert "/api/mcp/preset/apply" in src
-        assert "mcpp.restart_note" in src            # 诚实的"要重启"提示真被用上
+        assert "mcpp.restart_note" in src            # 无热加载时诚实的"要重启"提示仍在(fallback)
+
+    def test_skills_panel_hotload_wiring(self):
+        """docs/96 刀1:手动重连端点 + 装上即用/连失败真结果话术 + disabled 占位卡 +
+        凭证指路链接 + 状态灯,前端真接上。"""
+        src = self._read("karvyloop/console/frontend/src/skills_panel.ts")
+        assert "/api/mcp/reconnect" in src           # 手动"重连 server"按钮
+        for needle in ("mcpp.live_note", "mcpp.conn_failed", "mcpp.st_connected",
+                       "mcpp.st_failed", "mcpp.st_oauth", "mcpp.apps_title",
+                       "mcp-card-disabled", "credential_url", "disabled_reason"):
+            assert needle in src, f"skills_panel.ts 缺 {needle}"
+
+    def test_unlock_panel_apps_chips(self):
+        src = self._read("karvyloop/console/frontend/src/unlock_panel.ts")
+        assert "/api/mcp/presets" in src             # 解锁面板 MCP 卡带应用状态小灯
+        assert "unlock.mcp.apps_label" in src
 
     def test_i18n_keys_in_both_tables(self):
         src = self._read("karvyloop/console/frontend/src/i18n.ts")
         for key in ("mcpp.title", "mcpp.connect", "mcpp.connected", "mcpp.needs_secret",
-                    "mcpp.restart_note", "mcpp.param_default_ph"):
+                    "mcpp.restart_note", "mcpp.param_default_ph",
+                    # docs/96 刀1 新增
+                    "mcpp.apps_title", "mcpp.apps_hint", "mcpp.live_note", "mcpp.conn_failed",
+                    "mcpp.reconnect", "mcpp.reconnecting", "mcpp.reconnect_done",
+                    "mcpp.reconnect_partial", "mcpp.st_connected", "mcpp.st_not_connected",
+                    "mcpp.st_failed", "mcpp.st_oauth", "mcpp.st_saved",
+                    "mcpp.get_credential", "mcpp.perm_label", "unlock.mcp.apps_label"):
             assert src.count(f'"{key}"') == 2, f"{key} 应在 en+zh 两表各出现一次"

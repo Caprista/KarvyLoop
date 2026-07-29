@@ -521,8 +521,58 @@ async def run(
                     return True, ""
                 return False, (getattr(d, "message", "") or getattr(d, "reason", ""))
 
-            results = await run_tools(assistant_tool_uses, tools, token,
+            # docs/96 刀0:**对外发送永不直发,一律草稿决策卡**。这里是工具执行唯一咽喉
+            # (run_tools 只有本处一个调用点,MCP 工具与未来内置发送工具都从这过 —— 同刀3a
+            # abort 的"唯一咽喉"哲学)。判定为外发类(is_outbound_send_tool:共享 token 表
+            # + 策展 outbound_tools 显式标注)的调用:
+            #   ① 域 deontic forbid 硬闸**叠加在前**:同一 authorize 链拒(deontic step 6.5 /
+            #      任何 Deny)→ 留在正常链路吃同一个诚实 Deny,连草稿卡都不出;
+            #   ② authorize 放行的 → **不真执行**,完整入参记进全局草稿队列(console 在
+            #      drive 收尾升 outbound_draft H2A 卡;ACCEPT 才真调原工具原参数),
+            #      合成诚实回执给模型(不是发送成功,不抛错,agent 可继续干别的);
+            #   ③ 无 store(CLI 裸跑/--no-llm/测试桩)→ fail-closed:仍截住,回执如实说
+            #      「草稿未能递交」,**绝不放行直发**。
+            # 只拦本次 run 工具集里真存在的名字(不存在的交 run_tools 报 unknown,0 语义漂移);
+            # 组件(判定器/authorize/note)按各自契约绝不抛 —— 不包 try/except 兜底放行,
+            # 代码缺陷宁可 fail-loud 上冒,也不能变成"崩了就直发"。
+            from karvyloop.capability.outbound_gate import (
+                is_outbound_send_tool as _is_outbound, note_outbound_draft as _note_outbound)
+            outbound_synth: dict[str, ToolResult] = {}
+            run_blocks = assistant_tool_uses
+            if any(tu.name in tools and _is_outbound(tu.name) for tu in assistant_tool_uses):
+                from karvyloop import i18n as _i18n_ob
+                run_blocks = []
+                for tu in assistant_tool_uses:
+                    if not (tu.name in tools and _is_outbound(tu.name)):
+                        run_blocks.append(tu)
+                        continue
+                    d = _authorize(_PC(tool=tu.name, input=tu.input or {}, mode=default_mode,
+                                       workspace_root=None))
+                    if not isinstance(d, _Allow):
+                        run_blocks.append(tu)   # 域 forbid/任何 Deny 在前:正常链路拒,不出卡
+                        continue
+                    submitted = _note_outbound(
+                        tu.name, tu.input or {}, atom_id=atom.id,
+                        intent=str((input or {}).get("intent", "")
+                                   if isinstance(input, dict) else ""))
+                    if submitted:
+                        content: dict = {"text": _i18n_ob.t("outbound.draft_submitted",
+                                                            tool=tu.name)}
+                    else:
+                        content = {"ok": False, "error_message": _i18n_ob.t(
+                            "outbound.draft_channel_missing", tool=tu.name)}
+                    outbound_synth[tu.id] = ToolResult(
+                        tool_use_id=tu.id, name=tu.name, content=content)
+
+            results = await run_tools(run_blocks, tools, token,
                                        capability_check=_cap_check)
+            if outbound_synth:
+                # 按原 tool_use 顺序合并(合成草稿回执 + 真跑结果;缺位兜 dropped 防静默丢)
+                _by_id = {r.tool_use_id: r for r in results}
+                results = [outbound_synth.get(tu.id) or _by_id.get(tu.id)
+                           or ToolResult(tool_use_id=tu.id, name=tu.name, content=None,
+                                         is_error=True, error_reason="dropped:unknown")
+                           for tu in assistant_tool_uses]
             # slice C 回填:按 tool_use_id 写回成败事实(_tool_call_fact 认两种失败报法:
             # is_error=True 的异常/超时/deny + CodingResult(ok=False) 返回值式),
             # 真因如实携带不改写不吞并;截断 ≤200 字。

@@ -112,6 +112,27 @@ var KarvyUnlockPanelBundle = (function(exports) {
   }
   function _mcpCard(u) {
     const bits = [el("div", { class: "mc-meta", text: t("unlock.mcp.value") })];
+    const appsRow = el("div", { class: "mc-meta unlock-mcp-apps" });
+    bits.push(appsRow);
+    (async () => {
+      try {
+        const d = await _getJSON("/api/mcp/presets");
+        const apps = (d && d.presets || []).filter((p) => p && p.category === "app");
+        if (!apps.length) return;
+        const st = d && d.mcp_status || null;
+        appsRow.appendChild(el("span", { text: t("unlock.mcp.apps_label") + " " }));
+        apps.forEach((p, i) => {
+          const connected = !!(st && st.connected && st.connected[p.id]);
+          const dot = p.disabled ? "🔒" : connected ? "🟢" : "⚪";
+          if (i) appsRow.appendChild(document.createTextNode(" "));
+          appsRow.appendChild(el("span", {
+            class: "dpref-badge " + (connected ? "confirmed" : "provisional"),
+            text: dot + " " + (p.icon || "") + " " + p.name
+          }));
+        });
+      } catch (e) {
+      }
+    })();
     if (u.status === "missing_dep") {
       bits.push(_enableBlock(u));
       bits.push(el("div", { class: "mc-meta unlock-manual", text: t("unlock.or_manual") }));

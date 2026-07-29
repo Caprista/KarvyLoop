@@ -2475,6 +2475,17 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .inbox-draft-body { white-space: pre-wrap; font-size: var(--fs-12); line-height: 1.5; margin: 3px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); max-height: 200px; overflow-y: auto; }
 .inbox-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
 
+/* —— 外发草稿卡 outbound_draft（docs/96 刀0 BUG-1）：收件人全集逐条 + 完整入参全文 +
+     隐藏收件人红条（卡顶 .outbound-hidden-top 折叠态也可见）—— */
+.outbound-card { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--surface-2, #faf7f0); }
+.outbound-hidden-warn { font-size: var(--fs-12); font-weight: 700; color: var(--rose-deep, #a5493f); background: var(--rose-soft, #fbe9e5); border: 1px solid var(--rose-line, #e4b6ae); border-radius: 6px; padding: 4px 8px; margin: 4px 0; word-break: break-all; }
+.outbound-hidden-top { margin: 6px 0 2px; }
+.outbound-label { font-size: var(--fs-12); font-weight: 700; color: var(--text-3); margin-top: 5px; }
+.outbound-recipient { font-size: var(--fs-12); line-height: 1.5; color: var(--text-1); padding-left: 8px; word-break: break-all; }
+.outbound-meta { font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); margin-top: 3px; }
+.outbound-args { white-space: pre-wrap; font-size: var(--fs-12); line-height: 1.5; margin: 3px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); max-height: 240px; overflow-y: auto; word-break: break-all; }
+.outbound-hint { font-size: 11px; color: var(--text-3); margin-top: 5px; }
+
 /* —— 挣来的静音轻通知里的「翻案」入口(最强负信号,连坐吊销整桶授权)—— */
 .silence-overturn { margin-left: 6px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--rose-line, var(--border)); background: transparent; color: var(--rose-deep, #a5493f); font-size: 11px; cursor: pointer; }
 .silence-overturn:hover { background: var(--rose-soft, #fbe9e5); }

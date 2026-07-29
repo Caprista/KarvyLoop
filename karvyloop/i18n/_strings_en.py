@@ -837,6 +837,59 @@ EN = {
     "scene_preexec.product_error_diag": (
         "The test run failed again. Error: {err}\n\nWhat I saw while running it:\n{text}"
     ),
+    # ---- outbound_draft 段(docs/96 刀0:对外发送永不直发,一律草稿决策卡)----
+    # 执行咽喉给 agent 的合成回执(诚实:不是发送成功,也永远不会自动发出)
+    "outbound.draft_submitted": (
+        "Outbound send intercepted: this call was NOT executed. A draft decision card with the "
+        "exact tool call ({tool}) has been submitted to the owner — it will only be sent if the "
+        "owner approves it, never automatically. You can continue with other work."
+    ),
+    "outbound.draft_channel_missing": (
+        "Outbound send intercepted: this call was NOT executed, and the draft channel is not "
+        "connected (no console) — the draft could not be submitted. Nothing was sent, and nothing "
+        "will be sent automatically."
+    ),
+    # 卡面(summary/basis;对抗验收 BUG-1 盲拍修:收件人全集逐条 + 隐藏收件人红标 + 完整入参可核)
+    "proposal.outbound_draft.summary": "📨 Outbound send awaiting your approval: {what}",
+    "proposal.outbound_draft.hidden_warn": "⚠️[hidden recipients — expand and verify]",
+    "proposal.outbound_draft.hidden_detail": (
+        "⚠ These recipient keys could not be rendered inline — verify them in the full "
+        "arguments below: {keys}"
+    ),
+    "proposal.outbound_draft.who_default": "An agent",
+    "proposal.outbound_draft.task_default": "(interactive session)",
+    "proposal.outbound_draft.recipient_line": "Recipient {line}",
+    "proposal.outbound_draft.subject": "Subject: {v}",
+    "proposal.outbound_draft.body": "Content: {v}",
+    "proposal.outbound_draft.full_args": (
+        "Full arguments (on ACCEPT this exact payload is sent, byte-for-byte): {v}"
+    ),
+    "proposal.outbound_draft.args_truncated": (
+        " …[truncated — the complete arguments are attached to this card]"
+    ),
+    "proposal.outbound_draft.no_details": (
+        "(No recipient/subject could be extracted from the arguments — the full raw arguments "
+        "are attached to this card for review.)"
+    ),
+    "proposal.outbound_draft.basis": (
+        "{who} wanted to call {tool} while working on “{task}”. The call was intercepted "
+        "and NOT sent.  {details}  ACCEPT = actually send with exactly these arguments; "
+        "REJECT = discard the draft. Nothing ever goes out without your approval (hard rule)."
+    ),
+    # 并发拍板(对抗验收 BUG-2):后来的那一路拿到的诚实回执 —— 绝不重复执行
+    "proposal.decide.already_handled": (
+        "This card was already handled by another action (approved or rejected elsewhere) — "
+        "nothing was executed twice."
+    ),
+    # ACCEPT 兑现回执
+    "receipt.outbound.sent": "Sent via {tool}: {gist}",
+    "receipt.outbound.send_failed": (
+        "Send failed ({tool}): {err} — the draft was NOT sent."
+    ),
+    "receipt.outbound.tool_missing": (
+        "Tool {tool} is no longer available (server disconnected?) — nothing was sent. "
+        "Reconnect the channel and try again."
+    ),
     # ---- system-import 段(docs/84 #3 多 agent 系统导入:plan/apply 用户可见文案)----
     "system_import.note.no_llm": (
         "No LLM wired (--no-llm?), so the topology can't be read. You can still import each agent "
