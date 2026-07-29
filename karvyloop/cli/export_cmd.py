@@ -26,6 +26,10 @@ from typing import List, Optional, Tuple
 # channel_secret = 邮件决策闭环的 HMAC secret(docs/43 ⑤a)——本机凭证,带走即可伪造回批码。
 _EXCLUDE_ROOT_NAMES = ("config.yaml", "console.runtime.json", "channel_secret")
 
+# 根级排除(整个目录):docs/96 刀2 —— mcp_oauth/ 存 remote server 的 OAuth access/refresh
+# token(0600),本机凭证,带走即可冒你身份连回 Gmail/Slack 等,绝不入包(照 config.yaml 先例)。
+_EXCLUDE_ROOT_DIRS = ("mcp_oauth",)
+
 # 已知顶层条目 → MANIFEST 一句话说明(未知条目走通用说明,不漏)
 _KNOWN_ENTRIES = {
     "skills": "your crystallized skill library (one folder per SKILL.md)",
@@ -54,6 +58,8 @@ def _is_excluded(rel: PurePosixPath) -> bool:
         return True
     if len(rel.parts) == 1 and rel.name in _EXCLUDE_ROOT_NAMES:
         return True
+    if rel.parts and rel.parts[0] in _EXCLUDE_ROOT_DIRS:
+        return True   # mcp_oauth/ 整个目录(OAuth token 家)不入包
     return False
 
 
@@ -114,6 +120,8 @@ def _manifest_text(included: List[Tuple[Path, PurePosixPath]], excluded: List[st
         "  console.runtime.json   local runtime access token — machine-specific.",
         "  channel_secret         email-channel HMAC secret — machine-specific credential",
         "                         (a new one is generated on the new machine).",
+        "  mcp_oauth/             OAuth tokens for connected apps (Gmail/Slack/…) —",
+        "                         credentials; re-authorize on the new machine.",
         "  *.lock                 process lock files — meaningless elsewhere.",
     ]
     if excluded:

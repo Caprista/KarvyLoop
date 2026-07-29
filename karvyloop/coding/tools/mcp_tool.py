@@ -284,8 +284,15 @@ def read_mcp_server_configs(config_path: str) -> list:
                 token = _resolve_env_value(s.get("token", "") or "", data).strip()
                 if token and "authorization" not in {k.lower() for k in headers}:
                     headers["Authorization"] = f"Bearer {token}"
-                out.append(McpServerConfig(name=name, url=url, transport="http",
-                                           headers=headers, outbound_tools=ob))
+                # docs/96 刀2:`auth: oauth` → OAuth 2.1 授权码流(SDK 客户端;token 落 0600
+                # 文件不进 config)。`scopes: [..]` 申请的权限范围。无 auth → 静态 header(v1)。
+                auth_kind = str(s.get("auth", "") or "").strip().lower()
+                scopes = [str(x).strip() for x in (s.get("scopes") or []) if str(x).strip()]
+                out.append(McpServerConfig(
+                    name=name, url=url, transport="http", headers=headers,
+                    outbound_tools=ob,
+                    auth_kind=("oauth" if auth_kind == "oauth" else ""),
+                    oauth_scopes=scopes))
                 continue
             # local(stdio):原有形状
             if not command:

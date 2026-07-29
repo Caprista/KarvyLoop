@@ -295,8 +295,9 @@ def build_server_config(preset_id: str, params: Optional[dict[str, str]] = None,
     # (docs/96 刀0:预设的 outbound_tools **不落 config entry** —— 接入时 mcp_manager 按
     # server 名回查 PRESETS 登记进 outbound_gate,老 config 也吃得到策展名单。)
     if p.get("url"):
-        return build_remote_server_config(p["url"], name=p["id"],
-                                          token=values.get("token", ""))
+        return build_remote_server_config(
+            p["url"], name=p["id"], token=values.get("token", ""),
+            auth=str(p.get("auth", "") or ""), scopes=p.get("scopes") or [])
 
     def _subst(s: str) -> str:
         out = s
@@ -396,13 +397,15 @@ def _sanitize_name(name: str) -> str:
 
 
 def build_remote_server_config(url: str, *, name: str = "",
-                               token: str = "") -> dict[str, Any]:
-    """贴 URL + 可选 bearer token → config.yaml `mcp.servers` 的 remote 形状
-    `{name, url, transport: "http", [token]}`(read_mcp_server_configs 真实消费;
-    token 落盘后由它转成 Authorization: Bearer header)。
+                               token: str = "", auth: str = "",
+                               scopes: Optional[list] = None) -> dict[str, Any]:
+    """贴 URL + 可选 bearer token / OAuth → config.yaml `mcp.servers` 的 remote 形状
+    `{name, url, transport: "http", [token] | [auth: oauth, scopes]}`
+    (read_mcp_server_configs 真实消费;token 落盘后转成 Authorization: Bearer header,
+    auth=oauth 走 docs/96 刀2 的 OAuth 客户端,token 落 0600 文件不进 config)。
 
     校验(错误信息只含参数名/URL 的 host,**绝不含 token 值**):
-    - url 必须 http(s)://…;
+    - url 必须 http(s)://…;OAuth 端点必须 https(授权码/token 不许裸奔明文);
     - **token 不许走明文 http**(凭证裸奔),localhost 回环除外(本地调试);
     - name 允许 [a-z0-9_-],没给就从 host 推导(mcp.notion.com → notion)。
     """
@@ -417,11 +420,19 @@ def build_remote_server_config(url: str, *, name: str = "",
     is_loopback = parts.hostname in ("localhost", "127.0.0.1", "::1")
     if tok and parts.scheme == "http" and not is_loopback:
         raise ValueError("refusing to send a token over plain http — use https")
+    is_oauth = str(auth or "").strip().lower() == "oauth"
+    if is_oauth and parts.scheme != "https" and not is_loopback:
+        raise ValueError("refusing to run OAuth over plain http — use https")
     nm = _sanitize_name(name) or _derive_name(u)
     if not nm:
         raise ValueError("could not derive a server name — pass one explicitly")
     entry: dict[str, Any] = {"name": nm, "url": u, "transport": "http"}
-    if tok:
+    if is_oauth:
+        entry["auth"] = "oauth"
+        sc = [str(x).strip() for x in (scopes or []) if str(x).strip()]
+        if sc:
+            entry["scopes"] = sc
+    elif tok:
         entry["token"] = tok
     return entry
 

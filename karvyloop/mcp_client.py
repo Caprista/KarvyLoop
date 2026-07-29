@@ -69,6 +69,11 @@ class McpServerConfig:
     # server_configs 读回);预设的策展标注**不落 config**,由 mcp_manager 接入时按
     # server 名回查 PRESETS 合并登记(老 config 也吃得到)。
     outbound_tools: list[str] = dataclasses.field(default_factory=list)
+    # docs/96 刀2:remote server 的鉴权方式。""=静态 header/bearer(v1,住 headers);
+    # "oauth"=OAuth 2.1 授权码流(SDK OAuthClientProvider,token 落 0600 文件不进 config)。
+    auth_kind: str = ""
+    # OAuth 申请的权限范围(如 ["gmail.readonly"]);空 = 让 server 决定。仅 auth_kind=="oauth" 吃。
+    oauth_scopes: list[str] = dataclasses.field(default_factory=list)
 
     @property
     def transport_kind(self) -> str:
@@ -156,9 +161,16 @@ async def _open_session(stack: contextlib.AsyncExitStack, cfg: McpServerConfig) 
     if cfg.transport_kind == "http":
         import httpx
         from mcp.client.streamable_http import streamable_http_client
+        # docs/96 刀2:OAuth server → 挂 SDK 的 OAuthClientProvider(它是个 httpx.Auth)。
+        # 协议全走 SDK;token 落 0600 文件(mcp_oauth),绝不进 config/log。静态 header 方式 auth=None。
+        auth = None
+        if getattr(cfg, "auth_kind", "") == "oauth":
+            from karvyloop.mcp_oauth import build_oauth_provider
+            auth = build_oauth_provider(cfg.url, cfg.name, scopes=list(cfg.oauth_scopes or []))
         # headers(含 Authorization)只进 httpx client,绝不 log
         http_client = httpx.AsyncClient(
             headers=dict(cfg.headers) or None,
+            auth=auth,
             timeout=httpx.Timeout(params.timeout.total_seconds(),
                                   read=params.sse_read_timeout.total_seconds()),
             follow_redirects=True,
