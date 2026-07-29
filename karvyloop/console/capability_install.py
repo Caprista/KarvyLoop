@@ -32,7 +32,7 @@ INSTALLABLE: dict[str, list[str]] = {
     "asr": ["faster-whisper>=1.1"],
     "files": ["pypdf>=4.0", "python-docx>=1.1", "openpyxl>=3.1"],
     "relay": ["cryptography>=42"],
-    "mcp": ["mcp>=1.9"],
+    "mcp": ["mcp>=1.9,<2"],   # 与 pyproject 同步(2.0.0 破 stdio,pin <2;守卫测试锁镜像)
     "web": ["playwright>=1.40"],   # 注:装完还需 `playwright install chromium`(前端文案说明,不算失败)
 }
 
