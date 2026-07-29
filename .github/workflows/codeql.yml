@@ -1,0 +1,33 @@
+# CodeQL 静态分析(SAST)—— 补 OpenSSF Scorecard 的 SAST 项;公开仓免费。
+# 只扫 Python(产品代码);actions 全锁 commit 哈希(不给自己再挖 Pinned-Dependencies)。
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "25 6 * * 1"   # 每周一 06:25 UTC 兜底扫一遍
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write   # 上报告警到 code scanning
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        with:
+          languages: python
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        with:
+          category: "/language:python"

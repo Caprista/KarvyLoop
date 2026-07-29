@@ -267,6 +267,32 @@ def _fence_text_fields(obj: Any, source: str) -> Any:
     return obj
 
 
+# 非 text blob(图/音频 base64)封顶:untrusted MCP server 返回的图/音频超此 → 只留占位。
+# 防一个恶意/失控 server 把巨型 base64 灌进模型 context(成本 + DoS)。~1.1MB 解码后。
+_MAX_BLOB_B64 = 1_500_000
+
+
+def _fence_nontext_block(bd: dict, source: str) -> dict:
+    """docs/96 刀3:非 text 块(图/音频/resource)的围栏 —— 标注**不可信来源** + 大 blob 限尺寸。
+
+    text 块已由 `_fence_text_fields` 过围栏(自带 source),这里不重复标;非 text 块补两件:
+    - `_source`:标明这块来自哪个 untrusted server(数据不是指令;供审计/下游溯源)。
+    - 图/音频 base64 超 `_MAX_BLOB_B64` → 抽掉 data 换占位说明(保 mimeType,不撑爆 context)。
+    """
+    if bd.get("type") == "text":
+        return bd
+    bd = {**bd, "_source": source}
+    if bd.get("type") in ("image", "audio"):
+        data = bd.get("data")
+        if isinstance(data, str) and len(data) > _MAX_BLOB_B64:
+            n = len(data)
+            bd = {k: v for k, v in bd.items() if k != "data"}
+            bd["_karvy_omitted"] = (
+                f"[{bd.get('type')} from untrusted MCP source '{source}' omitted: "
+                f"{n} base64 chars > {_MAX_BLOB_B64} cap]")
+    return bd
+
+
 def _flatten_mcp_content(content: list[Any], *, source: str = "mcp") -> Any:
     """MCP tool result 的 `content` 块数组 → KarvyLoop `Tool.call` 的 dict 输出。
 
@@ -293,11 +319,13 @@ def _flatten_mcp_content(content: list[Any], *, source: str = "mcp") -> Any:
     if len(text_blocks) == len(content):
         joined = "\n".join(getattr(c, "text", "") for c in text_blocks)
         return {"text": fence_untrusted(joined, source=source)}
-    # 混合或非 text → 序列化成 dict 列表(结构透传;text 字段逐个过围栏)
+    # 混合或非 text → 序列化成 dict 列表(text 字段过围栏;非 text 块标来源 + blob 限尺寸)
     return {
         "blocks": [
-            _fence_text_fields(
-                {k: v for k, v in dataclasses.asdict(c).items() if v is not None}, source)
+            _fence_nontext_block(
+                _fence_text_fields(
+                    {k: v for k, v in dataclasses.asdict(c).items() if v is not None}, source),
+                source)
             for c in content
         ]
     }

@@ -257,6 +257,67 @@ def test_ac7_flatten_mcp_content_shapes():
     assert out["blocks"][1]["data"] == "abc"
 
 
+# ============ 刀3:非 text 块围栏(标来源 + blob 限尺寸)============
+def test_dao3_nontext_block_small_image_tagged_with_source():
+    """小图:data 原样 + 补 _source(标不可信来源,供审计/溯源)。"""
+    import dataclasses
+
+    @dataclasses.dataclass
+    class _Text:
+        text: str
+        type: str = "text"
+
+    @dataclasses.dataclass
+    class _Img:
+        type: str = "image"
+        data: str = "abc"
+        mimeType: str = "image/png"
+
+    out = _flatten_mcp_content([_Text("cap"), _Img()], source="mcp:srvX:tool")
+    img = out["blocks"][1]
+    assert img["data"] == "abc"                  # 小图不动
+    assert img["_source"] == "mcp:srvX:tool"     # 标来源
+
+
+def test_dao3_nontext_block_huge_image_omitted_not_context_bomb():
+    """巨图(base64 超封顶):抽掉 data 换占位说明,不把巨型 blob 灌进 context。"""
+    import dataclasses
+
+    from karvyloop.mcp_client import _MAX_BLOB_B64
+
+    @dataclasses.dataclass
+    class _Text:
+        text: str
+        type: str = "text"
+
+    @dataclasses.dataclass
+    class _BigImg:
+        type: str = "image"
+        data: str = "A" * (_MAX_BLOB_B64 + 10)
+        mimeType: str = "image/png"
+
+    out = _flatten_mcp_content([_Text("cap"), _BigImg()], source="mcp:evil:tool")
+    img = out["blocks"][1]
+    assert "data" not in img                      # 巨 blob 被抽走
+    assert "untrusted MCP source 'mcp:evil:tool'" in img["_karvy_omitted"]
+    assert img["mimeType"] == "image/png"         # 元信息保留
+
+
+def test_dao3_same_tool_name_across_servers_disambiguated_by_prefix():
+    """多 server 命名冲突:两个 server 同名工具 → mcp_<server>_<tool> 前缀天然消歧,不撞。"""
+    from karvyloop.mcp_client import _mcp_tool_to_karvyloop_tool
+
+    class _T:
+        name = "search"
+        description = "find things"
+        inputSchema = {"type": "object", "properties": {}}
+
+    a = _mcp_tool_to_karvyloop_tool(_T(), server_name="alpha", session=object())
+    b = _mcp_tool_to_karvyloop_tool(_T(), server_name="beta", session=object())
+    assert a.name == "mcp_alpha_search" and b.name == "mcp_beta_search"
+    assert a.name != b.name                        # 同名工具不同 server 不冲突
+
+
 # ============ AC8:input_schema 透传(从 MCP 端到 KarvyLoop Tool 端)============
 @pytest.mark.asyncio
 async def test_ac8_input_schema_passthrough(tmp_path: Path):
