@@ -11,6 +11,20 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **Connect your real apps — with a safety net nobody else has.** A new "Connect your
+  apps" area offers one-tap setup for Notion and GitHub (official MCP servers; paste one
+  token, tools are live immediately — no restart needed), with Gmail, Google Calendar and
+  Slack visibly on deck ("needs OAuth sign-in — coming in a later release"). And the
+  ground rule that makes this safe: **an agent can never send anything outward on its
+  own.** Any send-like tool call (email, chat post, invoice, file share — 65 real-world
+  tool names verified) is intercepted into a draft decision card showing every recipient
+  (including cc/bcc — hidden-recipient injection is surfaced with a red flag) and the
+  byte-exact payload; only your Accept actually sends. Adversarially verified: no bypass
+  path, atomic accept (two devices approving the same card can't double-send), fail-closed
+  when the card system is unavailable.
+
+
 ## [2026.7.29] — 2026-07-29
 
 The proactive release: "guess what you want" got rebuilt on evidence — cards now fire on
