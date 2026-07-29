@@ -185,8 +185,7 @@ def api_line_open(req: LineOpenRequest, request: Request) -> dict[str, Any]:
     return {
         "ok": True, **ret_peer, "is_group": req.role == "roundtable",
         "conversation_id": conv.id, "turn_count": conv.turn_count,
-        "turns": [{"user_intent": t.user_intent, "agent_response": t.agent_response,
-                   "brain": t.brain, "task_id": t.task_id, "data": t.data} for t in conv.turns],
+        "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
     }
 
 
@@ -233,6 +232,5 @@ def api_line_open_by_conv(req: ConvOpenRequest, request: Request) -> dict[str, A
         "kind": "workflow" if role == "workflow" else ("roundtable" if is_round else ""),
         "title": title.lstrip("⚙🎡 ").strip(), "origin_group": _line_origin_name(request.app, target.domain_id),
         "conversation_id": conv.id, "turn_count": conv.turn_count,
-        "turns": [{"user_intent": t.user_intent, "agent_response": t.agent_response,
-                   "brain": t.brain, "task_id": t.task_id, "data": t.data} for t in conv.turns],
+        "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
     }

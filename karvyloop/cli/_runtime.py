@@ -25,6 +25,9 @@ class ResolvedRuntime:
     main_loop: Optional[object]   # MainLoop | None
     runtime_kwargs: dict          # 慢脑工厂 kwargs(token/sandbox/gateway/workspace_root/model_ref)
     skills_dir: Path
+    # build_main_loop 抛异常时的**真实原因**(config 在但引擎起不来)。UX 诚实修:
+    # 网页/TUI 据此把"MainLoop 未注入"从一句误导的"请先 karvyloop init"换成真原因。
+    build_error: Optional[str] = None
 
 
 def resolve_runtime(
@@ -70,6 +73,7 @@ def resolve_runtime(
             main_loop=None,
             runtime_kwargs={},
             skills_dir=skills_dir,
+            build_error=str(e) or e.__class__.__name__,
         )
 
     try:

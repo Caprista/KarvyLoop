@@ -57,7 +57,8 @@ class TestAC7WSIntentRoundtrip:
             msg = ws.receive_json()
             assert msg["type"] == "drive_done"
             assert "error" in msg["payload"]
-            assert "MainLoop" in msg["payload"]["error"]
+            # 缺席真因=needs_init(UX 诚实修:报真话不再一句"MainLoop 未注入")
+            assert "karvyloop init" in msg["payload"]["error"]
 
     def test_ws_empty_intent_returns_error(self, client):
         with client.websocket_connect("/ws") as ws:

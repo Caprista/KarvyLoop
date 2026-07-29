@@ -896,8 +896,9 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         logger.warning("[api_intent] slash 处理失败,降级正常 drive", exc_info=True)
 
     if main_loop is None:
-        # 修 silent-fail:返 200 + error dict,**不** 500
-        return drive_outcome_to_dict(_stub_no_main_loop(req.intent))
+        # 修 silent-fail:返 200 + error dict,**不** 500(error 带缺席真因)
+        from karvyloop.console.drive_turn_accounting import stub_no_main_loop
+        return drive_outcome_to_dict(stub_no_main_loop(req.intent, request.app))
 
     # 9.1d:取当前对话上下文(CV-8),喂 drive(上下文依赖门 + 慢脑消解多轮)
     # 9.2b:业务域线注入 value.md(CV-14)
@@ -1026,6 +1027,12 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         task_id = task_reg.start(who=_who, domain_id=_did, role=_role, intent=req.intent,
                                  kind="drive")   # docs/90 刀3a:显式任务类型(停止按钮按它路由)
 
+    # bug(执行中对话归属竞态):drive **之前**落挂起轮 + 立即绑任务到捕获的对话(共享落账,镜像 ws)
+    from karvyloop.console.drive_turn_accounting import (
+        begin_drive_turn, fail_drive_turn, finalize_drive_turn)
+    _turn_handle = begin_drive_turn(mgr, task_reg, task_id, intent=req.intent,
+                                    attachments=req.attachments, tag="api_intent")
+
     # 走 drive_in_tui(asyncio.to_thread 包装,防 R3-async 嵌套)
     try:
         # @ 命中 → 用被 @ 角色配置的模型(空=默认);否则全局 default。
@@ -1063,6 +1070,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         logger.exception(f"api_intent drive 异常: {e}")
         if task_reg is not None and task_id is not None:
             task_reg.finish(task_id, error=str(e))
+        fail_drive_turn(mgr, _turn_handle, str(e))   # 挂起轮回填失败态,不留僵尸 pending
         return {"intent": req.intent, "error": str(e), "brain": "SLOW", "text": "",
                 "recall_used": _recall_used}
 
@@ -1111,24 +1119,13 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         except Exception:
             pass
 
-    # 9.1d:这一轮入当前对话(CV-10,带 brain 标记)
+    # bug(执行中对话归属竞态):drive 结束就地回填挂起轮(成功填 text / error 填错)+ 回填任务 trace_id
+    # ——不叠第二条(共享落账,镜像 ws)。l0 私聊任务此前 conversation_id 空 → 去聊天只能切场不能定位。
+    finalize_drive_turn(mgr, _turn_handle, task_reg, task_id, intent=req.intent,
+                        outcome=outcome, attachments=req.attachments)
+
+    # 结晶/蒸馏/角色经验等下游:只在**完整轮**(finalize/成功)后触发,不在空的挂起轮(begin)。
     if mgr is not None and not outcome.error:
-        try:
-            mgr.record_turn(
-                req.intent, outcome.text or "",
-                brain=outcome.brain.value, task_id=outcome.task_id,
-                data=({"attachments": req.attachments} if req.attachments else None),  # 多模态:落历史给人回看
-            )
-            # 料→去聊天定位:把本任务挂到刚写入的对话 + 回填 trace_id(= turn.task_id)。
-            # l0 私聊任务此前 conversation_id 一直空 → "去聊天"只能切场不能定位;且 registry id
-            # ≠ turn 的 drive trace id,两个 id 空间对不上 → 定位永空。这里两样都补上。
-            if task_reg is not None and task_id is not None:
-                try:
-                    task_reg.set_conversation(task_id, mgr.current().id, trace_id=outcome.task_id or "")
-                except Exception:
-                    pass
-        except Exception:
-            pass
         # loop step4b:轮后自动蒸馏(攒够 N 轮→批量编译进知识库;fire-and-forget 不阻塞)
         schedule_auto_distill(request.app, mgr)
         # W1(docs/56 审计 HIGH):角色经验沉淀补**直聊路径**(REST api_intent 同 ws 镜像)。
@@ -1405,19 +1402,8 @@ async def _fuzzy_ops_proposal(app, intent: str):
         return None
 
 
-def _stub_no_main_loop(intent: str):
-    """main_loop=None 时返 DriveOutcome stub(error,不 500)。"""
-    from karvyloop.runtime.main_loop import Brain
-    from karvyloop.workbench.main_loop_bridge import DriveOutcome
-    return DriveOutcome(
-        intent=intent,
-        brain=Brain.SLOW,
-        text="",
-        skill_name="",
-        fast_brain_hit=False,
-        crystallized=False,
-        error="MainLoop 未注入 — 请先 karvyloop init",
-    )
+# _stub_no_main_loop 已下沉到 drive_turn_accounting.stub_no_main_loop(god-module 收口,
+# 两个 drive 入口 routes/ws 共用)。
 
 
 # ---- /api/tokens* 已下沉到 routes_tokens.py(P2-② 纯搬移)----

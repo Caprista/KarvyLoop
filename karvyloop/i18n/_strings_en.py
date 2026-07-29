@@ -140,7 +140,14 @@ EN = {
     "cli.run.config_missing": "config not found: {path}. run `karvyloop init` first.",
     "cli.interrupted": "interrupted.",
     "cli.chat.readonly_warning": "[karvyloop] config.yaml not found ({path}); TUI read-only view — intent submission will fail; run `karvyloop init` first",
+    # UX 诚实修:main_loop 缺席时,页面/聊天报**真原因**(不再一句误导的"请先 karvyloop init")
+    "setup.absent.no_llm": "Read-only mode (--no-llm): no model engine is attached, so chat can't run. Restart without --no-llm to enable it.",
+    "setup.absent.needs_init": "Not set up yet — run `karvyloop init` first (or add a model in Settings).",
+    "setup.absent.build_failed": "The model engine failed to start: {reason}. Fix the config or dependencies and restart.",
+    "setup.absent.needs_setup": "No usable model key — add one in Settings to start chatting.",
     "chat.empty_retry_fallback": "(I didn't quite catch that — could you say it once more?)",
+    # bug(执行中对话归属竞态):僵尸挂起轮标"已中断"的人话回复
+    "conv.turn_interrupted": "(Interrupted — this run did not finish.)",
     # init wizard
     "wizard.choose_provider": "Choose your LLM provider:",
     "wizard.choose_prompt": "Pick [1..{n}] (default 1=local): ",

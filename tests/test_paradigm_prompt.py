@@ -56,6 +56,31 @@ def test_compiled_prompt_marks_domain_governance_covered(tmp_path):
         assert "covers_domain_governance" in src, f"{rel} 缺双注入去重接线"
 
 
+def test_role_name_anchored_to_nickname_not_leaked_karvy(tmp_path):
+    """bug 修:私聊角色自称成"小卡"。IDENTITY.md 文本(共创起草器 LLM 生成,system 通篇
+    小卡)可能把角色名漏成"小卡";系统提示必须用**用户设的花名**钉权威身份、划清与小卡的界,
+    不管 IDENTITY 文本写了啥。"""
+    roles = RoleRegistry(tmp_path / "roles")
+    # 模拟坏 IDENTITY:文本里烙了"小卡",但用户设的花名是"小美"
+    rv = roles.create("pcb-eng", identity="我是小卡,KarvyLoop 里的 PCB 设计工程师",
+                      soul="严谨", nickname="小美", title="PCB设计工程师")
+    cp = build_role_paradigm_prompt(rv, None, intent="你是谁", cwd="/w")
+    text = cp.to_text()
+    assert "你叫「小美」" in text                      # 权威花名钉进提示
+    assert "绝不要自称小卡" in text                    # 显式划清与全局助手的界
+    # 花名在权威锚里,压在 IDENTITY 文本之前(先声明真名)
+    assert text.index("你叫「小美」") < text.index("PCB 设计工程师")
+
+
+def test_name_anchor_falls_back_to_id_when_no_nickname(tmp_path):
+    """没花名(nickname 空)→ 用 role_id 当名字锚,不炸、不空锚。"""
+    roles = RoleRegistry(tmp_path / "roles")
+    rv = roles.create("analyst", identity="资深分析师", soul="求真")   # 无 nickname
+    cp = build_role_paradigm_prompt(rv, None, intent="x", cwd="/w")
+    text = cp.to_text()
+    assert "你叫「analyst」" in text
+
+
 def test_no_role_dir_returns_none(tmp_path):
     """不是 materialized 角色目录 → 返 None(调用方回退 persona)。"""
     class _Fake:

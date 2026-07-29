@@ -243,6 +243,10 @@ def cmd_console(args: argparse.Namespace) -> int:
     # 无 Key 强制引导(/api/setup_status):记下是不是用户**显式** --no-llm
     # (显式只读模式不强制录模型;非 no_llm 但无可用 key → 网页强制引导)。
     app.state.no_llm = bool(no_llm)
+    # UX 诚实修:main_loop=None 时,把"到底为什么起不来"存进 state。build_main_loop 抛异常
+    # (config 在但引擎坏)的真原因由 resolve_runtime 带回,让 stub/setup_status 报真话,
+    # 不再一句误导的"请先 karvyloop init"(用户明明已 init 过)。
+    app.state.build_error = getattr(resolved, "build_error", None)
 
     # === 接线孤儿修(docs/87 §四):main_loop=None 时补独立 Trace 源到 app.state.trace ===
     # 病根:--no-llm(以及 config 缺失/构造失败)→ main_loop=None → app.state.trace 从没被赋值。

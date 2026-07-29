@@ -29,7 +29,7 @@ from karvyloop.runtime.main_loop import MainLoop
 from karvyloop.karvy.observer import WorkbenchObserver
 from karvyloop.workbench.main_loop_bridge import drive_in_tui
 
-from .routes import _stub_no_main_loop
+from .drive_turn_accounting import stub_no_main_loop
 from .serializers import drive_outcome_to_dict
 
 logger = logging.getLogger(__name__)
@@ -289,7 +289,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         return
 
     if main_loop is None:
-        outcome = _stub_no_main_loop(intent)
+        outcome = stub_no_main_loop(intent, app)   # error 带缺席真因(no_llm/构造失败/需 init)
         await websocket.send_json({
             "type": "drive_done",
             "payload": drive_outcome_to_dict(outcome),
@@ -405,6 +405,13 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         task_id = task_reg.start(who=_who, domain_id=_did, role=_role, intent=intent,
                                  kind="drive")   # 显式任务类型(⏹ 停止按钮按它路由 cancel 端点)
 
+    # bug(执行中对话归属竞态):drive **之前**落挂起轮 + 立即绑任务到捕获的对话(共享落账,镜像 REST)
+    from karvyloop.console.drive_turn_accounting import (
+        begin_drive_turn, fail_drive_turn, finalize_drive_turn)
+    _att = payload.get("attachments")
+    _turn_handle = begin_drive_turn(mgr, task_reg, task_id, intent=intent,
+                                    attachments=_att, tag="ws")
+
     # P4 逐字流式:drive 在 worker 线程跑,每个 render 事件经 run_coroutine_threadsafe 桥回本 loop
     # 推 `drive_event`(loop 不被 to_thread 阻塞,可即时广播)→ 前端逐字追加。失败不拖垮 drive。
     _loop = asyncio.get_running_loop()
@@ -450,6 +457,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         # docs/90 刀3a 收口:异常也落卡终态(与 REST 同语义;人话化在 tasks.finish 咽喉)
         if task_reg is not None and task_id is not None:
             task_reg.finish(task_id, error=str(e))
+        fail_drive_turn(mgr, _turn_handle, str(e))   # 挂起轮回填失败态,不留僵尸 pending
         await websocket.send_json({
             "type": "drive_done",
             "payload": {"intent": intent, "error": str(e), "brain": "SLOW", "text": "",
@@ -499,26 +507,12 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         except Exception:
             pass
 
-    # 9.1d:这一轮入当前对话(CV-10,带 brain 标记)
+    # bug(执行中对话归属竞态):drive 结束就地回填挂起轮 + 回填任务 trace_id(共享落账,镜像 REST)
+    finalize_drive_turn(mgr, _turn_handle, task_reg, task_id, intent=intent,
+                        outcome=outcome, attachments=_att)
+
+    # 结晶/蒸馏/角色经验等下游:只在**完整轮**(finalize/成功)后触发,不在空的挂起轮(begin)。
     if mgr is not None and not outcome.error:
-        try:
-            _att = payload.get("attachments")
-            mgr.record_turn(
-                intent, outcome.text or "",
-                brain=outcome.brain.value, task_id=outcome.task_id,
-                data=({"attachments": _att} if _att else None),  # 多模态:落历史给人回看
-            )
-            # docs/90 刀3a 收口(照 REST api_intent):任务卡挂上这条对话 + 回填 trace_id
-            # (= turn.task_id = drive trace id;≠ 本任务 registry id,两个 id 空间对不上
-            # 则「去聊天」只能切场不能定位到那一轮)。
-            if task_reg is not None and task_id is not None:
-                try:
-                    task_reg.set_conversation(task_id, mgr.current().id,
-                                              trace_id=outcome.task_id or "")
-                except Exception:
-                    pass
-        except Exception:
-            pass
         # loop step4b:轮后自动蒸馏(fire-and-forget,不阻塞 WS 响应)
         from .routes import schedule_auto_distill
         schedule_auto_distill(app, mgr)

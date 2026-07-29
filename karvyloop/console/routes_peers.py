@@ -110,10 +110,6 @@ def api_peer_switch(req: PeerSwitchRequest, request: Request) -> dict[str, Any]:
         "ok": True,
         "domain_id": peer.domain_id, "role": peer.role, "agent_id": peer.agent_id,
         "conversation_id": conv.id, "turn_count": conv.turn_count,
-        "turns": [
-            {"user_intent": t.user_intent, "agent_response": t.agent_response,
-             "brain": t.brain, "task_id": t.task_id, "data": t.data}
-            for t in conv.turns
-        ],
+        "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
         "roundtable_pending": _roundtable_pending(request.app, conv.id),
     }

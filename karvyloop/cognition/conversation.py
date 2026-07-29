@@ -25,7 +25,7 @@ import json
 import re
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
@@ -39,6 +39,21 @@ DEFAULT_CONTEXT_TURNS = 12
 
 BRAIN_FAST = "fast"
 BRAIN_SLOW = "slow"
+
+# 轮状态(bug:执行中对话归属竞态)——一轮的生命周期:
+#   ""       普通已完成轮(老格式,向后兼容:无 status 字段照读)
+#   running  挂起轮:begin_turn 刚落盘、drive 还在跑(前端渲"执行中…"占位,刷新读得到)
+#   done     finalize_turn 就地回填成功
+#   error    finalize_turn 就地回填失败(带人话错误)
+#   interrupted 崩溃/进程退出留下的僵尸挂起轮,被超时扫描标"已中断"
+TURN_RUNNING = "running"
+TURN_DONE = "done"
+TURN_ERROR = "error"
+TURN_INTERRUPTED = "interrupted"
+
+# 挂起轮陈旧阈值:标 running 但落盘超过它 = 疑似进程中断(镜像 task_monitor.STALE_THRESHOLD_S)。
+# 保守(> 单次正常慢真模型 drive 时长),宁晚标勿误杀活着的慢任务。〔待 Trace 标定〕
+PENDING_STALE_THRESHOLD_S = 30 * 60
 
 # karvy world(私聊场)的 domain_id(docs/23:l0 = 跨域标识 / 大群)
 KARVY_WORLD_DOMAIN = "l0"
@@ -70,6 +85,30 @@ def _atomic_append(path: Path, line: str) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(line)
         f.flush()
+
+
+def _interrupted_text() -> str:
+    """僵尸挂起轮标"已中断"时给人话回复(best-effort i18n;低层模块降级到中文兜底不炸)。"""
+    try:
+        from karvyloop import i18n
+        return i18n.t("conv.turn_interrupted")
+    except Exception:
+        return "(执行中断,未完成)"
+
+
+def _mark_interrupted_if_stale(turn: "Turn", *, now: float,
+                               threshold: float = PENDING_STALE_THRESHOLD_S) -> "Turn":
+    """挂起轮陈旧(> threshold 无回填)→ 呈现为"已中断",别让它永远转圈。非挂起轮原样返回。
+
+    读时呈现是**权威机制**:进程崩后的僵尸挂起轮每次被读到都判"已中断"(幂等、无写副作用),
+    不依赖任何后台落盘 tick。活着的慢 drive(age ≤ threshold)保持 pending → 前端继续显"执行中…"。
+    """
+    if not turn.pending:
+        return turn
+    if now - (turn.ts or 0.0) <= threshold:
+        return turn
+    return replace(turn, pending=False, status=TURN_INTERRUPTED,
+                   agent_response=turn.agent_response or _interrupted_text())
 
 
 def karvy_world_peer(role: str = "observer", agent_id: str = "karvy") -> Address:
@@ -115,6 +154,13 @@ class Turn:
     `data`:可选**结构化负载**(默认 None)。给"非普通一来一回"的回合带结构 —— 如圆桌
     (`{"roundtable": {transcript, conclusion, rounds, ...}}`),让重开时前端渲成群聊串而非
     一坨 markdown。普通回合 data=None,落盘不带这字段(记录干净、0 回归)。
+
+    bug(执行中对话归属竞态)加的三个状态位(都可选、向后兼容,老对话文件无这些字段照读):
+    - `turn_id`:挂起轮(begin_turn)与其回填(finalize_turn)的稳定关联键。有它 → 同 id 的后
+      写行在加载时 coalesce(finalize 覆盖 begin);无它(record_turn/create_record 的老路径)
+      → 永远追加、绝不 coalesce(0 回归)。
+    - `pending`:True = 挂起轮(drive 还在跑,回复位是占位);finalize 清成 False。
+    - `status`:"" | running | done | error | interrupted(见模块常量)。
     """
     user_intent: str
     agent_response: str
@@ -122,6 +168,9 @@ class Turn:
     ts: float = 0.0
     task_id: str = ""
     data: Optional[dict] = None
+    turn_id: str = ""
+    pending: bool = False
+    status: str = ""
 
     def to_record(self) -> dict:
         rec = {
@@ -133,7 +182,26 @@ class Turn:
         }
         if self.data:
             rec["data"] = self.data
+        # 挂起态字段只在有值时落盘(普通完成轮记录干净、老读者不受影响)
+        if self.turn_id:
+            rec["turn_id"] = self.turn_id
+        if self.pending:
+            rec["pending"] = True
+        if self.status:
+            rec["status"] = self.status
         return rec
+
+    def to_ui_dict(self) -> dict:
+        """给前端的一轮(含挂起/中断态位),供 peer/switch·resume·line/open 等端点统一序列化。"""
+        return {
+            "user_intent": self.user_intent,
+            "agent_response": self.agent_response,
+            "brain": self.brain,
+            "task_id": self.task_id,
+            "data": self.data,
+            "pending": self.pending,
+            "status": self.status,
+        }
 
     @classmethod
     def from_record(cls, rec: dict) -> "Turn":
@@ -145,7 +213,21 @@ class Turn:
             ts=float(rec.get("ts", 0.0)),
             task_id=rec.get("task_id", ""),
             data=d if isinstance(d, dict) else None,
+            turn_id=rec.get("turn_id", "") or "",
+            pending=bool(rec.get("pending", False)),
+            status=rec.get("status", "") or "",
         )
+
+
+@dataclass
+class TurnHandle:
+    """begin_turn 返回的句柄:回填(finalize_turn)时定位那条挂起轮。
+
+    带**对话对象引用**(不是 id)—— 归属捕获在 intent 收到那刻(current),之后 current 可能漂移
+    (用户切场),finalize 仍就地回填**当初那条对话**,不会落到别的场。turn_id 在 conv.turns 里精确定位。
+    """
+    conv: "Conversation"
+    turn_id: str
 
 
 @dataclass
@@ -242,20 +324,35 @@ class ConversationStore:
     def append_turn(self, conv: Conversation, turn: Turn) -> Turn:
         """追加一轮(CV-10)。ts 为 0 → clock 补;落盘脱敏,内存保真。"""
         if not turn.ts:
-            turn = Turn(
-                user_intent=turn.user_intent,
-                agent_response=turn.agent_response,
-                brain=turn.brain,
-                ts=self._clock(),
-                task_id=turn.task_id,
-                data=turn.data,   # 保留结构化负载(圆桌等),别在补 ts 时丢掉
-            )
+            # replace 只补 ts,保留 data(圆桌等)+ turn_id/pending/status(挂起轮态位),别在补 ts 时丢掉
+            turn = replace(turn, ts=self._clock())
         disk_rec = turn.to_record()
         disk_rec["user_intent"] = _scrub_field(turn.user_intent)
         disk_rec["agent_response"] = _scrub_field(turn.agent_response)
         _atomic_append(self._path(conv.peer, conv.id), json.dumps(disk_rec, ensure_ascii=False) + "\n")
         conv.turns.append(turn)
         return turn
+
+    def rewrite_turn(self, conv: Conversation, turn: Turn) -> Turn:
+        """就地回填一条已存在的挂起轮(同 turn_id):追加一条回填行(加载时 coalesce 覆盖 begin),
+        并替换内存里那条 —— **不叠第二条**。找不到那条挂起轮 → 退化为 append_turn(绝不丢回复)。
+
+        合原子追加范式(镜像 `_closed` 墓碑行的做法):不改写既有内容,只追加后写行。
+        """
+        if turn.turn_id:
+            for i, old in enumerate(conv.turns):
+                if old.turn_id == turn.turn_id:
+                    if not turn.ts:
+                        turn = replace(turn, ts=old.ts or self._clock())
+                    disk_rec = turn.to_record()
+                    disk_rec["user_intent"] = _scrub_field(turn.user_intent)
+                    disk_rec["agent_response"] = _scrub_field(turn.agent_response)
+                    _atomic_append(self._path(conv.peer, conv.id),
+                                   json.dumps(disk_rec, ensure_ascii=False) + "\n")
+                    conv.turns[i] = turn
+                    return turn
+        # 没找到挂起轮(理论上不该发生:句柄丢了/换了 conv)→ 当新轮追加,别把回复弄丢
+        return self.append_turn(conv, turn)
 
     def close(self, conv: Conversation, *, reason: str = "sedimented") -> float:
         """关闭会话(docs/66 §E:沉淀了才关)。追加 `_closed` 墓碑行,不改写既有内容;幂等。"""
@@ -281,6 +378,7 @@ class ConversationStore:
         title = ""
         peer = karvy_world_peer()
         turns: list[Turn] = []
+        id_index: dict[str, int] = {}   # turn_id → 在 turns 里的位置(coalesce:后写覆盖)
         closed_at: Optional[float] = None
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -300,7 +398,18 @@ class ConversationStore:
                 if rec.get("_closed"):
                     closed_at = float(rec.get("ts", 0.0)) or None
                     continue
-                turns.append(Turn.from_record(rec))
+                turn = Turn.from_record(rec)
+                # 挂起轮回填 = 同 turn_id 的后写行覆盖前者(begin → finalize 就地回填,不叠两条)
+                tid = turn.turn_id
+                if tid and tid in id_index:
+                    turns[id_index[tid]] = turn
+                else:
+                    if tid:
+                        id_index[tid] = len(turns)
+                    turns.append(turn)
+        # 僵尸挂起轮:进程崩了留下的 running 轮陈旧过久 → 呈现为"已中断"(不永远转圈)
+        now = self._clock()
+        turns = [_mark_interrupted_if_stale(t, now=now) for t in turns]
         return Conversation(
             id=path.stem, created_at=created_at, peer=peer, title=title, turns=turns,
             closed_at=closed_at,
@@ -345,6 +454,7 @@ class ConversationStore:
         peer = karvy_world_peer()
         last_ts = 0.0
         turn_count = 0
+        seen_ids: set[str] = set()   # coalesce:同 turn_id 的回填行不重复计数(begin+finalize=1 轮)
         closed_at: Optional[float] = None
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -365,8 +475,13 @@ class ConversationStore:
                     if rec.get("_closed"):
                         closed_at = float(rec.get("ts", 0.0)) or None
                         continue          # 墓碑不算轮
-                    turn_count += 1
                     last_ts = float(rec.get("ts", last_ts))
+                    tid = rec.get("turn_id") or ""
+                    if tid and tid in seen_ids:
+                        continue          # 回填行:只更新 last_ts,不重复计数
+                    if tid:
+                        seen_ids.add(tid)
+                    turn_count += 1
         except OSError:
             return None
         return ConversationMeta(
@@ -559,6 +674,69 @@ class ConversationManager:
             blocks.append(guard)
         return "\n\n".join(blocks)
 
+    def begin_turn(
+        self,
+        user_intent: str,
+        *,
+        task_id: str = "",
+        brain: str = BRAIN_SLOW,
+        data: Optional[dict] = None,
+        conv: Optional["Conversation"] = None,
+    ) -> TurnHandle:
+        """bug(执行中对话归属竞态):drive **之前立即**在**捕获到的那条对话**追加一条挂起轮
+        (agent_response="",pending=True/status=running)并**落盘** —— 刷新从盘读得到、任务能当场绑对话。
+
+        `conv`:显式传"intent 收到那刻的 current",不靠之后可能漂移的 current(用户 drive 中切场)。
+        返回 TurnHandle,drive 结束用它 finalize_turn 就地回填。无当前对话则默认私聊小卡。
+        """
+        target = conv if conv is not None else self._current
+        if target is None:
+            target = self.start()
+        turn = Turn(
+            user_intent=user_intent, agent_response="", brain=brain,
+            task_id=task_id, data=data,
+            turn_id=uuid.uuid4().hex[:16], pending=True, status=TURN_RUNNING,
+        )
+        stored = self._store.append_turn(target, turn)
+        return TurnHandle(conv=target, turn_id=stored.turn_id)
+
+    def finalize_turn(
+        self,
+        handle: Optional[TurnHandle],
+        agent_response: str,
+        *,
+        error: str = "",
+        task_id: Optional[str] = None,
+        brain: Optional[str] = None,
+        data: Optional[dict] = None,
+    ) -> Optional[Turn]:
+        """bug(执行中对话归属竞态):drive 结束把挂起轮**就地回填**(填回复+清 pending)——
+        **不追加第二条**。成功 → status=done+text;error → status=error+人话错误。持久化。
+
+        `task_id`/`brain`/`data` 缺省(None)= 保留 begin 时的值;传入 = 覆盖(brain/trace_id 只有
+        drive 结束才知道)。handle 为 None(begin 落账失败降级)→ 返回 None,由调用方走旧 record_turn。
+        """
+        if handle is None:
+            return None
+        conv = handle.conv
+        old: Optional[Turn] = None
+        for t in conv.turns:
+            if t.turn_id == handle.turn_id:
+                old = t
+                break
+        status = TURN_ERROR if error else TURN_DONE
+        resp = (agent_response or error) if error else agent_response
+        new_turn = Turn(
+            user_intent=(old.user_intent if old else ""),
+            agent_response=resp or "",
+            brain=(brain if brain is not None else (old.brain if old else BRAIN_SLOW)),
+            ts=(old.ts if old else 0.0),
+            task_id=(task_id if task_id is not None else (old.task_id if old else "")),
+            data=(data if data is not None else (old.data if old else None)),
+            turn_id=handle.turn_id, pending=False, status=status,
+        )
+        return self._store.rewrite_turn(conv, new_turn)
+
     def record_turn(
         self,
         user_intent: str,
@@ -626,10 +804,16 @@ __all__ = [
     "CONVERSATION_SCHEMA",
     "DEFAULT_CONTEXT_TURNS",
     "KARVY_WORLD_DOMAIN",
+    "PENDING_STALE_THRESHOLD_S",
+    "TURN_RUNNING",
+    "TURN_DONE",
+    "TURN_ERROR",
+    "TURN_INTERRUPTED",
     "Conversation",
     "ConversationManager",
     "ConversationMeta",
     "ConversationStore",
     "Turn",
+    "TurnHandle",
     "karvy_world_peer",
 ]

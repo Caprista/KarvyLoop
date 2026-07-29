@@ -41,6 +41,36 @@ def is_ready(reg: Any) -> tuple[bool, str]:
         return False, f"error:{e}"
 
 
+def main_loop_absence(app: Any) -> dict:
+    """main_loop=None 时诚实说清**到底为什么**(UX 修:页面能开、发消息才报一句误导的
+    "请先 karvyloop init")。返回 {"code","text"};main_loop 在位 → {"code":"","text":""}。
+
+    四种缺席(互斥,按优先级判):
+    - no_llm    : 用户显式 --no-llm 只读模式(不是坏,是他主动选的)。
+    - build_failed: config 在但 build_main_loop 抛异常(引擎真坏)→ 端出真原因。
+    - needs_init: 根本没 config.yaml(纯新机器)→ 这时"请先 karvyloop init"才是对的。
+    - needs_setup: config 在、无构造错,但没可用模型/Key(被删 / env 没设)→ 去设置里补。
+    """
+    from karvyloop.i18n import t
+    if getattr(app.state, "main_loop", None) is not None:
+        return {"code": "", "text": ""}
+    if bool(getattr(app.state, "no_llm", False)):
+        return {"code": "no_llm", "text": t("setup.absent.no_llm")}
+    build_error = getattr(app.state, "build_error", None)
+    if build_error:
+        return {"code": "build_failed",
+                "text": t("setup.absent.build_failed", reason=str(build_error))}
+    cfg_path = getattr(app.state, "config_path", None)
+    try:
+        from pathlib import Path
+        exists = bool(cfg_path and Path(cfg_path).exists())
+    except Exception:
+        exists = False
+    if not exists:
+        return {"code": "needs_init", "text": t("setup.absent.needs_init")}
+    return {"code": "needs_setup", "text": t("setup.absent.needs_setup")}
+
+
 def setup_status(app: Any) -> dict:
     """给 /api/setup_status 用:综合 no_llm 显式模式 + registry 就绪。"""
     no_llm = bool(getattr(app.state, "no_llm", False))
@@ -48,13 +78,18 @@ def setup_status(app: Any) -> dict:
     gw = rk.get("gateway")
     reg = getattr(gw, "reg", None) if gw is not None else None
     ready, reason = is_ready(reg)
+    absence = main_loop_absence(app)   # UX 诚实修:前端据此置灰聊天框 + 显真原因 banner
     return {
         "ready": ready,
         "reason": reason,
         "no_llm_mode": no_llm,        # 用户显式 --no-llm:网页不强制引导(是他主动选的只读模式)
         # 网页据此决定:not ready 且 not no_llm_mode → 强制录入模型
         "must_setup": (not ready) and (not no_llm),
+        # main_loop 缺席(发消息会撞 stub)→ 前端把聊天框置灰、显 absence_text(诚实文案)
+        "absent": bool(absence["code"]),
+        "absence_code": absence["code"],
+        "absence_text": absence["text"],
     }
 
 
-__all__ = ["is_ready", "setup_status", "LOCAL_PROVIDERS"]
+__all__ = ["is_ready", "setup_status", "main_loop_absence", "LOCAL_PROVIDERS"]

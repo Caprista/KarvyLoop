@@ -538,4 +538,5 @@ def test_ws_intent_no_session_stub_unchanged():
         ws.receive_json()
         ws.send_json({"type": "intent", "payload": {"intent": "hello"}})
         msg = ws.receive_json()
-    assert msg["type"] == "drive_done" and "MainLoop" in msg["payload"]["error"]
+    # main_loop=None 且无 config → 缺席真因=needs_init(UX 诚实修:报真话不再一句"MainLoop 未注入")
+    assert msg["type"] == "drive_done" and "karvyloop init" in msg["payload"]["error"]

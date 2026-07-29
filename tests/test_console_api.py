@@ -65,7 +65,8 @@ class TestAC2IntentEndpoint:
         assert r.status_code == 200
         data = r.json()
         assert "error" in data
-        assert "MainLoop" in data["error"]
+        # 缺席真因=needs_init(UX 诚实修:报真话不再一句"MainLoop 未注入")
+        assert "karvyloop init" in data["error"]
 
     def test_intent_empty_string_422(self, client):
         """空 intent 被 Pydantic 拒(422)。"""

@@ -1167,6 +1167,18 @@ html, body {
 
 /* ch4 #1:群里 @ 角色(微信式选择器)*/
 .chat-input-wrap { position: relative; }
+/* 只读态(UX 诚实修):没接模型引擎时——置灰输入框+工具+发送,并在上方显真原因横幅。
+   别再让人对着一个发出去只会撞"MainLoop 未注入"的活框打字。 */
+.composer-readonly {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin: 0 0 8px; padding: 9px 12px;
+  background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: 10px;
+  color: var(--warn); font-size: 12.5px; line-height: 1.5;
+}
+.chat-input-wrap.is-readonly .chat-input-ce,
+.chat-input-wrap.is-readonly .chat-toolbar {
+  opacity: 0.45; pointer-events: none; user-select: none;
+}
 .mention-pop {
   position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px;
@@ -3397,6 +3409,13 @@ body.desk-view .desk-dragging {
 .live-thinking .kv-dots span:nth-child(2) { animation-delay: 0.2s; }
 .live-thinking .kv-dots span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes kv-dot-breathe { 0%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+
+/* bug(执行中对话归属竞态):挂起轮"执行中…"占位 —— 慢脑 drive 还在跑,切到该对话/刷新时
+   回复位显骨架(不空白)。复用 kv-dots 相位呼吸(reduced-motion 总闸压静止)。 */
+.pending-turn .pending-turn-body { display: inline-flex; align-items: baseline; gap: 4px; color: var(--text-dim); font-style: italic; }
+.pending-turn .kv-dots span { display: inline-block; animation: kv-dot-breathe 1.2s ease-in-out infinite; }
+.pending-turn .kv-dots span:nth-child(2) { animation-delay: 0.2s; }
+.pending-turn .kv-dots span:nth-child(3) { animation-delay: 0.4s; }
 
 /* P1-7 执行后回报卡到场:fade+rise + 一次 accent 描边淡入再放掉(700ms;同决策卡到场
    家族但更轻 —— 无 scale、无 10px ping,不抢决策卡的主角地位) */

@@ -210,6 +210,7 @@
     } else if (msg.type === "drive_done") {
       // 9.4b:WS 实时追加即为权威渲染,不再回拉 chat_history 重建(那会抢选中/强制滚动)
       _clearLiveStream();   // P4:清掉逐字流式草稿 → renderDriveDone 渲染权威终态(含 markdown/高亮)
+      _clearPendingPlaceholders();   // bug竞态:清挂起占位(切到对话中途落的"执行中…")→ 权威回复接上
       openChatModal();   // step5:回复到了 → 弹起对话窗(含后台/主动回复)
       renderDriveDone(msg.payload);
     } else if (msg.type === "h2a_proposal") {
@@ -2152,6 +2153,28 @@
     ttl.textContent = "💬 " + t("chat.you") + " & " + who;
     _chatSpeaker = isKarvy ? "" : who;   // 回复方身份(agent tag)同步
   }
+  // bug(执行中对话归属竞态):刷新恢复到刷新前的**非默认场**。此前刷新一律回落默认 Karvy 私聊线
+  // (_currentPeer=null)→ 在业务角色/域里发的消息、正在跑的指令看着"跑到 Karvy 那里"。只存**非默认**
+  // 场(默认线走进程级 chat_history 老路径,0 行为变化);切回默认线时清掉(键只承载非默认场)。
+  const _ACTIVE_PEER_KEY = "karvyloop_active_peer";
+  function _saveActivePeer(peerJson, peer) {
+    try {
+      if (peer && !_isKarvyPrivatePeer(peer)) localStorage.setItem(_ACTIVE_PEER_KEY, peerJson);
+      else localStorage.removeItem(_ACTIVE_PEER_KEY);
+    } catch (e) { /* 隐私模式无 localStorage → 不恢复,不炸 */ }
+  }
+  function _restoreActivePeerOrHistory() {
+    let saved = null;
+    try { saved = localStorage.getItem(_ACTIVE_PEER_KEY); } catch (e) {}
+    let p = null;
+    if (saved) { try { p = JSON.parse(saved); } catch (e) { p = null; } }
+    if (p && !_isKarvyPrivatePeer(p)) {
+      switchPeer(saved);   // 恢复刷新前的非默认场(switchPeer 重画该线历史,含挂起"执行中…"占位)
+    } else {
+      pollChatHistory();   // 默认(没切过 / 默认 Karvy 私聊线)→ 进程级聊天历史(老路径不变)
+    }
+  }
+
   async function switchPeer(peerJson) {
     if (!peerJson) return;
     let peer;
@@ -2171,6 +2194,7 @@
       _currentRunConv = "";  // 切到普通场 → 清运行卡高亮(2d)
       _toggleChannelTools(false);   // #1:普通场恢复 新对话/历史
       _currentPeer = peer;   // ch4:记住当前场(圆桌按钮按它显隐)
+      _saveActivePeer(peerJson, peer);   // bug竞态:记住非默认场,刷新时恢复回来(不回落小卡)
       _setChatTitle(peer);   // #4:标题 + 回复方身份随场更新
       _toggleRoundtableBtn(peer);
       _loadGroupRoster(peer);   // ch4 #1:进群场 → 拉名册供 @ 选择
@@ -3009,10 +3033,10 @@
         // 多模态:回放也看得到当时发了什么图/文档(缩略图 + 文档块)
         const a = tn.data.attachments;
         _pushUserWithAttachments(a.q || tn.user_intent, a.items || []);
-        pushChatLine(tn.brain === "fast" ? "system" : "agent", tn.agent_response);
+        _renderTurnReply(log, tn);
       } else {
         pushChatLine("user", tn.user_intent);
-        pushChatLine(tn.brain === "fast" ? "system" : "agent", tn.agent_response);
+        _renderTurnReply(log, tn);
       }
       if (log && tn.task_id) {
         for (let i = start; i < log.children.length; i++) {
@@ -3020,6 +3044,44 @@
         }
       }
     }
+  }
+
+  // bug(执行中对话归属竞态):一轮的**回复侧**渲染。挂起轮(pending)= drive 还在跑 →
+  // 显"执行中…"占位(不空白,刷新时读得到、锚在正确对话);已中断/失败轮 → 中断提示;
+  // 其余照 brain 走 system(快脑)/agent(慢脑)正文。
+  function _renderTurnReply(log, tn) {
+    if (tn && tn.pending) { _pushExecutingPlaceholder(log, tn.task_id); return; }
+    if (tn && tn.status === "interrupted") {
+      pushChatLine("system", "⚠ " + t("chat.turn_interrupted")); return;
+    }
+    if (tn && tn.status === "error") {
+      pushChatLine("system", "⚠ " + tB(tn.agent_response || t("chat.turn_interrupted"))); return;
+    }
+    pushChatLine(tn.brain === "fast" ? "system" : "agent", tn.agent_response);
+  }
+
+  // "执行中…" 占位:agent 侧一条带呼吸点的骨架行(不是空白)。drive 完成的 drive_done /
+  // 再次刷新的回填都会替换掉它(_clearPendingPlaceholders + finalize 落盘的真回复)。
+  function _pushExecutingPlaceholder(log, taskId) {
+    if (!log) log = document.getElementById("chat-log");
+    if (!log) return null;
+    const line = el("div", { class: "chat-line agent pending-turn" },
+      el("span", { class: "role", text: _chatSpeaker || t("chat.karvy") }),
+      el("div", { class: "pending-turn-body" },
+        el("span", { class: "pending-turn-label", text: t("chat.executing") }),
+        el("span", { class: "kv-dots", "aria-hidden": "true" },
+          el("span", { text: "." }), el("span", { text: "." }), el("span", { text: "." }))));
+    if (taskId) line.dataset.taskId = taskId;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+    return line;
+  }
+
+  // 挂起占位清理:drive_done 权威回复到达前先摘掉占位,避免"占位 + 真回复"叠双。
+  function _clearPendingPlaceholders() {
+    const log = document.getElementById("chat-log");
+    if (!log) return;
+    log.querySelectorAll(".chat-line.pending-turn").forEach((n) => n.remove());
   }
 
   // 料→去聊天:滚到并高亮某条 task 对应的那一轮(找它的**第一个**节点 = 提问行)。
@@ -3081,6 +3143,28 @@
       .map((s) => ({ agent_id: s.getAttribute("data-agent"), domain_id: s.getAttribute("data-domain") || "" }))
       .filter((m) => m.agent_id);
     return { text: text, mentions: mentions };
+  }
+
+  // UX 诚实修:没接模型引擎(--no-llm / 没 init / 引擎构造失败 / 缺 Key)时,发消息只会撞
+  // "MainLoop 未注入"stub。与其让人对着一个活输入框白打字,不如**当场置灰**+显真原因横幅。
+  // 真原因由后端 /api/setup_status 的 absence_text 给(已本地化);拉不到就保持原样(不误伤)。
+  async function _refreshEngineState() {
+    let s = null;
+    try { s = await _getJSON("/api/setup_status"); } catch (e) { return; }
+    if (!s) return;
+    const wrap = document.querySelector(".chat-input-wrap");
+    if (!wrap) return;
+    const banner = document.getElementById("composer-readonly");
+    const input = document.getElementById("chat-input");
+    const send = document.getElementById("chat-send");
+    const absent = !!s.absent;
+    wrap.classList.toggle("is-readonly", absent);
+    if (input) input.setAttribute("contenteditable", absent ? "false" : "true");
+    if (send) send.disabled = absent;
+    if (banner) {
+      if (absent) { banner.textContent = "⚠ " + (s.absence_text || ""); banner.classList.remove("hidden"); }
+      else { banner.textContent = ""; banner.classList.add("hidden"); }
+    }
   }
 
   function _clearMention() { _hideMentionPop(); }   // 行内 chip 由清空输入框带走
@@ -4211,6 +4295,9 @@
 
   // 发送一条聊天(表单提交按钮 + Enter 都走这里)。从 contenteditable 读文本 + 被 @ 的角色。
   async function _submitChat() {
+    // 只读态(引擎缺席)守卫:置灰后 Enter 仍可能触发提交 → 这里兜底拦住,顺手刷新一次横幅。
+    const _wrap = document.querySelector(".chat-input-wrap");
+    if (_wrap && _wrap.classList.contains("is-readonly")) { _refreshEngineState(); return; }
     const { text, mentions } = _readChatInput();
     // 多模态:抓附件(文本内联 / 图片走 images),建展示清单(缩略图,落历史),再清附件区
     const _imgs = _attachmentsImages();
@@ -5136,7 +5223,7 @@
     // 立即拉 1 次
     pollSnapshot();
     pollStats();
-    pollChatHistory();
+    _restoreActivePeerOrHistory();   // bug竞态:刷新恢复到刷新前的非默认场(否则回落小卡);默认走 chat_history
     pollTasks();
     fetchPendingProposals();   // 待你拍的板跨刷新存活(不靠 WS 在线推)
     fetchRecentDecisions();    // 最近拍板流水(只读回看)
@@ -5145,6 +5232,9 @@
     // 无 Key → 强制引导录入模型(进系统就判)。T4:models 脚本懒加载,boot ensure 后再判 gate
     // (异步注入不卡首绘;载入失败会人话报错 —— gate 是安全门,不许静默跳过)
     _openLazyPanel("models", () => window.KarvyModelsPanel.checkSetupGate({ pollSnapshot }));
+    // UX 诚实修:引擎缺席(--no-llm/没 init/构造失败/缺 Key)→ 置灰聊天框 + 显真原因横幅
+    // (checkSetupGate 只在 must_setup 时弹强制录入;no_llm 只读态它直接 return,聊天框会假装能用)。
+    _refreshEngineState();
     // docs/46 S4:新手引导 —— 重看入口 + 空态行动链接 + placeholder 轮换 + 首启 tour
     const tourBtn = document.getElementById("tour-replay");
     if (tourBtn) tourBtn.addEventListener("click", () => startTour(true));

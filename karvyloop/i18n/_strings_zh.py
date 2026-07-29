@@ -131,7 +131,14 @@ ZH = {
     "cli.run.config_missing": "配置不存在:{path}。先跑 karvyloop init。",
     "cli.interrupted": "中断。",
     "cli.chat.readonly_warning": "[karvyloop] config.yaml 不存在({path});TUI 只读视图 — intent 提交将失败,先跑 `karvyloop init`",
+    # UX 诚实修:main_loop 缺席时,页面/聊天报**真原因**(不再一句误导的"请先 karvyloop init")
+    "setup.absent.no_llm": "只读模式(--no-llm):没接模型引擎,聊天跑不了。去掉 --no-llm 重启就能用。",
+    "setup.absent.needs_init": "还没配置 —— 先跑 `karvyloop init`(或在设置里加一个模型)。",
+    "setup.absent.build_failed": "模型引擎启动失败:{reason}。修好配置或依赖后重启。",
+    "setup.absent.needs_setup": "没有可用的模型 Key —— 在设置里加一个就能开聊。",
     "chat.empty_retry_fallback": "(这次没接住,能再说一遍吗?)",
+    # bug(执行中对话归属竞态):僵尸挂起轮标"已中断"的人话回复
+    "conv.turn_interrupted": "(执行中断,这次没跑完。)",
     "wizard.choose_provider": "选择你的 LLM provider:",
     "wizard.choose_prompt": "选 [1..{n}] (默认 1=本地): ",
     "wizard.unknown_provider": "未知 provider: {raw}",

@@ -85,9 +85,19 @@ def build_role_paradigm_prompt(
         text = load_paradigm(ctx).to_system_prompt()
         if not text.strip():
             return None
+        # 权威身份锚(bug 修:私聊角色自称成"小卡")—— 角色系统提示的身份**只来自 IDENTITY.md
+        # 文本**,而 IDENTITY.md 是共创起草器(system 通篇"你是小卡")LLM 生成的,名字常被漏成
+        # "小卡"。这里用**用户设的花名**(权威真值,不靠 IDENTITY 文本)钉在最前压过它,并显式
+        # 划清与全局助手的界:不管 IDENTITY 写了啥,自我介绍就用这个名字,绝不自称小卡。
+        _name = (getattr(role_view, "nickname", "") or getattr(role_view, "id", "") or "").strip()
+        name_anchor = (
+            f"【你的名字】你叫「{_name}」。自我介绍、被问「你是谁」时,就用「{_name}」这个名字。"
+            "「小卡」是 KarvyLoop 的全局助手,**不是你** —— 绝不要自称小卡。"
+        ) if _name else ""
         # 工作区块照旧(9.5 P1):告诉它写哪
         ws = f"你的工作区:{cwd}(要写文件/跑代码就在这,有读写权限,别往 /tmp 写)"
-        cp = CodingPrompt(static=[text], dynamic_blocks=[ws])
+        cp = CodingPrompt(static=([name_anchor, text] if name_anchor else [text]),
+                          dynamic_blocks=[ws])
         # 本 prompt 已编入域治理(value.md + deontic forbid/oblige)—— 调用方据此**不再**把
         # governance_text 的域块重复注入 user 前缀(对抗验收:直聊路径曾双注入,浪费 token)。
         cp.covers_domain_governance = True

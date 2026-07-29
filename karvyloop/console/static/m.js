@@ -179,7 +179,11 @@ var KarvyMobileBundle = (function(exports) {
       });
       const d = r.ok ? await r.json() : null;
       thinking.remove();
-      const reply = d && !d.error && (d.text || "").trim() ? String(d.text).trim() : t("m.chat_failed");
+      // 引擎缺席等失败:优先端出后端**诚实原因**(d.error,如 --no-llm/需 init/构造失败),
+      // 别一律吞成一句泛化的"聊天失败"(UX 诚实修,与桌面置灰同理)。
+      const reply = d && !d.error && (d.text || "").trim()
+        ? String(d.text).trim()
+        : (d && d.error ? String(d.error) : t("m.chat_failed"));
       log.appendChild(_bubble("karvy", reply));
     } catch (e) {
       thinking.remove();

@@ -75,11 +75,7 @@ def api_conversation_resume(req: ResumeRequest, request: Request) -> dict[str, A
     return {
         "id": conv.id, "title": conv.title, "turn_count": conv.turn_count,
         "closed_at": conv.closed_at,
-        "turns": [
-            {"user_intent": t.user_intent, "agent_response": t.agent_response,
-             "brain": t.brain, "task_id": t.task_id, "data": t.data}
-            for t in conv.turns
-        ],
+        "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
         "roundtable_pending": _roundtable_pending(request.app, conv.id),
     }
 

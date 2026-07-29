@@ -196,6 +196,9 @@
               <div class="journey-bar hidden" id="journey-bar"></div>
               <!-- ch4 #1:群里 @ 角色 —— 行内高亮 @花名(可多个、整体删),输 @ 弹角色选择器 -->
               <div class="chat-input-wrap">
+                <!-- 只读态横幅(UX 诚实修):没接模型引擎时置灰输入框 + 说清真原因,
+                     别让人对着一个发出去只会撞"MainLoop 未注入"的框打字。文案由 /api/setup_status 的 absence_text 填 -->
+                <div class="composer-readonly hidden" id="composer-readonly" role="status" aria-live="polite"></div>
                 <div class="mention-pop hidden" id="mention-pop"></div>
                 <form class="chat-input" id="chat-form">
                   <div

@@ -164,3 +164,70 @@ def test_setup_status_without_live_stays_config_level():
     gw = _fake_gw(_ok_events)
     r = TestClient(_live_app(gw)).get("/api/setup_status").json()
     assert r["must_setup"] is False and r["live_checked"] is False and gw.calls == 0
+
+
+# ---- UX 诚实修:main_loop 缺席时报**真原因**(不再一句误导的"请先 karvyloop init")----
+
+def _absence_app(**state):
+    """最小假 app:只带 .state(main_loop_absence 只读 state)。"""
+    a = types.SimpleNamespace()
+    a.state = types.SimpleNamespace(**state)
+    return a
+
+
+def test_absence_present_when_main_loop_wired():
+    from karvyloop.gateway.readiness import main_loop_absence
+    assert main_loop_absence(_absence_app(main_loop=object())) == {"code": "", "text": ""}
+
+
+def test_absence_no_llm_is_honest_not_init():
+    """显式只读模式:文案不该叫人去 init(他没错、是主动选的);要点名 --no-llm。"""
+    from karvyloop.gateway.readiness import main_loop_absence
+    r = main_loop_absence(_absence_app(main_loop=None, no_llm=True))
+    assert r["code"] == "no_llm"
+    assert "karvyloop init" not in r["text"] and "--no-llm" in r["text"]
+
+
+def test_absence_build_failed_surfaces_real_reason():
+    """config 在但引擎构造抛异常 → 端出**真原因**,而不是一句"请先 init"。"""
+    from karvyloop.gateway.readiness import main_loop_absence
+    r = main_loop_absence(_absence_app(main_loop=None, no_llm=False,
+                                       build_error="No module named 'mcp'"))
+    assert r["code"] == "build_failed" and "No module named 'mcp'" in r["text"]
+
+
+def test_absence_needs_init_only_when_config_missing(tmp_path):
+    """真的没 config.yaml(纯新机器)→ 这时"请先 karvyloop init"才是对的。"""
+    from karvyloop.gateway.readiness import main_loop_absence
+    r = main_loop_absence(_absence_app(main_loop=None, no_llm=False,
+                                       build_error=None, config_path=tmp_path / "nope.yaml"))
+    assert r["code"] == "needs_init"
+
+
+def test_absence_needs_setup_when_config_present_but_no_key(tmp_path):
+    """config 在、没构造错,但没可用 Key(被删/env 没设)→ 去设置里补,不是 init。"""
+    from karvyloop.gateway.readiness import main_loop_absence
+    cfg = tmp_path / "config.yaml"; cfg.write_text("providers: {}\n", encoding="utf-8")
+    r = main_loop_absence(_absence_app(main_loop=None, no_llm=False,
+                                       build_error=None, config_path=cfg))
+    assert r["code"] == "needs_setup"
+
+
+def test_setup_status_exposes_absence_fields():
+    """/api/setup_status 带 absent/absence_code/absence_text 供前端置灰聊天框+显真原因。"""
+    from fastapi.testclient import TestClient
+    from karvyloop.console import build_console_app
+    from karvyloop.karvy.observer import WorkbenchObserver
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.no_llm = True
+    r = TestClient(app).get("/api/setup_status").json()
+    assert r["absent"] is True and r["absence_code"] == "no_llm"
+    assert r["absence_text"] and "--no-llm" in r["absence_text"]
+
+
+def test_stub_reports_honest_reason_not_generic_init():
+    """发消息撞 stub 时 error 带缺席真因(no_llm);老调用(app=None)保留旧兜底,不炸。"""
+    from karvyloop.console.drive_turn_accounting import stub_no_main_loop
+    out = stub_no_main_loop("你好", _absence_app(main_loop=None, no_llm=True))
+    assert out.error and "--no-llm" in out.error
+    assert stub_no_main_loop("你好").error   # app=None 旧调用仍返兜底 error
