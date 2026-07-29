@@ -24,7 +24,7 @@ web = [
 ]
 # 接 MCP server(它的工具注入给每个 agent);没装 → 用到时友好报错"pip install karvyloop[mcp]"。
 mcp = [
-    "mcp>=1.9,<2",        # ≥1.9:remote server(streamable HTTP)要求;<2:2.0.0(2026-07-28 发布)stdio 破坏性变更,CI 三平台 Connection closed 实锤 —— 适配 2.x 另立待办,先钉稳
+    "mcp>=1.9,<3",        # ≥1.9:remote server(streamable HTTP)要求;<2:2.0.0(2026-07-28 发布)stdio 破坏性变更,CI 三平台 Connection closed 实锤 —— 适配 2.x 另立待办,先钉稳
 ]
 # 跨进程 A2A transport(多进程/多机协作);没装 → 自动降级到 in-process(单进程够用)。
 redis = [
@@ -63,7 +63,7 @@ winsandbox = []
 # 没装 → `karvyloop console --relay` / `relay-pair` 诚实报 "pip install karvyloop[relay]"。
 # relay 服务本体(relay-serve)只用 FastAPI/uvicorn(基础依赖),不需要这个 extra。
 relay = [
-    "cryptography>=42,<48",
+    "cryptography>=42,<50",
 ]
 # 测试/开发依赖。**装了 `.[dev]` 后 `pytest --co` 必须 0 collection error**——这是开源可信度地板:
 # respx / psutil 是仅有的两个「测试模块顶层直接 import」的非核心依赖(3 + 1 个测试文件),
