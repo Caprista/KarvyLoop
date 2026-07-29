@@ -1,0 +1,40 @@
+name: Dependency canary
+
+# Weekly early-warning run: install the NEWEST available versions of every dependency
+# (deliberately ignoring the upper-bound pins in pyproject) and run the full suite.
+# A red here means "an upstream release will break us when we lift the pins" — it never
+# blocks main CI; it buys us a warning window to adapt on our own schedule instead of
+# firefighting after the fact (mcp 2.0.0 broke stdio on 2026-07-28 and we only found out
+# because all three CI legs went red for two days — this job exists so that never repeats).
+#
+# Mechanism: strip the `,<N` caps from pyproject with sed before installing, so pip
+# resolves to the actual latest of everything (majors included). Nothing here ships.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # Mondays 03:00 UTC
+  workflow_dispatch:        # manual trigger for "did upstream fix it yet?" checks
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Strip upper-bound pins (canary installs true-latest)
+        run: |
+          sed -i -E 's/,<[0-9.]+"/"/g' pyproject.toml
+          grep -E '">=|"[a-z-]+>' pyproject.toml || true
+      - name: Install package with latest deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,mcp,relay]"
+          python -m pip list
+      - name: pytest (full suite on latest deps)
+        run: python -m pytest -q

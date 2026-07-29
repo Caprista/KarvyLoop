@@ -28,12 +28,12 @@ from typing import Any, Optional
 #: 可一键启用的可选件 → 底层 pip 包(**pyproject [project.optional-dependencies] 的镜像**;
 #: test 交叉核对防漂移)。纯配置型能力(webhook/email)不在此(没有可装的东西)。
 INSTALLABLE: dict[str, list[str]] = {
-    "ocr": ["rapidocr-onnxruntime>=1.2"],
-    "asr": ["faster-whisper>=1.1"],
-    "files": ["pypdf>=4.0", "python-docx>=1.1", "openpyxl>=3.1"],
-    "relay": ["cryptography>=42"],
+    "ocr": ["rapidocr-onnxruntime>=1.2,<2"],
+    "asr": ["faster-whisper>=1.1,<2"],
+    "files": ["pypdf>=4.0,<7", "python-docx>=1.1,<2", "openpyxl>=3.1,<4"],
+    "relay": ["cryptography>=42,<48"],
     "mcp": ["mcp>=1.9,<2"],   # 与 pyproject 同步(2.0.0 破 stdio,pin <2;守卫测试锁镜像)
-    "web": ["playwright>=1.40"],   # 注:装完还需 `playwright install chromium`(前端文案说明,不算失败)
+    "web": ["playwright>=1.40,<2"],   # 注:装完还需 `playwright install chromium`(前端文案说明,不算失败)
 }
 
 #: 装完还需额外一步(纯一键装不全)的能力 —— 前端据此提示,不当失败。

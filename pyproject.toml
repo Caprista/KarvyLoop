@@ -6,21 +6,21 @@ requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
-    "pydantic>=2.0",
-    "pyyaml>=6.0",
-    "httpx>=0.27",
-    "textual>=0.50",          # MIT, M3 批 3 workbench 终端 UI 主线
-    "textual-serve>=0.5",     # MIT, M3 批 3c `--serve` 模式
-    "fastapi>=0.115",         # 批 8.5-C:本地 HTML 控制台 后端(MIT,通用基建)
-    "uvicorn[standard]>=0.30",  # 批 8.5-C:ASGI server + WS + 静态文件
-    "croniter>=2.0",          # 定时任务:完整 cron 表达式解析/算 next_run(MIT,通用基建必借,不手搓)
+    "pydantic>=2.0,<3",
+    "pyyaml>=6.0,<7",
+    "httpx>=0.27,<1",
+    "textual>=0.50,<9",          # MIT, M3 批 3 workbench 终端 UI 主线
+    "textual-serve>=0.5,<2",     # MIT, M3 批 3c `--serve` 模式
+    "fastapi>=0.115,<1",         # 批 8.5-C:本地 HTML 控制台 后端(MIT,通用基建)
+    "uvicorn[standard]>=0.30,<1",  # 批 8.5-C:ASGI server + WS + 静态文件
+    "croniter>=2.0,<7",          # 定时任务:完整 cron 表达式解析/算 next_run(MIT,通用基建必借,不手搓)
 ]
 
 [project.optional-dependencies]
 # 全部可选依赖**缺了也能跑**——优雅降级,绝不报错(见 README「Optional features」表)。
 # 网页产物运行时验收门(karvyloop verify-web):重依赖(要下浏览器);没装则降级到只验语法。
 web = [
-    "playwright>=1.40",   # 装后还需 `playwright install chromium`
+    "playwright>=1.40,<2",   # 装后还需 `playwright install chromium`
 ]
 # 接 MCP server(它的工具注入给每个 agent);没装 → 用到时友好报错"pip install karvyloop[mcp]"。
 mcp = [
@@ -28,22 +28,22 @@ mcp = [
 ]
 # 跨进程 A2A transport(多进程/多机协作);没装 → 自动降级到 in-process(单进程够用)。
 redis = [
-    "redis>=5.0",
+    "redis>=5.0,<9",
 ]
 # 附件真解析(files 面板预览 + read_file 工具):PDF/Word(.docx)/Excel(.xlsx)→ 文本,
 # 与 CSV 走同一条预览/截断/交办产线(karvyloop/file_extract.py)。通用基建必借,不自造解析器。
 # 没装 → 预览/读取时诚实提示 `pip install "karvyloop[files]"`,绝不吐二进制垃圾、绝不崩。
 files = [
-    "pypdf>=4.0",         # BSD;纯 Python PDF 文本提取
-    "python-docx>=1.1",   # MIT;Word .docx(zip 容器)段落+表格
-    "openpyxl>=3.1",      # MIT;Excel .xlsx(zip 容器)按行铺成 CSV 形状
+    "pypdf>=4.0,<7",         # BSD;纯 Python PDF 文本提取
+    "python-docx>=1.1,<2",   # MIT;Word .docx(zip 容器)段落+表格
+    "openpyxl>=3.1,<4",      # MIT;Excel .xlsx(zip 容器)按行铺成 CSV 形状
 ]
 # 本地音频转写(ASR):mp3/wav/m4a → 文字稿,进附件解析同一条产线(audio_transcribe.py),
 # 转写后的文字走 meeting-notes 等既有通道。选型 docs/64:faster-whisper(MIT,CTranslate2,
 # CPU int8 可跑,自带 PyAV 解码不要求系统 ffmpeg)。**模型不随包**:首次使用时从 HF 下载
 # (默认 small ≈ 480MB,KARVYLOOP_ASR_MODEL 可换)。没装 → 明确提示,绝不假装转写。
 asr = [
-    "faster-whisper>=1.1",
+    "faster-whisper>=1.1,<2",
 ]
 # 图片/扫描票据 OCR:图片 → 脏文本,进 file_extract 同一条产线(read_file/files 面板自动 OCR,
 # 照 [asr] 那条,不另建工具)。报销员等角色的 prose 方法再拿 LLM 校准+抽取。
@@ -52,7 +52,7 @@ asr = [
 # 一个逼你"别升/降 Python"的依赖=选型硬伤);RapidOCR 靠 onnxruntime 新 Python wheel 跟得快、更轻、
 # **模型随包不另下**。没装 → 诚实提示 `pip install "karvyloop[ocr]"`,图片走贴文字/视觉模型兜底,绝不崩。
 ocr = [
-    "rapidocr-onnxruntime>=1.2",
+    "rapidocr-onnxruntime>=1.2,<2",
 ]
 # Windows Tier 3 沙箱(RestrictedToken 写隔离 + Job 资源上限)——**零额外依赖**:
 # 全用 stdlib ctypes 手绑 Win32,不引 pywin32(避免给非 Windows 用户加基础重量)。
@@ -63,7 +63,7 @@ winsandbox = []
 # 没装 → `karvyloop console --relay` / `relay-pair` 诚实报 "pip install karvyloop[relay]"。
 # relay 服务本体(relay-serve)只用 FastAPI/uvicorn(基础依赖),不需要这个 extra。
 relay = [
-    "cryptography>=42",
+    "cryptography>=42,<48",
 ]
 # 测试/开发依赖。**装了 `.[dev]` 后 `pytest --co` 必须 0 collection error**——这是开源可信度地板:
 # respx / psutil 是仅有的两个「测试模块顶层直接 import」的非核心依赖(3 + 1 个测试文件),

@@ -1,0 +1,17 @@
+# Dependency upgrades become visible, CI-tested pull requests instead of silent drift.
+# Weekly is enough for a solo project; grouped so one PR carries the batch, not ten.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python-deps:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
