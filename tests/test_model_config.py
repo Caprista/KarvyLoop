@@ -44,9 +44,27 @@ def test_env_ref_key_not_masked(tmp_path):
     assert cm.list_models(p)["models"][0]["api_key_masked"] == "${ANTHROPIC_KEY}"
 
 
+def test_config_yaml_chmod_600_is_reached_all_platforms(tmp_path, monkeypatch):
+    """跨平台守卫:保存 config.yaml **必真调** os.chmod(path, 0o600)。
+
+    教训(afd8f37 事故):config_models 里 os 只在函数内 import,_save 的 os.chmod 抛 NameError 被
+    `except Exception: pass` 吞掉 → 权限没锁,而 POSIX-only 的实测在 Windows 跳过 → 本机看不见。
+    这条 spy os.chmod 不分平台,任何"chmod 没被调到/被吞"都在**本机就红**,堵住"测在跳过处"的坑。"""
+    import os
+    calls = []
+    real_chmod = os.chmod
+    monkeypatch.setattr(os, "chmod", lambda path, mode, *a, **k: calls.append((str(path), mode)) or real_chmod(path, mode, *a, **k))
+    p = _w(tmp_path)
+    ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                             "api": "anthropic-messages", "api_key": "FAKE-DO-NOT-LEAK-newkey"}, p)
+    assert ok
+    assert any(cp == str(p) and mode == 0o600 for cp, mode in calls), \
+        f"保存 config.yaml 必须 chmod 0600 锁权限(含 key),实际 chmod 调用:{calls}"
+
+
 def test_config_yaml_written_0600(tmp_path):
-    """CodeQL 报 clear-text-storage:config.yaml 含 API key → 写盘必 0600(只你自己可读),
-    与 mcp_oauth token / console.runtime.json / access token 一致(POSIX;Windows 忽略)。"""
+    """POSIX 实测:config.yaml 含 API key → 真落成 0600(只你自己可读),
+    与 mcp_oauth token / console.runtime.json / access token 一致(Windows chmod 无 POSIX 语义,跳)。"""
     import os
     import pytest
     if os.name != "posix":

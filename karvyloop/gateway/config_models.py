@@ -14,6 +14,7 @@ config.yaml 结构(与 gateway/registry.from_config 对齐):
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -81,7 +82,6 @@ def _env_ref_unset(k) -> bool:
     空串,而 _mask_key 原样回显 `${VAR}` + has_key=True → 面板显示"已配置",聊天时才 401。
     这里对面板诚实标注"env 未设",别让"配了个没设的引用"冒充"已配好"。绝不 log/回显 env 值。
     """
-    import os
     import re
     s = str(k or "")
     refs = re.findall(r"\$\{([^}]+)\}", s)
