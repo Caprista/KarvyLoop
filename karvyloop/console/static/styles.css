@@ -1179,6 +1179,14 @@ html, body {
 .chat-input-wrap.is-readonly .chat-toolbar {
   opacity: 0.45; pointer-events: none; user-select: none;
 }
+/* "让小卡帮你修一下":出问题时给个动手按钮,不甩 CLI 咒语。banner 内可点(不受 is-readonly 置灰影响)*/
+.composer-fix-btn {
+  margin-left: auto; flex: 0 0 auto; align-self: center;
+  padding: 5px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  background: var(--accent); color: #fff; border: none; font-size: 12.5px; font-weight: 600;
+}
+.composer-fix-btn:hover { background: var(--accent-deep); }
+.composer-fix-btn:disabled { opacity: 0.6; cursor: default; }
 .mention-pop {
   position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px;
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px;

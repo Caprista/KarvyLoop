@@ -19,6 +19,7 @@ ZH = {
     "console.bind_failed": "[karvyloop console] 绑定失败: {error}",
     "console.port_fallback": "[karvyloop console] 端口 {orig} 被占用,已自动改用 {port}",
     "console.already_running": "[karvyloop console] 已有实例在 {url} 运行(v{ver})—— 直接打开它,别再开第二个",
+    "console.took_over": "[karvyloop console] 清掉了一个没起好的旧控制台,已替你接管 → {url}",
     "console.old_running": "[karvyloop console] 端口上还有旧版 KarvyLoop(v{old})在 {url} 运行;请先停掉它再启动 v{new} —— 旧版占着端口时升级不会生效",
     "cli.config_missing": "[karvyloop] config.yaml 不存在({path}) — 只读视图",
     "cli.lang_set": "[karvyloop] 语言已设为 {lang}",

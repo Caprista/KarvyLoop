@@ -75,6 +75,60 @@ def _probe_karvyloop_version(host: str, port: int, *, timeout: float = 0.6):
         return None
 
 
+def _probe_console_healthy(host: str, port: int, *, timeout: float = 0.6):
+    """端口上已确认是 KarvyLoop(_probe_karvyloop_version 非 None)→ 它**起好了没**(MainLoop 在不在)?
+
+    命中 /api/setup_status:absent=True(MainLoop 未注入 —— 就是"请先 init"那个僵尸态)→ 不健康 False。
+    连不上/形状不对 → None(拿不准,保守当健康,绝不乱杀活实例)。
+    """
+    import json
+    import urllib.request
+    h = "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
+    try:
+        with urllib.request.urlopen(f"http://{h}:{port}/api/setup_status", timeout=timeout) as r:
+            d = json.loads(r.read().decode())
+        return not bool(d.get("absent"))
+    except Exception:
+        return None
+
+
+def _take_over_console(host: str, port: int, *, wait_s: float = 4.0) -> bool:
+    """自愈接管:端口上是个**没起好的**旧 KarvyLoop → 替用户清掉它、腾出端口(用户永远不用碰
+    "端口/进程/kill")。安全:**只终止 console.runtime.json 里登记的、且端口对得上的那个 pid**,
+    绝不乱杀别的进程。成功(端口腾空)→ True。"""
+    import os
+    import signal
+    import time as _t
+
+    from karvyloop.console import access
+    rt = access.read_runtime()
+    if not rt:
+        return False
+    pid = rt.get("pid")
+    try:
+        if not pid or int(rt.get("port", -1)) != int(port):
+            return False   # runtime 记的不是这个端口的实例 → 不动它
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except Exception:
+        pass   # 可能已经没了 / 没权限 —— 让下面"端口空没空"当裁判,别在这早退(死 pid+端口本就空=已腾空)
+    deadline = _t.time() + wait_s
+    while _t.time() < deadline:
+        if _port_free(host, port):
+            return True
+        _t.sleep(0.2)
+    try:   # 还赖着 → POSIX 再硬杀一下(Windows os.kill=TerminateProcess 已是硬的)
+        if os.name == "posix":
+            os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
+    _t.sleep(0.5)
+    return _port_free(host, port)
+
+
 def resolve_config_state_path(config_path: Optional[Path], no_llm: bool) -> str:
     """app.state.config_path 的唯一决定逻辑(闭环审计断① CRITICAL 修)。
 
@@ -658,20 +712,25 @@ def cmd_console(args: argparse.Namespace) -> int:
     if not _port_free(host, port):
         _running = _probe_karvyloop_version(host, port)
         if _running is not None:
-            from karvyloop import __version__ as _ver
             _bh = "localhost" if host in ("0.0.0.0", "::", "") else host
             _url = f"http://{_bh}:{port}/"
-            if str(_running) == str(_ver):
+            # 端口上是 KarvyLoop —— 它起好了没?没起好的僵尸(MainLoop 未注入,就是用户看到"请先 init"
+            # 那个)→ **自愈接管**:替用户清掉它、接手,用户永远不用碰"端口/进程/kill"。
+            # 健康的实例(可能你另开着一个)→ 绝不杀,叫你开那个。拿不准(None)→ 保守当健康。
+            if _probe_console_healthy(host, port) is False and _take_over_console(host, port):
+                sys.stderr.write(t("console.took_over", url=_url) + "\n")
+                sys.stderr.flush()
+                # 接管成功、端口已腾空 → fall through 继续 bind+start(下面用真实端口)
+            else:
                 sys.stderr.write(t("console.already_running", url=_url, ver=_running) + "\n")
-            else:   # 旧版还占着 → 升级未生效,提示先停旧版
-                sys.stderr.write(t("console.old_running", url=_url, old=_running, new=_ver) + "\n")
-            sys.stderr.flush()
-            return 0
-        # 占用者是外部进程 → 安全挪到下一个空闲端口
-        port = _next_free_port(host, port)
-        if port != _req_port:
-            sys.stderr.write(t("console.port_fallback", orig=_req_port, port=port) + "\n")
-            sys.stderr.flush()
+                sys.stderr.flush()
+                return 0
+        if not _port_free(host, port):
+            # 占用者是外部进程(或接管没成)→ 安全挪到下一个空闲端口
+            port = _next_free_port(host, port)
+            if port != _req_port:
+                sys.stderr.write(t("console.port_fallback", orig=_req_port, port=port) + "\n")
+                sys.stderr.flush()
 
     # === 记下"怎么重启自己"(一键升级用:升级 runner 装完后照这个把 console 拉起来)===
     # **必须走 sys.executable + `-m karvyloop`**,不能用 sys.argv[0]:若 console 是 `python -m` 启动的,

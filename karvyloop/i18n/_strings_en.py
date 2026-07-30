@@ -22,6 +22,7 @@ EN = {
     "console.bind_failed": "[karvyloop console] bind failed: {error}",
     "console.port_fallback": "[karvyloop console] port {orig} is in use — using {port} instead",
     "console.already_running": "[karvyloop console] already running at {url} (v{ver}) — open that instead of starting a second one",
+    "console.took_over": "[karvyloop console] cleaned up a console that hadn't started properly and took over → {url}",
     "console.old_running": "[karvyloop console] an older KarvyLoop (v{old}) is still running at {url}; stop it first, then start v{new} — the upgrade won't take effect while the old one holds the port",
     # CLI 通用
     "cli.config_missing": "[karvyloop] config.yaml not found ({path}) — read-only view",

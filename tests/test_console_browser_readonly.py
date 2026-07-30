@@ -101,6 +101,13 @@ def test_readonly_composer_greyed_and_banner_visible(console_no_llm):
         # ⑤ wrap 挂上 is-readonly(CSS 置灰真生效的开关)
         assert page.eval_on_selector(
             ".chat-input-wrap", "el => el.classList.contains('is-readonly')"), "wrap 应有 is-readonly"
+        # ⑥ "让小卡帮你修一下"按钮在、看得见、可点(不甩 CLI 咒语给用户;用户问谁→小卡)
+        page.wait_for_selector(".composer-fix-btn", timeout=5000)
+        fbox = page.eval_on_selector(
+            ".composer-fix-btn",
+            "el => { const r = el.getBoundingClientRect(); return {w: r.width, h: r.height}; }")
+        assert fbox["w"] > 0 and fbox["h"] > 0, f"帮我修按钮挂了却不可见: {fbox}"
+        assert not page.is_disabled(".composer-fix-btn"), "帮我修按钮应可点"
         browser.close()
 
     assert not errors, "只读态渲染必须 0 JS 报错:\n" + "\n".join(errors)

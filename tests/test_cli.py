@@ -123,13 +123,16 @@ def test_ac1_init_generates_legal_yaml(tmp_path: Path, monkeypatch):
     assert "${ANTHROPIC_API_KEY}" in text
 
 
-def test_ac1b_init_refuses_existing_without_force(tmp_path: Path):
+def test_ac1b_init_existing_is_nondestructive_noop(tmp_path: Path):
+    """非破坏性(Hardy 2026-07-30):config 已存在 → 啥都不动、不弹"覆盖?[y/N]"、返回 0(已配好不是错)。
+    关键不变量:**config 绝不被覆盖**(防手滑一下抹了配置);重配是 --force 的显式动作。"""
     target = tmp_path / "cfg.yaml"
     target.write_text("already: here", encoding="utf-8")
-    rc = cmd_init(path=target, interactive=False, force=False, stdout=io.StringIO())
-    assert rc == 1
-    # 原文不变
-    assert target.read_text(encoding="utf-8") == "already: here"
+    out = io.StringIO()
+    rc = cmd_init(path=target, interactive=False, force=False, stdout=out)
+    assert rc == 0                                            # 已配好 = 成功不是错
+    assert target.read_text(encoding="utf-8") == "already: here"   # 原文一字未动(核心保护)
+    assert "--force" in out.getvalue()                       # 如实告知重配路径
 
 
 def test_ac1c_init_force_overwrites(tmp_path: Path):

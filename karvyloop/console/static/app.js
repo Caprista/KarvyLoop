@@ -3162,9 +3162,26 @@
     if (input) input.setAttribute("contenteditable", absent ? "false" : "true");
     if (send) send.disabled = absent;
     if (banner) {
-      if (absent) { banner.textContent = "⚠ " + (s.absence_text || ""); banner.classList.remove("hidden"); }
-      else { banner.textContent = ""; banner.classList.add("hidden"); }
+      banner.innerHTML = "";
+      if (absent) {
+        banner.appendChild(el("span", { text: "⚠ " + (s.absence_text || "") }));
+        // "用户问谁 → 小卡"(Hardy 2026-07-30):出问题不甩 CLI 咒语,给一个"让小卡帮你修一下"
+        // 按钮 → 跑确定性 doctor 自愈(/api/doctor/fix);修好了 banner 自动消失。
+        const btn = el("button", { class: "composer-fix-btn", text: t("recover.fix_btn") });
+        btn.addEventListener("click", () => _runDoctorFix(btn));
+        banner.appendChild(btn);
+        banner.classList.remove("hidden");
+      } else { banner.classList.add("hidden"); }
     }
+  }
+
+  // 让小卡跑确定性自愈(doctor --fix 那批,confirm=false 只做安全项),完事重刷引擎态:
+  // 好了 → banner 自动隐藏;没好 → banner 重画(按钮回原样),用户看得见"还没好"。
+  async function _runDoctorFix(btn) {
+    btn.disabled = true;
+    btn.textContent = t("recover.fixing");
+    try { await _postJSON("/api/doctor/fix", { confirm: false }); } catch (e) {}
+    await _refreshEngineState();
   }
 
   function _clearMention() { _hideMentionPop(); }   // 行内 chip 由清空输入框带走

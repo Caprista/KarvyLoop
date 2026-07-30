@@ -137,23 +137,12 @@ def cmd_init(
 
     target = Path(path) if path else CONFIG_PATH
     if target.exists() and not force:
-        if interactive and sys.stdin.isatty():
-            out = stdout or sys.stdout
-            out.write(f"配置已存在:{target}\n")
-            out.write("覆盖?[y/N] ")
-            out.flush()
-            try:
-                ans = sys.stdin.readline().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                return 1
-            if ans not in ("y", "yes"):
-                out.write("取消。\n")
-                return 0
-        else:
-            # 非交互 + 已存在 + 不强制 → 退出
-            if stdout is not None:
-                stdout.write(f"配置已存在:{target}(加 --force 覆盖)\n")
-            return 1
+        # 非破坏性(Hardy 2026-07-30):config 已存在 → **啥都不动、不弹"覆盖?[y/N]"**(手滑一下就把
+        # 配置抹了)。init 只管"没配过时配一次";已配好就如实说、直接返回,重配是 --force 的显式动作。
+        out = stdout or sys.stdout
+        out.write(f"已经配好了:{target} —— 直接用就行(要重新配置才加 --force)。\n")
+        out.flush()
+        return 0
 
     # M3+ 拍 8:wizard 模式
     if interactive and sys.stdin.isatty() and not no_wizard:
