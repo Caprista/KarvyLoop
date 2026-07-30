@@ -580,6 +580,43 @@ async def api_mcp_reconnect(request: Request) -> dict[str, Any]:
             "tool_names": res["tool_names"], "requires_restart": False}
 
 
+# docs/43 远程访问 + docs/96 刀2:跨机 OAuth 回调落点。厂商在你**浏览器**里授权后,把
+# ?code=&state= 打回**你访问 console 用的那个地址**上的这个路由(不是 localhost)→ 交给
+# 进程级 broker 唤醒正在等的授权流程(按 state 关联)。返回一张"可关页"HTML。
+# 这条让 headless 服务器/云主机/局域网/karvy.chat 远程都能 OAuth(浏览器够得到 console 即可)。
+_OAUTH_DONE_HTML = (
+    "<!doctype html><html><head><meta charset='utf-8'><title>KarvyLoop</title></head>"
+    "<body style='font-family:sans-serif;text-align:center;padding-top:80px'>"
+    "<h2>{title}</h2><p>{msg}</p>"
+    "<p style='color:#888'>{sub}</p></body></html>"
+)
+
+
+@router.get("/oauth/callback")
+def api_oauth_callback(request: Request, code: str = "", state: str = "",
+                       error: str = ""):
+    """OAuth 授权码回调(跨机)。命中等待中的 flow → 唤醒它换 token;否则如实说没有匹配流程。"""
+    from starlette.responses import HTMLResponse
+
+    from karvyloop.console.oauth_broker import get_broker
+    broker = get_broker(request.app)
+    if error:
+        broker.deliver_error(state, error)
+        return HTMLResponse(_OAUTH_DONE_HTML.format(
+            title="⚠ 授权未完成", msg=f"授权被拒或出错:{error}。可关掉此页,回 KarvyLoop 重试。",
+            sub="Authorization was denied or errored — you can close this tab."))
+    ok = bool(code) and broker.deliver(state, code)
+    if ok:
+        return HTMLResponse(_OAUTH_DONE_HTML.format(
+            title="✅ 授权完成", msg="可以关掉这个标签页,回到 KarvyLoop 了。",
+            sub="You can close this tab and return to KarvyLoop."))
+    return HTMLResponse(_OAUTH_DONE_HTML.format(
+        title="⚠ 没有匹配的授权流程",
+        msg="没找到对应的等待中授权(可能超时了或已完成)。回 KarvyLoop 重新发起即可。",
+        sub="No matching pending authorization — restart the connect from KarvyLoop."),
+        status_code=409)
+
+
 def _skill_status(body: str) -> str:
     """技能生命周期状态(btw-1,Hardy 定义):
       - crystallized(已沉淀):过了我方结晶门(有 verify_proof)或外部技能成功跑通一次(verified_at)。

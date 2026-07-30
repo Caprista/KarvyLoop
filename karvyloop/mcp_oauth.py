@@ -216,12 +216,21 @@ def build_oauth_provider(
     *,
     scopes: Optional[list[str]] = None,
     base_dir: Optional[Path] = None,
+    callback_base_url: Optional[str] = None,
+    flow=None,
 ):
     """给一个 remote MCP server 造 SDK 的 `OAuthClientProvider`(= httpx.Auth,直接塞进
-    httpx client)。协议全走 SDK;我们只提供 0600 存储 + 浏览器/回调两个 handler。
+    httpx client)。协议全走 SDK;我们只提供 0600 存储 + redirect/callback 两个 handler。
 
     server_url: MCP server 端点(SDK 从这里发现授权服务器 + 动态注册)。
     scopes: 申请的权限范围(如 Gmail 的 gmail.readonly);None = 让 server 决定。
+
+    两种回调 topology:
+    - **跨机(docs/43)**:传 `callback_base_url`(你访问 console 的地址,如 https://你的域名
+      或 karvy.chat 隧道)+ `flow`(oauth_broker 的 flow)→ redirect_uri = 该地址上 console 的
+      `/api/oauth/callback`,授权 URL 挂给前端导航用户浏览器。**headless 服务器/云主机/局域网/远程
+      都能用**(浏览器只要够得到 console 就行)。
+    - **同机兜底(CLI/本机)**:不传上面两个 → 起 localhost 一次性回调 + 开本地浏览器(旧行为)。
     """
     try:
         from mcp.client.auth import OAuthClientProvider
@@ -231,11 +240,23 @@ def build_oauth_provider(
             "接需要 OAuth 的 remote MCP server 要 mcp SDK(pip install 'mcp>=1.9,<2'): " + str(e)
         ) from e
 
-    receiver = _LocalCallbackReceiver()
+    if callback_base_url and flow is not None:
+        # 跨机:回调打到 console 自己的路由(浏览器够得到的那个地址),不写死 localhost
+        from karvyloop.console.oauth_broker import CALLBACK_PATH
+        redirect_uri = callback_base_url.rstrip("/") + CALLBACK_PATH
+        redirect_handler = flow.redirect_handler
+        callback_handler = flow.callback_handler
+    else:
+        # 同机兜底:localhost 一次性回调 + 开本地浏览器
+        receiver = _LocalCallbackReceiver()
+        redirect_uri = receiver.redirect_uri
+        redirect_handler = receiver.redirect_handler
+        callback_handler = receiver.callback_handler
+
     storage = KarvyTokenStorage(server_name, base_dir=base_dir)
     metadata = OAuthClientMetadata(
         client_name="KarvyLoop",
-        redirect_uris=[receiver.redirect_uri],       # 必须与回调 server 端口一致
+        redirect_uris=[redirect_uri],
         grant_types=["authorization_code", "refresh_token"],
         response_types=["code"],
         scope=(" ".join(scopes) if scopes else None),
@@ -245,8 +266,8 @@ def build_oauth_provider(
         server_url=server_url,
         client_metadata=metadata,
         storage=storage,
-        redirect_handler=receiver.redirect_handler,
-        callback_handler=receiver.callback_handler,
+        redirect_handler=redirect_handler,
+        callback_handler=callback_handler,
     )
 
 
