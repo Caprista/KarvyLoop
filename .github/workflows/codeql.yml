@@ -27,9 +27,9 @@ jobs:
       - uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
         with:
           languages: python
-          # 只跑**安全**查询(security-extended);不跑 -and-quality 的可维护性查询
-          # (unused-var / string-concat 等 100+ 条噪音 = ruff 的活,ruff 已绿)。SAST 要的是安全信号。
-          queries: security-extended
+          # 默认(code-scanning/security)高精度规则集:抓 path/command/sql-injection、凭证明文、
+          # SSRF 等**核心安全**查询,不跑 -extended 的低精度项、更不跑 -and-quality 的可维护性噪音
+          # (那是 ruff 的活)。养一个可维护的 SAST,不是噪音消防栓。
       - uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
         with:
           category: "/language:python"

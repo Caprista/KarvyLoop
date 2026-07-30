@@ -58,6 +58,10 @@ def _save(cfg: dict, cfg_path=None) -> None:
         except OSError:
             pass   # 备份失败不挡保存(只是少一层保险)
     p.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    try:
+        os.chmod(p, 0o600)   # config.yaml 含 API key,只你自己可读(POSIX;Windows 忽略,同 access.py)
+    except Exception:
+        pass
 
 
 def _mask_key(k) -> str:

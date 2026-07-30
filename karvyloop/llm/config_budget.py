@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -187,6 +188,10 @@ def save_spend_budget_config(spec: dict, config_path=None) -> tuple[bool, str]:
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        try:
+            os.chmod(p, 0o600)   # config.yaml 含 API key,只你自己可读(POSIX;Windows 忽略,同 access.py)
+        except Exception:
+            pass
     except Exception as e:
         return False, f"config.yaml 写入失败:{type(e).__name__}"
     return True, ""

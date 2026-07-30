@@ -249,6 +249,10 @@ def run_wizard(
         config_text = _build_config_for(provider, api_key)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(config_text, encoding="utf-8")
+    try:
+        os.chmod(target, 0o600)   # config.yaml 含 API key,只你自己可读(POSIX;Windows 忽略,同 access.py)
+    except Exception:
+        pass
 
     from karvyloop.i18n import t
     stdout.write("\n" + t("wizard.written", target=target) + "\n")

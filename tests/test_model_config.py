@@ -44,6 +44,22 @@ def test_env_ref_key_not_masked(tmp_path):
     assert cm.list_models(p)["models"][0]["api_key_masked"] == "${ANTHROPIC_KEY}"
 
 
+def test_config_yaml_written_0600(tmp_path):
+    """CodeQL 报 clear-text-storage:config.yaml 含 API key → 写盘必 0600(只你自己可读),
+    与 mcp_oauth token / console.runtime.json / access token 一致(POSIX;Windows 忽略)。"""
+    import os
+    import pytest
+    if os.name != "posix":
+        pytest.skip("0600 权限位只在 POSIX 有意义")
+    p = _w(tmp_path)
+    ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                             "api": "anthropic-messages",
+                             "api_key": "FAKE-DO-NOT-LEAK-newkey"}, p)
+    assert ok
+    mode = os.stat(p).st_mode & 0o777
+    assert mode == 0o600, f"config.yaml 含 key,必须 0600,实为 {oct(mode)}"
+
+
 def test_upsert_add_and_blank_key_keeps(tmp_path):
     p = _w(tmp_path)
     ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
