@@ -66,6 +66,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_doctor.add_argument("--online", action="store_true", help=t("cli.help.doctor.online"))
     sub.add_parser("status", help=t("cli.help.status"))
 
+    # minimax-login(用 OAuth 设备码流接 MiniMax,不贴 key;跨机/headless 天生行)
+    p_mmlogin = sub.add_parser("minimax-login", help="用 OAuth 登录接 MiniMax(不贴 key)")
+    p_mmlogin.add_argument("--region", choices=["cn", "global"], default="cn")
+    p_mmlogin.add_argument("--client-id", type=str, default="", help="MiniMax OAuth 客户端 ID")
+    p_mmlogin.add_argument("--model", type=str, default="", help="默认模型名(如 MiniMax-M3)")
+    p_mmlogin.add_argument("--config", type=str, default="", help="config.yaml 路径(默认 ~/.karvyloop)")
+
     # replay(M3+ 批 6 — Trace 重放子命令;可观测性③:--run 按 run_id 过滤)
     p_replay = sub.add_parser("replay", help=t("cli.help.replay"))
     p_replay.add_argument("task_id", nargs="?", default="", help=t("cli.help.replay.task_id"))
@@ -436,6 +443,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.cmd == "status":
         from .doctor_cmd import cmd_status
         return cmd_status()
+
+    if args.cmd == "minimax-login":
+        from pathlib import Path
+        from .minimax_login_cmd import cmd_minimax_login
+        return cmd_minimax_login(
+            region=args.region, client_id=args.client_id, model=args.model,
+            config_path=Path(args.config) if args.config else None)
 
     if args.cmd == "replay":
         from pathlib import Path
