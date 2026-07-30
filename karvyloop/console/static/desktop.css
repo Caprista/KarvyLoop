@@ -248,7 +248,9 @@ body.desk-view .desk-board-fold:hover { transform: translateY(-1px); box-shadow:
 body.desk-view .desk-board-fold-ico { font-size: 22px; line-height: 1; }
 body.desk-view .desk-board-fold-body { display: flex; flex-direction: column; gap: 2px; }
 body.desk-view .desk-board-fold-title { font-size: var(--fs-14, 14px); font-weight: 700; color: var(--accent-strong); }
-body.desk-view .desk-board-fold-hint { font-size: var(--fs-12, 12px); color: var(--text-dim); }
+/* hint 用 --text-dim(为白底调的)在浅绿卡(--accent-light)上对比不够、看不清(Hardy 2026-07-30);
+   改用 --accent-strong:在浅绿/深绿卡上都够黑够读,层级靠"标题粗体 vs 提示常规"区分,不靠淡色。 */
+body.desk-view .desk-board-fold-hint { font-size: var(--fs-12, 12px); color: var(--accent-strong); }
 body.desk-view .desk-board-fold-badge {
   margin-left: auto;
   min-width: 20px; height: 20px;
