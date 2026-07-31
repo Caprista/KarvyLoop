@@ -4303,34 +4303,34 @@ var KarvyRenderBundle = (function(exports) {
     re.src_ZPCc = [re.src_Z, re.src_P, re.src_Cc].join("|");
     re.src_ZCc = [re.src_Z, re.src_Cc].join("|");
     const text_separators = "[><｜]";
-    re.src_pseudo_letter = "(?:(?!" + text_separators + "|" + re.src_ZPCc + ")" + re.src_Any + ")";
+    re.src_pseudo_letter = `(?:(?!${text_separators}|${re.src_ZPCc})${re.src_Any})`;
     re.src_ip4 = "(?:(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)";
-    re.src_auth = "(?:(?:(?!" + re.src_ZCc + "|[@/\\[\\]()]).)+@)?";
+    re.src_auth = `(?:(?:(?!${re.src_ZCc}|[@/\\[\\]()]).){1,50}@)?`;
     re.src_port = "(?::(?:6(?:[0-4]\\d{3}|5(?:[0-4]\\d{2}|5(?:[0-2]\\d|3[0-5])))|[1-5]?\\d{1,4}))?";
-    re.src_host_terminator = "(?=$|" + text_separators + "|" + re.src_ZPCc + ")(?!" + (opts["---"] ? "-(?!--)|" : "-|") + "_|:\\d|\\.-|\\.(?!$|" + re.src_ZPCc + "))";
-    re.src_path = "(?:[/?#](?:(?!" + re.src_ZCc + "|" + text_separators + `|[()[\\]{}.,"'?!\\-;]).|\\[(?:(?!` + re.src_ZCc + "|\\]).)*\\]|\\((?:(?!" + re.src_ZCc + "|[)]).)*\\)|\\{(?:(?!" + re.src_ZCc + '|[}]).)*\\}|\\"(?:(?!' + re.src_ZCc + `|["]).)+\\"|\\'(?:(?!` + re.src_ZCc + "|[']).)+\\'|\\'(?=" + re.src_pseudo_letter + "|[-])|\\.{2,}[a-zA-Z0-9%/&]|\\.(?!" + re.src_ZCc + "|[.]|$)|" + (opts["---"] ? "\\-(?!--(?:[^-]|$))(?:-*)|" : "\\-+|") + // allow `,,,` in paths
-    ",(?!" + re.src_ZCc + "|$)|;(?!" + re.src_ZCc + "|$)|\\!+(?!" + re.src_ZCc + "|[!]|$)|\\?(?!" + re.src_ZCc + "|[?]|$))+|\\/)?";
-    re.src_email_name = '[\\-;:&=\\+\\$,\\.a-zA-Z0-9_][\\-;:&=\\+\\$,\\"\\.a-zA-Z0-9_]*';
+    re.src_host_terminator = `(?=$|${text_separators}|${re.src_ZPCc})(?!${opts["---"] ? "-(?!--)|" : "-|"}_|:\\d|\\.-|\\.(?!$|${re.src_ZPCc}))`;
+    re.src_path = `(?:[/?#](?:(?!${re.src_ZCc}|${text_separators}|[()[\\]{}.,"'?!\\-;]).|\\[(?:(?!${re.src_ZCc}|\\]).)*\\]|\\((?:(?!${re.src_ZCc}|[)]).)*\\)|\\{(?:(?!${re.src_ZCc}|[}]).)*\\}|\\"(?:(?!${re.src_ZCc}|["]).)+\\"|\\'(?:(?!${re.src_ZCc}|[']).)+\\'|\\'(?=${re.src_pseudo_letter}|[-])|\\.{2,}[a-zA-Z0-9%/&]|\\.(?!${re.src_ZCc}|[.]|$)|` + (opts["---"] ? "\\-(?!--(?:[^-]|$))(?:-*)|" : "\\-+|") + // allow `,,,` in paths
+    `,(?!${re.src_ZCc}|$)|;(?!${re.src_ZCc}|$)|\\!+(?!${re.src_ZCc}|[!]|$)|\\?(?!${re.src_ZCc}|[?]|$))+|\\/)?`;
+    re.src_email_name = '[\\-;:&=\\+\\$,\\.a-zA-Z0-9_][\\-;:&=\\+\\$,\\"\\.a-zA-Z0-9_]{0,63}';
     re.src_xn = "xn--[a-z0-9\\-]{1,59}";
     re.src_domain_root = // Allow letters & digits (http://test1)
-    "(?:" + re.src_xn + "|" + re.src_pseudo_letter + "{1,63})";
-    re.src_domain = "(?:" + re.src_xn + "|(?:" + re.src_pseudo_letter + ")|(?:" + re.src_pseudo_letter + "(?:-|" + re.src_pseudo_letter + "){0,61}" + re.src_pseudo_letter + "))";
-    re.src_host = "(?:(?:(?:(?:" + re.src_domain + ")\\.)*" + re.src_domain + "))";
-    re.tpl_host_fuzzy = "(?:" + re.src_ip4 + "|(?:(?:(?:" + re.src_domain + ")\\.)+(?:%TLDS%)))";
-    re.tpl_host_no_ip_fuzzy = "(?:(?:(?:" + re.src_domain + ")\\.)+(?:%TLDS%))";
+    "(?:" + re.src_xn + `|${re.src_pseudo_letter}{1,63})`;
+    re.src_domain = "(?:" + re.src_xn + `|(?:${re.src_pseudo_letter})|(?:${re.src_pseudo_letter}(?:-|${re.src_pseudo_letter}){0,61}${re.src_pseudo_letter}))`;
+    re.src_host = `(?:(?:(?:(?:${re.src_domain})\\.)*${re.src_domain}))`;
+    re.tpl_host_fuzzy = "(?:" + re.src_ip4 + `|(?:(?:(?:${re.src_domain})\\.)+(?:%TLDS%)))`;
+    re.tpl_host_no_ip_fuzzy = `(?:(?:(?:${re.src_domain})\\.)+(?:%TLDS%))`;
     re.src_host_strict = re.src_host + re.src_host_terminator;
     re.tpl_host_fuzzy_strict = re.tpl_host_fuzzy + re.src_host_terminator;
     re.src_host_port_strict = re.src_host + re.src_port + re.src_host_terminator;
     re.tpl_host_port_fuzzy_strict = re.tpl_host_fuzzy + re.src_port + re.src_host_terminator;
     re.tpl_host_port_no_ip_fuzzy_strict = re.tpl_host_no_ip_fuzzy + re.src_port + re.src_host_terminator;
-    re.tpl_host_fuzzy_test = "localhost|www\\.|\\.\\d{1,3}\\.|(?:\\.(?:%TLDS%)(?:" + re.src_ZPCc + "|>|$))";
-    re.tpl_email_fuzzy = "(^|" + text_separators + '|"|\\(|' + re.src_ZCc + ")(" + re.src_email_name + "@" + re.tpl_host_fuzzy_strict + ")";
+    re.tpl_host_fuzzy_test = `localhost|www\\.|\\.\\d{1,3}\\.|(?:\\.(?:%TLDS%)(?:${re.src_ZPCc}|>|$))`;
+    re.tpl_email_fuzzy = `(^|${text_separators}|"|\\(|${re.src_ZCc})(${re.src_email_name}@${re.tpl_host_fuzzy_strict})`;
     re.tpl_link_fuzzy = // Fuzzy link can't be prepended with .:/\- and non punctuation.
     // but can start with > (markdown blockquote)
-    "(^|(?![.:/\\-_@])(?:[$+<=>^`|｜]|" + re.src_ZPCc + "))((?![$+<=>^`|｜])" + re.tpl_host_port_fuzzy_strict + re.src_path + ")";
+    `(^|(?![.:/\\-_@])(?:[$+<=>^\`|｜]|${re.src_ZPCc}))((?![$+<=>^\`|｜])${re.tpl_host_port_fuzzy_strict}${re.src_path})`;
     re.tpl_link_no_ip_fuzzy = // Fuzzy link can't be prepended with .:/\- and non punctuation.
     // but can start with > (markdown blockquote)
-    "(^|(?![.:/\\-_@])(?:[$+<=>^`|｜]|" + re.src_ZPCc + "))((?![$+<=>^`|｜])" + re.tpl_host_port_no_ip_fuzzy_strict + re.src_path + ")";
+    `(^|(?![.:/\\-_@])(?:[$+<=>^\`|｜]|${re.src_ZPCc}))((?![$+<=>^\`|｜])${re.tpl_host_port_no_ip_fuzzy_strict}${re.src_path})`;
     return re;
   }
   function assign(obj) {
@@ -4379,7 +4379,7 @@ var KarvyRenderBundle = (function(exports) {
         const tail = text2.slice(pos);
         if (!self.re.http) {
           self.re.http = new RegExp(
-            "^\\/\\/" + self.re.src_auth + self.re.src_host_port_strict + self.re.src_path,
+            `^\\/\\/${self.re.src_auth}${self.re.src_host_port_strict}${self.re.src_path}`,
             "i"
           );
         }
@@ -4398,7 +4398,7 @@ var KarvyRenderBundle = (function(exports) {
           self.re.no_http = new RegExp(
             "^" + self.re.src_auth + // Don't allow single-level domains, because of false positives like '//test'
             // with code comments
-            "(?:localhost|(?:(?:" + self.re.src_domain + ")\\.)+" + self.re.src_domain_root + ")" + self.re.src_port + self.re.src_host_terminator + self.re.src_path,
+            `(?:localhost|(?:(?:${self.re.src_domain})\\.)+${self.re.src_domain_root})` + self.re.src_port + self.re.src_host_terminator + self.re.src_path,
             "i"
           );
         }
@@ -4419,7 +4419,7 @@ var KarvyRenderBundle = (function(exports) {
         const tail = text2.slice(pos);
         if (!self.re.mailto) {
           self.re.mailto = new RegExp(
-            "^" + self.re.src_email_name + "@" + self.re.src_host_strict,
+            `^${self.re.src_email_name}@${self.re.src_host_strict}`,
             "i"
           );
         }
@@ -4468,7 +4468,7 @@ var KarvyRenderBundle = (function(exports) {
     const aliases = [];
     self.__compiled__ = {};
     function schemaError(name, val) {
-      throw new Error('(LinkifyIt) Invalid schema "' + name + '": ' + val);
+      throw new Error(`(LinkifyIt) Invalid schema "${name}": ${val}`);
     }
     Object.keys(self.__schemas__).forEach(function(name) {
       const val = self.__schemas__[name];
@@ -4511,11 +4511,11 @@ var KarvyRenderBundle = (function(exports) {
     const slist = Object.keys(self.__compiled__).filter(function(name) {
       return name.length > 0 && self.__compiled__[name];
     }).map(escapeRE).join("|");
-    self.re.schema_test = RegExp("(^|(?!_)(?:[><｜]|" + re.src_ZPCc + "))(" + slist + ")", "i");
-    self.re.schema_search = RegExp("(^|(?!_)(?:[><｜]|" + re.src_ZPCc + "))(" + slist + ")", "ig");
-    self.re.schema_at_start = RegExp("^" + self.re.schema_search.source, "i");
+    self.re.schema_test = RegExp(`(^|(?!_)(?:[><｜]|${re.src_ZPCc}))(${slist})`, "i");
+    self.re.schema_search = RegExp(`(^|(?!_)(?:[><｜]|${re.src_ZPCc}))(${slist})`, "ig");
+    self.re.schema_at_start = RegExp(`^${self.re.schema_search.source}`, "i");
     self.re.pretest = RegExp(
-      "(" + self.re.schema_test.source + ")|(" + self.re.host_fuzzy_test.source + ")|@",
+      `(${self.re.schema_test.source})|(${self.re.host_fuzzy_test.source})|@`,
       "i"
     );
   }
@@ -4709,10 +4709,10 @@ var KarvyRenderBundle = (function(exports) {
   };
   LinkifyIt.prototype.normalize = function normalize2(match) {
     if (!match.schema) {
-      match.url = "http://" + match.url;
+      match.url = `http://${match.url}`;
     }
     if (match.schema === "mailto:" && !/^mailto:/i.test(match.url)) {
-      match.url = "mailto:" + match.url;
+      match.url = `mailto:${match.url}`;
     }
   };
   LinkifyIt.prototype.onCompile = function onCompile() {
@@ -5270,7 +5270,7 @@ var KarvyRenderBundle = (function(exports) {
     env = env || {};
     return this.renderer.render(this.parseInline(src, env), this.options, env);
   };
-  /*! @license DOMPurify 3.4.11 | (c) Cure53 and other contributors | Released under the Apache license 2.0 and Mozilla Public License 2.0 | github.com/cure53/DOMPurify/blob/3.4.11/LICENSE */
+  /*! @license DOMPurify 3.4.12 | (c) Cure53 and other contributors | Released under the Apache license 2.0 and Mozilla Public License 2.0 | github.com/cure53/DOMPurify/blob/3.4.12/LICENSE */
   function _arrayLikeToArray(r, a) {
     (null == a || a > r.length) && (a = r.length);
     for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e];
@@ -5503,7 +5503,7 @@ var KarvyRenderBundle = (function(exports) {
   const mathMlDisallowed = freeze(["maction", "maligngroup", "malignmark", "mlongdiv", "mscarries", "mscarry", "msgroup", "mstack", "msline", "msrow", "semantics", "annotation", "annotation-xml", "mprescripts", "none"]);
   const text = freeze(["#text"]);
   const html = freeze(["accept", "action", "align", "alt", "autocapitalize", "autocomplete", "autopictureinpicture", "autoplay", "background", "bgcolor", "border", "capture", "cellpadding", "cellspacing", "checked", "cite", "class", "clear", "color", "cols", "colspan", "command", "commandfor", "controls", "controlslist", "coords", "crossorigin", "datetime", "decoding", "default", "dir", "disabled", "disablepictureinpicture", "disableremoteplayback", "download", "draggable", "enctype", "enterkeyhint", "exportparts", "face", "for", "headers", "height", "hidden", "high", "href", "hreflang", "id", "inert", "inputmode", "integrity", "ismap", "kind", "label", "lang", "list", "loading", "loop", "low", "max", "maxlength", "media", "method", "min", "minlength", "multiple", "muted", "name", "nonce", "noshade", "novalidate", "nowrap", "open", "optimum", "part", "pattern", "placeholder", "playsinline", "popover", "popovertarget", "popovertargetaction", "poster", "preload", "pubdate", "radiogroup", "readonly", "rel", "required", "rev", "reversed", "role", "rows", "rowspan", "spellcheck", "scope", "selected", "shape", "size", "sizes", "slot", "span", "srclang", "start", "src", "srcset", "step", "style", "summary", "tabindex", "title", "translate", "type", "usemap", "valign", "value", "width", "wrap", "xmlns"]);
-  const svg = freeze(["accent-height", "accumulate", "additive", "alignment-baseline", "amplitude", "ascent", "attributename", "attributetype", "azimuth", "basefrequency", "baseline-shift", "begin", "bias", "by", "class", "clip", "clippathunits", "clip-path", "clip-rule", "color", "color-interpolation", "color-interpolation-filters", "color-profile", "color-rendering", "cx", "cy", "d", "dx", "dy", "diffuseconstant", "direction", "display", "divisor", "dur", "edgemode", "elevation", "end", "exponent", "fill", "fill-opacity", "fill-rule", "filter", "filterunits", "flood-color", "flood-opacity", "font-family", "font-size", "font-size-adjust", "font-stretch", "font-style", "font-variant", "font-weight", "fx", "fy", "g1", "g2", "glyph-name", "glyphref", "gradientunits", "gradienttransform", "height", "href", "id", "image-rendering", "in", "in2", "intercept", "k", "k1", "k2", "k3", "k4", "kerning", "keypoints", "keysplines", "keytimes", "lang", "lengthadjust", "letter-spacing", "kernelmatrix", "kernelunitlength", "lighting-color", "local", "marker-end", "marker-mid", "marker-start", "markerheight", "markerunits", "markerwidth", "maskcontentunits", "maskunits", "max", "mask", "mask-type", "media", "method", "mode", "min", "name", "numoctaves", "offset", "operator", "opacity", "order", "orient", "orientation", "origin", "overflow", "paint-order", "path", "pathlength", "patterncontentunits", "patterntransform", "patternunits", "points", "preservealpha", "preserveaspectratio", "primitiveunits", "r", "rx", "ry", "radius", "refx", "refy", "repeatcount", "repeatdur", "restart", "result", "rotate", "scale", "seed", "shape-rendering", "slope", "specularconstant", "specularexponent", "spreadmethod", "startoffset", "stddeviation", "stitchtiles", "stop-color", "stop-opacity", "stroke-dasharray", "stroke-dashoffset", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke", "stroke-width", "style", "surfacescale", "systemlanguage", "tabindex", "tablevalues", "targetx", "targety", "transform", "transform-origin", "text-anchor", "text-decoration", "text-rendering", "textlength", "type", "u1", "u2", "unicode", "values", "viewbox", "visibility", "version", "vert-adv-y", "vert-origin-x", "vert-origin-y", "width", "word-spacing", "wrap", "writing-mode", "xchannelselector", "ychannelselector", "x", "x1", "x2", "xmlns", "y", "y1", "y2", "z", "zoomandpan"]);
+  const svg = freeze(["accent-height", "accumulate", "additive", "alignment-baseline", "amplitude", "ascent", "attributename", "attributetype", "azimuth", "basefrequency", "baseline-shift", "begin", "bias", "by", "class", "clip", "clippathunits", "clip-path", "clip-rule", "color", "color-interpolation", "color-interpolation-filters", "color-profile", "color-rendering", "cx", "cy", "d", "dx", "dy", "diffuseconstant", "direction", "display", "divisor", "dominant-baseline", "dur", "edgemode", "elevation", "end", "exponent", "fill", "fill-opacity", "fill-rule", "filter", "filterunits", "flood-color", "flood-opacity", "font-family", "font-size", "font-size-adjust", "font-stretch", "font-style", "font-variant", "font-weight", "fx", "fy", "g1", "g2", "glyph-name", "glyphref", "gradientunits", "gradienttransform", "height", "href", "id", "image-rendering", "in", "in2", "intercept", "k", "k1", "k2", "k3", "k4", "kerning", "keypoints", "keysplines", "keytimes", "lang", "lengthadjust", "letter-spacing", "kernelmatrix", "kernelunitlength", "lighting-color", "local", "marker-end", "marker-mid", "marker-start", "markerheight", "markerunits", "markerwidth", "maskcontentunits", "maskunits", "max", "mask", "mask-type", "media", "method", "mode", "min", "name", "numoctaves", "offset", "operator", "opacity", "order", "orient", "orientation", "origin", "overflow", "paint-order", "path", "pathlength", "patterncontentunits", "patterntransform", "patternunits", "points", "preservealpha", "preserveaspectratio", "primitiveunits", "r", "rx", "ry", "radius", "refx", "refy", "repeatcount", "repeatdur", "restart", "result", "rotate", "scale", "seed", "shape-rendering", "slope", "specularconstant", "specularexponent", "spreadmethod", "startoffset", "stddeviation", "stitchtiles", "stop-color", "stop-opacity", "stroke-dasharray", "stroke-dashoffset", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "stroke", "stroke-width", "style", "surfacescale", "systemlanguage", "tabindex", "tablevalues", "targetx", "targety", "transform", "transform-origin", "text-anchor", "text-decoration", "text-orientation", "text-rendering", "textlength", "type", "u1", "u2", "unicode", "values", "viewbox", "visibility", "version", "vert-adv-y", "vert-origin-x", "vert-origin-y", "width", "word-spacing", "wrap", "writing-mode", "xchannelselector", "ychannelselector", "x", "x1", "x2", "xmlns", "y", "y1", "y2", "z", "zoomandpan"]);
   const mathMl = freeze(["accent", "accentunder", "align", "bevelled", "close", "columnalign", "columnlines", "columnspacing", "columnspan", "denomalign", "depth", "dir", "display", "displaystyle", "encoding", "fence", "frame", "height", "href", "id", "largeop", "length", "linethickness", "lquote", "lspace", "mathbackground", "mathcolor", "mathsize", "mathvariant", "maxsize", "minsize", "movablelimits", "notation", "numalign", "open", "rowalign", "rowlines", "rowspacing", "rowspan", "rspace", "rquote", "scriptlevel", "scriptminsize", "scriptsizemultiplier", "selection", "separator", "separators", "stretchy", "subscriptshift", "supscriptshift", "symmetric", "voffset", "width", "xmlns"]);
   const xml = freeze(["xlink:href", "xml:id", "xlink:title", "xml:space", "xmlns:xlink"]);
   const MUSTACHE_EXPR = seal(/{{[\w\W]*|^[\w\W]*}}/g);
@@ -5589,7 +5589,7 @@ var KarvyRenderBundle = (function(exports) {
   function createDOMPurify() {
     let window2 = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : getGlobal();
     const DOMPurify = (root) => createDOMPurify(root);
-    DOMPurify.version = "3.4.11";
+    DOMPurify.version = "3.4.12";
     DOMPurify.removed = [];
     if (!window2 || !window2.document || window2.document.nodeType !== NODE_TYPE.document || !window2.Element) {
       DOMPurify.isSupported = false;
@@ -6030,6 +6030,7 @@ var KarvyRenderBundle = (function(exports) {
       }
     };
     const _neutralizeRoot = function _neutralizeRoot2(root) {
+      _neutralizeSubtree(root);
       const childNodes = getChildNodes(root);
       if (childNodes) {
         const snapshot = [];
@@ -6108,6 +6109,42 @@ var KarvyRenderBundle = (function(exports) {
         const nodeType = getNodeType ? getNodeType(node) : node.nodeType;
         if (nodeType === NODE_TYPE.element) {
           _stripDisallowedAttributes(node);
+        }
+        const childNodes = getChildNodes(node);
+        if (childNodes) {
+          for (let i = childNodes.length - 1; i >= 0; --i) {
+            stack.push(childNodes[i]);
+          }
+        }
+      }
+    };
+    const _neutralizePatchLinkage = function _neutralizePatchLinkage2(root) {
+      if (!SAFE_FOR_XML) {
+        return;
+      }
+      const stack = [root];
+      while (stack.length > 0) {
+        const node = stack.pop();
+        const nodeType = getNodeType ? getNodeType(node) : node.nodeType;
+        if (nodeType === NODE_TYPE.processingInstruction || nodeType === NODE_TYPE.comment && regExpTest(COMMENT_MARKUP_PROBE, node.data)) {
+          try {
+            remove(node);
+          } catch (_) {
+          }
+          continue;
+        }
+        if (nodeType === NODE_TYPE.element) {
+          const element = node;
+          const lcTag = transformCaseFunc(getNodeName ? getNodeName(node) : node.nodeName);
+          try {
+            if (element.hasAttribute && element.hasAttribute("patchsrc")) {
+              element.removeAttribute("patchsrc");
+            }
+            if (element.hasAttribute && element.hasAttribute("for") && lcTag !== "label" && lcTag !== "output") {
+              element.removeAttribute("for");
+            }
+          } catch (_) {
+          }
         }
         const childNodes = getChildNodes(node);
         if (childNodes) {
@@ -6290,8 +6327,11 @@ var KarvyRenderBundle = (function(exports) {
       _forceRemove(currentNode);
       return true;
     };
-    const _sanitizeElements = function _sanitizeElements2(currentNode) {
+    const _sanitizeElements = function _sanitizeElements2(currentNode, root) {
       _executeHooks(hooks.beforeSanitizeElements, currentNode, null);
+      if (currentNode !== root && getParentNode(currentNode) === null) {
+        return true;
+      }
       if (_isClobbered(currentNode)) {
         _forceRemove(currentNode);
         return true;
@@ -6301,12 +6341,19 @@ var KarvyRenderBundle = (function(exports) {
         tagName,
         allowedTags: ALLOWED_TAGS
       });
+      if (currentNode !== root && getParentNode(currentNode) === null) {
+        return true;
+      }
       if (_isUnsafeNode(currentNode, tagName)) {
         _forceRemove(currentNode);
         return true;
       }
       if (FORBID_TAGS[tagName] || !(EXTRA_ELEMENT_HANDLING.tagCheck instanceof Function && EXTRA_ELEMENT_HANDLING.tagCheck(tagName)) && !ALLOWED_TAGS[tagName]) {
-        return _sanitizeDisallowedNode(currentNode, tagName);
+        const removed = _sanitizeDisallowedNode(currentNode, tagName);
+        if (removed === false) {
+          _executeHooks(hooks.afterSanitizeElements, currentNode, null);
+        }
+        return removed;
       }
       const nt = getNodeType ? getNodeType(currentNode) : currentNode.nodeType;
       if (nt === NODE_TYPE.element && !_checkValidNamespace(currentNode)) {
@@ -6331,6 +6378,12 @@ var KarvyRenderBundle = (function(exports) {
     };
     const _isValidAttribute = function _isValidAttribute2(lcTag, lcName, value) {
       if (FORBID_ATTR[lcName]) {
+        return false;
+      }
+      if (SAFE_FOR_XML && lcName === "patchsrc") {
+        return false;
+      }
+      if (SAFE_FOR_XML && lcName === "for" && lcTag !== "label" && lcTag !== "output") {
         return false;
       }
       if (SANITIZE_DOM && (lcName === "id" || lcName === "name") && (value in document2 || value in formElement)) {
@@ -6463,7 +6516,7 @@ var KarvyRenderBundle = (function(exports) {
       _executeHooks(hooks.beforeSanitizeShadowDOM, fragment, null);
       while (shadowNode = shadowIterator.nextNode()) {
         _executeHooks(hooks.uponSanitizeShadowNode, shadowNode, null);
-        _sanitizeElements(shadowNode);
+        _sanitizeElements(shadowNode, fragment);
         _sanitizeAttributes(shadowNode);
         if (_isDocumentFragment(shadowNode.content)) {
           _sanitizeShadowDOM2(shadowNode.content);
@@ -6562,14 +6615,17 @@ var KarvyRenderBundle = (function(exports) {
       DOMPurify.removed = [];
       const inPlace = IN_PLACE && typeof dirty !== "string" && _isNode(dirty);
       if (inPlace) {
+        _neutralizePatchLinkage(dirty);
         const nn = getNodeName ? getNodeName(dirty) : dirty.nodeName;
         if (typeof nn === "string") {
           const tagName = transformCaseFunc(nn);
           if (!ALLOWED_TAGS[tagName] || FORBID_TAGS[tagName]) {
+            _neutralizeRoot(dirty);
             throw typeErrorCreate("root node is forbidden and cannot be sanitized in-place");
           }
         }
         if (_isClobbered(dirty)) {
+          _neutralizeRoot(dirty);
           throw typeErrorCreate("root node is clobbered and cannot be sanitized in-place");
         }
         try {
@@ -6602,10 +6658,11 @@ var KarvyRenderBundle = (function(exports) {
       if (body && FORCE_BODY) {
         _forceRemove(body.firstChild);
       }
-      const nodeIterator = _createNodeIterator(inPlace ? dirty : body);
+      const walkRoot = inPlace ? dirty : body;
+      const nodeIterator = _createNodeIterator(walkRoot);
       try {
         while (currentNode = nodeIterator.nextNode()) {
-          _sanitizeElements(currentNode);
+          _sanitizeElements(currentNode, walkRoot);
           _sanitizeAttributes(currentNode);
           if (_isDocumentFragment(currentNode.content)) {
             _sanitizeShadowDOM2(currentNode.content);
@@ -6614,6 +6671,11 @@ var KarvyRenderBundle = (function(exports) {
       } catch (error2) {
         if (inPlace) {
           _neutralizeRoot(dirty);
+          arrayForEach(DOMPurify.removed, (entry) => {
+            if (entry.element) {
+              _neutralizeSubtree(entry.element);
+            }
+          });
         }
         throw error2;
       }

@@ -511,6 +511,24 @@ def api_mcp_presets(request: Request) -> dict[str, Any]:
             "requires_restart": status is None}
 
 
+@router.get("/mcp/registry/search")
+def api_mcp_registry_search(q: str = "", limit: int = 20) -> dict[str, Any]:
+    """查官方 MCP Registry(docs/98 刀2:只**消费**不自建 catalog)。返回简化 server 列表
+    (name/title/description/version/url;只留有 streamable-http remote 的)。
+
+    从这里一键接入的 server = **未策展**(docs/98 刀1)→ 自动吃 fail-safe 外发门:名字判不出
+    的副作用工具会先弹**草稿决策卡**由你拍板。我们的增值只做围栏/信任分级/把关,不复制目录。
+    失败(网络/坏 JSON)→ ok:False + 克制 reason(不外泄底层),servers 空(宁空勿毒)。"""
+    from karvyloop.mcp_registry import RegistryError, search_registry
+    try:
+        servers = search_registry(q, limit=int(limit))
+    except RegistryError as e:
+        return {"ok": False, "reason": str(e), "servers": []}
+    except Exception:   # int() 之类的兜底:也不外泄
+        return {"ok": False, "reason": "查 MCP Registry 失败", "servers": []}
+    return {"ok": True, "servers": servers, "uncurated": True}
+
+
 @router.post("/mcp/preset/apply")
 async def api_mcp_preset_apply(req: McpPresetApplyRequest, request: Request) -> dict[str, Any]:
     """把一个预设 upsert 进 config.yaml 的 mcp.servers。密钥只落 config.yaml(它本来就是

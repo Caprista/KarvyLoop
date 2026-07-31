@@ -476,6 +476,8 @@ function _mcpPresetsSection(): HTMLElement {
     wrap.appendChild(chWrap);
     // remote(vendor 托管)server:贴 URL + 可选 token 就能加(streamable HTTP)
     wrap.appendChild(_mcpRemoteAddSection((data && data.remote_servers) || []));
+    // docs/98 刀2:从官方 MCP Registry 搜索接入(接进来 = 未策展,吃 fail-safe 外发门)
+    wrap.appendChild(_mcpRegistrySearchSection());
   };
   render();
   return wrap;
@@ -567,6 +569,61 @@ function _mcpRemoteAddSection(existing: any[]): HTMLElement {
       el("div", { class: "dpref-actions" }, btn),
       msg)));
   return wrap;
+}
+
+// docs/98 刀2:从官方 MCP Registry 搜索接入。只**消费**目录(事实标准),不自建 catalog;
+// 接进来的 server = **未策展** → 名字判不出的副作用工具会先弹**草稿决策卡**由你拍板(docs/98 刀1)。
+function _mcpRegistrySearchSection(): HTMLElement {
+  const wrap = el("div", { class: "mgmt-buysugar" });
+  wrap.appendChild(el("div", { class: "mgmt-section-title", text: "🌐 " + t("mcpp.registry_title") }));
+  wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.registry_hint") }));
+  const q = el("input", { type: "text", placeholder: t("mcpp.registry_search_ph") }) as HTMLInputElement;
+  q.style.flex = "3";
+  const msg = el("div", { class: "mgmt-hint" });
+  const results = el("div", { class: "mgmt-list" });
+  const doSearch = async (): Promise<void> => {
+    results.innerHTML = "";
+    msg.textContent = t("mcpp.registry_searching");
+    const body: any = await _getJSON("/api/mcp/registry/search?q="
+      + encodeURIComponent(q.value.trim()) + "&limit=20");
+    if (!body || body.ok === false) { msg.textContent = t("mcpp.registry_failed"); return; }
+    const servers = (body.servers || []) as any[];
+    msg.textContent = servers.length ? t("mcpp.registry_uncurated_note") : t("mcpp.registry_none");
+    for (const s of servers) results.appendChild(_mcpRegistryRow(s));
+  };
+  const btn = el("button", { class: "dpref-confirm", text: t("mcpp.registry_search"),
+    onclick: () => { void doSearch(); } });
+  q.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") { void doSearch(); } });
+  wrap.appendChild(el("div", { class: "mgmt-card" },
+    el("div", { class: "mc-main" },
+      el("div", { class: "mgmt-row" }, q, btn), msg, results)));
+  return wrap;
+}
+
+// Registry 一条结果:标题·版本 / 说明 / 端点 URL / 一键「接入」(复用 /mcp/server/add)。
+function _mcpRegistryRow(s: any): HTMLElement {
+  const row = el("div", { class: "mgmt-card" });
+  const st = el("div", { class: "mgmt-hint" });
+  const add = el("button", { class: "dpref-confirm", text: t("mcpp.registry_add"),
+    onclick: async () => {
+      (add as HTMLButtonElement).disabled = true; add.textContent = t("mcpp.applying");
+      const r = await _postJSON("/api/mcp/server/add", { url: s.url, name: s.name || "", token: "" });
+      if (r.ok && r.data && r.data.ok) {
+        add.textContent = t("mcpp.remote_added");
+        st.textContent = r.data.connected
+          ? t("mcpp.live_note", { n: (r.data.tools || []).length })
+          : t("mcpp.restart_note");
+      } else {
+        (add as HTMLButtonElement).disabled = false; add.textContent = t("mcpp.registry_add");
+        st.textContent = t("mgmt.failed", { err: (r.data && (r.data.reason || r.data.detail)) || r.status });
+      }
+    } });
+  row.appendChild(el("div", { class: "mc-main" },
+    el("div", { class: "mgmt-row-title", text: (s.title || s.name || "") + (s.version ? " · " + s.version : "") }),
+    el("div", { class: "mgmt-hint", text: s.description || "" }),
+    el("div", { class: "mgmt-hint", text: s.url || "" }),
+    el("div", { class: "dpref-actions" }, add), st));
+  return row;
 }
 
 // docs/96 刀1:一张预设卡 —— 图标+人话名 / 状态灯 / 一句话说明 / 权限范围人话 /

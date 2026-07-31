@@ -603,6 +603,7 @@ var KarvySkillsPanelBundle = (function(exports) {
       chWrap.appendChild(chList);
       wrap.appendChild(chWrap);
       wrap.appendChild(_mcpRemoteAddSection(data && data.remote_servers || []));
+      wrap.appendChild(_mcpRegistrySearchSection());
     };
     render();
     return wrap;
@@ -703,6 +704,82 @@ var KarvySkillsPanelBundle = (function(exports) {
       )
     ));
     return wrap;
+  }
+  function _mcpRegistrySearchSection() {
+    const wrap = el("div", { class: "mgmt-buysugar" });
+    wrap.appendChild(el("div", { class: "mgmt-section-title", text: "🌐 " + t("mcpp.registry_title") }));
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: t("mcpp.registry_hint") }));
+    const q = el("input", { type: "text", placeholder: t("mcpp.registry_search_ph") });
+    q.style.flex = "3";
+    const msg = el("div", { class: "mgmt-hint" });
+    const results = el("div", { class: "mgmt-list" });
+    const doSearch = async () => {
+      results.innerHTML = "";
+      msg.textContent = t("mcpp.registry_searching");
+      const body = await _getJSON("/api/mcp/registry/search?q=" + encodeURIComponent(q.value.trim()) + "&limit=20");
+      if (!body || body.ok === false) {
+        msg.textContent = t("mcpp.registry_failed");
+        return;
+      }
+      const servers = body.servers || [];
+      msg.textContent = servers.length ? t("mcpp.registry_uncurated_note") : t("mcpp.registry_none");
+      for (const s of servers) results.appendChild(_mcpRegistryRow(s));
+    };
+    const btn = el("button", {
+      class: "dpref-confirm",
+      text: t("mcpp.registry_search"),
+      onclick: () => {
+        void doSearch();
+      }
+    });
+    q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        void doSearch();
+      }
+    });
+    wrap.appendChild(el(
+      "div",
+      { class: "mgmt-card" },
+      el(
+        "div",
+        { class: "mc-main" },
+        el("div", { class: "mgmt-row" }, q, btn),
+        msg,
+        results
+      )
+    ));
+    return wrap;
+  }
+  function _mcpRegistryRow(s) {
+    const row = el("div", { class: "mgmt-card" });
+    const st = el("div", { class: "mgmt-hint" });
+    const add = el("button", {
+      class: "dpref-confirm",
+      text: t("mcpp.registry_add"),
+      onclick: async () => {
+        add.disabled = true;
+        add.textContent = t("mcpp.applying");
+        const r = await _postJSON("/api/mcp/server/add", { url: s.url, name: s.name || "", token: "" });
+        if (r.ok && r.data && r.data.ok) {
+          add.textContent = t("mcpp.remote_added");
+          st.textContent = r.data.connected ? t("mcpp.live_note", { n: (r.data.tools || []).length }) : t("mcpp.restart_note");
+        } else {
+          add.disabled = false;
+          add.textContent = t("mcpp.registry_add");
+          st.textContent = t("mgmt.failed", { err: r.data && (r.data.reason || r.data.detail) || r.status });
+        }
+      }
+    });
+    row.appendChild(el(
+      "div",
+      { class: "mc-main" },
+      el("div", { class: "mgmt-row-title", text: (s.title || s.name || "") + (s.version ? " · " + s.version : "") }),
+      el("div", { class: "mgmt-hint", text: s.description || "" }),
+      el("div", { class: "mgmt-hint", text: s.url || "" }),
+      el("div", { class: "dpref-actions" }, add),
+      st
+    ));
+    return row;
   }
   function _mcpPresetRow(p, status, hot) {
     const msg = el("div", { class: "mgmt-hint" });
