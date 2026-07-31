@@ -540,14 +540,45 @@ async def run(
                 is_curated_tool as _is_curated)
             # docs/98 刀1:未策展来源(官方 Registry/任意 URL 的 server)吃 fail-safe——名字判不出
             # 的工具也走草稿卡(server_curated=False)。已策展(内置 + 预设)维持精确判定。
+            # docs/99 刀1:computer use 会话同意门 + 高危弹卡,**同一执行咽喉、前置于 outbound**
+            # (直控真桌面沙箱管不住,收口靠这层结构闸)。两类工具名互斥(computer-control 绝非
+            # 外发),各出一份合成回执;被 computer 门拦的从 outbound 候选与 run_blocks 里扣掉,
+            # 末尾按原序合并。组件绝不抛(分类崩→fail-safe 当高危),不包 try 兜底放行。
+            from karvyloop.capability.computer_gate import (
+                is_computer_control_tool as _is_cc, is_computer_control_enabled as _cc_enabled,
+                is_high_risk_action as _cc_high_risk)
+            from karvyloop import i18n as _i18n_cc
+            computer_synth: dict[str, ToolResult] = {}
+            for tu in assistant_tool_uses:
+                if not (tu.name in tools and _is_cc(tu.name)):
+                    continue
+                if not _cc_enabled():
+                    # 闸1:会话同意未开 → 不执行,诚实回执让模型改道(不是崩)。
+                    cc_content: dict = {"ok": False, "error_message": _i18n_cc.t(
+                        "computer.control_not_enabled", tool=tu.name)}
+                elif _cc_high_risk(tu.name, tu.input or {}):
+                    # 闸2:确定性高危(键入凭证域/危险组合键)→ 扣下等 H2A(刀1 骨架先诚实回执,
+                    # 刀3 升真决策卡 + 对抗验收)。
+                    cc_content = {"ok": False, "error_message": _i18n_cc.t(
+                        "computer.high_risk_needs_confirm", tool=tu.name)}
+                else:
+                    continue   # 已同意 + benign → 放行,交 run_tools 真跑
+                computer_synth[tu.id] = ToolResult(
+                    tool_use_id=tu.id, name=tu.name, content=cc_content)
+
+            # computer-control 工具**结构性豁免 outbound 判定**:桌面控制不是「对外发送」语义,
+            # 它整个由 computer_gate 收口(上面已处理:拦的进 computer_synth,benign 的放行真跑)。
+            # 若不豁免,benign 控机工具会撞上未策展 fail-safe(规则10)被误当外发草稿 → 不该。
+            ob_candidates = [tu for tu in assistant_tool_uses if tu.id not in computer_synth]
             outbound_synth: dict[str, ToolResult] = {}
-            run_blocks = assistant_tool_uses
-            if any(tu.name in tools and _is_outbound(tu.name, server_curated=_is_curated(tu.name))
-                   for tu in assistant_tool_uses):
+            run_blocks = ob_candidates
+            if any(tu.name in tools and not _is_cc(tu.name)
+                   and _is_outbound(tu.name, server_curated=_is_curated(tu.name))
+                   for tu in ob_candidates):
                 from karvyloop import i18n as _i18n_ob
                 run_blocks = []
-                for tu in assistant_tool_uses:
-                    if not (tu.name in tools
+                for tu in ob_candidates:
+                    if not (tu.name in tools and not _is_cc(tu.name)
                             and _is_outbound(tu.name, server_curated=_is_curated(tu.name))):
                         run_blocks.append(tu)
                         continue
@@ -571,10 +602,11 @@ async def run(
 
             results = await run_tools(run_blocks, tools, token,
                                        capability_check=_cap_check)
-            if outbound_synth:
-                # 按原 tool_use 顺序合并(合成草稿回执 + 真跑结果;缺位兜 dropped 防静默丢)
+            if outbound_synth or computer_synth:
+                # 按原 tool_use 顺序合并(computer 门 → outbound 草稿 → 真跑结果;缺位兜 dropped)
                 _by_id = {r.tool_use_id: r for r in results}
-                results = [outbound_synth.get(tu.id) or _by_id.get(tu.id)
+                results = [computer_synth.get(tu.id) or outbound_synth.get(tu.id)
+                           or _by_id.get(tu.id)
                            or ToolResult(tool_use_id=tu.id, name=tu.name, content=None,
                                          is_error=True, error_reason="dropped:unknown")
                            for tu in assistant_tool_uses]

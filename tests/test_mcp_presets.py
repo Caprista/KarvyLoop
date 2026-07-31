@@ -25,7 +25,8 @@ from karvyloop.console.mcp_presets import (
 FAKE_TOKEN = "ghp_FAKE-DO-NOT-LEAK-0123456789abcdef"
 
 # 目录三形态(docs/96 刀1):stdio(command)/ remote(url)/ disabled 占位(都没有)
-STDIO_IDS = {"filesystem", "fetch", "memory", "time", "sqlite"}
+# computer_use(docs/99 刀1):stdio(npx 拉起上游 computer-use MCP server)。
+STDIO_IDS = {"filesystem", "fetch", "memory", "time", "sqlite", "computer_use"}
 REMOTE_IDS = {"notion", "github"}
 DISABLED_IDS = {"gmail", "gcalendar", "slack"}
 

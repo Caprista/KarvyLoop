@@ -857,6 +857,18 @@ EN = {
         "connected (no console) — the draft could not be submitted. Nothing was sent, and nothing "
         "will be sent automatically."
     ),
+    # ---- computer use 段(docs/99 刀1:直控本机 —— 会话同意门 + 高危弹卡骨架)----
+    # 执行咽喉给 agent 的合成回执(诚实:控制权没交给你 / 高危动作扣下等拍板,都没执行)。
+    "computer.control_not_enabled": (
+        "Computer control is not enabled: this call to {tool} was NOT executed. Controlling your "
+        "real desktop is off by default — the owner has to turn it on for this session before a role "
+        "may click or type. Nothing happened; ask the owner to enable it, or do something else."
+    ),
+    "computer.high_risk_needs_confirm": (
+        "High-risk desktop action held for approval: this call to {tool} was NOT executed. It looks "
+        "irreversible or credential-related (e.g. typing into a password field, a permanent-delete "
+        "key combo), so it needs the owner's explicit confirmation. Nothing was done automatically."
+    ),
     # 卡面(summary/basis;对抗验收 BUG-1 盲拍修:收件人全集逐条 + 隐藏收件人红标 + 完整入参可核)
     "proposal.outbound_draft.summary": "📨 Outbound send awaiting your approval: {what}",
     "proposal.outbound_draft.hidden_warn": "⚠️[hidden recipients — expand and verify]",

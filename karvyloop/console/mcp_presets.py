@@ -157,6 +157,40 @@ PRESETS: list[dict[str, Any]] = [_with_defaults(p) for p in [
                            "chat_postEphemeral", "chat_scheduleMessage", "chat_meMessage"],
     },
     {
+        # docs/99 刀1:直控本机的 computer use plumbing —— 消费业界那个跑通 Wayland 的 MCP server
+        # (a11y 树 + 门户截屏 + 内核输入兜底),模型无关(规划器出语义、runtime 分层定位)。
+        # 桌面控制的收口**不靠沙箱**(输入打真桌面,进程沙箱管不住)→ 靠 capability(FULL 默认拒)
+        # + computer_gate 的会话同意门(默认全暗)+ 高危弹卡。顺序铁律:同意面/停止键/硬化在刀3-刀4。
+        "id": "computer_use",
+        "name": "Computer control (desktop)",
+        "icon": "🖥️",
+        "category": "app",
+        "description": "Let a role see your screen and drive the mouse & keyboard to operate the "
+                       "apps on your real desktop — Linux (Wayland/X11). Off by default; you turn it "
+                       "on per session. · 让角色看你的屏幕、代你操作真桌面上的应用(鼠标键盘）—— "
+                       "Linux(Wayland/X11)。默认关闭,由你按会话打开。",
+        "command": "npx",
+        # 上游 MCP server(stdio):`computer-use-linux mcp`。npx 拉起其 bin,首启会安装。
+        # 真机启动形状在 VM 门到门(刀2)复核 —— 本机(win32)跑不了,是 Linux 专属地利。
+        "args_template": ["-y", "@agent-sh/computer-use-linux", "mcp"],
+        "env_template": {},
+        "params": [],
+        "needs_secret": False,
+        "secret_hint": "",
+        # 桌面控制不是「对外发送」语义(不进 outbound 判定面)——它另由 computer_gate 收口;
+        # outbound_tools 留空是对的。接入即被登记为已策展 server(mcp_manager),但真正拦它的是
+        # capability FULL + 会话同意门。
+        "outbound_tools": [],
+        "risk_note": "Highest-trust capability: it can click, type and read anything on your screen "
+                     "— a process sandbox does NOT contain input to your real desktop. Needs a Linux "
+                     "graphical session and the computer-use server installed; stays off until you "
+                     "explicitly enable it, and risky actions (typing into password fields, "
+                     "permanent-delete key combos) are held for your approval. "
+                     "· 最高信任级能力:能点击、键入、读取你屏幕上的一切 —— 进程沙箱**管不住**打到"
+                     "真桌面的输入。需 Linux 图形会话 + 安装 computer-use server;默认关闭、由你显式"
+                     "开启,高危动作(往密码框键入、永久删除类组合键)会先扣下等你拍板。",
+    },
+    {
         "id": "filesystem",
         "name": "Filesystem",
         "icon": "📁",

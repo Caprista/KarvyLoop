@@ -95,7 +95,16 @@ def required_mode(tool: str) -> Mode:
     例外:`mcp_*`(用户在配置里显式接入的 MCP 工具)是**调用方注入的可信工具**,
     不该因"没在固定表里"被当 FULL 一票拒(那样配了 MCP 也用不了)。给 WORKSPACE_WRITE 下限
     —— 在 maker(forge,WORKSPACE_WRITE)放行,在只读 checker 仍拦住。
+
+    **反例(docs/99 刀1):computer-use plumbing 是最危险的一类** —— 鼠标键盘打真桌面、
+    进程沙箱管不住(docs/99 §一)。`mcp_computer_use_*` 与编排器 `computer` **不吃** mcp_* 的
+    WORKSPACE_WRITE 通融档,提到 FULL(默认拒);再叠加 computer_gate 的会话同意 + 高危弹卡
+    (capability 是下限,同意门 + 高危分类是另两道结构闸)。**判定复用 computer_gate 的同一谓词**
+    (单一事实源,别在两处各写一份前缀 —— 对抗验收 FINDING B:防漂移)。
     """
+    from karvyloop.capability.computer_gate import is_computer_control_tool
+    if is_computer_control_tool(tool):
+        return Mode.FULL
     if tool.startswith("mcp_"):
         return Mode.WORKSPACE_WRITE
     return DEFAULT_TOOL_REQUIREMENTS.get(tool, Mode.FULL)
