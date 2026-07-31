@@ -108,7 +108,8 @@ class McpConnectionManager:
             # 登记短名 + 全名(mcp_<server>_<tool>)两种形态;集合只增不减 = 只收紧。
             # fail-soft:登记失败只 warning,不挡接入(方向只可能少拦,不会误放行已登记的)。
             try:
-                from karvyloop.capability.outbound_gate import register_curated_outbound
+                from karvyloop.capability.outbound_gate import (
+                    register_curated_outbound, register_curated_server)
                 try:
                     from karvyloop.console.mcp_presets import PRESETS as _PRESETS
                     _preset_ob = {str(p.get("id") or ""): list(p.get("outbound_tools") or [])
@@ -116,6 +117,10 @@ class McpConnectionManager:
                 except Exception:
                     _preset_ob = {}
                 for cfg in cfgs:
+                    # docs/98 刀1:预设目录里的 = 我们 vet 过的已策展 server;不在预设的
+                    # (官方 Registry / 任意 URL)= 未策展,其名字判不出的工具吃 fail-safe 走卡。
+                    if cfg.name in _preset_ob:
+                        register_curated_server(cfg.name)
                     _obs = [str(t).strip() for t in (getattr(cfg, "outbound_tools", None) or ())
                             if str(t).strip()]
                     _obs += [str(t).strip() for t in _preset_ob.get(cfg.name, [])

@@ -148,13 +148,43 @@ def curated_outbound() -> frozenset[str]:
 
 
 def clear_curated_outbound() -> None:
-    """测试/重载用。"""
+    """测试/重载用(同时清来源可信档)。"""
     _curated_outbound.clear()
+    _curated_servers.clear()
+
+
+# ---- 来源可信档(docs/98 刀1:已策展 vs 未策展 server)----
+# 已策展 server = 我们预设目录里、经我们 vet 过的(mcp_manager 接入 preset 时登记)。
+# 未策展 server(官方 Registry / 任意 URL)的**名字判不出**的工具,规则 10 由"放行"翻成
+# fail-safe「走草稿卡」——逻辑封闭:未策展来源的工具要么证得了是纯读(放行),要么走 H2A 卡,
+# 不存在"有副作用但无卡"的路径(不依赖认出攻击,只依赖来源+出口的结构)。
+_curated_servers: set[str] = set()
+
+
+def register_curated_server(name: str) -> None:
+    """登记一个已策展(经我们 vet)的 server 名(= 预设目录里的 server)。"""
+    s = str(name or "").strip()
+    if s:
+        _curated_servers.add(s)
+
+
+def is_curated_server(name: str) -> bool:
+    return str(name or "").strip() in _curated_servers
+
+
+def is_curated_tool(tool: str) -> bool:
+    """工具是否来自已策展来源:内置工具(非 `mcp_` 前缀)= 我们自己的,视为已策展;
+    MCP 工具 `mcp_<srv>_…` 仅当 <srv> 登记为已策展时才算。未策展 → 吃 fail-safe 收敛。"""
+    t = str(tool or "").strip()
+    if not t.startswith("mcp_"):
+        return True   # 内置工具 = 我们自己的,已策展
+    return any(t.startswith(f"mcp_{s}_") for s in _curated_servers)
 
 
 # ---- 判定函数(确定性,零 LLM,绝不抛)----
 
-def is_outbound_send_tool(tool: str, *, extra_outbound: Iterable[str] = ()) -> bool:
+def is_outbound_send_tool(tool: str, *, extra_outbound: Iterable[str] = (),
+                          server_curated: bool = True) -> bool:
     """这个工具名是否属「对外发送类」(docs/96 刀0 判定面)。
 
     判定序(短路;对抗验收 65 名真实工具判定表锁着,tests/test_outbound_draft.py):
@@ -167,7 +197,9 @@ def is_outbound_send_tool(tool: str, *, extra_outbound: Iterable[str] = ()) -> b
       7. 弱自足动词(send/broadcast/tweet/dm/sms/notify)→ True。
       8. 发送动词 × 消息名词 → True;"add" 特例只配核心消息名词(conversations_add_message)。
       9. 真送出动词 × 内容名词(send_file/share_photo/forward_document)→ True。
-      10. 其余 → False(拿不准不拦,兜底=策展标注)。
+      10. 其余 → **已策展来源"拿不准不拦"(兜底=策展标注);未策展来源(server_curated=
+          False,如官方 Registry/任意 URL)fail-safe 走卡**(docs/98 刀1:未策展的"拿不准"
+          不再放行,收敛到 H2A 卡——逻辑封闭,不存在"有副作用但无卡"的路径)。
 
     **异常方向权衡(对抗验收④,写死别翻)**:主体是 frozenset 集合运算 + 纯字符串处理,
     现实不可达抛;唯一有外部输入形态风险的是 extra_outbound 迭代/字符串化 → 只这段窄 try,
@@ -216,7 +248,8 @@ def is_outbound_send_tool(tool: str, *, extra_outbound: Iterable[str] = ()) -> b
         return True
     if (tset & TRANSMIT_VERBS) and (tset & CONTENT_NOUNS):
         return True
-    return False
+    # 10) 其余:已策展来源"拿不准不拦";未策展来源 fail-safe 走卡(docs/98 刀1)
+    return not server_curated
 
 
 # ---- 草稿队列(fs_grants 同款全局注册表:执行层记待办,console 收尾捞起升卡)----
@@ -287,5 +320,6 @@ __all__ = [
     "MAIL_PROGRAMS", "READ_VERB_PREFIXES", "NON_SEND_ACTION_VERBS",
     "tool_tokens", "is_outbound_send_tool",
     "register_curated_outbound", "curated_outbound", "clear_curated_outbound",
+    "register_curated_server", "is_curated_server", "is_curated_tool",
     "OutboundDraftStore", "register_store", "get_store", "note_outbound_draft",
 ]

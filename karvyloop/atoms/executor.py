@@ -536,14 +536,19 @@ async def run(
             # 组件(判定器/authorize/note)按各自契约绝不抛 —— 不包 try/except 兜底放行,
             # 代码缺陷宁可 fail-loud 上冒,也不能变成"崩了就直发"。
             from karvyloop.capability.outbound_gate import (
-                is_outbound_send_tool as _is_outbound, note_outbound_draft as _note_outbound)
+                is_outbound_send_tool as _is_outbound, note_outbound_draft as _note_outbound,
+                is_curated_tool as _is_curated)
+            # docs/98 刀1:未策展来源(官方 Registry/任意 URL 的 server)吃 fail-safe——名字判不出
+            # 的工具也走草稿卡(server_curated=False)。已策展(内置 + 预设)维持精确判定。
             outbound_synth: dict[str, ToolResult] = {}
             run_blocks = assistant_tool_uses
-            if any(tu.name in tools and _is_outbound(tu.name) for tu in assistant_tool_uses):
+            if any(tu.name in tools and _is_outbound(tu.name, server_curated=_is_curated(tu.name))
+                   for tu in assistant_tool_uses):
                 from karvyloop import i18n as _i18n_ob
                 run_blocks = []
                 for tu in assistant_tool_uses:
-                    if not (tu.name in tools and _is_outbound(tu.name)):
+                    if not (tu.name in tools
+                            and _is_outbound(tu.name, server_curated=_is_curated(tu.name))):
                         run_blocks.append(tu)
                         continue
                     d = _authorize(_PC(tool=tu.name, input=tu.input or {}, mode=default_mode,

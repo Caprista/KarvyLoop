@@ -588,3 +588,55 @@ class TestCuratedConfig:
                 "conversations_add_message", "chat_postMessage",
                 "chat_scheduleMessage", "chat_meMessage"} <= slack_ob
         assert not any("get" in t or "list" in t or "history" in t for t in slack_ob)
+
+
+class TestUncuratedFailSafe:
+    """docs/98 刀1:未策展来源(官方 Registry / 任意 URL 的 server)的**名字判不出**的副作用工具,
+    规则 10 由"放行"翻成 fail-safe「走草稿卡」——逻辑封闭:未策展工具要么证得了是纯读(放行),
+    要么走 H2A 卡,不存在"有副作用但无卡"的路径(不依赖认出攻击,只依赖来源+出口的结构)。"""
+
+    # 偏门副作用名(名字判不出;老行为=规则10放行,溜过 H2A):支付/转账/下单/开资源等
+    ROGUE = [
+        "mcp_acme_execute_transfer", "mcp_acme_dispatch_event", "mcp_acme_run_workflow",
+        "mcp_acme_trigger_action", "mcp_acme_charge_card", "mcp_acme_place_order",
+        "mcp_acme_execute_payment", "mcp_acme_apply_change", "mcp_acme_provision_resource",
+    ]
+
+    def test_uncurated_rogue_names_fail_safe_to_card(self):
+        for name in self.ROGUE:
+            # 前提:这些名字判不出(已策展来源=规则10放行)—— 正是老 gap
+            assert not is_outbound_send_tool(name), f"{name} 应落规则10(判不出)"
+            # 未策展来源:fail-safe 走卡
+            assert is_outbound_send_tool(name, server_curated=False), \
+                f"未策展 server 的 {name} 必须 fail-safe 走卡"
+
+    def test_uncurated_reads_still_pass(self):
+        # fail-safe 只兜"拿不准",纯读(规则5)照放行 —— 未策展也绝不误拦
+        for name in ("mcp_acme_list_items", "mcp_acme_get_status", "mcp_acme_search_docs"):
+            assert not is_outbound_send_tool(name, server_curated=False), \
+                f"未策展的纯读 {name} 不该拦"
+
+    def test_uncurated_explicit_send_still_true(self):
+        # 明确发送名(规则6-9)本就 True,与 curated 档无关
+        assert is_outbound_send_tool("mcp_acme_send_email", server_curated=False)
+        assert is_outbound_send_tool("mcp_acme_send_email")
+
+    def test_curated_default_unchanged_no_regression(self):
+        # 向后兼容:默认 server_curated=True,偏门名维持"拿不准不拦"(现有 65 表零回归)
+        for name in self.ROGUE:
+            assert not is_outbound_send_tool(name)
+
+    def test_is_curated_tool_source_tier(self):
+        assert og.is_curated_tool("read_file")          # 内置 = 我们自己的
+        assert not og.is_curated_tool("mcp_notion_x")   # 未注册 server = 未策展
+        og.register_curated_server("notion")
+        assert og.is_curated_tool("mcp_notion_x")       # 注册后 = 已策展
+        assert not og.is_curated_tool("mcp_other_x")    # 别的 server 仍未策展
+
+    def test_composition_mirrors_executor(self):
+        # 复刻 executor 的组合:is_outbound_send_tool(name, server_curated=is_curated_tool(name))
+        tool = "mcp_registryco_execute_transfer"
+        assert not og.is_curated_tool(tool)
+        assert is_outbound_send_tool(tool, server_curated=og.is_curated_tool(tool))  # 未策展→卡
+        og.register_curated_server("registryco")        # 一旦登记为已策展(如它其实是预设)
+        assert not is_outbound_send_tool(tool, server_curated=og.is_curated_tool(tool))
