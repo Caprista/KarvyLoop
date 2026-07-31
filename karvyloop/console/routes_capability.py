@@ -9,12 +9,14 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 
 @router.get("/skills")
@@ -523,8 +525,11 @@ def api_mcp_registry_search(q: str = "", limit: int = 20) -> dict[str, Any]:
     try:
         servers = search_registry(q, limit=int(limit))
     except RegistryError as e:
-        return {"ok": False, "reason": str(e), "servers": []}
-    except Exception:   # int() 之类的兜底:也不外泄
+        # 异常/栈细节只进日志,**绝不回给客户端**(py/stack-trace-exposure);回一句静态克制话
+        logger.info("[mcp_registry] search failed: %s", e)
+        return {"ok": False, "reason": "查 MCP Registry 失败", "servers": []}
+    except Exception:   # int() 之类的兜底:同样只记日志、不外泄底层
+        logger.warning("[mcp_registry] unexpected search error", exc_info=True)
         return {"ok": False, "reason": "查 MCP Registry 失败", "servers": []}
     return {"ok": True, "servers": servers, "uncurated": True}
 
