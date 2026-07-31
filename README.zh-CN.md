@@ -72,7 +72,7 @@ KarvyLoop 是一个**跑在你自己机器上的 AI agent 运行时**。你组�
 - 🖥️ **你的设备连成一张 mesh。** 同主人设备共享一条因果有序的日志(混合逻辑时钟 + gossip 收敛,无中央服务器):台式机上学到的认知、结晶出的技能,**笔记本上就能看到**;删除带墓碑、绝不复活;「我的设备」面板列出花名册 —— 每台设备的能力指纹、在线态,以及**知情删除**(某台设备是某能力的唯一提供者时,删除前明确告诉你 mesh 会永久失去什么,再让你确认)。丢了设备?面板做成账户安全页的样子:一张表列出所有有访问权的设备,吊销要**输入设备名确认** —— 生效于那台设备的下一个请求。跨网同步走 relay(端到端加密,relay 只见密文只转发)。
 - 🔌 **多 provider LLM 网关 + MCP。** 任意 Anthropic / OpenAI 兼容端点;唯一网关咽喉计每一个 token —— 还会**缓存每次调用的稳定前缀**(system + tools 尾块),重复运行时直接从 provider 缓存读回,把这部分 input 成本砍掉约 80–90%(越用越省)。接入 **MCP** server,其工具即达每个 agent —— **本地(stdio)或厂商托管的远程都行**(粘一个 streamable-HTTP URL + 可选 token,不用在本地跑任何进程)。
 - 🔒 **安全是构造级的。** 每个任务带能力令牌;文件/网络/进程访问对照它放行;第三方技能在 **bubblewrap**(Linux)/ **Seatbelt**(macOS)沙箱里跑,且带**完整性锁**(被篡改的技能目录在索引和执行两道都被拒)。控制台拒绝跨源浏览器请求(HTTP + WebSocket 同源门),叠加跨设备访问令牌。技能面板的「**能力总览**」卡一张表审计全能力面。它低于 agent 的信任边界 —— 绕不过。
-- 🏠 **本地优先、私密。** 跑在 `localhost`;你的数据在 `~/.karvyloop/`,绝不上传。**MIT** 许可;**按版本发布**,没你点一下绝不自升。
+- 🏠 **本地优先 = 你的数据与决策归你 —— 不是"模型跑在你机器上"。** 运行时、你的记忆/技能/实例都在你机器上(`~/.karvyloop/`)、绝不上传;而**模型任你选** —— 租一个云端 API,**或**本地跑一个(Ollama)。这里的本地优先指的是**数据主权**,不是零上云。**MIT** 许可;**按版本发布**,没你点一下绝不自升。
 
 ### 支持的平台
 
@@ -375,6 +375,14 @@ pytest -q                    # 全量,不需要任何 flag
 测试套件是**自洽的**:不依赖任何未随仓发布的文档;可选基建(如 `mcp` 包、redis、Linux+bubblewrap)**自动跳过**而非报错。预期约 **1880+ passed / 十几个 skipped**。想全跑:Linux 上 `pip install -e .`(把 `karvyloop` 命令装进 PATH)、`pip install mcp`、装 `bubblewrap` 和 `redis`。
 
 > 有一条元守卫测试(`tests/test_suite_self_contained.py`)禁止任何测试读取未发布的文档,所以"只有代码也能跑绿"是**制度**,不是侥幸。
+
+## 安全
+
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Caprista/KarvyLoop/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Caprista/KarvyLoop)
+
+这里的安全是**筑在执行路径里的地板,不是一个功能**:本地优先的数据主权、动作由人拍板(不可逆动作**绝不**自动批准)、基于**来源判定**的注入防御(不可信内容被当**数据**围起来,绝不当指令)、以及三平台上真实的 OS 沙箱。这些地板由一套你可以自己跑的对抗性测试守着 —— `pytest -m security`(382 例,清单见 [`tests/security/README.md`](tests/security/README.md))。
+
+诚实的姿态:我们对照 **OWASP LLM Top 10(2025)** 和 **OWASP Agentic Top 10(2026)** 逐条自评,每项带 `file:line` 证据 —— 不宣称任何认证,gap 是**列出来的、不是藏起来的**。完整自评 + 威胁模型:[`docs/SECURITY-POSTURE.md`](docs/SECURITY-POSTURE.md)。发现漏洞?请私下报告 —— 见 [`SECURITY.md`](SECURITY.md)。
 
 ## 前后端
 
