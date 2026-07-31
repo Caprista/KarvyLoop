@@ -65,6 +65,23 @@ def _first_text(content: list) -> str:
     return ""
 
 
+def _extract_images(content: list) -> list:
+    """MCP result 里的 image 块 → [{data:<base64>, media_type:<mt>}](docs/99 刀2 slice-A)。
+
+    computer-use 的 screenshot/get_app_state 回的是 image 内容块(MCP `ImageContent`:
+    type=='image'、data=base64、mimeType)。执行层把这些当**顶层 image 块**回灌给会视觉的
+    planner —— 否则被 _flatten 丢成 "[+N non-text block(s)]" 文本占位,planner 是瞎的。
+    图数据是 server 产的**二进制载荷不是指令**(不过 fence 文本围栏,它不是文字);只保留有 data 的。"""
+    out: list = []
+    for c in content or []:
+        if getattr(c, "type", None) == "image":
+            data = getattr(c, "data", "") or ""
+            if data:
+                out.append({"data": data,
+                            "media_type": getattr(c, "mimeType", "") or "image/png"})
+    return out
+
+
 def _flatten(content: list, *, source: str = "mcp") -> Any:
     """MCP tool result 的 content 块 → 给 agent/LLM 看的文本(多块/非文本则保留结构)。
 
@@ -144,9 +161,13 @@ class McpAgentTool:
             return CodingResult(ok=False, payload=None, error_code=4,
                                 error_message="MCP 工具报错: "
                                               f"{scrub_untrusted(_first_text(getattr(result, 'content', [])))}")
-        return CodingResult(ok=True, payload=_flatten(
-            getattr(result, "content", []) or [],
-            source=f"mcp:{self._server_name}:{self._mcp_tool_name}"))
+        content_blocks = getattr(result, "content", []) or []
+        images = _extract_images(content_blocks)
+        return CodingResult(
+            ok=True,
+            payload=_flatten(content_blocks,
+                             source=f"mcp:{self._server_name}:{self._mcp_tool_name}"),
+            images=(images or None))
 
 
 def mcp_tools_from_session(session: Any, tools_list: list, server_name: str,

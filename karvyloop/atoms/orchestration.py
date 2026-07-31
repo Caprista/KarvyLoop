@@ -49,6 +49,9 @@ class ToolResult:
     content: Any
     is_error: bool = False
     error_reason: str = ""
+    # 多模态工具输出(docs/99 刀2 slice-A:computer-use 截图)→ 执行层当**顶层 image 块**回灌;
+    # 默认 None,非产图工具零影响。从工具返回值(CodingResult.images)透传。
+    images: Optional[list] = None
 
 
 # ---- 串行执行 ----
@@ -56,7 +59,8 @@ class ToolResult:
 async def _run_one(tool: Tool, block: ToolUseBlock) -> ToolResult:
     try:
         out = await tool(block.input)
-        return ToolResult(tool_use_id=block.id, name=tool.name, content=out)
+        return ToolResult(tool_use_id=block.id, name=tool.name, content=out,
+                          images=getattr(out, "images", None))
     except Exception as e:  # 工具异常 → is_error + 计入断路器
         return ToolResult(
             tool_use_id=block.id, name=tool.name,

@@ -67,7 +67,8 @@ class ToolFailedError:
 
 # ---- 决策辅助 ----
 
-def _serialize_results_for_model(results: list[ToolResult]) -> list[dict]:
+def _serialize_results_for_model(results: list[ToolResult], *,
+                                 accepts_images: bool = True) -> list[dict]:
     """把 ToolResult 序列化成 Anthropic Messages 协议回灌消息。
 
     Anthropic 协议:tool_result 不是独立 role,而是 user 消息的 content blocks。
@@ -78,6 +79,12 @@ def _serialize_results_for_model(results: list[ToolResult]) -> list[dict]:
     (Anthropic Messages API 严格规定;MiniMax 等兼容端点会因 dict 直接返 400)。
     我们统一把 content JSON 序列化成字符串 —— 模型在 message 里能完整看到
     原 dict 结构,不是被强制改写。
+
+    docs/99 刀2 slice-A(多模态):产图工具(computer-use 截图)的 image 载荷**不塞进
+    tool_result.content**(base64 巨串 + MiniMax 等兼容端点 tool_result 不吃图),而是作为
+    **同一条 user 消息里的顶层 image 块**、追加在 tool_result 块之后 —— Anthropic 直接吃,
+    OpenAI 系 adapter 会拆成单独 user 图消息(模型无关)。planner 不会视觉(accepts_images
+    False)→ 诚实丢弃图块,纯文字照走不 400。
     """
     if not results:
         return []
@@ -92,7 +99,9 @@ def _serialize_results_for_model(results: list[ToolResult]) -> list[dict]:
         if isinstance(v, (int, float, bool)):
             return _json.dumps(v, ensure_ascii=False)
         if dataclasses.is_dataclass(v) and not isinstance(v, type):
-            return _json.dumps(dataclasses.asdict(v), ensure_ascii=False)
+            d = dataclasses.asdict(v)
+            d.pop("images", None)   # 图走顶层 image 块,不进 tool_result 文本(base64 巨串;无图时保持原文本不变)
+            return _json.dumps(d, ensure_ascii=False)
         # list / dict: 序列化成 JSON 字符串
         try:
             return _json.dumps(v, ensure_ascii=False, default=str)
@@ -100,6 +109,7 @@ def _serialize_results_for_model(results: list[ToolResult]) -> list[dict]:
             return str(v)
 
     blocks: list[dict] = []
+    image_blocks: list[dict] = []
     for r in results:
         if r.is_error:
             content = _json.dumps({"error": True, "reason": r.error_reason},
@@ -111,7 +121,16 @@ def _serialize_results_for_model(results: list[ToolResult]) -> list[dict]:
             "tool_use_id": r.tool_use_id,
             "content": content,
         })
-    return [{"role": "user", "content": blocks}]
+        # 多模态:截图等 → 顶层 image 块(块序:tool_result 全在前,image 追加在后,合规)
+        if accepts_images and r.images:
+            for im in r.images:
+                data = im.get("data") if isinstance(im, dict) else ""
+                if data:
+                    image_blocks.append({"type": "image", "source": {
+                        "type": "base64",
+                        "media_type": (im.get("media_type") or "image/png"),
+                        "data": data}})
+    return [{"role": "user", "content": blocks + image_blocks}]
 
 
 def _synthesize_missing_tool_results(
@@ -624,7 +643,10 @@ async def run(
                 yield ToolResultEvent(result=r)
 
             # 7) 回灌(任何 tool 都必须有对应 result,包括 is_error)
-            for msg in _serialize_results_for_model(results):
+            # slice-A:产图工具(截图)的 image 载荷当**顶层 image 块**回灌 —— 仅当 planner 会视觉
+            # (同首条 user 图块一样的降级判定,非视觉模型不拼图、纯文字照走不 400)。
+            _acc_img, _ = _model_accepts_images(gateway, atom.model)
+            for msg in _serialize_results_for_model(results, accepts_images=_acc_img):
                 state.messages.append(msg)
 
             # 8) max_turns
