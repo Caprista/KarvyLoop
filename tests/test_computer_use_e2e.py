@@ -51,3 +51,21 @@ def test_help_exits_zero(capsys):
         main(["--help"])
     assert ei.value.code == 0
     assert "computer-use" in capsys.readouterr().out
+
+
+class TestEnsureYdotoolSocket:
+    """回归锁:_ensure_ydotool_socket 用到 os —— 缺 import os 会在**运行期**炸(纯 import
+    smoke 逮不到,真机 E2E 才现形)。这两测直接调它,把运行期路径覆盖住。"""
+
+    def test_no_socket_no_crash(self, monkeypatch):
+        from karvyloop.cli.computer_use_e2e import _ensure_ydotool_socket
+        monkeypatch.delenv("YDOTOOL_SOCKET", raising=False)
+        _ensure_ydotool_socket(lambda s: None)   # 无真 socket(CI/Win)→ 优雅返回不抛
+
+    def test_respects_existing_env(self, monkeypatch):
+        import os as _os
+
+        from karvyloop.cli.computer_use_e2e import _ensure_ydotool_socket
+        monkeypatch.setenv("YDOTOOL_SOCKET", "/preset/sock")
+        _ensure_ydotool_socket(lambda s: None)
+        assert _os.environ["YDOTOOL_SOCKET"] == "/preset/sock"   # 已设 → 不覆盖
