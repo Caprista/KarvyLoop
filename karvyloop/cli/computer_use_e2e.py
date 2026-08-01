@@ -131,8 +131,20 @@ def _check_input_backend(emit) -> None:
              "python -m karvyloop.cli.computer_use_setup")
 
 
+def _consent_prompt(notice: str) -> bool:
+    """终端知情授权:打印在授权什么 + 问。非 TTY(脚本/管道)→ False(绝不静默开,要 --yes)。"""
+    if not sys.stdin.isatty():
+        return False
+    print("\n" + notice, flush=True)
+    try:
+        ans = input("允许 computer use 控制这台机器?(输入 yes 允许,其它一律拒绝): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return ans in ("yes", "y")
+
+
 async def _run(task: str, *, config_path: Optional[Path], model_ref: Optional[str],
-               max_turns: int, log) -> int:
+               max_turns: int, assume_yes: bool, log) -> int:
     def emit(line: str) -> None:
         print(line, flush=True)
         log.write(line + "\n")
@@ -183,11 +195,14 @@ async def _run(task: str, *, config_path: Optional[Path], model_ref: Optional[st
             except Exception as e:
                 emit(f"🩺 doctor 调用失败(继续): {type(e).__name__}: {e}")
 
-        # 4) 显式开会话同意门(刀1 默认关;这里是"留 flag 后开发用"的那个 flag)
-        from karvyloop.capability.computer_gate import enable_computer_control
-        enable_computer_control()
-        emit("⚠️  已显式开启【机器控制】—— 这台桌面的鼠标/键盘/屏幕现在可被 planner 操作。"
-             "高危/不可逆动作仍会被扣下要确认。跑完即止。")
+        # 4) 知情授权(会话级同意):**绝不静默开** —— 明确告诉用户在授权什么 + 让用户当场选。
+        #    --yes = 用户在命令行显式预授权;否则终端里问(非 TTY 无预授权 → 拒,安全默认)。
+        #    Windows 尤其关键:OS 本身不弹权限框,这是唯一"用户知不知道"的关卡。
+        from karvyloop.capability.computer_gate import request_consent
+        if not request_consent(assume_yes=assume_yes, prompt_fn=_consent_prompt):
+            emit("未获授权 —— 没开启机器控制,退出(computer use 需要你明确同意)。")
+            return 5
+        emit("✅ 已获你授权开启【机器控制】(本次会话)。高危/不可逆动作仍会被扣下要确认。跑完即止。")
 
         # 5) 真跑(atoms.run;a11y-优先 v1 引导 + FULL 模式满足 computer 的 capability 下限)
         from karvyloop.atoms import run as atoms_run
@@ -229,6 +244,8 @@ def main(argv: Optional[list] = None) -> int:
     p.add_argument("--config", default="", help="config.yaml 路径(默认 ~/.karvyloop/config.yaml)")
     p.add_argument("--model", default="", help="覆盖 planner 模型引用(默认取 config 默认模型)")
     p.add_argument("--max-turns", type=int, default=24, help="最多 tool-use 轮数(默认 24)")
+    p.add_argument("--yes", "-y", action="store_true",
+                   help="显式预授权机器控制(你已知情同意 agent 看屏+控鼠标键盘);不给则终端里问你")
     a = p.parse_args(argv)
 
     log_path = Path.home() / ".karvyloop" / f"computer_use_e2e_{int(time.time())}.log"
@@ -244,6 +261,7 @@ def main(argv: Optional[list] = None) -> int:
             config_path=Path(a.config) if a.config else None,
             model_ref=a.model or None,
             max_turns=a.max_turns,
+            assume_yes=a.yes,
             log=log))
     finally:
         if log is not sys.stderr:

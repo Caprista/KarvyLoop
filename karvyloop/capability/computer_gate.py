@@ -78,6 +78,41 @@ def clear_computer_gate() -> None:
     _consent_enabled = False
 
 
+# ---- 知情授权(会话级显式同意的"怎么开")----------------------------------------
+# enable_computer_control() 是**开关**;真实用户绝不该被**静默**替他开。开它必须走知情授权:
+# 明确告诉用户在授权什么(看你的屏 + 控你的鼠标键盘)+ 让用户当场选。Windows 尤其关键 —— OS 本身
+# **不弹权限框**,这是唯一"用户知不知道"的关卡。UI 无关(prompt_fn 由调用方给:CLI 终端问 /
+# 未来控制台弹卡),逻辑单一事实源在这。
+
+CONSENT_NOTICE = (
+    "computer use 会让这个 agent **看你的屏幕**、并**代你操作鼠标和键盘**(本次会话)。\n"
+    "这是最高信任级能力:进程沙箱管不住打到真桌面的输入。高危/不可逆动作(往密码框键入、"
+    "永久删除类组合键)仍会被扣下要你二次确认。跑完即止,不常驻。"
+)
+
+
+def request_consent(*, assume_yes: bool = False, prompt_fn=None) -> bool:
+    """知情授权:决定要不要开机器控制,获授权时 enable_computer_control。返回是否已授权。
+
+    - assume_yes(用户**显式预授权**,如 CLI --yes,或未来"本会话记住")→ 直接开(用户已明示)。
+    - 否则有 prompt_fn(交互:CLI 终端 / 控制台卡)→ 展示 CONSENT_NOTICE 问,只在**明确同意**才开。
+    - 否则(非交互 + 无预授权)→ **拒**(安全默认,绝不静默开)。
+    prompt_fn 崩了 → 当拒(fail-safe,绝不因异常放开控机)。
+    """
+    if assume_yes:
+        enable_computer_control()
+        return True
+    if prompt_fn is not None:
+        try:
+            ok = bool(prompt_fn(CONSENT_NOTICE))
+        except Exception:
+            ok = False
+        if ok:
+            enable_computer_control()
+        return ok
+    return False
+
+
 # ---- 闸 2:确定性高危分类 --------------------------------------------------------
 
 # 键入凭证域的信号 token(目标字段名 / 选择器 / 角色里出现即高危)。归一小写。
@@ -215,4 +250,5 @@ __all__ = [
     "COMPUTER_SERVER", "REAL_COMPUTER_TOOL", "is_computer_control_tool",
     "enable_computer_control", "disable_computer_control", "is_computer_control_enabled",
     "clear_computer_gate", "classify_action", "is_high_risk_action",
+    "request_consent", "CONSENT_NOTICE",
 ]

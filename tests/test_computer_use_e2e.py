@@ -72,3 +72,12 @@ class TestCheckInputBackend:
         monkeypatch.delenv("YDOTOOL_SOCKET", raising=False)
         _check_input_backend(lambda s: None)
         assert "YDOTOOL_SOCKET" not in _os.environ   # 诊断不改环境
+
+
+def test_consent_prompt_non_tty_denies(monkeypatch):
+    """安全体验:非 TTY(脚本/管道)→ 终端知情授权 prompt 返回 False,绝不静默开(要 --yes)。"""
+    import sys as _sys
+
+    from karvyloop.cli.computer_use_e2e import _consent_prompt
+    monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
+    assert _consent_prompt("some notice") is False

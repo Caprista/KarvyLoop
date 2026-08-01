@@ -146,6 +146,44 @@ class TestConsentGate:
         assert cg.is_computer_control_enabled() is False
 
 
+# ============================================================ 知情授权(安全体验:用户知情才开)
+class TestRequestConsent:
+    def setup_method(self):
+        cg.clear_computer_gate()
+
+    def teardown_method(self):
+        cg.clear_computer_gate()
+
+    def test_assume_yes_enables(self):
+        """用户显式预授权(如 CLI --yes)→ 开。"""
+        assert cg.request_consent(assume_yes=True) is True
+        assert cg.is_computer_control_enabled() is True
+
+    def test_prompt_yes_enables(self):
+        assert cg.request_consent(prompt_fn=lambda notice: True) is True
+        assert cg.is_computer_control_enabled() is True
+
+    def test_prompt_no_denies(self):
+        assert cg.request_consent(prompt_fn=lambda notice: False) is False
+        assert cg.is_computer_control_enabled() is False
+
+    def test_non_interactive_no_preauth_denies(self):
+        """非交互 + 无预授权 + 无 prompt → **拒**(安全默认,绝不静默开)。"""
+        assert cg.request_consent() is False
+        assert cg.is_computer_control_enabled() is False
+
+    def test_prompt_crash_fails_safe(self):
+        def boom(notice):
+            raise RuntimeError("x")
+        assert cg.request_consent(prompt_fn=boom) is False
+        assert cg.is_computer_control_enabled() is False   # 崩了 → 拒,绝不因异常放开控机
+
+    def test_notice_says_what_is_authorized(self):
+        """授权提示必须点明在授权什么(看屏 + 控鼠标/键盘)—— 用户得知情。"""
+        n = cg.CONSENT_NOTICE
+        assert "屏" in n and ("鼠标" in n or "键盘" in n)
+
+
 # ================================================================ ③ capability 默认拒(纯)
 class TestCapabilityFloor:
     def test_computer_plumbing_requires_full(self):
