@@ -3330,6 +3330,7 @@
     "缺 proposal_id": "missing proposal_id",
     "缺升级标记(防 CSRF);请从控制台界面点升级": "missing upgrade marker (CSRF guard); trigger the upgrade from the console UI",
     "缺启用标记(防 CSRF);请从控制台界面点启用": "missing enable marker (CSRF guard); trigger enabling from the console UI",
+    "缺授权标记(防 CSRF);请从控制台界面开启": "missing authorization marker (CSRF guard); enable it from the console UI",
     "已在安装中": "already installing",
     "角色注册表不可用": "role registry unavailable",
     "授权台账未接": "grants ledger not wired",
