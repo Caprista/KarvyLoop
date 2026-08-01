@@ -24,7 +24,10 @@ import subprocess
 import sys
 from typing import Optional
 
-_YDOTOOLD_SOCKET = "/run/ydotoold.socket"   # 常驻服务的 socket(system service,不依赖登录会话)
+def _ydotool_socket_path(uid: int) -> str:
+    """computer-use-linux 的 ydotool client **写死**用 $XDG_RUNTIME_DIR/.ydotool_socket
+    (**忽略** YDOTOOL_SOCKET —— VM 门到门实测:设了也不认)→ 常驻服务必须把 socket 放这。"""
+    return f"/run/user/{uid}/.ydotool_socket"
 
 
 @dataclasses.dataclass
@@ -35,7 +38,7 @@ class Env:
     desktop: str               # 如 "ubuntu:GNOME"
     server_installed: bool      # computer-use-linux 在不在
     ydotool_installed: bool
-    ydotoold_socket_ok: bool    # 有个能用的 ydotool socket(常驻在跑)
+    ydotoold_running: bool      # ydotoold 守护进程在跑(输入后端活着;查进程比查 socket 文件可靠)
     a11y_on: bool               # toolkit-accessibility 开没开
     distro_pkg: str            # "apt" / "dnf" / "pacman" / ""(认不出)
     uid: int
@@ -62,15 +65,21 @@ def _pkg_install_cmd(distro_pkg: str, pkg: str) -> str:
 
 
 def _ydotoold_unit(uid: int, gid: int) -> str:
-    """root systemd 服务:ydotoold 常驻(root 开 /dev/uinput,socket 归你)——开机自启、免重登。"""
+    """root systemd 服务:ydotoold 常驻,socket 放 client 默认位($XDG_RUNTIME_DIR/.ydotool_socket)
+    且归你。root 开 /dev/uinput → 免把你加进 input 组、免重登。ExecStartPre 等登录会话就绪 + 清
+    残留 socket(登录/注销会重建 /run/user/UID);Restart + StartLimitIntervalSec=0 兜登录切换。"""
+    sock = _ydotool_socket_path(uid)
     return (
         "[Unit]\n"
         "Description=ydotoold (KarvyLoop computer-use input backend)\n"
-        "After=systemd-user-sessions.service\n\n"
+        "After=systemd-user-sessions.service\n"
+        "StartLimitIntervalSec=0\n\n"
         "[Service]\n"
-        f"ExecStart=/usr/bin/ydotoold --socket-path={_YDOTOOLD_SOCKET} "
+        f"ExecStartPre=/bin/sh -c 'until [ -d /run/user/{uid} ]; do sleep 1; done; rm -f {sock}'\n"
+        f"ExecStart=/usr/bin/ydotoold --socket-path={sock} "
         f"--socket-own={uid}:{gid} --socket-perm=0660\n"
-        "Restart=always\n\n"
+        "Restart=always\n"
+        "RestartSec=2\n\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"
     )
@@ -121,12 +130,13 @@ def plan_setup(env: Env) -> list:
             ["gsettings set org.gnome.desktop.interface toolkit-accessibility true"],
             privileged=False, auto=True))
 
-    if not env.ydotoold_socket_ok:
+    if not env.ydotoold_running:
         steps.append(Step(
             "ydotoold_service",
-            "装 ydotoold 常驻服务(开机自启、socket 归你、免重登)",
-            "输入后端要一个常驻守护进程 + 可访问 /dev/uinput。装成 root systemd 服务最省事:"
-            "root 开 uinput、socket 归你、开机自启,不用每次手动起、也不用重新登录换用户组。",
+            "装 ydotoold 常驻服务(开机自启、socket 放 client 默认位、免重登)",
+            "输入后端要一个常驻守护进程 + 可访问 /dev/uinput。装成 root systemd 服务最省事:root 开"
+            " uinput、socket 放 computer-use-linux 认的默认位($XDG_RUNTIME_DIR/.ydotool_socket)"
+            "且归你、开机自启,不用每次手动起、也不用重新登录换用户组。",
             [f"sudo tee /etc/systemd/system/ydotoold.service >/dev/null <<'UNIT'\n"
              f"{_ydotoold_unit(env.uid, env.gid)}UNIT",
              "sudo systemctl daemon-reload",
@@ -155,23 +165,20 @@ def _detect() -> Env:
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "") or ""
     server = shutil.which("computer-use-linux") is not None
     ydotool = shutil.which("ydotool") is not None
-    # ydotool socket:环境变量指定的 / 常驻服务的 / 登录会话默认位,任一存在即算 ok
-    xdg_rt = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{uid}")
-    sock_candidates = [os.environ.get("YDOTOOL_SOCKET", ""), _YDOTOOLD_SOCKET,
-                       f"{xdg_rt}/.ydotool_socket", "/tmp/.ydotool_socket"]
-    ydotoold_ok = any(p and _is_socket(p) for p in sock_candidates)
+    # 查守护进程在不在跑(比查 socket 文件可靠 —— socket 文件可能是死进程的残留,门到门实测踩过)
+    ydotoold_running = _ydotoold_running()
     a11y_on = _gsettings_bool("org.gnome.desktop.interface", "toolkit-accessibility")
     distro_pkg = _detect_pkg_mgr()
     return Env(is_linux=is_linux, session_type=session_type, desktop=desktop,
                server_installed=server, ydotool_installed=ydotool,
-               ydotoold_socket_ok=ydotoold_ok, a11y_on=a11y_on,
+               ydotoold_running=ydotoold_running, a11y_on=a11y_on,
                distro_pkg=distro_pkg, uid=uid, gid=gid)
 
 
-def _is_socket(path: str) -> bool:
+def _ydotoold_running() -> bool:
     try:
-        import stat
-        return stat.S_ISSOCK(os.stat(path).st_mode)
+        return subprocess.run(["pgrep", "-x", "ydotoold"],
+                              capture_output=True, timeout=8).returncode == 0
     except Exception:
         return False
 
@@ -218,7 +225,7 @@ def main(argv: Optional[list] = None) -> int:
     print(f"  平台: {'linux' if env.is_linux else sys.platform}  会话: {env.session_type or '(无)'}"
           f"  桌面: {env.desktop or '?'}")
     print(f"  server={_yn(env.server_installed)} ydotool={_yn(env.ydotool_installed)} "
-          f"输入常驻={_yn(env.ydotoold_socket_ok)} a11y={_yn(env.a11y_on)}")
+          f"输入常驻={_yn(env.ydotoold_running)} a11y={_yn(env.a11y_on)}")
 
     auto_steps = [s for s in plan if s.auto]
     priv_steps = [s for s in plan if s.privileged]
@@ -254,8 +261,8 @@ def main(argv: Optional[list] = None) -> int:
             print("\n(复核无误后自己跑上面这几条;或加 --run 让我交互确认后代跑。)")
 
     print("\n跑完 `python -m karvyloop.cli.computer_use_e2e` 验证:能看能动就成了。"
-          "\n提示:输入常驻服务的 socket 在 " + _YDOTOOLD_SOCKET +
-          ";computer use 会自动探测常见 socket 位置。")
+          "\n提示:输入 socket 放在 computer-use-linux 认的默认位 $XDG_RUNTIME_DIR/.ydotool_socket"
+          "(它写死这条路径、不认 YDOTOOL_SOCKET)。")
     return 0
 
 

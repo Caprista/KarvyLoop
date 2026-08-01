@@ -112,25 +112,23 @@ def summarize_event(ev: Any) -> Optional[str]:
     return None
 
 
-def _ensure_ydotool_socket(emit) -> None:
-    """没设 YDOTOOL_SOCKET 就探常见 socket 位置并设上(让 spawn 的 server 继承)。找不到不报错
-    (可能只想看屏、没配输入)。位置与 computer_use_setup 的常驻服务 socket 对齐。"""
-    if os.environ.get("YDOTOOL_SOCKET"):
-        return
+def _check_input_backend(emit) -> None:
+    """诊断输入后端(**不改环境**):computer-use-linux 的键盘/鼠标走 ydotool,client 写死用
+    $XDG_RUNTIME_DIR/.ydotool_socket(**忽略** YDOTOOL_SOCKET —— VM 门到门实测)。这里只查那条
+    路径在不在:不在就提醒(动作类会失败,看屏仍可跑),去 `computer_use_setup` 配。"""
     import stat
     xdg = os.environ.get("XDG_RUNTIME_DIR", "")
-    cands = ["/run/ydotoold.socket"]
-    if xdg:
-        cands.append(f"{xdg}/.ydotool_socket")
-    cands.append("/tmp/.ydotool_socket")
-    for p in cands:
-        try:
-            if stat.S_ISSOCK(os.stat(p).st_mode):
-                os.environ["YDOTOOL_SOCKET"] = p
-                emit(f"(输入 socket 自动探测到 {p})")
-                return
-        except Exception:
-            continue
+    sock = f"{xdg}/.ydotool_socket" if xdg else ""
+    try:
+        ok = bool(sock) and stat.S_ISSOCK(os.stat(sock).st_mode)
+    except Exception:
+        ok = False
+    if ok:
+        emit(f"(输入后端就绪:{sock})")
+    else:
+        emit("⚠️ 输入 socket 不在(" + (sock or "$XDG_RUNTIME_DIR/.ydotool_socket") +
+             ")—— 键盘/鼠标动作会失败(看屏仍可跑)。配它:"
+             "python -m karvyloop.cli.computer_use_setup")
 
 
 async def _run(task: str, *, config_path: Optional[Path], model_ref: Optional[str],
@@ -140,10 +138,9 @@ async def _run(task: str, *, config_path: Optional[Path], model_ref: Optional[st
         log.write(line + "\n")
         log.flush()
 
-    # 0) 输入后端 socket 自动探测:computer-use-linux 的键盘走 ydotool,client 认 YDOTOOL_SOCKET。
-    #    没显式设 → 探常见位置(常驻服务 /run/ydotoold.socket、登录会话默认位)并设上,让 spawn
-    #    的 server 继承 —— 省得用户手动 export(computer_use_setup 装的常驻服务 socket 也在此列)。
-    _ensure_ydotool_socket(emit)
+    # 0) 输入后端诊断(不改环境):computer-use-linux 键盘/鼠标走 ydotool、写死用默认 socket 位。
+    #    只查在不在,不在就提醒去跑 computer_use_setup(看屏不受影响)。
+    _check_input_backend(emit)
 
     # 1) 真 gateway(复用 resolve_runtime;失败 fail-loud,不静默)
     from karvyloop.cli._runtime import resolve_runtime

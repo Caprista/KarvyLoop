@@ -53,19 +53,22 @@ def test_help_exits_zero(capsys):
     assert "computer-use" in capsys.readouterr().out
 
 
-class TestEnsureYdotoolSocket:
-    """回归锁:_ensure_ydotool_socket 用到 os —— 缺 import os 会在**运行期**炸(纯 import
-    smoke 逮不到,真机 E2E 才现形)。这两测直接调它,把运行期路径覆盖住。"""
+class TestCheckInputBackend:
+    """回归锁:_check_input_backend 用到 os —— 缺 import os 会在**运行期**炸(纯 import smoke
+    逮不到,真机 E2E 才现形)。诊断输入 socket 在不在,只提醒、**不改环境**
+    (computer-use-linux 写死默认 socket 位、不认 YDOTOOL_SOCKET)。"""
 
-    def test_no_socket_no_crash(self, monkeypatch):
-        from karvyloop.cli.computer_use_e2e import _ensure_ydotool_socket
-        monkeypatch.delenv("YDOTOOL_SOCKET", raising=False)
-        _ensure_ydotool_socket(lambda s: None)   # 无真 socket(CI/Win)→ 优雅返回不抛
+    def test_missing_socket_warns_no_crash(self, monkeypatch):
+        from karvyloop.cli.computer_use_e2e import _check_input_backend
+        monkeypatch.setenv("XDG_RUNTIME_DIR", "/nonexistent-xdg-runtime-xyz")
+        msgs: list = []
+        _check_input_backend(lambda s: msgs.append(s))   # 无 socket → 出一条诊断、不抛
+        assert msgs and ("socket 不在" in msgs[-1] or "就绪" in msgs[-1])
 
-    def test_respects_existing_env(self, monkeypatch):
+    def test_does_not_mutate_ydotool_socket_env(self, monkeypatch):
         import os as _os
 
-        from karvyloop.cli.computer_use_e2e import _ensure_ydotool_socket
-        monkeypatch.setenv("YDOTOOL_SOCKET", "/preset/sock")
-        _ensure_ydotool_socket(lambda s: None)
-        assert _os.environ["YDOTOOL_SOCKET"] == "/preset/sock"   # 已设 → 不覆盖
+        from karvyloop.cli.computer_use_e2e import _check_input_backend
+        monkeypatch.delenv("YDOTOOL_SOCKET", raising=False)
+        _check_input_backend(lambda s: None)
+        assert "YDOTOOL_SOCKET" not in _os.environ   # 诊断不改环境

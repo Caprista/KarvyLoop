@@ -12,7 +12,7 @@ from karvyloop.cli.computer_use_setup import (
 
 def _env(**kw) -> Env:
     base = dict(is_linux=True, session_type="wayland", desktop="ubuntu:GNOME",
-                server_installed=True, ydotool_installed=True, ydotoold_socket_ok=True,
+                server_installed=True, ydotool_installed=True, ydotoold_running=True,
                 a11y_on=True, distro_pkg="apt", uid=1000, gid=1000)
     base.update(kw)
     return Env(**base)
@@ -24,7 +24,7 @@ class TestPlan:
 
     def test_missing_everything(self):
         plan = plan_setup(_env(server_installed=False, ydotool_installed=False,
-                               ydotoold_socket_ok=False, a11y_on=False))
+                               ydotoold_running=False, a11y_on=False))
         by = {s.code: s for s in plan}
         for c in ("install_server", "install_ydotool", "enable_a11y", "ydotoold_service"):
             assert c in by, c
@@ -47,15 +47,19 @@ class TestPlan:
     def test_a11y_already_on_no_step(self):
         assert "enable_a11y" not in [s.code for s in plan_setup(_env(a11y_on=True))]
 
-    def test_ydotoold_unit_has_socket_and_owner(self):
-        plan = plan_setup(_env(ydotoold_socket_ok=False))
+    def test_ydotoold_unit_socket_at_client_default_path(self):
+        """VM 门到门实测:computer-use-linux 写死 $XDG_RUNTIME_DIR/.ydotool_socket、不认
+        YDOTOOL_SOCKET → 服务 socket 必须放这条默认路径(不是 /run/ydotoold.socket)。"""
+        plan = plan_setup(_env(ydotoold_running=False))
         svc = next(s for s in plan if s.code == "ydotoold_service")
         blob = "\n".join(svc.commands)
-        assert "/run/ydotoold.socket" in blob and "--socket-own=1000:1000" in blob
+        assert "/run/user/1000/.ydotool_socket" in blob and "--socket-own=1000:1000" in blob
+        assert "/run/ydotoold.socket" not in blob   # 不能是那条 client 不认的路径
         assert "systemctl enable --now ydotoold" in blob
 
-    def test_unit_text_owner(self):
+    def test_unit_text_owner_and_default_path(self):
         u = _ydotoold_unit(1000, 1000)
+        assert "--socket-path=/run/user/1000/.ydotool_socket" in u
         assert "--socket-own=1000:1000" in u and "Restart=always" in u
 
     def test_pkg_cmd_variants(self):
@@ -70,7 +74,7 @@ def test_main_not_linux_no_side_effects(monkeypatch, capsys):
     from karvyloop.cli import computer_use_setup as m
     monkeypatch.setattr(m, "_detect", lambda: Env(
         is_linux=False, session_type="", desktop="", server_installed=False,
-        ydotool_installed=False, ydotoold_socket_ok=False, a11y_on=False,
+        ydotool_installed=False, ydotoold_running=False, a11y_on=False,
         distro_pkg="", uid=0, gid=0))
     assert m.main([]) == 0
     out = capsys.readouterr().out
