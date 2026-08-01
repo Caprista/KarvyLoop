@@ -139,12 +139,16 @@ async def _run(task: str, *, config_path: Optional[Path], model_ref: Optional[st
     async with group_ctx:
         emit(f"✓ 连上,拿到 {len(tools)} 个工具: {', '.join(sorted(tools))}")
 
-        # 3) doctor 就绪报告(直接调,诊断用)
+        # 3) doctor 就绪报告(直接调,诊断用)。**带超时**:doctor 在某些会话下会卡在门户/截屏
+        #    探测上(VM 门到门实测:SSH 里 doctor 工具调用 90s 不返回)—— 诊断步绝不能拖死整个
+        #    E2E,超时就跳过、直接去跑真任务。
         doc = tools.get(f"mcp_{_CU_SERVER}_doctor")
         if doc is not None:
             try:
-                res = await doc({})
+                res = await asyncio.wait_for(doc({}), timeout=20)
                 emit(f"🩺 doctor: {_short(getattr(res, 'payload', res), 800)}")
+            except asyncio.TimeoutError:
+                emit("🩺 doctor 探测 >20s 未返回,跳过(不影响后面真跑;多半卡在截屏门户探测)。")
             except Exception as e:
                 emit(f"🩺 doctor 调用失败(继续): {type(e).__name__}: {e}")
 
