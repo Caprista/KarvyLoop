@@ -442,6 +442,47 @@ function _openCodingDetail(cap: any): void {
 
 // docs/96 刀1:MCP 预设区 ——「接上你的应用」(Notion/GitHub/Gmail…,category=app)+
 // 通用渠道(文件/抓网页/记忆/时间/SQLite,category=channel)。卡片式:图标/人话名/说明/
+// docs/99 安全体验:机器控制**知情授权**开关。默认关;展示在授权什么(看你的屏 + 控你的鼠标
+// 键盘),用户当场点开 = 明确同意。开它是高信任动作 → POST 带 CSRF 头(后端还叠本机/私网来源门,
+// 挡公网/跨源静默开)。这是把 CLI 里那套 request_consent 搬进产品的那道用户可见关卡。
+function _computerConsentSection(): HTMLElement {
+  const wrap = el("div", { class: "mgmt-buysugar" });
+  const render = async (): Promise<void> => {
+    const data: any = await _getJSON("/api/computer/consent");
+    wrap.innerHTML = "";
+    const enabled = !!(data && data.enabled);
+    wrap.appendChild(el("div", { class: "mgmt-section-title", text: "🖥️ " + t("cuc.title") }));
+    wrap.appendChild(el("div", { class: "mgmt-hint", text: (data && data.notice) || t("cuc.notice") }));
+    const row = el("div", { class: "mgmt-row" });
+    const status = el("span", { class: "mgmt-hint",
+      text: enabled ? "🟢 " + t("cuc.on") : "⚪ " + t("cuc.off") });
+    const btn = el("button", { class: enabled ? "dpref-edit" : "dpref-confirm",
+      text: enabled ? t("cuc.disable") : t("cuc.enable"),
+      onclick: async () => {
+        (btn as HTMLButtonElement).disabled = true;
+        try {
+          const r = await fetch("/api/computer/consent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-karvyloop-upgrade": "1" },
+            body: JSON.stringify({ enable: !enabled }),
+          });
+          const d: any = await r.json().catch(() => ({}));
+          if (!d || d.ok === false) {
+            status.textContent = "⚠ " + ((d && d.reason) || t("cuc.failed"));
+            (btn as HTMLButtonElement).disabled = false;
+          } else { render(); }
+        } catch {
+          status.textContent = "⚠ " + t("cuc.failed");
+          (btn as HTMLButtonElement).disabled = false;
+        }
+      } });
+    row.appendChild(btn); row.appendChild(status);
+    wrap.appendChild(row);
+  };
+  render();
+  return wrap;
+}
+
 // 权限范围/状态灯(已接/未接/连接失败/需OAuth)+ 一键接入。热加载可用时装上即用
 // (响应带真结果);不可用时如实退回"要重启"。手动"重连 server"按钮:server 挂了
 // 不用重启 console。
@@ -451,6 +492,7 @@ function _mcpPresetsSection(): HTMLElement {
   const render = async (): Promise<void> => {
     const data = await _getJSON("/api/mcp/presets");
     wrap.innerHTML = "";
+    wrap.appendChild(_computerConsentSection());   // 安全体验(docs/99):机器控制知情授权,置顶
     const presets = (data && data.presets) || [];
     const status = (data && data.mcp_status) || null;
     const hot = !!(data && data.hot_reload);

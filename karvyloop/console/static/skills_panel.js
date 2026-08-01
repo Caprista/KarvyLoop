@@ -572,12 +572,57 @@ var KarvySkillsPanelBundle = (function(exports) {
     b.appendChild(list);
     b.appendChild(_mcpPresetsSection());
   }
+  function _computerConsentSection() {
+    const wrap = el("div", { class: "mgmt-buysugar" });
+    const render = async () => {
+      const data = await _getJSON("/api/computer/consent");
+      wrap.innerHTML = "";
+      const enabled = !!(data && data.enabled);
+      wrap.appendChild(el("div", { class: "mgmt-section-title", text: "🖥️ " + t("cuc.title") }));
+      wrap.appendChild(el("div", { class: "mgmt-hint", text: data && data.notice || t("cuc.notice") }));
+      const row = el("div", { class: "mgmt-row" });
+      const status = el("span", {
+        class: "mgmt-hint",
+        text: enabled ? "🟢 " + t("cuc.on") : "⚪ " + t("cuc.off")
+      });
+      const btn = el("button", {
+        class: enabled ? "dpref-edit" : "dpref-confirm",
+        text: enabled ? t("cuc.disable") : t("cuc.enable"),
+        onclick: async () => {
+          btn.disabled = true;
+          try {
+            const r = await fetch("/api/computer/consent", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-karvyloop-upgrade": "1" },
+              body: JSON.stringify({ enable: !enabled })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!d || d.ok === false) {
+              status.textContent = "⚠ " + (d && d.reason || t("cuc.failed"));
+              btn.disabled = false;
+            } else {
+              render();
+            }
+          } catch {
+            status.textContent = "⚠ " + t("cuc.failed");
+            btn.disabled = false;
+          }
+        }
+      });
+      row.appendChild(btn);
+      row.appendChild(status);
+      wrap.appendChild(row);
+    };
+    render();
+    return wrap;
+  }
   function _mcpPresetsSection() {
     const wrap = el("div");
     let note = "";
     const render = async () => {
       const data = await _getJSON("/api/mcp/presets");
       wrap.innerHTML = "";
+      wrap.appendChild(_computerConsentSection());
       const presets = data && data.presets || [];
       const status = data && data.mcp_status || null;
       const hot = !!(data && data.hot_reload);

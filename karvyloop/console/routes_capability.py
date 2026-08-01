@@ -337,6 +337,41 @@ def api_capability_enable_status(request: Request, id: str = "") -> dict[str, An
     return st if st else {"state": "", "id": id}
 
 
+class ComputerConsentRequest(BaseModel):
+    enable: bool = True
+
+
+@router.get("/computer/consent")
+def api_computer_consent_status(request: Request) -> dict[str, Any]:
+    """computer use 机器控制的会话同意门状态 + **知情文案**(前端开关据此展示在授权什么)。只读。"""
+    from karvyloop.capability.computer_gate import CONSENT_NOTICE, is_computer_control_enabled
+    return {"enabled": is_computer_control_enabled(), "notice": CONSENT_NOTICE}
+
+
+@router.post("/computer/consent")
+def api_computer_consent_set(req: ComputerConsentRequest, request: Request) -> dict[str, Any]:
+    """开/关机器控制(docs/99 安全体验:知情授权搬进控制台)。开 = 让角色能**看你的屏 + 控你的
+    鼠标键盘**(本会话)。前端开关先展示 CONSENT_NOTICE、用户点开 = 当场知情授权。
+
+    高信任动作,同 capability/enable 那道门:CSRF 头(X-Karvyloop-Upgrade)+ 本机/私网来源
+    (控自己机器的事,挡公网/恶意跨源**静默开**)。绝不因缺门就默认开。
+    """
+    from karvyloop.console.routes_ops import _is_trusted_upgrade_origin
+    if (request.headers.get("x-karvyloop-upgrade") or "") != "1":
+        return {"ok": False, "reason": "缺授权标记(防 CSRF);请从控制台界面开启"}
+    client = (request.client.host if request.client else "") or ""
+    if not _is_trusted_upgrade_origin(client):
+        return {"ok": False,
+                "reason": f"机器控制只能从本机或同局域网开启(来源 {client} 不在可信网内)"}
+    from karvyloop.capability.computer_gate import (
+        disable_computer_control, enable_computer_control, is_computer_control_enabled)
+    if req.enable:
+        enable_computer_control()
+    else:
+        disable_computer_control()
+    return {"ok": True, "enabled": is_computer_control_enabled()}
+
+
 class FsGrantRequest(BaseModel):
     path: str = Field(..., min_length=1, max_length=1024)
     ops: list = Field(default_factory=lambda: ["read"])

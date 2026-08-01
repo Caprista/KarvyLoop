@@ -262,6 +262,55 @@ class TestApplyEndpoint:
         assert ok is False and reason
 
 
+# ---------- docs/99 安全体验:机器控制知情授权端点(控制台把 CLI 的 request_consent 搬进产品)----
+
+class TestComputerConsentApi:
+    def _clear(self):
+        from karvyloop.capability.computer_gate import clear_computer_gate
+        clear_computer_gate()
+
+    def test_status_returns_notice_and_default_off(self, client):
+        self._clear()
+        c, _ = client
+        r = c.get("/api/computer/consent").json()
+        assert r["enabled"] is False              # 默认关(顺序铁律)
+        assert "屏" in r["notice"]                # 知情文案点明"看你的屏"
+
+    def test_enable_without_csrf_rejected_stays_off(self, client):
+        from karvyloop.capability.computer_gate import is_computer_control_enabled
+        self._clear()
+        c, _ = client
+        d = c.post("/api/computer/consent", json={"enable": True}).json()
+        assert d["ok"] is False and ("授权标记" in d["reason"] or "CSRF" in d["reason"])
+        assert is_computer_control_enabled() is False     # 没开
+
+    def test_enable_untrusted_origin_rejected(self, client):
+        from karvyloop.capability.computer_gate import is_computer_control_enabled
+        self._clear()
+        c, _ = client   # TestClient host="testclient"(非 IP)→ 不可信来源
+        d = c.post("/api/computer/consent", json={"enable": True},
+                   headers={"x-karvyloop-upgrade": "1"}).json()
+        assert d["ok"] is False and "局域网" in d["reason"]
+        assert is_computer_control_enabled() is False
+
+    def test_enable_disable_with_csrf_and_trusted_origin(self, client, monkeypatch):
+        from karvyloop.capability.computer_gate import (
+            clear_computer_gate, is_computer_control_enabled)
+        import karvyloop.console.routes_ops as ro
+        clear_computer_gate()
+        monkeypatch.setattr(ro, "_is_trusted_upgrade_origin", lambda h: True)
+        c, _ = client
+        d = c.post("/api/computer/consent", json={"enable": True},
+                   headers={"x-karvyloop-upgrade": "1"}).json()
+        assert d["ok"] is True and d["enabled"] is True
+        assert is_computer_control_enabled() is True
+        d2 = c.post("/api/computer/consent", json={"enable": False},
+                    headers={"x-karvyloop-upgrade": "1"}).json()
+        assert d2["ok"] is True and d2["enabled"] is False
+        assert is_computer_control_enabled() is False
+        clear_computer_gate()
+
+
 # ---------- 前端接线(编译源即契约)----------
 
 class TestFrontendWiring:
@@ -275,6 +324,16 @@ class TestFrontendWiring:
         assert "/api/mcp/presets" in src
         assert "/api/mcp/preset/apply" in src
         assert "mcpp.restart_note" in src            # 无热加载时诚实的"要重启"提示仍在(fallback)
+
+    def test_computer_consent_toggle_wired(self):
+        """安全体验:机器控制知情授权开关真接上 —— 调 /api/computer/consent、带 CSRF 头、用 cuc.* 文案。"""
+        src = self._read("karvyloop/console/frontend/src/skills_panel.ts")
+        assert "/api/computer/consent" in src
+        assert "x-karvyloop-upgrade" in src          # 高信任动作带 CSRF 头
+        assert "cuc.title" in src and "cuc.enable" in src
+        i18n = self._read("karvyloop/console/frontend/src/i18n.ts")
+        for key in ("cuc.title", "cuc.notice", "cuc.enable", "cuc.disable", "cuc.on", "cuc.off"):
+            assert i18n.count(f'"{key}"') == 2, f"{key} 应在 en+zh 两表各一次"
 
     def test_skills_panel_hotload_wiring(self):
         """docs/96 刀1:手动重连端点 + 装上即用/连失败真结果话术 + disabled 占位卡 +
