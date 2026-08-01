@@ -99,9 +99,31 @@ def do_move(x: int, y: int) -> dict:
 
 
 def do_type(text: str) -> dict:
+    """输入文本。走**剪贴板粘贴**(pyperclip.copy + Ctrl+V)而非逐字 typewrite —— typewrite 的按键
+    会被**输入法(IME)拦截**转成中文/丢字(Windows 门到门实测:开着中文 IME 时整行被打乱),
+    且 Unicode 不稳。粘贴绕开 IME、原样进任意 Unicode;粘完尽量还原你原来的剪贴板。
+    pyperclip 缺失(极端)→ 退回 typewrite(可能被 IME 影响,但别彻底不能用)。"""
+    import time as _t
     pg = _pyautogui()
-    pg.typewrite(str(text or ""), interval=0.01)
-    return {"ok": True, "action": "type_text", "len": len(str(text or ""))}
+    s = str(text or "")
+    try:
+        import pyperclip
+        try:
+            prev = pyperclip.paste()
+        except Exception:
+            prev = ""
+        pyperclip.copy(s)
+        _t.sleep(0.05)
+        pg.hotkey("ctrl", "v")
+        _t.sleep(0.05)
+        try:
+            pyperclip.copy(prev)   # 尽力还原原剪贴板(不留痕)
+        except Exception:
+            pass
+        return {"ok": True, "action": "type_text", "len": len(s), "via": "clipboard"}
+    except Exception:
+        pg.typewrite(s, interval=0.01)
+        return {"ok": True, "action": "type_text", "len": len(s), "via": "typewrite"}
 
 
 def do_press(keys: str) -> dict:
