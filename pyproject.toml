@@ -26,6 +26,13 @@ web = [
 mcp = [
     "mcp>=1.9,<2",        # ≥1.9:remote server(streamable HTTP)要求;<2:2.0.0(2026-07-28 发布)stdio 破坏性变更,CI 三平台 Connection closed 实锤 —— 适配 2.x 另立待办,先钉稳
 ]
+# computer use 的**非 Wayland 平台 plumbing**(Windows/macOS/Linux-X11)——截屏 + 鼠标键盘注入。
+# 没装 → karvyloop/computer/native_server 用到时 fail-loud 指路 `pip install "karvyloop[computer]"`。
+# Linux/Wayland 不走这个(走 computer-use-linux 的门户/ydotool);macOS 还要在系统设置授辅助功能+屏幕录制。
+computer = [
+    "pyautogui>=0.9.54,<1",   # BSD;跨平台鼠标键盘(Win SendInput / mac CGEvent / X11)
+    "pillow>=10,<12",         # PIL.ImageGrab 截屏(Windows/macOS 原生)
+]
 # 跨进程 A2A transport(多进程/多机协作);没装 → 自动降级到 in-process(单进程够用)。
 redis = [
     "redis>=5.0,<9",

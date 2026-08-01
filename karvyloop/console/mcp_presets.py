@@ -32,6 +32,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -165,10 +166,11 @@ PRESETS: list[dict[str, Any]] = [_with_defaults(p) for p in [
         "name": "Computer control (desktop)",
         "icon": "🖥️",
         "category": "app",
-        "description": "Let a role see your screen and drive the mouse & keyboard to operate the "
-                       "apps on your real desktop — Linux (Wayland/X11). Off by default; you turn it "
-                       "on per session. · 让角色看你的屏幕、代你操作真桌面上的应用(鼠标键盘）—— "
-                       "Linux(Wayland/X11)。默认关闭,由你按会话打开。",
+        "description": "Let a role see your screen and drive the mouse & keyboard to operate the apps "
+                       "on your real desktop — Linux, Windows or macOS (KarvyLoop picks the right "
+                       "backend per OS). Off by default; you turn it on per session. · 让角色看你的"
+                       "屏幕、代你操作真桌面上的应用(鼠标键盘）—— Linux/Windows/macOS(按系统自动选"
+                       "后端)。默认关闭,由你按会话打开。",
         "command": "npx",
         # 上游 MCP server(stdio):`computer-use-linux mcp`。npx 拉起其 bin,首启会安装。
         # 真机启动形状在 VM 门到门(刀2)复核 —— 本机(win32)跑不了,是 Linux 专属地利。
@@ -182,13 +184,15 @@ PRESETS: list[dict[str, Any]] = [_with_defaults(p) for p in [
         # capability FULL + 会话同意门。
         "outbound_tools": [],
         "risk_note": "Highest-trust capability: it can click, type and read anything on your screen "
-                     "— a process sandbox does NOT contain input to your real desktop. Needs a Linux "
-                     "graphical session and the computer-use server installed; stays off until you "
-                     "explicitly enable it, and risky actions (typing into password fields, "
-                     "permanent-delete key combos) are held for your approval. "
+                     "— a process sandbox does NOT contain input to your real desktop. Needs a "
+                     "graphical desktop + the backend (Linux: the computer-use server; Windows/macOS: "
+                     "`pip install karvyloop[computer]`; macOS also grant Accessibility + Screen "
+                     "Recording). Stays off until you explicitly enable it; risky actions (typing "
+                     "into password fields, permanent-delete key combos) are held for your approval. "
                      "· 最高信任级能力:能点击、键入、读取你屏幕上的一切 —— 进程沙箱**管不住**打到"
-                     "真桌面的输入。需 Linux 图形会话 + 安装 computer-use server;默认关闭、由你显式"
-                     "开启,高危动作(往密码框键入、永久删除类组合键)会先扣下等你拍板。",
+                     "真桌面的输入。需图形桌面 + 后端(Linux:computer-use server;Windows/macOS:"
+                     "`pip install karvyloop[computer]`;macOS 还要授辅助功能+屏幕录制)。默认关闭、"
+                     "由你显式开启,高危动作(往密码框键入、永久删除类组合键)会先扣下等你拍板。",
     },
     {
         "id": "filesystem",
@@ -314,6 +318,12 @@ def build_server_config(preset_id: str, params: Optional[dict[str, str]] = None,
     if p.get("disabled"):
         raise ValueError(p.get("disabled_reason")
                          or f"preset '{preset_id}' is not available yet")
+    # docs/99:computer_use 是**平台 plumbing**,按 OS 换 server —— 非 Linux(Windows/macOS)拉起
+    # 自造 native server(PIL 截屏 + pyautogui 输入);Linux 才用 computer-use-linux(Wayland 门户/
+    # ydotool 那套硬活)。两边工具名都 mcp_computer_use_*,核心的 persona/安全门一视同仁。
+    if preset_id == "computer_use" and not sys.platform.startswith("linux"):
+        return {"name": "computer_use", "command": sys.executable or "python",
+                "args": ["-m", "karvyloop.computer.native_server"]}
     supplied = dict(params or {})
     values: dict[str, str] = {}
     for prm in p["params"]:

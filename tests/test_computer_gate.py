@@ -343,12 +343,16 @@ class TestPreset:
         assert "sandbox" in note.lower() or "沙箱" in note
         assert "默认" in note or "off by default" in note.lower()
 
-    def test_build_server_config_shape_consumable(self, tmp_path):
-        """build_server_config 产出 read_mcp_server_configs 真实消费的 stdio 形状。"""
+    def test_build_server_config_platform_aware(self, tmp_path, monkeypatch):
+        """docs/99:computer_use 按 OS 换 server —— Linux 用 computer-use-linux,非 Linux 拉自造
+        native server。两边名都 computer_use → 工具 mcp_computer_use_*(核心/gate 一视同仁)。"""
         import yaml
+        import karvyloop.console.mcp_presets as mp
         from karvyloop.coding.tools.mcp_tool import read_mcp_server_configs
-        from karvyloop.console.mcp_presets import build_server_config
-        entry = build_server_config("computer_use", {})
+
+        # Linux → computer-use-linux(stdio,read_mcp_server_configs 真消费得了)
+        monkeypatch.setattr(mp.sys, "platform", "linux")
+        entry = mp.build_server_config("computer_use", {})
         assert entry == {"name": "computer_use", "command": "npx",
                          "args": ["-y", "@agent-sh/computer-use-linux", "mcp"]}
         cfg = tmp_path / "config.yaml"
@@ -356,3 +360,9 @@ class TestPreset:
                        encoding="utf-8")
         (got,) = read_mcp_server_configs(str(cfg))
         assert got.name == "computer_use" and got.command == "npx"
+
+        # Windows/mac → 自造 native server(python -m karvyloop.computer.native_server)
+        monkeypatch.setattr(mp.sys, "platform", "win32")
+        win = mp.build_server_config("computer_use", {})
+        assert win["name"] == "computer_use"
+        assert win["args"] == ["-m", "karvyloop.computer.native_server"]

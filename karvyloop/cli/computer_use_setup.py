@@ -34,12 +34,14 @@ def _ydotool_socket_path(uid: int) -> str:
 class Env:
     """setup 计划的输入(纯状态;_detect() 探出来,plan_setup() 只读它 → 可单测)。"""
     is_linux: bool
+    is_mac: bool               # macOS(非 Linux plumbing 走自造 native server + 权限授予)
     session_type: str          # "wayland" / "x11" / "tty" / ""(SSH 无图形会话)
     desktop: str               # 如 "ubuntu:GNOME"
-    server_installed: bool      # computer-use-linux 在不在
+    server_installed: bool      # computer-use-linux 在不在(Linux plumbing)
     ydotool_installed: bool
     ydotoold_running: bool      # ydotoold 守护进程在跑(输入后端活着;查进程比查 socket 文件可靠)
     a11y_on: bool               # toolkit-accessibility 开没开
+    native_deps_ok: bool        # 非 Linux plumbing 的依赖(pyautogui+PIL)在不在
     distro_pkg: str            # "apt" / "dnf" / "pacman" / ""(认不出)
     uid: int
     gid: int
@@ -90,12 +92,25 @@ def plan_setup(env: Env) -> list:
     steps: list = []
 
     if not env.is_linux:
-        steps.append(Step(
-            "not_linux",
-            "computer use 输入后端目前只自动配 Linux",
-            "本机不是 Linux。macOS 需在系统设置里授予 Accessibility + Screen Recording;"
-            "Windows 用系统原生输入。V1 的自动 setup 只覆盖 GNOME/Wayland Linux。",
-            [], privileged=False, auto=False))
+        # 非 Linux(Windows/macOS):plumbing 是自造 native server(PIL 截屏 + pyautogui 输入),
+        # setup 很轻 —— 只装可选 extra(+ macOS 授权限)。无守护进程、无 udev 那套 Linux 活。
+        if not env.native_deps_ok:
+            steps.append(Step(
+                "install_native_deps",
+                "装 computer use 依赖(截屏 + 鼠标键盘)",
+                "Windows/macOS 走自造 native 后端,只要装可选 extra(pyautogui + Pillow)。",
+                ['pip install "karvyloop[computer]"'],
+                privileged=False, auto=False))
+        if env.is_mac:
+            steps.append(Step(
+                "macos_permissions",
+                "macOS:授辅助功能 + 屏幕录制",
+                "macOS 的安全模型(类似 Wayland 的当面同意):系统设置 → 隐私与安全性,给运行"
+                " KarvyLoop 的终端/应用勾**辅助功能**(注入键鼠)+ **屏幕录制**(截屏),改完重启该应用。",
+                [], privileged=False, auto=False))
+        if not steps:
+            steps.append(Step("native_ready", "computer use 依赖已就绪", "看能动的都齐了。",
+                              [], privileged=False, auto=False))
         return steps
 
     if env.session_type not in ("wayland", "x11"):
@@ -161,6 +176,7 @@ def _detect() -> Env:
     uid = os.getuid() if hasattr(os, "getuid") else 0
     gid = os.getgid() if hasattr(os, "getgid") else 0
     is_linux = sys.platform.startswith("linux")
+    is_mac = sys.platform == "darwin"
     session_type = os.environ.get("XDG_SESSION_TYPE", "") or ""
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "") or ""
     server = shutil.which("computer-use-linux") is not None
@@ -171,10 +187,21 @@ def _detect() -> Env:
     ydotoold_running = _proc_running("ydotoold") and _is_socket(default_sock)
     a11y_on = _gsettings_bool("org.gnome.desktop.interface", "toolkit-accessibility")
     distro_pkg = _detect_pkg_mgr()
-    return Env(is_linux=is_linux, session_type=session_type, desktop=desktop,
+    return Env(is_linux=is_linux, is_mac=is_mac, session_type=session_type, desktop=desktop,
                server_installed=server, ydotool_installed=ydotool,
                ydotoold_running=ydotoold_running, a11y_on=a11y_on,
-               distro_pkg=distro_pkg, uid=uid, gid=gid)
+               native_deps_ok=_native_deps_ok(), distro_pkg=distro_pkg, uid=uid, gid=gid)
+
+
+def _native_deps_ok() -> bool:
+    """非 Linux plumbing 的依赖(pyautogui + PIL.ImageGrab)在不在。import 有副作用/无显示会抛 → 兜。"""
+    try:
+        import importlib
+        importlib.import_module("PIL.ImageGrab")
+        importlib.import_module("pyautogui")
+        return True
+    except Exception:
+        return False
 
 
 def _proc_running(name: str) -> bool:
@@ -234,14 +261,17 @@ def main(argv: Optional[list] = None) -> int:
     print("== computer use 就绪检查 ==")
     print(f"  平台: {'linux' if env.is_linux else sys.platform}  会话: {env.session_type or '(无)'}"
           f"  桌面: {env.desktop or '?'}")
-    print(f"  server={_yn(env.server_installed)} ydotool={_yn(env.ydotool_installed)} "
-          f"输入常驻={_yn(env.ydotoold_running)} a11y={_yn(env.a11y_on)}")
+    if env.is_linux:
+        print(f"  server={_yn(env.server_installed)} ydotool={_yn(env.ydotool_installed)} "
+              f"输入常驻={_yn(env.ydotoold_running)} a11y={_yn(env.a11y_on)}")
+    else:
+        print(f"  native 依赖(pyautogui+PIL)={_yn(env.native_deps_ok)}")
 
     auto_steps = [s for s in plan if s.auto]
-    priv_steps = [s for s in plan if s.privileged]
-    info_steps = [s for s in plan if not s.auto and not s.privileged]
+    note_steps = [s for s in plan if not s.auto and not s.commands]   # 纯提示(无命令)
+    todo_steps = [s for s in plan if not s.auto and s.commands]       # 要你来跑的(特权或非特权)
 
-    for s in info_steps:
+    for s in note_steps:
         print(f"\nℹ️  {s.title}\n    {s.why}")
 
     # 安全项:直接跑(非特权、幂等)
@@ -249,17 +279,20 @@ def main(argv: Optional[list] = None) -> int:
         print(f"\n▶ 自动修:{s.title}\n    {s.why}")
         print("    ✓ 已修" if _run_auto(s) else "    ⚠ 没跑成(可手动跑:" + " ; ".join(s.commands) + ")")
 
-    # privileged 项:生成可复核脚本
-    if priv_steps:
-        print("\n── 下面这些要 sudo / 改系统,给你一段**可复核**的脚本 ──")
+    # 要你来跑的:privileged(要 sudo)和非特权(如 pip install)都在这,给可复核清单
+    if todo_steps:
+        has_priv = any(s.privileged for s in todo_steps)
+        print("\n── 下面这些要你来跑" + ("(带 sudo 的要你的密码)" if has_priv else "") +
+              ",复核无误后执行 ──")
         script_lines: list = []
-        for s in priv_steps:
-            print(f"\n#  {s.title}\n#  {s.why}")
+        for s in todo_steps:
+            tag = " [需 sudo/改系统]" if s.privileged else ""
+            print(f"\n#  {s.title}{tag}\n#  {s.why}")
             for c in s.commands:
                 print(c)
                 script_lines.append(c)
         if a.run and sys.stdin.isatty():
-            sys.stdout.write("\n以上都要 sudo,确认全部执行? [y/N] ")
+            sys.stdout.write("\n确认全部执行?" + ("(含 sudo)" if has_priv else "") + " [y/N] ")
             sys.stdout.flush()
             if sys.stdin.readline().strip().lower() in ("y", "yes"):
                 for c in script_lines:
@@ -270,9 +303,10 @@ def main(argv: Optional[list] = None) -> int:
         else:
             print("\n(复核无误后自己跑上面这几条;或加 --run 让我交互确认后代跑。)")
 
-    print("\n跑完 `python -m karvyloop.cli.computer_use_e2e` 验证:能看能动就成了。"
-          "\n提示:输入 socket 放在 computer-use-linux 认的默认位 $XDG_RUNTIME_DIR/.ydotool_socket"
-          "(它写死这条路径、不认 YDOTOOL_SOCKET)。")
+    print("\n跑完 `python -m karvyloop.cli.computer_use_e2e` 验证:能看能动就成了。")
+    if env.is_linux:
+        print("提示:输入 socket 放在 computer-use-linux 认的默认位 $XDG_RUNTIME_DIR/.ydotool_socket"
+              "(它写死这条路径、不认 YDOTOOL_SOCKET)。")
     return 0
 
 

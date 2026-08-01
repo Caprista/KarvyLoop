@@ -11,9 +11,9 @@ from karvyloop.cli.computer_use_setup import (
 
 
 def _env(**kw) -> Env:
-    base = dict(is_linux=True, session_type="wayland", desktop="ubuntu:GNOME",
+    base = dict(is_linux=True, is_mac=False, session_type="wayland", desktop="ubuntu:GNOME",
                 server_installed=True, ydotool_installed=True, ydotoold_running=True,
-                a11y_on=True, distro_pkg="apt", uid=1000, gid=1000)
+                a11y_on=True, native_deps_ok=True, distro_pkg="apt", uid=1000, gid=1000)
     base.update(kw)
     return Env(**base)
 
@@ -34,8 +34,29 @@ class TestPlan:
         assert by["install_server"].privileged
         assert by["ydotoold_service"].privileged and not by["ydotoold_service"].auto
 
-    def test_not_linux_short_circuits(self):
-        assert [s.code for s in plan_setup(_env(is_linux=False))] == ["not_linux"]
+    def test_non_linux_ready_no_steps(self):
+        # Windows/mac 依赖已装 + 非 mac → 只报"已就绪"(不掺 Linux 的 ydotool 那套)
+        assert [s.code for s in plan_setup(_env(is_linux=False, native_deps_ok=True))] \
+            == ["native_ready"]
+
+    def test_windows_missing_deps(self):
+        plan = plan_setup(_env(is_linux=False, is_mac=False, native_deps_ok=False))
+        codes = [s.code for s in plan]
+        assert codes == ["install_native_deps"]   # Windows 无权限步,只装 extra
+        assert 'pip install "karvyloop[computer]"' in "\n".join(plan[0].commands)
+
+    def test_macos_permissions_always_flagged(self):
+        # mac 依赖装了也仍要提示授权限(辅助功能+屏幕录制)
+        assert "macos_permissions" in [s.code for s in plan_setup(
+            _env(is_linux=False, is_mac=True, native_deps_ok=True))]
+        # mac 缺依赖 → 装 extra + 权限两步
+        codes = [s.code for s in plan_setup(_env(is_linux=False, is_mac=True, native_deps_ok=False))]
+        assert codes == ["install_native_deps", "macos_permissions"]
+
+    def test_non_linux_never_has_ydotool_steps(self):
+        for plan in (plan_setup(_env(is_linux=False, native_deps_ok=False)),
+                     plan_setup(_env(is_linux=False, is_mac=True, native_deps_ok=False))):
+            assert not any(s.code in ("install_ydotool", "ydotoold_service") for s in plan)
 
     def test_no_gui_session_flagged(self):
         assert "no_gui_session" in [s.code for s in plan_setup(_env(session_type="tty"))]
@@ -69,13 +90,13 @@ class TestPlan:
         assert "未能识别" in _pkg_install_cmd("", "ydotool")   # 认不出发行版 → 诚实提示
 
 
-def test_main_not_linux_no_side_effects(monkeypatch, capsys):
-    """main 在非 Linux(monkeypatch _detect):打印 not_linux 提示、返回 0,不跑任何 auto/privileged。"""
+def test_main_windows_no_side_effects(monkeypatch, capsys):
+    """main 在 Windows(monkeypatch _detect,缺依赖):打印装 extra 指引、返回 0,不跑 auto/privileged。"""
     from karvyloop.cli import computer_use_setup as m
     monkeypatch.setattr(m, "_detect", lambda: Env(
-        is_linux=False, session_type="", desktop="", server_installed=False,
+        is_linux=False, is_mac=False, session_type="", desktop="", server_installed=False,
         ydotool_installed=False, ydotoold_running=False, a11y_on=False,
-        distro_pkg="", uid=0, gid=0))
+        native_deps_ok=False, distro_pkg="", uid=0, gid=0))
     assert m.main([]) == 0
     out = capsys.readouterr().out
-    assert "computer use" in out.lower() and "Linux" in out
+    assert "computer use" in out.lower() and "karvyloop[computer]" in out
