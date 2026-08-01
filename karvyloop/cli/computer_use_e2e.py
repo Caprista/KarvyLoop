@@ -111,12 +111,38 @@ def summarize_event(ev: Any) -> Optional[str]:
     return None
 
 
+def _ensure_ydotool_socket(emit) -> None:
+    """没设 YDOTOOL_SOCKET 就探常见 socket 位置并设上(让 spawn 的 server 继承)。找不到不报错
+    (可能只想看屏、没配输入)。位置与 computer_use_setup 的常驻服务 socket 对齐。"""
+    if os.environ.get("YDOTOOL_SOCKET"):
+        return
+    import stat
+    xdg = os.environ.get("XDG_RUNTIME_DIR", "")
+    cands = ["/run/ydotoold.socket"]
+    if xdg:
+        cands.append(f"{xdg}/.ydotool_socket")
+    cands.append("/tmp/.ydotool_socket")
+    for p in cands:
+        try:
+            if stat.S_ISSOCK(os.stat(p).st_mode):
+                os.environ["YDOTOOL_SOCKET"] = p
+                emit(f"(输入 socket 自动探测到 {p})")
+                return
+        except Exception:
+            continue
+
+
 async def _run(task: str, *, config_path: Optional[Path], model_ref: Optional[str],
                max_turns: int, log) -> int:
     def emit(line: str) -> None:
         print(line, flush=True)
         log.write(line + "\n")
         log.flush()
+
+    # 0) 输入后端 socket 自动探测:computer-use-linux 的键盘走 ydotool,client 认 YDOTOOL_SOCKET。
+    #    没显式设 → 探常见位置(常驻服务 /run/ydotoold.socket、登录会话默认位)并设上,让 spawn
+    #    的 server 继承 —— 省得用户手动 export(computer_use_setup 装的常驻服务 socket 也在此列)。
+    _ensure_ydotool_socket(emit)
 
     # 1) 真 gateway(复用 resolve_runtime;失败 fail-loud,不静默)
     from karvyloop.cli._runtime import resolve_runtime
