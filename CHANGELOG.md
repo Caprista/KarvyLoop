@@ -11,7 +11,36 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+
+## [2026.8.1] — 2026-08-01
+
+The computer-use release: your agents can see your screen and operate your real desktop —
+on Linux, Windows and macOS — with the safety built into the floor, not bolted on.
+
 ### Added
+- **Computer use — an agent can drive your real desktop, and you stay in the seat.** A role
+  can now see your screen (screenshots reach the model) and control your mouse & keyboard to
+  operate the apps you already use — cross-platform: Linux (Wayland/X11 via the computer-use
+  server) and Windows/macOS (a built-in backend). It's **model-agnostic** — validated end to
+  end driving a real GNOME/Wayland desktop with a non-Anthropic vision model (it opened an app
+  for us), and demonstrated live on Windows (opened Notepad and typed a line). One command
+  sets up the input backend: `python -m karvyloop.cli.computer_use_setup`.
+- **The safety is the floor, not a feature.** Computer control is **off until you knowingly
+  turn it on** — a console toggle (and a CLI prompt) that spells out exactly what you're
+  authorizing (see your screen + control your mouse & keyboard) *before* anything can happen;
+  turning it on is gated to your own machine/LAN with a CSRF guard, so nothing enables it
+  behind your back (this matters most on Windows, where the OS itself won't prompt). A process
+  sandbox can't contain input to a real desktop, so consent is the containment — and even once
+  enabled, risky/irreversible actions (typing into a password field, permanent-delete key
+  combos) are **structurally held for your approval**. The same rule that governs messages now
+  governs the screen: on-screen text is **data, not commands** — in a live run the model
+  spotted an injection attempt in what it "read" off the screen, refused it, and flagged it.
+- **Connect a server that needs a sign-in — safely (remote MCP over OAuth 2.1).** Vendor-
+  hosted MCP servers that require you to log in now work: the console runs the OAuth flow,
+  tokens are stored out of the repo (0600), and a cross-machine callback path makes it work
+  even on a headless/remote box. Plus connect **MiniMax without pasting a key** (device-code
+  sign-in). And search the **official MCP Registry** to add servers — anything uncurated is
+  routed through the same never-send-without-approval safety net below (fail-safe).
 - **Connect your real apps — with a safety net nobody else has.** A new "Connect your
   apps" area offers one-tap setup for Notion and GitHub (official MCP servers; paste one
   token, tools are live immediately — no restart needed), with Gmail, Google Calendar and
@@ -23,6 +52,17 @@ _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
   byte-exact payload; only your Accept actually sends. Adversarially verified: no bypass
   path, atomic accept (two devices approving the same card can't double-send), fail-closed
   when the card system is unavailable.
+
+### Fixed
+- **Recovery that has your back.** When something breaks, the error surface now diagnoses the
+  real cause and hands you an actual button ("help Karvy fix it") instead of a dead end.
+- Console papercuts: a role no longer calls itself "Karvy" in a direct chat, messages don't
+  scroll away mid-run, and a chat box won't pretend to work when the engine is absent.
+
+### Security
+- Config file (`config.yaml`, which holds your keys) is written locked to `0600`; supply-chain
+  hardening (CI actions pinned to hashes, weekly dependency canary, upper-bounded pins); CodeQL
+  tightened to the security-focused set.
 
 
 ## [2026.7.29] — 2026-07-29
