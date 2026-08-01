@@ -165,8 +165,10 @@ def _detect() -> Env:
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "") or ""
     server = shutil.which("computer-use-linux") is not None
     ydotool = shutil.which("ydotool") is not None
-    # 查守护进程在不在跑(比查 socket 文件可靠 —— socket 文件可能是死进程的残留,门到门实测踩过)
-    ydotoold_running = _ydotoold_running()
+    # 输入后端就绪 = ydotoold 进程在 **且** socket 在 client 默认位(两者都要:进程在但 socket
+    # 放错位 = 动作仍失败;socket 文件在但进程死 = 残留假阳。两个坑门到门都踩过)。
+    default_sock = f"{os.environ.get('XDG_RUNTIME_DIR', '') or f'/run/user/{uid}'}/.ydotool_socket"
+    ydotoold_running = _proc_running("ydotoold") and _is_socket(default_sock)
     a11y_on = _gsettings_bool("org.gnome.desktop.interface", "toolkit-accessibility")
     distro_pkg = _detect_pkg_mgr()
     return Env(is_linux=is_linux, session_type=session_type, desktop=desktop,
@@ -175,10 +177,18 @@ def _detect() -> Env:
                distro_pkg=distro_pkg, uid=uid, gid=gid)
 
 
-def _ydotoold_running() -> bool:
+def _proc_running(name: str) -> bool:
     try:
-        return subprocess.run(["pgrep", "-x", "ydotoold"],
-                              capture_output=True, timeout=8).returncode == 0
+        return subprocess.run(["pgrep", "-x", name], capture_output=True,
+                              timeout=8).returncode == 0
+    except Exception:
+        return False
+
+
+def _is_socket(path: str) -> bool:
+    try:
+        import stat
+        return stat.S_ISSOCK(os.stat(path).st_mode)   # 跟随 symlink → 指到活 socket 也算
     except Exception:
         return False
 
