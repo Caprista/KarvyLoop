@@ -11,6 +11,23 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+### Added
+- **Non-blocking H2A decisions: let it run, then confirm.** You can now set a decision card to
+  **non-blocking** mode — the agent goes ahead and executes the proposal immediately, then leaves
+  the card open for you to **confirm, reject, or defer later**. This is for the "porridge or noodles"
+  class of decisions: you don't care which one happens, but your later thumbs-up/thumbs-down still
+  feeds your decision-preference model, so the instance learns what "like you" means without
+  interrupting your flow. Rejecting an already-executed card does **not** roll back the result; it
+  simply records your taste for next time.
+- **H2A outcome vocabulary (fail-closed).** Decision outcomes are now drawn from a closed set
+  (`allowed-once`, `rejected`, `cancelled`, `unavailable`, `auto-allowed`, `pending`), inspired by
+  DeepSeek Harness's clean approval-seam design, and surfaced on every H2A envelope for audit.
+
+### Changed
+- **Blocking remains the default.** Non-blocking is opt-in per card; high-risk kinds and any card
+  carrying irreversible semantics (send/delete/pay/prod-write) are forced back to blocking even when
+  non-blocking is requested.
+
 
 ## [2026.8.1] — 2026-08-01
 

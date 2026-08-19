@@ -175,6 +175,8 @@ class DecisionSample:
     domain: str = ""
     role: str = ""
     ts: float = 0.0
+    mode: str = "blocking"  # blocking | non_blocking(非阻塞追拍)
+    auto_decided: bool = False  # 是否系统已自动推进、用户事后追拍
 
 
 @dataclass

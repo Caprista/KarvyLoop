@@ -168,7 +168,8 @@ def observe_decision(app: Any, sample: DecisionSample) -> None:
 
 def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
                             reason: str = "", domain: str = "", role: str = "",
-                            edits: Optional[dict] = None, batch: str = "") -> None:
+                            edits: Optional[dict] = None, batch: str = "",
+                            mode: str = "blocking", auto_decided: bool = False) -> None:
     """一次 H2A 拍板 → 三路信号(样本缓冲→结晶 / stats 复利 / decision_log 回看)**单一接缝**。
 
     batch(docs/92 刀3):组批批次标(=组的 chain_id)。组级「全部接受」= 前端逐卡发
@@ -287,6 +288,8 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
             "domain": eff_domain, "role": role or "",
             "reason": (eff_reason or "")[:160],
             "edited": sorted(edits.keys())[:6] if edits else [],
+            "mode": mode,
+            "auto_decided": bool(auto_decided),
         }
         if batch:
             _t3["batch"] = batch   # docs/92 刀3:组批标(单卡不带字段,老事件读侧 .get 兼容)
@@ -299,7 +302,8 @@ def record_decision_signals(app: Any, *, decision: str, proposal_id: str,
         observe_decision(app, DecisionSample(
             decision=decision, context=(ctx or proposal_id),
             reason=eff_reason, scope="personal",
-            domain=domain or "", role=role or "", ts=_time.time()))
+            domain=domain or "", role=role or "", ts=_time.time(),
+            mode=mode, auto_decided=bool(auto_decided)))
         schedule_decision_crystallize(app)
     except Exception as e:
         logger.warning(f"[decision_wire] 决策样本入缓冲/结晶调度失败(proposal_id={proposal_id},"

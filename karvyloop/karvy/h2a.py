@@ -26,6 +26,41 @@ H2A_ACCEPT: str = "ACCEPT"
 H2A_REJECT: str = "REJECT"
 H2A_DEFER: str = "DEFER"  # 用户没拍板(继续等)
 
+# H2A 拍板模式
+H2A_MODE_BLOCKING: str = "blocking"
+H2A_MODE_NON_BLOCKING: str = "non_blocking"
+
+# H2A outcome 封闭枚举(借 DeepSeek Harness approval 设计:fail-closed + 一锤定音)。
+# 空字符串 = 未指定,由 decision_to_envelope 按 decision 推导(向后兼容)。
+H2A_OUTCOME_ALLOWED_ONCE: str = "allowed-once"
+H2A_OUTCOME_AUTO_ALLOWED: str = "auto-allowed"   # 非阻塞模式下系统先自动推进
+H2A_OUTCOME_REJECTED: str = "rejected"
+H2A_OUTCOME_CANCELLED: str = "cancelled"
+H2A_OUTCOME_UNAVAILABLE: str = "unavailable"
+H2A_OUTCOME_PENDING: str = "pending"
+
+H2A_OUTCOMES: frozenset[str] = frozenset({
+    H2A_OUTCOME_ALLOWED_ONCE,
+    H2A_OUTCOME_AUTO_ALLOWED,
+    H2A_OUTCOME_REJECTED,
+    H2A_OUTCOME_CANCELLED,
+    H2A_OUTCOME_UNAVAILABLE,
+    H2A_OUTCOME_PENDING,
+})
+
+
+def _derive_outcome(decision: str, outcome: str = "") -> str:
+    """由 decision 推导 outcome(向后兼容:旧调用不传 outcome 时自动补)。"""
+    if outcome and outcome in H2A_OUTCOMES:
+        return outcome
+    if decision == H2A_ACCEPT:
+        return H2A_OUTCOME_ALLOWED_ONCE
+    if decision == H2A_REJECT:
+        return H2A_OUTCOME_REJECTED
+    if decision == H2A_DEFER:
+        return H2A_OUTCOME_PENDING
+    return H2A_OUTCOME_UNAVAILABLE
+
 
 @dataclasses.dataclass(frozen=True)
 class H2ADecision:
@@ -35,6 +70,14 @@ class H2ADecision:
     decision: str  # ACCEPT / REJECT / DEFER
     reason: str = ""  # REJECT 时必填
     timestamp: str = ""
+    mode: str = H2A_MODE_BLOCKING  # blocking / non_blocking
+    outcome: str = ""  # 空 = 由 decision 推导;非空必须是 H2A_OUTCOMES 之一
+
+    def __post_init__(self):
+        object.__setattr__(self, "outcome", _derive_outcome(self.decision, self.outcome))
+        # frozen 校验 mode
+        if self.mode not in (H2A_MODE_BLOCKING, H2A_MODE_NON_BLOCKING):
+            raise ValueError(f"H2ADecision mode must be blocking/non_blocking, got {self.mode!r}")
 
 
 # 注入式用户输入(测试可 mock)

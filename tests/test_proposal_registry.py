@@ -366,3 +366,174 @@ def test_h2a_decide_no_registry_backward_compat():
     body = r.json()
     assert body["dispatch"] is None
     assert body["envelope"] is not None
+
+
+# ---- 非阻塞 H2A 模式(Hardy 2026-08-01):自动推进 + 事后追拍 + 偏好沉淀 + 不 rollback ----
+
+def test_proposal_mode_field_defaults_blocking():
+    p = _mk()
+    assert p.mode == "blocking"
+    assert p.to_dict()["mode"] == "blocking"
+
+
+def test_proposal_mode_roundtrip():
+    from karvyloop.karvy.atoms import Proposal
+    p = Proposal(summary="s", options=("ACCEPT",), strength=0.5, evidence_refs=(),
+                 habit_id=0, model_ref="m", ts=1.0, mode="non_blocking")
+    assert p.mode == "non_blocking"
+    r = Proposal.from_dict(p.to_dict())
+    assert r.mode == "non_blocking"
+
+
+def test_registry_auto_decide_keeps_pending():
+    reg = PendingProposalRegistry()
+    p = _mk(kind=KIND_ROUTE_TO_ROLE, payload={"requirement": "x"})
+    reg.register(p)
+    assert not reg.is_auto_decided(p.proposal_id)
+    ok = reg.auto_decide(p.proposal_id, decision="ACCEPT", detail="auto ran")
+    assert ok
+    assert reg.is_auto_decided(p.proposal_id)
+    assert reg.get(p.proposal_id) is p  # 仍在 pending
+    meta = reg.proposal_meta(p.proposal_id)
+    assert meta["auto_decided"]
+    assert meta["auto_decision"] == "ACCEPT"
+
+
+def test_auto_decided_accept_confirms_without_second_dispatch():
+    """非阻塞追拍 ACCEPT = 只确认,不二次执行(已执行过了)。"""
+    reg = PendingProposalRegistry()
+    calls = []
+    handlers = {
+        KIND_CRYSTALLIZE_SKILL: lambda p: (calls.append("dispatch"), (True, "done"))[1],
+    }
+    p = _mk()
+    reg.register(p)
+    reg.auto_decide(p.proposal_id, decision="ACCEPT")
+    res = reg.decide(p.proposal_id, "ACCEPT", handlers=handlers)
+    assert res.ok and res.detail == "confirmed_after_auto"
+    assert reg.get(p.proposal_id) is None
+    assert calls == []  # 没有二次 dispatch
+
+
+def test_auto_decided_reject_does_not_rollback():
+    """非阻塞追拍 REJECT 只表达态度并关闭卡,不 rollback 已执行结果。"""
+    reg = PendingProposalRegistry()
+    p = _mk()
+    reg.register(p)
+    reg.auto_decide(p.proposal_id, decision="ACCEPT")
+    res = reg.decide(p.proposal_id, "REJECT")
+    assert res.ok and res.detail == "rejected_after_auto"
+    assert reg.get(p.proposal_id) is None
+
+
+def test_auto_decided_defer_returns_to_blocking():
+    """非阻塞追拍 DEFER = 转回阻塞式,下次正常呈现等人拍。"""
+    reg = PendingProposalRegistry()
+    p = _mk()
+    reg.register(p)
+    reg.auto_decide(p.proposal_id, decision="ACCEPT")
+    res = reg.decide(p.proposal_id, "DEFER")
+    assert res.ok and res.detail == "deferred_to_blocking"
+    assert reg.get(p.proposal_id) is p
+    assert not reg.is_auto_decided(p.proposal_id)
+
+
+def test_auto_decided_persist_survives_restart(tmp_path):
+    """非阻塞 auto_decided 状态随 registry 持久化跨重启存活。"""
+    path = tmp_path / "pending_proposals.json"
+    reg = PendingProposalRegistry(persist_path=path)
+    p = _mk()
+    reg.register(p)
+    reg.auto_decide(p.proposal_id)
+    reg2 = PendingProposalRegistry(persist_path=path)
+    assert reg2.is_auto_decided(p.proposal_id)
+    assert reg2.get(p.proposal_id) is not None
+
+
+def test_non_blocking_rest_auto_executes_and_follows_up():
+    """端到端:non_blocking Proposal → broadcast 自动执行 → 仍在 registry → 追拍进偏好样本。"""
+    from karvyloop.console import build_console_app
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.proposal_registry = PendingProposalRegistry()
+    calls = []
+    app.state.proposal_handlers = {
+        KIND_CRYSTALLIZE_SKILL: lambda pr: (calls.append(pr.proposal_id), (True, "auto-done"))[1],
+    }
+    from karvyloop.karvy.atoms import Proposal
+    p = Proposal(summary="自动跑个脚本", options=("ACCEPT", "DEFER", "REJECT"),
+                 strength=0.7, evidence_refs=(), habit_id=0, model_ref="m", ts=1.0,
+                 kind=KIND_CRYSTALLIZE_SKILL, mode="non_blocking")
+    import asyncio
+    asyncio.run(broadcast_proposal(app, p))
+    # 自动执行了
+    assert calls == [p.proposal_id]
+    # 仍在 registry 且标记 auto_decided
+    assert app.state.proposal_registry.is_auto_decided(p.proposal_id)
+    # wire payload 带 mode + auto_decided
+    from karvyloop.console.proposals import proposal_wire_payload
+    wire = proposal_wire_payload(app.state.proposal_registry, p)
+    assert wire["mode"] == "non_blocking"
+    assert wire["auto_decided"] is True
+    # 追拍 REJECT:关闭卡,不二次 dispatch,样本进缓冲
+    client = TestClient(app)
+    r = client.post("/api/h2a_decide", json={
+        "proposal_id": p.proposal_id, "decision": "REJECT", "reason": "",
+    })
+    assert r.status_code == 200
+    assert r.json()["auto_decided"] is True
+    samples = getattr(app.state, "decision_samples", [])
+    assert any(s.decision == "REJECT" and s.mode == "non_blocking" and s.auto_decided for s in samples)
+    assert app.state.proposal_registry.get(p.proposal_id) is None
+
+
+def test_non_blocking_high_risk_forces_blocking():
+    """高危 kind 即使 mode=non_blocking 也强制阻塞(不自动执行)。"""
+    from karvyloop.console import build_console_app
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.proposal_registry = PendingProposalRegistry()
+    calls = []
+    app.state.proposal_handlers = {
+        "outbound_draft": lambda pr: (calls.append(pr.proposal_id), (True, "sent"))[1],
+    }
+    from karvyloop.karvy.atoms import Proposal
+    p = Proposal(summary="发邮件", options=("ACCEPT", "DEFER", "REJECT"),
+                 strength=0.7, evidence_refs=(), habit_id=0, model_ref="m", ts=1.0,
+                 kind="outbound_draft", mode="non_blocking")
+    import asyncio
+    asyncio.run(broadcast_proposal(app, p))
+    assert calls == []  # 没自动执行
+    assert not app.state.proposal_registry.is_auto_decided(p.proposal_id)
+    # 卡mode被降级为阻塞
+    stored = app.state.proposal_registry.get(p.proposal_id)
+    assert stored is not None
+    assert stored.mode == "blocking"
+
+
+def test_non_blocking_no_handler_forces_blocking():
+    """无 handler 的 non_blocking 卡降级阻塞,不吞卡。"""
+    from karvyloop.console import build_console_app
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.proposal_registry = PendingProposalRegistry()
+    app.state.proposal_handlers = {}  # 空
+    from karvyloop.karvy.atoms import Proposal
+    p = Proposal(summary="没 handler", options=("ACCEPT", "DEFER", "REJECT"),
+                 strength=0.7, evidence_refs=(), habit_id=0, model_ref="m", ts=1.0,
+                 kind=KIND_CRYSTALLIZE_SKILL, mode="non_blocking")
+    import asyncio
+    asyncio.run(broadcast_proposal(app, p))
+    stored = app.state.proposal_registry.get(p.proposal_id)
+    assert stored is not None
+    assert stored.mode == "blocking"
+
+
+def test_auto_decided_concurrent_followup_idempotent():
+    """并发两路追拍同一张 auto_decided 卡:只有一路成功,不二次 dispatch/不重复样本。"""
+    reg = PendingProposalRegistry()
+    p = _mk()
+    reg.register(p)
+    reg.auto_decide(p.proposal_id)
+    res1 = reg.decide(p.proposal_id, "ACCEPT")
+    res2 = reg.decide(p.proposal_id, "ACCEPT")
+    assert res1.ok and res1.detail == "confirmed_after_auto"
+    assert res2 is None or not res2.ok  # 已被处置
+    assert reg.get(p.proposal_id) is None

@@ -1506,6 +1506,8 @@
   // 同一个拍板 API;两处各建实例、各自 judgeState,拍任意一张 = 同一条 h2a_decision)。
   function _buildProposalCard(payload) {
     const card = el("div", { class: "h2a-card" });
+    const isAutoDecided = !!(payload.auto_decided);
+    const mode = String(payload.mode || "blocking");
     card.setAttribute("data-kind", String(payload.kind || ""));   // #6:按 kind 客户端筛选的数据源
     // docs/92 刀1 同链合并:链键 = chain_id(派生卡带)|| 自己的 proposal_id(链根卡不回填)。
     // 右栏 _regroupChains 按它把同链 ≥2 张收成一组;单链 1 张 = 无组壳,和现在一模一样。
@@ -1513,6 +1515,12 @@
       String(payload.chain_id || payload.proposal_id || ("p-" + (payload.habit_id || 0))));
     if (payload.chain_intent) card.setAttribute("data-chain-intent", String(payload.chain_intent));
     if (payload.high_risk) card.setAttribute("data-high-risk", "1");   // 后端 silence.HIGH_RISK_KINDS 判定源
+    if (isAutoDecided) card.setAttribute("data-auto-decided", "1");   // 非阻塞已自动推进
+    // 非阻塞自动推进状态条:让用户一眼知道这张卡已经执行完了,现在只是追拍态度。
+    if (isAutoDecided) {
+      card.appendChild(el("div", { class: "h2a-auto-status",
+        text: "⚡ " + t("proposal.auto_executed") }));
+    }
     card.appendChild(el("div", { class: "h2a-summary", text: "💡 " + (payload.summary || t("proposal.no_desc")) }));
     // docs/96 刀0 对抗验收 BUG-1:外发草稿卡含"渲不出来的收件人类键" → **卡顶红条**
     // (折叠态也可见,逼展开核对;详情区另把这些键点名 + 完整入参全文铺出)。
@@ -1671,6 +1679,31 @@
       });
     };
     const decide = (decision, _batch) => {
+      // 非阻塞追拍:系统已经自动推进,用户只表达态度。不强制阅读门(已执行完),
+      // 但保留高价值/无脑拍提醒(用户仍可认真看)。
+      if (isAutoDecided) {
+        let _edits = null;
+        if (decision === "ACCEPT" && editArea && editArea.value.trim() &&
+            editArea.value.trim() !== _editSrc.trim()) {
+          _edits = {}; _edits[_editField] = editArea.value.trim();
+          judgeState.engaged = true;
+        }
+        // _autoDecided 追拍也过一遍轻提醒(不阻塞):高价值/无脑拍 streak 仍提醒,
+        // 但用 confirm 不挡拒绝/稍后。
+        if (decision === "ACCEPT") {
+          return _readyWithin(judgeState, 4000).then(async (checked) => {
+            const vios = judgeState.violations || [];
+            if (vios.length) { _openFold(); await _nextPaint(); }
+            if (!_engagedNow(judgeState)) {
+              if (judgeState.highValue &&
+                  !window.confirm(t("dcard.hv_confirm", { standard: judgeState.hvStandard || "" }))) return false;
+              if (judgeState.needsRecheck && !window.confirm(t("dcard.surrender_confirm"))) return false;
+            }
+            return _commitDecision("ACCEPT", _edits, _batch);
+          });
+        }
+        return _commitDecision(decision, _edits, _batch);
+      }
       // 「改了再批」:改动过 → 随 ACCEPT 带 edits。改过=亲手判断过(最强 engaged 信号),闸前标记。
       let _edits = null;
       if (decision === "ACCEPT" && editArea && editArea.value.trim() &&
@@ -1711,9 +1744,15 @@
         return _commitDecision("ACCEPT", _edits, _batch);
       });
     };
-    btnRow.appendChild(el("button", { class: "h2a-accept", onClick: () => decide("ACCEPT"), text: t("proposal.accept") }));
-    btnRow.appendChild(el("button", { class: "h2a-defer", onClick: () => decide("DEFER"), text: t("proposal.defer") }));
-    btnRow.appendChild(el("button", { class: "h2a-reject", onClick: () => decide("REJECT"), text: t("proposal.reject") }));
+    if (isAutoDecided) {
+      btnRow.appendChild(el("button", { class: "h2a-accept", onClick: () => decide("ACCEPT"), text: t("proposal.confirm") }));
+      btnRow.appendChild(el("button", { class: "h2a-defer", onClick: () => decide("DEFER"), text: t("proposal.defer") }));
+      btnRow.appendChild(el("button", { class: "h2a-reject", onClick: () => decide("REJECT"), text: t("proposal.reject") }));
+    } else {
+      btnRow.appendChild(el("button", { class: "h2a-accept", onClick: () => decide("ACCEPT"), text: t("proposal.accept") }));
+      btnRow.appendChild(el("button", { class: "h2a-defer", onClick: () => decide("DEFER"), text: t("proposal.defer") }));
+      btnRow.appendChild(el("button", { class: "h2a-reject", onClick: () => decide("REJECT"), text: t("proposal.reject") }));
+    }
     card.appendChild(btnRow);
     card.appendChild(reasonInput);   // 可选拒绝理由(不填也能拒)
     // docs/92 刀3:组批入口 —— 全批只是"替你连点 N 次 Accept",逐卡复用**同一个** decide

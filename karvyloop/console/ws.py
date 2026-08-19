@@ -659,12 +659,22 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
         eff_reason = req.reason
         if req.decision == H2A_REJECT and not req.reason.strip():
             eff_reason = DEFAULT_REJECT_REASON
+        # 查询 registry:这张卡是否已被系统自动推进(非阻塞追拍),以及它的 mode。
+        registry = getattr(app.state, "proposal_registry", None)
+        is_auto = bool(registry.is_auto_decided(req.proposal_id)) if registry is not None else False
+        proposal_mode = "blocking"
+        if registry is not None:
+            p = registry.get(req.proposal_id)
+            if p is not None:
+                proposal_mode = str(getattr(p, "mode", "blocking") or "blocking")
         decision_obj = H2ADecision(
             decision=req.decision,
             reason=eff_reason,
             proposal_id=req.proposal_id,
             user_address=user_addr,
             timestamp=datetime.now(timezone.utc).isoformat(),
+            mode=proposal_mode,
+            outcome=("auto-allowed" if is_auto and req.decision == "ACCEPT" else ""),
         )
         # §11 决策接口结晶:把这次拍板记成样本(信号源),攒够批量后结晶成"决策偏好"。
         # 单一接缝 record_decision_signals(样本→结晶 / stats / decision_log;REST 路径同调,
@@ -675,7 +685,9 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
                                 domain=req.to_address_domain_id or "",
                                 role=req.to_address_role or "",
                                 edits=(req.edits or None),
-                                batch=(req.batch or ""))   # docs/92 刀3:批次标落流水/Trace
+                                batch=(req.batch or ""),
+                                mode=proposal_mode,
+                                auto_decided=is_auto)   # docs/92 刀3:批次标落流水/Trace
         # D5(docs/30):按 kind 兑现(若接了 registry)— 与 REST /api/h2a_decide 同语义。
         # 9.4-门2:route_to_role handler 会同步 drive(一次 LLM)→ 用 to_thread 包,
         # 不阻塞 WS 事件循环(REST 路径是 sync def,FastAPI 已自动线程池化)。
@@ -702,10 +714,13 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
                 await raise_drive_wrapup_cards(app)
             except Exception:
                 logger.debug("[ws] 委派收尾升卡失败(不阻断)", exc_info=True)
-            return res.to_dict() if res is not None else None
+            d = res.to_dict() if res is not None else None
+            if d is not None:
+                d["auto_decided"] = is_auto
+            return d
 
         if req.decision == H2A_DEFER:
-            await websocket.send_json({"type": "h2a_envelope", "payload": {"envelope": None, "proposal_id": req.proposal_id, "decision": req.decision, "dispatch": await _dispatch()}})
+            await websocket.send_json({"type": "h2a_envelope", "payload": {"envelope": None, "proposal_id": req.proposal_id, "decision": req.decision, "dispatch": await _dispatch(), "mode": proposal_mode, "auto_decided": is_auto}})
             return
         # REJECT 不强制 reason(Hardy):reason 空也照拒;K5(人拍板/by=[])由工厂保证,与 reason 无关。
         env = decision_to_envelope(decision_obj, to_addr)
@@ -714,7 +729,8 @@ async def _handle_h2a_decision_ws(websocket: WebSocket, app, payload: dict) -> N
         await websocket.send_json({
             "type": "h2a_envelope",
             "payload": {"envelope": envelope_to_dict(env), "proposal_id": req.proposal_id, "decision": req.decision,
-                        "dispatch": _disp, "report_card": pop_report_card(app, req.proposal_id)},
+                        "dispatch": _disp, "report_card": pop_report_card(app, req.proposal_id),
+                        "mode": proposal_mode, "auto_decided": is_auto},
         })
     except Exception as e:
         await websocket.send_json({"type": "h2a_envelope", "payload": {"envelope": None, "error": str(e)}})

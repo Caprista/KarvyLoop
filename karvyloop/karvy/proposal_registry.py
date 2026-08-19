@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 # DEFER 过的卡满该阈值重新计入下一封 digest(DEFER≠消失,只是暂缓)。
 AGING_THRESHOLD_S = 48 * 3600
 
+# 非阻塞(auto_decided)卡用户追拍 REJECT 后保留审计的窗口(秒)。
+# 用户表达态度后,卡从 pending 移除,但保留一条 decision_log/Trace 记录即可。
+AUTO_DECIDED_REJECT_RETAIN_S = 7 * 86400
+
 # docs/92 刀1:链源意图(链根卡的人话摘要)截断长度 —— 组头一行放得下的量。
 CHAIN_INTENT_MAX = 60
 
@@ -225,24 +229,33 @@ class PendingProposalRegistry:
             if getattr(prop, "proposal_id", ""):
                 self._pending[prop.proposal_id] = prop
         # 卡龄元数据:v2 文件带 meta;v1 旧文件无戳 → 按加载时刻记(向后兼容,不误报老龄)。
+        # 保留全部 meta 字段(含 auto_decided 等非阻塞状态),缺省字段补默认值。
         raw_meta = data.get("meta") or {}
         load_now = time.time()
         for pid in self._pending:
             m = raw_meta.get(pid) if isinstance(raw_meta, dict) else None
-            m = m if isinstance(m, dict) else {}
+            m = dict(m) if isinstance(m, dict) else {}
             try:
                 created = float(m.get("created_ts") or 0.0)
             except (TypeError, ValueError):
                 created = 0.0
             try:
-                deferred = float(m.get("deferred_at") or 0.0)
+                deferred_raw = m.get("deferred_at")
+                deferred = float(deferred_raw or 0.0) if deferred_raw is not None else 0.0
             except (TypeError, ValueError):
                 deferred = 0.0
+            try:
+                auto_decided_at = float(m.get("auto_decided_at") or 0.0) or None
+            except (TypeError, ValueError):
+                auto_decided_at = None
             self._meta[pid] = {
                 "created_ts": created if created > 0 else load_now,
                 "deferred_at": deferred if deferred > 0 else None,
-                # docs/81 B-5 #7:DEFER 老化"已报过"标记跨重启保留(否则重启后同卡再报一次,分布掺水)
                 "defer_aged_reported": bool(m.get("defer_aged_reported")),
+                "auto_decided": bool(m.get("auto_decided")),
+                "auto_decision": str(m.get("auto_decision") or ""),
+                "auto_detail": str(m.get("auto_detail") or ""),
+                "auto_decided_at": auto_decided_at,
             }
         # docs/92 刀1 链意图:v3 文件带 chains 直接还原(链根已被拍掉时唯一的意图来源);
         # 老文件无 chains → 从 pending 卡重建(链根还挂着就能重建,丢的只是"根已拍掉"边角)。
@@ -275,7 +288,8 @@ class PendingProposalRegistry:
         """登记一条 Proposal,返回 proposal_id(幂等:同 id 覆盖)。
 
         卡龄戳:首次登记记 created_ts;同 id 重复登记(幂等收敛卡,如 ops_fix)**不重置**
-        created_ts / deferred_at —— 挂龄从第一次出现算,DEFER 状态不被重复建议洗掉。
+        created_ts / deferred_at / auto_decided 状态 —— 挂龄从第一次出现算,
+        DEFER 状态不被重复建议洗掉,已自动推进的状态也不被覆盖。
 
         docs/92 刀1 同链:①同任务兜底 —— 提案带 context_ref.kind=="task" 且已有**待决**
         提案同 task_id → 自动继承其链(都没 chain_id 则先来的 proposal_id 当链根)。此兜底
@@ -288,10 +302,34 @@ class PendingProposalRegistry:
         self._pending[pid] = proposal
         if pid not in self._meta:
             self._meta[pid] = {"created_ts": time.time() if now is None else float(now),
-                               "deferred_at": None}
+                               "deferred_at": None,
+                               "auto_decided": False}
         self._record_chain(proposal)
         self._save()
         return pid
+
+    def is_auto_decided(self, proposal_id: str) -> bool:
+        return bool((self._meta.get(proposal_id) or {}).get("auto_decided"))
+
+    def auto_decide(self, proposal_id: str, *, decision: str = "ACCEPT",
+                    detail: str = "", now: Optional[float] = None) -> bool:
+        """把一张已 pending 的卡标记为"已自动推进"(非阻塞模式)。
+
+        不 remove proposal,不执行 dispatch(调用方已在外部执行)。只写审计元数据,
+        让后续 h2a_decide 走追拍路径。
+        """
+        pid = proposal_id
+        meta = self._meta.get(pid)
+        if meta is None or self._pending.get(pid) is None:
+            return False
+        meta["auto_decided"] = True
+        meta["auto_decision"] = str(decision or "ACCEPT").upper()
+        meta["auto_detail"] = str(detail or "")[:400]
+        meta["auto_decided_at"] = time.time() if now is None else float(now)
+        # 自动推进后清 deferred_at(它现在不是"挂起",而是"已执行待确认")。
+        meta.pop("deferred_at", None)
+        self._save()
+        return True
 
     # ---- docs/92 刀1:同链合并(chain_id 贯通,确定性零 LLM)----
 
@@ -432,6 +470,9 @@ class PendingProposalRegistry:
         - REJECT → 原子移除丢弃 → 返 DispatchResult(ok=True, detail=reject 钩子的人话回执,
           无钩子/回执空 → 通用 "rejected");并发后来者同上返"已被处置"。
         - DEFER  → 留在 registry(下次再呈现)→ 返 DispatchResult(ok=True, "deferred")。
+        - **非阻塞追拍**:卡此前被 auto_decided(系统已自动推进)。ACCEPT=确认(只 remove,
+          不二次 dispatch);REJECT=用户不认可这次自动推进(只 remove,不 rollback 已执行结果);
+          DEFER=转为阻塞式(清 auto_decided,保留 pending)。
 
         edits(#42 优化①「改了再批」):ACCEPT 时把用户就地改过的 payload 字段**覆盖后兑现**。
         安全边界:只允许覆盖 payload 里**已存在**的字符串字段(不许注入新键/改类型),单值封顶 8k。
@@ -444,6 +485,36 @@ class PendingProposalRegistry:
         proposal = self.get(proposal_id)
         if proposal is None:
             return None
+
+        # 非阻塞追拍路径(系统已自动推进,用户事后拍板)。
+        if self.is_auto_decided(proposal_id):
+            kind = getattr(proposal, "kind", "")
+            if decision == "ACCEPT":
+                taken = self.remove(proposal_id)
+                if taken is None:
+                    from karvyloop import i18n as _i18n
+                    return DispatchResult(proposal_id, kind, False,
+                                          _i18n.t("proposal.decide.already_handled"))
+                return DispatchResult(proposal_id, kind, True, "confirmed_after_auto")
+            if decision == "REJECT":
+                # 关键边界:不 rollback 已执行结果,只表达态度并关闭这张卡。
+                taken = self.remove(proposal_id)
+                if taken is None:
+                    from karvyloop import i18n as _i18n
+                    return DispatchResult(proposal_id, kind, False,
+                                          _i18n.t("proposal.decide.already_handled"))
+                return DispatchResult(proposal_id, kind, True, "rejected_after_auto")
+            if decision == "DEFER":
+                # 转回阻塞式:清 auto_decided,保留 pending,下次正常呈现等人拍。
+                meta = self._meta.setdefault(proposal_id, {"created_ts": time.time() if now is None else float(now),
+                                                           "deferred_at": None,
+                                                           "auto_decided": False})
+                meta["auto_decided"] = False
+                meta["deferred_at"] = time.time() if now is None else float(now)
+                meta.pop("defer_aged_reported", None)
+                self._save()
+                return DispatchResult(proposal_id, kind, True, "deferred_to_blocking")
+            return DispatchResult(proposal_id, kind, False, f"unknown decision: {decision}")
 
         if decision == "REJECT":
             # BUG-2:原子取走 —— 并发另一路已处置(ACCEPT 兑现/REJECT 丢弃)→ 诚实回执,不重复

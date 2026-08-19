@@ -646,12 +646,23 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
     if req.decision == _H2A_REJECT and not req.reason.strip():
         eff_reason = DEFAULT_REJECT_REASON
 
+    # 查询 registry:这张卡是否已被系统自动推进(非阻塞追拍),以及它的 mode。
+    registry = getattr(request.app.state, "proposal_registry", None)
+    is_auto = bool(registry.is_auto_decided(req.proposal_id)) if registry is not None else False
+    proposal_mode = "blocking"
+    if registry is not None:
+        p = registry.get(req.proposal_id)
+        if p is not None:
+            proposal_mode = str(getattr(p, "mode", "blocking") or "blocking")
+
     decision_obj = _H2ADecision(
         decision=req.decision,
         reason=eff_reason,
         proposal_id=req.proposal_id,
         user_address=user_addr,
         timestamp=datetime.now(timezone.utc).isoformat(),
+        mode=proposal_mode,
+        outcome=("auto-allowed" if is_auto and req.decision == "ACCEPT" else ""),
     )
 
     # §11 决策信号(P3-a 对齐):REST 拍板与 WS 同喂 样本→结晶 / stats / decision_log。
@@ -663,7 +674,9 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
                             domain=req.to_address_domain_id or "",
                             role=req.to_address_role or "",
                             edits=(req.edits or None),
-                            batch=(req.batch or ""))   # docs/92 刀3:批次标落流水/Trace
+                            batch=(req.batch or ""),
+                            mode=proposal_mode,
+                            auto_decided=is_auto)   # docs/92 刀3:批次标落流水/Trace
 
     # D5:按 kind 兑现(若接了 registry)。reason 可选,不拦 REJECT。
     def _dispatch() -> dict[str, Any] | None:
@@ -687,11 +700,15 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
             asyncio.run(raise_drive_wrapup_cards(request.app))   # fs_grants + docs/96 刀0 外发草稿
         except Exception:
             logger.debug("[h2a_decide] 委派收尾升卡失败(不阻断)", exc_info=True)
-        return res.to_dict() if res is not None else None
+        d = res.to_dict() if res is not None else None
+        if d is not None:
+            d["auto_decided"] = is_auto
+        return d
 
     if req.decision == _H2A_DEFER:
         # K5:DEFER 不发 envelope,返 null;D5:挂起(留 registry,下次再呈现)
-        return {"envelope": None, "decision": req.decision, "dispatch": _dispatch()}
+        return {"envelope": None, "decision": req.decision, "dispatch": _dispatch(),
+                "auto_decided": is_auto, "mode": proposal_mode}
 
     # K5 唯一 Envelope 构造路径(REJECT 的空 reason 已在上面补成占位,A8 不破)
     env = _decision_to_envelope(decision_obj, to_addr)
@@ -699,6 +716,8 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
     return {
         "envelope": _envelope_to_dict(env),
         "decision": req.decision,
+        "mode": proposal_mode,
+        "auto_decided": is_auto,
         "dispatch": _dispatch(),  # D5:ACCEPT 兑现结果 / REJECT 丢弃回执(handler 内会 stash 回报卡)
         # 执行后回报卡:兑现跑了独立验收 → 把"它到底验过没"翻成卡(grounded ✓ 的自然产地)
         "report_card": pop_report_card(request.app, req.proposal_id),

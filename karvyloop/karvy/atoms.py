@@ -27,7 +27,7 @@ import dataclasses
 import hashlib
 import logging
 import time
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
 from karvyloop.a2a import Envelope
 from karvyloop.domain import Address
@@ -184,6 +184,9 @@ class Proposal:
     # proposal_id)。**纯视觉收纳**:前端右栏按它分组折叠,每张卡仍独立拍(独立 h2a_decision
     # 流水,不丢拍板粒度)。老卡/不带链的卡 = 空串,前端按单卡渲染(0 视觉回归)。
     chain_id: str = ""
+    # H2A 拍板模式:阻塞式(默认,等人拍) / 非阻塞式(先自动推进,用户可事后追拍)。
+    # 非阻塞拍板的结果仍沉淀决策偏好,但不回头修正已运行完的结果。
+    mode: Literal["blocking", "non_blocking"] = "blocking"
 
     def __post_init__(self):
         if not self.proposal_id:
@@ -209,6 +212,7 @@ class Proposal:
             "basis": self.basis,              # ch4:决策依据(为什么)
             "context_ref": dict(self.context_ref),  # ch4:上下文跳转目标
             "chain_id": self.chain_id,       # docs/92 刀1:同链合并(空=无链,前端单卡渲染)
+            "mode": self.mode,               # H2A 阻塞/非阻塞模式
         }
 
     @classmethod
@@ -229,6 +233,7 @@ class Proposal:
             basis=str(d.get("basis", "") or ""),
             context_ref=dict(d.get("context_ref", {}) or {}),
             chain_id=str(d.get("chain_id", "") or ""),  # docs/92 刀1;老落盘文件无此键 → ""
+            mode=str(d.get("mode", "blocking") or "blocking"),  # H2A 模式;老落盘文件无此键 → blocking
         )
 
 

@@ -46,7 +46,9 @@ def proposal_wire_payload(registry: Any, proposal: Any) -> dict:
       前端组头「🔗 关于:{intent}」+ 空理解保护句直引它,零 LLM;
     - `high_risk`:kind ∈ silence.HIGH_RISK_KINDS —— 前端组折叠对高风险卡**永远展开
       置顶**(同刀1b 安全不折叠哲学),判定源唯一(不在前端另抄 kind 表)。
-    fail-soft:registry 缺/查询坏 → 只少 chain_intent,卡照常出。
+    - `mode`:Proposal.mode(blocking/non_blocking),老卡缺省 blocking。
+    - `auto_decided`:本卡是否已被系统自动推进(非阻塞模式),待用户追拍。
+    fail-soft:registry 缺/查询坏 → 只少 chain_intent/auto_decided,卡照常出。
     """
     d = proposal.to_dict()  # duck type:不直接 import Proposal
     try:
@@ -62,6 +64,17 @@ def proposal_wire_payload(registry: Any, proposal: Any) -> dict:
         d["high_risk"] = str(d.get("kind") or "") in HIGH_RISK_KINDS
     except Exception:
         d["high_risk"] = False
+    # H2A 模式 + 自动推进状态(非阻塞模式用)
+    try:
+        d["mode"] = str(getattr(proposal, "mode", "blocking") or "blocking")
+        pid = str(getattr(proposal, "proposal_id", "") or "")
+        if pid and registry is not None and hasattr(registry, "is_auto_decided"):
+            d["auto_decided"] = bool(registry.is_auto_decided(pid))
+        else:
+            d["auto_decided"] = False
+    except Exception:
+        d["mode"] = "blocking"
+        d["auto_decided"] = False
     return d
 
 
@@ -109,6 +122,68 @@ async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = T
                 return 0
         except Exception as e:   # 静音判定失败 → 走正常路径(宁可少静音绝不静音错)
             logger.debug(f"[proposals] 静音判定失败,走正常路径: {e}")
+
+    # H2A 非阻塞模式(docs/02 §11 + Hardy 2026-08-01):用户选择"让它先跑",
+    # 系统先按默认路径(ACCEPT)推进,用户仍可事后追拍,拍的结果沉淀为决策偏好,
+    # 但不回头修正已运行完的结果。
+    # 高危 kind / 不可逆语义 / 无 handler → 强制降级为阻塞模式(不能让用户误开全放手)。
+    if getattr(proposal, "mode", "blocking") == "non_blocking":
+        try:
+            from karvyloop.karvy.silence import HIGH_RISK_KINDS, irreversible_semantics
+            kind = getattr(proposal, "kind", "") or ""
+            pid = getattr(proposal, "proposal_id", "") or ""
+            force_blocking = False
+            if kind in HIGH_RISK_KINDS:
+                logger.info("[proposals] 非阻塞卡 %s 属高危 kind(%s) → 强制阻塞", pid, kind)
+                force_blocking = True
+            if not force_blocking:
+                sem = irreversible_semantics(kind, getattr(proposal, "payload", None),
+                                             getattr(proposal, "summary", "") or "")
+                if sem:
+                    logger.info("[proposals] 非阻塞卡 %s 含不可逆语义(%s) → 强制阻塞", pid, sem)
+                    force_blocking = True
+            handlers = getattr(app.state, "proposal_handlers", None) or {}
+            if not force_blocking and handlers.get(kind) is None:
+                logger.info("[proposals] 非阻塞卡 %s 无 handler → 降级阻塞(不吞卡)", pid)
+                force_blocking = True
+            if not force_blocking:
+                # 先登记(保证 pending 里有,auto_decide 才有锚点),再 dispatch,再标记 auto_decided。
+                registry = getattr(app.state, "proposal_registry", None)
+                if registry is not None and pid:
+                    try:
+                        registry.register(proposal)
+                        stored = registry.get(pid)
+                        if stored is not None:
+                            proposal = stored
+                    except Exception as e:
+                        logger.debug(f"[proposals] 非阻塞登记失败,降级阻塞: {e}")
+                        force_blocking = True
+            if not force_blocking:
+                from karvyloop.karvy.proposal_registry import dispatch_accept
+                try:
+                    res = dispatch_accept(proposal, handlers)
+                    # 推进结果写 Trace + 决策 log(审计,但不进偏好结晶;追拍时才进)。
+                    _trace_auto_decided(app, proposal, res)
+                    registry.auto_decide(pid, decision="ACCEPT", detail=res.detail)
+                    # 推进后仍把卡推给前端,但带 auto_decided 标记,按钮变成"确认/拒绝/稍后"。
+                except Exception as e:
+                    logger.warning("[proposals] 非阻塞自动推进失败 %s: %s", pid, e)
+                    # 执行失败 → 清登记,降级阻塞(等人拍,不吞错误)。
+                    try:
+                        registry.remove(pid)
+                    except Exception:
+                        pass
+                    force_blocking = True
+        except Exception as e:
+            logger.debug(f"[proposals] 非阻塞判定异常,走阻塞: {e}")
+            force_blocking = True
+        # 强制阻塞降级:把 proposal mode 改回 blocking 继续走正常出卡路径。
+        if force_blocking:
+            try:
+                import dataclasses
+                proposal = dataclasses.replace(proposal, mode="blocking")
+            except Exception:
+                pass
 
     # D5(docs/30 PR-2):推给用户前先进待决议表 → ACCEPT 时凭 proposal_id 查回兑现。
     registry = getattr(app.state, "proposal_registry", None)
@@ -442,6 +517,31 @@ __all__ = [
     "raise_drive_wrapup_cards",
     "trace_aged_defers",
 ]
+
+def _trace_auto_decided(app: Any, proposal: Any, result: Any) -> None:
+    """非阻塞模式下系统自动推进后写审计 Trace(kind=h2a_auto_decided)。
+
+    这条 Trace 只用于 lifeline/审计,**不进**决策偏好结晶;用户事后追拍时再单独
+    写 decision_made/decision_pref 样本。fail-soft,不阻断任何行为。
+    """
+    try:
+        tr = getattr(getattr(app, "state", None), "trace", None)
+        if tr is None:
+            return
+        pid = getattr(proposal, "proposal_id", "") or ""
+        kind = getattr(proposal, "kind", "") or ""
+        from karvyloop.cognition.trace import TraceEntry
+        payload = {
+            "kind": kind,
+            "summary": (getattr(proposal, "summary", "") or "")[:200],
+            "ok": bool(getattr(result, "ok", False)),
+            "detail": (getattr(result, "detail", "") or "")[:200],
+        }
+        tr.append(TraceEntry(task_id=pid, kind="h2a_auto_decided",
+                             payload=payload, agent="karvy", source="proposals"))
+    except Exception as e:
+        logger.debug(f"[proposals] auto_decided Trace 埋点失败(不阻断): {e}")
+
 
 def _schedule_taste_bet(app: Any, proposal: Any) -> None:
     """异步押一注"用户会 ACCEPT 还是 REJECT"(口味命中率的前瞻端)。
