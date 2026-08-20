@@ -18,6 +18,14 @@ from .policy import (
     Verdict,
     required_mode,
 )
+from .seams import (
+    SEAMS,
+    SLOT_FS,
+    SLOT_SANDBOX,
+    SLOT_SHELL,
+    CapabilitySlot,
+    SeamRegistry,
+)
 from .token import has_grant, is_expired, mint, verify
 
 __all__ = [
@@ -30,6 +38,9 @@ __all__ = [
     # policy
     "Mode", "Verdict", "Rule", "PermissionContext", "Prompter",
     "DEFAULT_TOOL_REQUIREMENTS", "required_mode",
+    # seams(能力三相:定义/提供者/消费者;provider 一换整体迁移)
+    "SEAMS", "SeamRegistry", "CapabilitySlot",
+    "SLOT_SANDBOX", "SLOT_FS", "SLOT_SHELL",
     # token
     "mint", "verify", "is_expired", "has_grant",
 ]

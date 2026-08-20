@@ -20,16 +20,32 @@ from .web import WebFetchTool, WebSearchTool
 from .reconcile import ReconcileReceiptTool
 
 
-def make_coding_tools(sandbox, file_state, workspace_root: str,
+def make_coding_tools(sandbox=None, file_state=None, workspace_root: str = ".",
                       *, token: CapabilityToken,
-                      read_only: bool = False) -> dict[str, Any]:
+                      read_only: bool = False,
+                      seams=None) -> dict[str, Any]:
     """工厂:返回 {tool_name: instance}。token 在任务生命周期内绑入工具实例。
+
+    sandbox 可省(capability/seams):不传则从能力缝注册表解析 sandbox provider
+    (selector.default_sandbox 选用时已登记)。传了 = 旧路径,优先用(现状零回归)。
+    seams 参数可注入自定义注册表(测试/上层定制);None = 用全局 SEAMS。
 
     read_only=True(loop step3 独立验收者用):只给 read_file + run_command —— 能读产物、
     能跑测试/脚本核验,但**不给** write_file / edit_file,维持作者(maker)/验收者(checker)
     分离。注:run_command(bash)理论上仍能写文件,是已知 loophole,靠验收者 prompt 明令
     "只核验不修改" 约束;P1 上真只读沙箱再硬隔离。
     """
+    if sandbox is None:
+        # 从能力缝解析(selector 已注册);缝里没有 → 兜底显式选一次(仍会注册)。
+        try:
+            from karvyloop.capability.seams import SEAMS, SLOT_SANDBOX
+            registry = seams if seams is not None else SEAMS
+            sandbox = registry.resolve(SLOT_SANDBOX.name)
+        except Exception:
+            sandbox = None
+        if sandbox is None:
+            from karvyloop.sandbox.selector import default_sandbox
+            sandbox = default_sandbox()
     tools = {
         "read_file": ReadTool(sandbox, file_state, workspace_root, token=token),
         "run_command": BashTool(sandbox, file_state, workspace_root, token=token),
