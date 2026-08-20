@@ -311,6 +311,31 @@ class PendingProposalRegistry:
     def is_auto_decided(self, proposal_id: str) -> bool:
         return bool((self._meta.get(proposal_id) or {}).get("auto_decided"))
 
+    def set_mode(self, proposal_id: str, mode: str) -> bool:
+        """翻转一张 pending 卡的拍板模式(blocking ↔ non_blocking)。
+
+        Proposal 是 frozen → dataclasses.replace 换新对象放回表里(卡龄/auto 状态等 meta 不动)。
+        已在 auto_decided 追拍态的卡不许翻回 blocking(已执行,翻回=假装没跑过;要转回走 DEFER)。
+        卡不在 / 非法 mode → False。
+        """
+        if mode not in ("blocking", "non_blocking"):
+            return False
+        with self._lock:
+            prop = self._pending.get(proposal_id)
+            if prop is None:
+                return False
+            meta = self._meta.get(proposal_id) or {}
+            if meta.get("auto_decided") and mode == "blocking":
+                return False   # 已自动推进 → 不许翻回(用 DEFER 转阻塞追拍)
+            if getattr(prop, "mode", "blocking") == mode:
+                return True    # 已是目标态(幂等)
+            try:
+                self._pending[proposal_id] = dataclasses.replace(prop, mode=mode)
+            except Exception:
+                return False
+            self._save()
+            return True
+
     def auto_decide(self, proposal_id: str, *, decision: str = "ACCEPT",
                     detail: str = "", now: Optional[float] = None) -> bool:
         """把一张已 pending 的卡标记为"已自动推进"(非阻塞模式)。

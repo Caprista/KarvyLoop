@@ -1475,6 +1475,11 @@ html, body {
 .h2a-defer, .h2a-proposal .defer  { color: var(--text-2); background: var(--surface-2); }
 .h2a-reject, .h2a-proposal .reject { color: var(--rose-deep); background: var(--rose-soft); border-color: var(--rose-line); }
 .h2a-reject:hover, .h2a-proposal .reject:hover { background: rgba(216,82,124,0.18); border-color: var(--rose); }
+/* 「⚡ 先跑」钮:次要动作(默认拍板仍是主路径),窄一点、不占整行 flex */
+.h2a-runfirst { flex: 0 0 auto; font-size: var(--fs-12); padding: 8px 8px; color: var(--text-3); }
+.h2a-runfirst:hover { color: var(--accent-strong); border-color: var(--accent); }
+/* 非阻塞已推进状态条:中性提示,不是成功也不是警告(用户还要追拍) */
+.h2a-auto-status { font-size: var(--fs-12); color: var(--text-3); padding: 2px 2px 6px; }
 /* 可选拒绝理由:留空也能拒(Hardy 不强制);小、低调,不喧宾夺主 */
 .h2a-reason {
   margin-top: 7px; width: 100%; box-sizing: border-box;

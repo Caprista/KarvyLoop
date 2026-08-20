@@ -127,58 +127,48 @@ async def broadcast_proposal(app: Any, proposal: Any, *, allow_silence: bool = T
     # 系统先按默认路径(ACCEPT)推进,用户仍可事后追拍,拍的结果沉淀为决策偏好,
     # 但不回头修正已运行完的结果。
     # 高危 kind / 不可逆语义 / 无 handler → 强制降级为阻塞模式(不能让用户误开全放手)。
-    if getattr(proposal, "mode", "blocking") == "non_blocking":
+    # 守卫/执行抽成模块级函数(non_blocking_block_reason / execute_non_blocking),
+    # 与「卡上手动翻非阻塞」端点(routes_system /api/proposals/mode)共用同一套判定,防漂移。
+    eff_mode = getattr(proposal, "mode", "blocking") or "blocking"
+    if eff_mode == "blocking":
+        # 控制台默认模式(Hardy 2026-08-20「可以设置」):用户设了"新卡默认先跑后拍" →
+        # 未显式带 mode 的卡(今天所有生产者都缺省 blocking)按非阻塞处理;守卫仍会强制降级。
         try:
-            from karvyloop.karvy.silence import HIGH_RISK_KINDS, irreversible_semantics
-            kind = getattr(proposal, "kind", "") or ""
-            pid = getattr(proposal, "proposal_id", "") or ""
-            force_blocking = False
-            if kind in HIGH_RISK_KINDS:
-                logger.info("[proposals] 非阻塞卡 %s 属高危 kind(%s) → 强制阻塞", pid, kind)
-                force_blocking = True
-            if not force_blocking:
-                sem = irreversible_semantics(kind, getattr(proposal, "payload", None),
-                                             getattr(proposal, "summary", "") or "")
-                if sem:
-                    logger.info("[proposals] 非阻塞卡 %s 含不可逆语义(%s) → 强制阻塞", pid, sem)
-                    force_blocking = True
-            handlers = getattr(app.state, "proposal_handlers", None) or {}
-            if not force_blocking and handlers.get(kind) is None:
-                logger.info("[proposals] 非阻塞卡 %s 无 handler → 降级阻塞(不吞卡)", pid)
-                force_blocking = True
-            if not force_blocking:
-                # 先登记(保证 pending 里有,auto_decide 才有锚点),再 dispatch,再标记 auto_decided。
-                registry = getattr(app.state, "proposal_registry", None)
-                if registry is not None and pid:
-                    try:
-                        registry.register(proposal)
-                        stored = registry.get(pid)
-                        if stored is not None:
-                            proposal = stored
-                    except Exception as e:
-                        logger.debug(f"[proposals] 非阻塞登记失败,降级阻塞: {e}")
-                        force_blocking = True
-            if not force_blocking:
-                from karvyloop.karvy.proposal_registry import dispatch_accept
+            from karvyloop.config_h2a_mode import NON_BLOCKING, read_h2a_default_mode
+            if read_h2a_default_mode() == NON_BLOCKING:
+                import dataclasses as _dc
+                proposal = _dc.replace(proposal, mode="non_blocking")
+                eff_mode = "non_blocking"
+        except Exception:
+            pass   # 配置读不到 = 保守阻塞(现状)
+    if eff_mode == "non_blocking":
+        pid0 = getattr(proposal, "proposal_id", "") or ""
+        reason = non_blocking_block_reason(app, proposal)
+        if reason:
+            logger.info("[proposals] 非阻塞卡 %s 强制阻塞: %s", pid0, reason)
+        else:
+            # 先登记(保证 pending 里有,auto_decide 才有锚点),再 dispatch,再标记 auto_decided。
+            registry = getattr(app.state, "proposal_registry", None)
+            if registry is not None and pid0:
                 try:
-                    res = dispatch_accept(proposal, handlers)
-                    # 推进结果写 Trace + 决策 log(审计,但不进偏好结晶;追拍时才进)。
-                    _trace_auto_decided(app, proposal, res)
-                    registry.auto_decide(pid, decision="ACCEPT", detail=res.detail)
-                    # 推进后仍把卡推给前端,但带 auto_decided 标记,按钮变成"确认/拒绝/稍后"。
+                    registry.register(proposal)
+                    stored = registry.get(pid0)
+                    if stored is not None:
+                        proposal = stored
                 except Exception as e:
-                    logger.warning("[proposals] 非阻塞自动推进失败 %s: %s", pid, e)
+                    logger.debug(f"[proposals] 非阻塞登记失败,降级阻塞: {e}")
+                    reason = "register_failed"
+            if not reason and registry is not None:
+                res = execute_non_blocking(app, proposal)
+                if res is None:
                     # 执行失败 → 清登记,降级阻塞(等人拍,不吞错误)。
                     try:
-                        registry.remove(pid)
+                        registry.remove(pid0)
                     except Exception:
                         pass
-                    force_blocking = True
-        except Exception as e:
-            logger.debug(f"[proposals] 非阻塞判定异常,走阻塞: {e}")
-            force_blocking = True
+                    reason = "dispatch_failed"
         # 强制阻塞降级:把 proposal mode 改回 blocking 继续走正常出卡路径。
-        if force_blocking:
+        if reason:
             try:
                 import dataclasses
                 proposal = dataclasses.replace(proposal, mode="blocking")
@@ -512,11 +502,63 @@ __all__ = [
     "ProposalPump",
     "broadcast_proposal",
     "proposal_wire_payload",
+    "non_blocking_block_reason",
+    "execute_non_blocking",
     "raise_fs_access_cards",
     "raise_outbound_draft_cards",
     "raise_drive_wrapup_cards",
     "trace_aged_defers",
 ]
+
+def non_blocking_block_reason(app: Any, proposal: Any) -> str:
+    """非阻塞自动推进的守卫判定:返回 "" = 可自动推进,否则 = 强制阻塞的原因。
+
+    守卫(与「挣来的静音」同口径的保守子集):
+    - 高危 kind(silence.HIGH_RISK_KINDS)→ 必人拍
+    - 不可逆语义(外发/删除/支付/生产写)→ 必人拍
+    - 无兑现 handler → 自动推进=吞卡,绝不
+    判定链任何一环异常 → 返回原因(保守,宁可阻塞)。
+    """
+    try:
+        from karvyloop.karvy.silence import HIGH_RISK_KINDS, irreversible_semantics
+        kind = getattr(proposal, "kind", "") or ""
+        if not kind:
+            return "no_kind"
+        if kind in HIGH_RISK_KINDS:
+            return f"high_risk_kind:{kind}"
+        sem = irreversible_semantics(kind, getattr(proposal, "payload", None),
+                                     getattr(proposal, "summary", "") or "")
+        if sem:
+            return f"irreversible:{sem}"
+        handlers = getattr(app.state, "proposal_handlers", None) or {}
+        if handlers.get(kind) is None:
+            return "no_handler"
+        return ""
+    except Exception as e:
+        return f"guard_error:{e}"
+
+
+def execute_non_blocking(app: Any, proposal: Any):
+    """对一张**已登记**的非阻塞卡执行自动推进:dispatch + Trace 审计 + 标记 auto_decided。
+
+    返回 DispatchResult(即使 ok=False 也算"推进过"——失败 detail 如实记,用户追拍时看得见);
+    执行路径异常 → None(调用方决定降级阻塞)。不进偏好结晶(追拍时才进)。
+    """
+    from karvyloop.karvy.proposal_registry import dispatch_accept
+    pid = getattr(proposal, "proposal_id", "") or ""
+    kind = getattr(proposal, "kind", "") or ""
+    handlers = getattr(app.state, "proposal_handlers", None) or {}
+    registry = getattr(app.state, "proposal_registry", None)
+    try:
+        res = dispatch_accept(proposal, handlers)
+        _trace_auto_decided(app, proposal, res)
+        if registry is not None:
+            registry.auto_decide(pid, decision="ACCEPT", detail=res.detail)
+        return res
+    except Exception as e:
+        logger.warning("[proposals] 非阻塞自动推进异常 %s(%s): %s", pid, kind, e)
+        return None
+
 
 def _trace_auto_decided(app: Any, proposal: Any, result: Any) -> None:
     """非阻塞模式下系统自动推进后写审计 Trace(kind=h2a_auto_decided)。

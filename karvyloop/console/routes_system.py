@@ -723,3 +723,80 @@ def api_h2a_decide(req: H2ADecideRequest, request: Request) -> dict[str, Any]:
         "report_card": pop_report_card(request.app, req.proposal_id),
     }
 
+
+# ---- H2A 阻塞/非阻塞开关(Hardy 2026-08-20「拍板功能可以设置阻塞和非阻塞模式」)----
+class ProposalModeRequest(BaseModel):
+    proposal_id: str = Field(..., min_length=1, max_length=512)
+    mode: str = Field(..., pattern="^(blocking|non_blocking)$")
+
+
+@router.post("/proposals/mode")
+def api_proposal_mode(req: ProposalModeRequest, request: Request) -> dict[str, Any]:
+    """卡上手动翻转拍板模式:「⚡ 先跑后拍」(翻非阻塞=立即自动推进)/ 翻回阻塞。
+
+    - 翻非阻塞:守卫与广播路径同一套(non_blocking_block_reason:高危 kind/不可逆语义/
+      无 handler 一律拒翻,回 ok=False + reason);过守卫 → 立即 dispatch 推进 + 标
+      auto_decided,卡留在 pending 等追拍。推进像 h2a_decide 一样收尾升卡(fs_grants/外发草稿)。
+    - 翻回阻塞:只对**还没自动推进**的卡有意义;已 auto_decided 的拒翻(已执行,翻回=
+      假装没跑过 —— 要转回阻塞走 DEFER 追拍路径)。
+    """
+    registry = getattr(request.app.state, "proposal_registry", None)
+    if registry is None:
+        return {"ok": False, "reason": "no_registry"}
+    prop = registry.get(req.proposal_id)
+    if prop is None:
+        return {"ok": False, "reason": "not_found"}
+
+    if req.mode == "non_blocking":
+        if registry.is_auto_decided(req.proposal_id):
+            return {"ok": True, "auto_decided": True, "already": True}
+        from karvyloop.console.proposals import (
+            execute_non_blocking, non_blocking_block_reason)
+        reason = non_blocking_block_reason(request.app, prop)
+        if reason:
+            return {"ok": False, "reason": reason}
+        if not registry.set_mode(req.proposal_id, "non_blocking"):
+            return {"ok": False, "reason": "set_mode_failed"}
+        res = execute_non_blocking(request.app, registry.get(req.proposal_id))
+        if res is None:
+            registry.set_mode(req.proposal_id, "blocking")   # 推进异常 → 翻回阻塞(不吞错误)
+            return {"ok": False, "reason": "dispatch_failed"}
+        # 与 h2a_decide 同待遇:委派/执行收尾把「想要」升卡(sync 端点在 FastAPI 线程池,
+        # asyncio.run 安全;失败不阻断回执)。
+        import asyncio
+        from karvyloop.console.proposals import raise_drive_wrapup_cards
+        try:
+            asyncio.run(raise_drive_wrapup_cards(request.app))
+        except Exception:
+            logger.debug("[proposals/mode] 推进收尾升卡失败(不阻断)", exc_info=True)
+        return {"ok": True, "auto_decided": True, "dispatch": res.to_dict()}
+
+    # 翻回阻塞(仅未推进的卡;已 auto_decided → 拒翻)
+    if registry.is_auto_decided(req.proposal_id):
+        return {"ok": False, "reason": "already_auto_decided"}
+    ok = registry.set_mode(req.proposal_id, "blocking")
+    return {"ok": ok, "auto_decided": False, "reason": "" if ok else "set_mode_failed"}
+
+
+class DefaultModeRequest(BaseModel):
+    mode: str = Field(..., pattern="^(blocking|non_blocking)$")
+
+
+@router.get("/proposals/default_mode")
+def api_proposals_default_mode_get() -> dict[str, Any]:
+    """读「新卡默认拍板模式」(config.yaml h2a_default_mode;缺省 blocking)。"""
+    from karvyloop.config_h2a_mode import read_h2a_default_mode
+    return {"mode": read_h2a_default_mode()}
+
+
+@router.post("/proposals/default_mode")
+def api_proposals_default_mode_set(req: DefaultModeRequest) -> dict[str, Any]:
+    """设「新卡默认拍板模式」并持久化(config.yaml;重启生效保持)。
+
+    non_blocking = 新卡默认「先跑后拍」;高危/不可逆卡在执行咽喉仍强制阻塞
+    (non_blocking_block_reason),默认模式只松普通卡,安全闸不动。
+    """
+    from karvyloop.config_h2a_mode import write_h2a_default_mode
+    ok = write_h2a_default_mode(req.mode)
+    return {"ok": ok, "mode": req.mode if ok else ""}
+

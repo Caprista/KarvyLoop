@@ -241,6 +241,9 @@
         <section class="cockpit-col col-decide">
           <h2 class="col-head"><span><span data-i18n="cockpit.decide">⚖ 要我拍什么板</span><span id="decide-count" class="decide-count" hidden></span></span>
             <span class="col-acts">
+              <!-- H2A 默认拍板模式开关(Hardy 2026-08-20:拍板可设阻塞/非阻塞):✋=新卡等你拍(默认),
+                   ⚡=新卡先跑后拍(追拍仍沉淀决策偏好;高危/不可逆卡仍强制等你拍)。持久在 config.yaml。 -->
+              <button id="h2a-mode-toggle" class="col-act" data-i18n-title="h2a.mode_toggle.title.blocking">✋</button>
               <!-- 🧭 决策偏好就近入口(docs/90 刀2,§C #9:S2 + 决策卡就近入口):拍板列头一个小图标钮,
                    点开「你的标准」面板;带 nav-item 类吃 setupMgmtPanels 的 data-panel 委托绑定
                    (同 col-intel 的 My Pursuits 就近入口接法),不喧宾夺主 —— 图标钮不是大字入口。 -->

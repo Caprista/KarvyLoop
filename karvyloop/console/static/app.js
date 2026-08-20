@@ -1752,6 +1752,31 @@
       btnRow.appendChild(el("button", { class: "h2a-accept", onClick: () => decide("ACCEPT"), text: t("proposal.accept") }));
       btnRow.appendChild(el("button", { class: "h2a-defer", onClick: () => decide("DEFER"), text: t("proposal.defer") }));
       btnRow.appendChild(el("button", { class: "h2a-reject", onClick: () => decide("REJECT"), text: t("proposal.reject") }));
+      // 「⚡ 先跑后拍」(Hardy 2026-08-20:拍板可设非阻塞):点 = 这张卡立即自动推进,
+      // 转追拍态(确认/拒绝/稍后),你的追拍仍沉淀决策偏好、不改已跑结果。
+      // 高危卡(data-high-risk)不给这个钮 —— 后端守卫同样拒翻,双保险。
+      if (!payload.high_risk) {
+        const runFirstBtn = el("button", { class: "h2a-runfirst", type: "button",
+          text: t("proposal.run_first"), title: t("proposal.run_first.title") });
+        runFirstBtn.addEventListener("click", async () => {
+          runFirstBtn.disabled = true;
+          try {
+            const r = await _postJSON("/api/proposals/mode", { proposal_id: proposalId, mode: "non_blocking" });
+            if (r && r.ok) {
+              payload.mode = "non_blocking";
+              payload.auto_decided = true;
+              renderProposal(payload);   // 原地重渲成追拍态(同 id 替换,聊天流同卡同步)
+            } else {
+              runFirstBtn.textContent = t("proposal.run_first_failed");
+              runFirstBtn.title = (r && r.reason) ? String(r.reason) : "";
+            }
+          } catch (e) {
+            runFirstBtn.textContent = t("proposal.run_first_failed");
+            runFirstBtn.disabled = false;
+          }
+        });
+        btnRow.appendChild(runFirstBtn);
+      }
     }
     card.appendChild(btnRow);
     card.appendChild(reasonInput);   // 可选拒绝理由(不填也能拒)
@@ -5238,6 +5263,24 @@
     // 9.0e:绑"看建议"按钮
     const proposeBtn = document.getElementById("propose-btn");
     if (proposeBtn) proposeBtn.addEventListener("click", requestProposal);
+    // H2A 默认拍板模式开关(✋等你拍 / ⚡先跑后拍;持久在 config.yaml,重启保持)
+    const modeToggle = document.getElementById("h2a-mode-toggle");
+    if (modeToggle) {
+      const _paintModeToggle = (m) => {
+        const nb = (m === "non_blocking");
+        modeToggle.textContent = nb ? "⚡" : "✋";
+        modeToggle.title = t(nb ? "h2a.mode_toggle.title.non_blocking" : "h2a.mode_toggle.title.blocking");
+      };
+      _getJSON("/api/proposals/default_mode").then((d) => _paintModeToggle(d && d.mode)).catch(() => {});
+      modeToggle.addEventListener("click", async () => {
+        const cur = (modeToggle.textContent === "⚡") ? "non_blocking" : "blocking";
+        const next = (cur === "non_blocking") ? "blocking" : "non_blocking";
+        try {
+          const r = await _postJSON("/api/proposals/default_mode", { mode: next });
+          if (r && r.ok) _paintModeToggle(next);
+        } catch (e) { /* 网络抖动 → 保持原态 */ }
+      });
+    }
     // predict(你可能想做)手动刷新:现在就问一次(WS propose,回退 POST /api/propose)
     const predictRefreshBtn = document.getElementById("predict-refresh-btn");
     if (predictRefreshBtn) predictRefreshBtn.addEventListener("click", requestProposal);
