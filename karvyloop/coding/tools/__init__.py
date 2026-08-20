@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from karvyloop.schemas import CapabilityToken
@@ -18,6 +19,53 @@ from .edit import EditTool
 from .bash import BashTool
 from .web import WebFetchTool, WebSearchTool
 from .reconcile import ReconcileReceiptTool
+
+logger = logging.getLogger(__name__)
+
+# role 级工具预设(B 方向最小一刀):COMPOSITION.yaml `tools:` 段的组名 → 工具名集合。
+# `mcp` / `computer` 是动态前缀组(组内成员运行时才知道),在 apply_tool_preset 里按前缀展开。
+_TOOL_PRESET_GROUPS: dict[str, frozenset[str]] = {
+    "coding": frozenset({"read_file", "write_file", "edit_file", "run_command",
+                         "reconcile_receipt"}),
+    "network": frozenset({"web_search", "web_fetch"}),
+    "create_atom": frozenset({"create_atom"}),
+}
+
+
+def apply_tool_preset(tools: dict[str, Any], preset) -> dict[str, Any]:
+    """按 role 工具预设过滤工具集(白名单语义)。
+
+    preset = COMPOSITION.yaml `tools:` 段引用的组名/显式工具名列表。
+    - 组名:`coding` / `network` / `create_atom` 查表展开;`mcp` = 所有 mcp_*;
+      `computer` = 所有 mcp_computer_use_*(独立于 mcp 可单列 —— 桌面控制可单独授予)。
+    - 显式工具名:直通(与组展开结果并集)。
+    - 未知名:忽略 + log(fail-soft —— 写错预设名不该把 role 搞成零工具砖)。
+    - preset 为空/None → 原样返回(调用方保证只在 preset 非空时调;此处双保险)。
+
+    安全边界:本过滤是**可见性收窄**(prompt 噪音 + 攻击面),不是权限闸 ——
+    权限仍由 capability authorize / policy 下限表在执行咽喉兜底(过滤只是第一道工序)。
+    """
+    if not preset:
+        return tools
+    allowed: set[str] = set()
+    unknown: list[str] = []
+    for item in preset:
+        name = str(item or "").strip()
+        if not name:
+            continue
+        if name in _TOOL_PRESET_GROUPS:
+            allowed |= _TOOL_PRESET_GROUPS[name]
+        elif name == "mcp":
+            allowed |= {k for k in tools if k.startswith("mcp_")}
+        elif name == "computer":
+            allowed |= {k for k in tools if k.startswith("mcp_computer_use_") or k == "computer"}
+        elif name in tools:
+            allowed.add(name)
+        else:
+            unknown.append(name)
+    if unknown:
+        logger.warning("[tool_preset] 未知工具/组名被忽略: %s", unknown)
+    return {k: v for k, v in tools.items() if k in allowed}
 
 
 def make_coding_tools(sandbox=None, file_state=None, workspace_root: str = ".",
@@ -65,5 +113,5 @@ def make_coding_tools(sandbox=None, file_state=None, workspace_root: str = ".",
 __all__ = [
     "CodingResult",
     "ReadTool", "WriteTool", "EditTool", "BashTool", "WebFetchTool", "WebSearchTool",
-    "ReconcileReceiptTool", "make_coding_tools",
+    "ReconcileReceiptTool", "make_coding_tools", "apply_tool_preset",
 ]

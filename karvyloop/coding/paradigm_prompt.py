@@ -98,6 +98,12 @@ def build_role_paradigm_prompt(
         ws = f"你的工作区:{cwd}(要写文件/跑代码就在这,有读写权限,别往 /tmp 写)"
         cp = CodingPrompt(static=([name_anchor, text] if name_anchor else [text]),
                           dynamic_blocks=[ws])
+        # role 级工具可见性预设(B 方向最小一刀):COMPOSITION tools: 段 → ad-hoc 属性挂 persona,
+        # forge 在工具合并后按它过滤(base/MCP/create_atom 全覆盖;空 = 全量,0 回归)。
+        # 同 karvy_self / deontic_forbid 先例:机器可读属性,不进 prompt 文本。
+        _tool_preset = list(getattr(role_view, "tool_ids", None) or [])
+        if _tool_preset:
+            cp.tool_preset = _tool_preset
         # 本 prompt 已编入域治理(value.md + deontic forbid/oblige)—— 调用方据此**不再**把
         # governance_text 的域块重复注入 user 前缀(对抗验收:直聊路径曾双注入,浪费 token)。
         cp.covers_domain_governance = True

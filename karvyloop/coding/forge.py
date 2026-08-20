@@ -180,6 +180,13 @@ async def generate_and_run(
                               read_only=read_only)
     # A:并入 MCP 等外部工具 + 搜索源偏好(复用 key 的搜索优先);registry Tool 在此绑 token/sandbox
     _merge_extra_tools(tools, extra_tools, token=token, sandbox=sandbox)
+    # role 级工具可见性预设(B 方向最小一刀):persona 带了 tool_preset(角色 COMPOSITION tools: 段,
+    # 由 build_role_paradigm_prompt 挂)→ 合并后按白名单过滤(可见性收窄;权限仍由执行咽喉
+    # authorize 兜底)。无 preset = 全量(0 回归)。
+    _tool_preset = getattr(system_prompt, "tool_preset", None)
+    if _tool_preset:
+        from karvyloop.coding.tools import apply_tool_preset
+        tools = apply_tool_preset(tools, _tool_preset)
     # 9.4e 方案 A:有人格 prompt 就用人格(对话优先,要动手才用工具);
     # 没有(如 `karvyloop run` 编码路径)→ 默认 coding 提示(0 回归)。
     sys_prompt = system_prompt if system_prompt is not None else build_coding_prompt(workspace_root)

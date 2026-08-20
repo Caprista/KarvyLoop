@@ -34,6 +34,10 @@ _ATOM_REF_RE = re.compile(r"atom:\s*([A-Za-z0-9_]+)")
 # COMPOSITION.yaml 里的 skill 引用(L0 技能;角色"用不拥有",同 atom;
 # 技能名 kebab-case,放宽到 \w\- 与 skill_index 的 name 一致)。
 _SKILL_REF_RE = re.compile(r"skill:\s*([\w\-]+)")
+# COMPOSITION.yaml 里的工具预设引用(role 级工具可见性,B 方向最小一刀):
+# `- tool: <组名|显式工具名>`。组名(coding/network/mcp/computer/create_atom)在执行侧
+# 展开(coding/tools.apply_tool_preset);显式名直通。无 tools 段 = 全量(0 回归)。
+_TOOL_REF_RE = re.compile(r"tool:\s*([\w\-]+)")
 
 
 def normalize_tags(raw) -> list[dict]:
@@ -75,14 +79,20 @@ def _slot_filename(slot: str) -> str:
 
 
 def _composition_yaml(role_id: str, atom_ids: list[str],
-                      skill_ids: Optional[list[str]] = None) -> str:
-    """物化一个合法 COMPOSITION.yaml(含 step_id 头 + atom 引用 + skill 引用)。
+                      skill_ids: Optional[list[str]] = None,
+                      tool_ids: Optional[list[str]] = None) -> str:
+    """物化一个合法 COMPOSITION.yaml(含 step_id 头 + atom 引用 + skill 引用 + 工具预设)。
 
     `skills:` 与 `atoms:` 平行 —— 角色编写时**直接引用**公共技能库里的技能(docs/00 §2.2:
     L0 技能可被任何 L1 原子调用;这里在角色层声明"这个角色随身带哪几个技能",绑定即生效,
     不靠快脑模糊召回碰运气)。"用不拥有":引的技能必须已在技能库(create 时校验)。
+
+    `tools:`(可选,role 级工具可见性预设)= 这个角色 drive 时可见的工具白名单
+    (组名 coding/network/mcp/computer/create_atom 或显式工具名;执行侧 apply_tool_preset 展开)。
+    缺省不写 = 全量(现状,0 回归)。
     """
     skill_ids = skill_ids or []
+    tool_ids = tool_ids or []
     lines = [
         "<!-- step_id: COMPOSITION -->",
         f"role: {role_id}",
@@ -98,6 +108,10 @@ def _composition_yaml(role_id: str, atom_ids: list[str],
         lines.append(f"  - skill: {sid}")
     if not skill_ids:
         lines.append("  # (暂未挑技能;可从技能库引用或导入第三方)")
+    if tool_ids:
+        lines.append("tools:")
+        for tid in tool_ids:
+            lines.append(f"  - tool: {tid}")
     return "\n".join(lines) + "\n"
 
 
@@ -112,6 +126,7 @@ class RoleView:
     def __init__(self, role_id: str, identity: str, atom_ids: list[str], path: Path,
                  *, nickname: str = "", title: str = "", model: str = "",
                  skill_ids: Optional[list[str]] = None,
+                 tool_ids: Optional[list[str]] = None,
                  tags: Optional[list] = None) -> None:
         self.id = role_id
         self.identity = identity
@@ -121,6 +136,9 @@ class RoleView:
         self.title = title         # brick4:职务(如"产品经理")
         self.model = model         # 角色级模型引用(空=层叠到域/全局 default;#1 §3.1 软默认层叠)
         self.skill_ids = list(skill_ids or [])  # 角色随身技能(L0,引用公共技能库;绑定即生效)
+        # 角色级工具可见性预设(COMPOSITION tools: 段;空 = 全量,0 回归)。
+        # 组名(coding/network/mcp/computer/create_atom)在执行侧展开;显式工具名直通。
+        self.tool_ids = list(tool_ids or [])
         # 语义标签(#3b,同 atom 语义):双语标签集,给筛选 + 跨语言语义匹配用(无向量,LLM 打一次)。
         # 每个标签 = {"en": "...", "zh": "..."};旧英文字符串向后兼容(读时归一到 dict,缺 zh 显 en)。
         self.tags = normalize_tags(tags)
@@ -130,6 +148,7 @@ class RoleView:
                 "atom_ids": list(self.atom_ids), "path": str(self.path),
                 "nickname": self.nickname, "title": self.title, "model": self.model,
                 "skill_ids": list(self.skill_ids),
+                "tool_ids": list(self.tool_ids),
                 "tags": [dict(t) for t in self.tags]}
 
     def display_name(self) -> str:
@@ -241,6 +260,7 @@ class RoleRegistry:
         user_desc: str = "",
         atom_ids: Optional[list[str]] = None,
         skill_ids: Optional[list[str]] = None,  # 角色随身技能(引用技能库;绑定即生效)
+        tool_ids: Optional[list[str]] = None,   # 工具可见性预设(组名/显式名;空=全量)
         nickname: str = "",   # brick4:花名(进某域时的人名)
         title: str = "",      # brick4:职务
         model: str = "",      # 角色级模型引用(空=默认)
@@ -256,6 +276,7 @@ class RoleRegistry:
             raise DuplicateRoleError(f"角色「{rid}」已存在")
         picks = list(atom_ids or [])
         skills = list(skill_ids or [])
+        tools_preset = list(tool_ids or [])
         # 甲:引的原子必须在公共原子库(缺 → 先买糖)
         if self._atoms is not None:
             missing = [a for a in picks if self._atoms.get(a) is None]
@@ -273,7 +294,7 @@ class RoleRegistry:
         for slot in SLOT_NAMES:
             fname = _slot_filename(slot)
             if slot == "COMPOSITION":
-                content = _composition_yaml(rid, picks, skills)
+                content = _composition_yaml(rid, picks, skills, tools_preset)
             elif slot in filled:
                 body = (filled[slot] or "").strip() or "(待充实)"
                 content = f"# {slot}\n\n{body}\n"
@@ -297,7 +318,7 @@ class RoleRegistry:
             _json.dumps({"nickname": nn, "title": tt, "model": mdl, "tags": norm_tags},
                         ensure_ascii=False), encoding="utf-8")
         return RoleView(rid, identity.strip(), picks, d, nickname=nn, title=tt, model=mdl,
-                        skill_ids=skills, tags=norm_tags)
+                        skill_ids=skills, tool_ids=tools_preset, tags=norm_tags)
 
     # ---- 读 ----
     @_locked
@@ -306,24 +327,28 @@ class RoleRegistry:
                title: Optional[str] = None,
                skill_ids: Optional[list[str]] = None,
                atom_ids: Optional[list[str]] = None,
+               tool_ids: Optional[list[str]] = None,
                tags: Optional[list] = None) -> Optional["RoleView"]:
         """编辑角色(P0 审计:此前写错只能删重建)。只改传入字段:identity(人格)/ model / 花名 / 职务 /
-        skill_ids(随身技能)/ atom_ids(可用原子)。不存在返 None。七魂里只让改 IDENTITY;MEMORY/COMMITMENT
-        等运行时文件走 update_soul 不动这里。改 skill_ids/atom_ids 时重写 COMPOSITION.yaml(未传的那段保留)。"""
+        skill_ids(随身技能)/ atom_ids(可用原子)/ tool_ids(工具可见性预设)。不存在返 None。七魂里只让改
+        IDENTITY;MEMORY/COMMITMENT 等运行时文件走 update_soul 不动这里。改 skill_ids/atom_ids/tool_ids
+        时重写 COMPOSITION.yaml(未传的那段保留;tool_ids=[] 显式清空预设回全量)。"""
         rid = (role_id or "").strip()
         d = self._root / rid
         if not d.exists():
             return None
-        if skill_ids is not None or atom_ids is not None:
+        if skill_ids is not None or atom_ids is not None or tool_ids is not None:
             comp = d / "COMPOSITION.yaml"
             comp_txt = comp.read_text(encoding="utf-8") if comp.exists() else ""
             cur_atoms = _ATOM_REF_RE.findall(comp_txt)
             cur_skills = _SKILL_REF_RE.findall(comp_txt)
+            cur_tools = _TOOL_REF_RE.findall(comp_txt)
             new_atoms = list(atom_ids) if atom_ids is not None else cur_atoms
             new_skills = list(skill_ids) if skill_ids is not None else cur_skills
+            new_tools = list(tool_ids) if tool_ids is not None else cur_tools
             if skill_ids is not None:
                 self._validate_skills(new_skills)
-            comp.write_text(_composition_yaml(rid, new_atoms, new_skills), encoding="utf-8")
+            comp.write_text(_composition_yaml(rid, new_atoms, new_skills, new_tools), encoding="utf-8")
         if identity is not None:
             body = (identity or "").strip() or "(待充实)"
             (d / _slot_filename("IDENTITY")).write_text(f"# IDENTITY\n\n{body}\n", encoding="utf-8")
@@ -358,6 +383,7 @@ class RoleRegistry:
         txt = comp.read_text(encoding="utf-8")
         cur_atoms = _ATOM_REF_RE.findall(txt)
         cur_skills = _SKILL_REF_RE.findall(txt)
+        cur_tools = _TOOL_REF_RE.findall(txt)  # 保留 tools 段(工具预设)不丢
         new_atoms: list[str] = []
         seen: set[str] = set()
         changed = False
@@ -370,7 +396,8 @@ class RoleRegistry:
                 new_atoms.append(na)
         if not changed:
             return False
-        comp.write_text(_composition_yaml(rid, new_atoms, list(cur_skills)), encoding="utf-8")
+        comp.write_text(_composition_yaml(rid, new_atoms, list(cur_skills), list(cur_tools)),
+                        encoding="utf-8")
         return True
 
     @_locked
@@ -391,7 +418,9 @@ class RoleRegistry:
         if aid in cur_atoms:
             return False
         cur_skills = _SKILL_REF_RE.findall(txt)  # 保留 skills 段不丢
-        comp.write_text(_composition_yaml(rid, cur_atoms + [aid], cur_skills), encoding="utf-8")
+        cur_tools = _TOOL_REF_RE.findall(txt)    # 保留 tools 段(工具预设)不丢
+        comp.write_text(_composition_yaml(rid, cur_atoms + [aid], cur_skills, cur_tools),
+                        encoding="utf-8")
         return True
 
     # ---- 范式可见可编(docs/00 §2.4 / docs/02 §15.1.5;让用户看见+能改七层范式,不再 write-once)----
@@ -452,6 +481,7 @@ class RoleRegistry:
         comp_txt = comp.read_text(encoding="utf-8")
         atom_ids = _ATOM_REF_RE.findall(comp_txt)
         skill_ids = _SKILL_REF_RE.findall(comp_txt)
+        tool_ids = _TOOL_REF_RE.findall(comp_txt)
         identity = ""
         if ident.exists():
             txt = ident.read_text(encoding="utf-8")
@@ -472,7 +502,7 @@ class RoleRegistry:
             except Exception:
                 pass
         return RoleView(role_id, identity, atom_ids, d, nickname=nickname, title=title,
-                        model=model, skill_ids=skill_ids, tags=tags)
+                        model=model, skill_ids=skill_ids, tool_ids=tool_ids, tags=tags)
 
     def list_all(self) -> list[RoleView]:
         out: list[RoleView] = []
