@@ -261,6 +261,10 @@ def load_bound_skills(
             fm, body = parse_frontmatter(Path(info["path"]))
         except OSError:
             continue
+        # 停用的技能不随角色绑定加载(用户关了它,绑定也不复活)。
+        from karvyloop.registry.skills import skill_is_disabled
+        if skill_is_disabled(fm.raw or {}):
+            continue
         # 完整性锁:绑定直取(含扫盘兜底)同样不装载被篡改的 untrusted 技能。
         # 对抗验收点破的尖角:被篡改的技能被索引拒收后,这里的扫盘兜底反而会接住它 —— 必须同门。
         if reject_tampered_untrusted(Path(info["path"]).parent.parent, nm, fm.raw or {}):
@@ -352,6 +356,10 @@ def recall(
                 _fm, body = parse_frontmatter(Path(entry.path))
             except OSError:
                 continue
+            # 用户主动停用的技能不参与召回(与归档不同:归档命中会自动复活,停用不许越过)。
+            from karvyloop.registry.skills import skill_is_disabled
+            if skill_is_disabled(_fm.raw or {}):
+                continue
             # P3-c 三层匹配的语义层:LLM 语义标签并进匹配集(词面 overlap 之上的语义命中面;
             # 标签是 daily 慢侧打的,无向量 —— [[matching-is-grep-overlap-tags-no-vectors]])
             all_tokens = (_tokenize(entry.when_to_use) | _tokenize(entry.description)
@@ -368,9 +376,12 @@ def recall(
                 "source": getattr(entry, "source", "user") or "user",
             })
     else:
+        from karvyloop.registry.skills import skill_is_disabled
         for c in _load_skill_index(skills_dir):
-            # 同上:system 来源放行全场,user 技能严格同场
+            # 同上:system 来源放行全场,user 技能严格同场;停用技能不参与召回
             if c["scope"] != scope and c.get("source", "user") != "system":
+                continue
+            if skill_is_disabled(c.get("raw") or {}):
                 continue
             candidates.append({
                 "name": c["name"],

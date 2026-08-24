@@ -321,8 +321,14 @@ async function renderSkillsPanel(): Promise<void> {
 // 单张技能卡(抽出:tag 筛选后重渲用同一份渲染)
 function _skillCard(s: any, curveBySig: Record<string, any[]>): HTMLElement {
   const archived = !!s.archived;
+  const disabled = !!s.disabled;
   const badge = el("span", { class: "dpref-badge " + (archived ? "provisional" : "confirmed"),
     text: archived ? t("skills.archived_badge") : t("skills.active_badge") });
+  // 停用徽章(用户主动关的开关:在册但不被召回/绑定加载;与归档不同,命中也不复活)
+  const disBadge = disabled
+    ? el("span", { class: "dpref-badge provisional", title: t("skills.disabled_hint"),
+        text: t("skills.disabled_badge") })
+    : null;
   // btw-1:生命周期状态徽章(待沉淀/待验证/已沉淀)
   const st = s.status || "pending";
   const stCls = st === "crystallized" ? "confirmed" : (st === "unverified" ? "provisional" : "provisional");
@@ -348,12 +354,20 @@ function _skillCard(s: any, curveBySig: Record<string, any[]>): HTMLElement {
     actions.appendChild(el("button", { class: "dpref-confirm", text: t("skills.restore"),
       onclick: async () => { await _postJSON("/api/skill/restore", { sig: s.sig }); await renderSkillsPanel(); } }));
   }
+  // 停用/恢复(用户主动开关;停用后不被召回也不随角色绑定加载,随时可开回)
+  actions.appendChild(el("button", { class: "dpref-edit",
+    text: disabled ? t("skills.enable") : t("skills.disable"),
+    title: t("skills.disabled_hint"),
+    onclick: async () => {
+      await _postJSON("/api/skill/disable", { name: s.name, disabled: !disabled });
+      await renderSkillsPanel();
+    } }));
   actions.appendChild(el("button", { class: "dpref-edit", text: t("skills.view"),
     onclick: () => _openSkillDetail(s) }));
   return el("div", { class: "mgmt-card" },
     el("div", { class: "mc-main" },
       el("div", { class: "mc-name" }, el("span", { text: "🧩 " + s.name }), " ", stBadge,
-        " ", badge, tpBadge ? " " : null, tpBadge),
+        " ", badge, tpBadge ? " " : null, tpBadge, disBadge ? " " : null, disBadge),
       el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
       semTags.length ? el("div", { class: "mc-meta" }, ...semTags) : null,
       spark

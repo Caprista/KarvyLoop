@@ -56,6 +56,8 @@ def api_skills(request: Request) -> dict[str, Any]:
             "success_count": getattr(st, "success_count", 0) if st else 0,
             "recall_count": getattr(st, "recall_count", 0) if st else 0,
             "archived": store.is_archived(e.sig) if store is not None else False,
+            # 用户主动停用(disabled):在册但不被召回/绑定加载;读 frontmatter 实时值
+            "disabled": _skill_disabled(body),
             # 第三方导入的技能:标来源 + 是否带脚本(执行需沙箱)——让 Hardy 一眼分辨自家 vs 外来
             "third_party": "source: third-party" in body,
             "untrusted": "trust: untrusted" in body,
@@ -689,6 +691,13 @@ def _skill_status(body: str) -> str:
     return "pending"
 
 
+def _skill_disabled(body: str) -> bool:
+    """技能是否被用户停用(frontmatter `disabled: true`;body 是 SKILL.md 文本,头段即含)。"""
+    import re as _re
+    m = _re.search(r"(?m)^disabled:\s*(true|yes)\s*$", body or "", _re.I)
+    return m is not None
+
+
 def _skill_net_granted(app, name: str) -> bool:
     """读用户对某技能的联网授权(P1:第三方按需授网;默认拒)。"""
     ml = getattr(app.state, "main_loop", None)
@@ -872,6 +881,38 @@ def api_skill_restore(req: SkillRestoreRequest, request: Request) -> dict[str, A
     except Exception as e:
         return {"ok": False, "reason": str(e)}
     return {"ok": True}
+
+
+class SkillDisableRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    disabled: bool = True
+
+
+@router.post("/skill/disable")
+def api_skill_disable(req: SkillDisableRequest, request: Request) -> dict[str, Any]:
+    """停用/恢复一个技能(借业界 harness 的 disabled 语义:在册但不被召回/绑定加载)。
+
+    与归档(evict)的区别:归档是系统按用量判的冷存储,召回命中会自动复活;停用是
+    **用户主动**关的开关,召回/绑定加载都不许越过它,随时可恢复。写 SKILL.md
+    frontmatter `disabled: true`(范式可见可编,手改文件也生效)。
+    """
+    ml = getattr(request.app.state, "main_loop", None)
+    idx = getattr(ml, "skill_index", None) if ml is not None else None
+    if idx is None:
+        return {"ok": False, "reason": "未接技能库(--no-llm?)"}
+    target = None
+    for e in idx.all():
+        if e.name == req.name:
+            target = e
+            break
+    if target is None:
+        return {"ok": False, "reason": f"技能 {req.name!r} 不存在"}
+    from pathlib import Path as _Path
+    from karvyloop.registry.skills import set_skill_disabled
+    ok = set_skill_disabled(_Path(target.path), req.disabled)
+    if not ok:
+        return {"ok": False, "reason": "写入失败(文件缺失/无 frontmatter)"}
+    return {"ok": True, "name": req.name, "disabled": req.disabled}
 
 
 @router.get("/domains")

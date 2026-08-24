@@ -310,10 +310,51 @@ def load_skills_dir(
     return out
 
 
+# ---- 技能「停用」(借业界 harness 的 disabled 语义:在册但不被召回/绑定加载)----
+# 语义:disabled: true 写进 SKILL.md frontmatter;召回(recall)与角色绑定加载
+# (load_bound_skills)统一跳过;随时可恢复(删掉该行)。不删除文件、不动 UsageStats
+# —— 与归档(evict)的区别:归档是系统按用量判的冷存储(召回命中会自动复活),
+# 停用是**用户主动**关的开关(召回复活不许越过它)。
+
+def skill_is_disabled(raw: dict) -> bool:
+    """frontmatter raw 是否标了停用(兼容 "true"/True/"yes")。"""
+    v = (raw or {}).get("disabled")
+    if isinstance(v, bool):
+        return v
+    return str(v or "").strip().lower() in ("true", "yes")
+
+
+def set_skill_disabled(skill_path: Path, disabled: bool) -> bool:
+    """把 `disabled: true` 写进/移出 SKILL.md frontmatter。成功 True。
+
+    无 frontmatter → 拒(False;技能卡总该有 frontmatter,没有=坏卡别动它)。
+    其它字段原样保留(只动 disabled 行,逐行改写不重排)。
+    """
+    try:
+        text = skill_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return False
+    head_lines = m.group(1).splitlines()
+    out_lines = [ln for ln in head_lines if not ln.strip().startswith("disabled:")]
+    if disabled:
+        out_lines.append("disabled: true")
+    new_text = "---\n" + "\n".join(out_lines) + "\n---\n" + m.group(2)
+    try:
+        skill_path.write_text(new_text, encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
 __all__ = [
     "SkillFrontmatter",
     "parse_frontmatter",
     "load_skill",
     "load_skills_dir",
     "system_skills_dir",
+    "skill_is_disabled",
+    "set_skill_disabled",
 ]

@@ -393,10 +393,16 @@ var KarvySkillsPanelBundle = (function(exports) {
   }
   function _skillCard(s, curveBySig) {
     const archived = !!s.archived;
+    const disabled = !!s.disabled;
     const badge = el("span", {
       class: "dpref-badge " + (archived ? "provisional" : "confirmed"),
       text: archived ? t("skills.archived_badge") : t("skills.active_badge")
     });
+    const disBadge = disabled ? el("span", {
+      class: "dpref-badge provisional",
+      title: t("skills.disabled_hint"),
+      text: t("skills.disabled_badge")
+    }) : null;
     const st = s.status || "pending";
     const stCls = st === "crystallized" ? "confirmed" : st === "unverified" ? "provisional" : "provisional";
     const stBadge = el("span", { class: "dpref-badge " + stCls, text: t("skills.status_" + st) });
@@ -427,6 +433,15 @@ var KarvySkillsPanelBundle = (function(exports) {
     }
     actions.appendChild(el("button", {
       class: "dpref-edit",
+      text: disabled ? t("skills.enable") : t("skills.disable"),
+      title: t("skills.disabled_hint"),
+      onclick: async () => {
+        await _postJSON("/api/skill/disable", { name: s.name, disabled: !disabled });
+        await renderSkillsPanel();
+      }
+    }));
+    actions.appendChild(el("button", {
+      class: "dpref-edit",
       text: t("skills.view"),
       onclick: () => _openSkillDetail(s)
     }));
@@ -445,7 +460,9 @@ var KarvySkillsPanelBundle = (function(exports) {
           " ",
           badge,
           tpBadge ? " " : null,
-          tpBadge
+          tpBadge,
+          disBadge ? " " : null,
+          disBadge
         ),
         el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
         semTags.length ? el("div", { class: "mc-meta" }, ...semTags) : null,
