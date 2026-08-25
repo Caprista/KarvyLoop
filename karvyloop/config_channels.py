@@ -330,18 +330,89 @@ def load_email_channel_config(config_path=None) -> Optional[EmailChannelConfig]:
     return email_channel_config_from_dict(cfg)
 
 
+# =============================================================================
+# 钉钉双向通道(Stream 模式:WebSocket 长连接出站,零公网端点)
+# =============================================================================
+
+@dataclasses.dataclass(frozen=True)
+class DingTalkChannelConfig:
+    """钉钉通道配置(enabled 且凭据齐才会被 load 返回)。
+
+    client_secret 机密级(repr=False,不打日志/不进 export),同 SMTP 密码纪律。
+    role = 绑定的单个 agent(role_id);allow_senders = 钉钉 staffId 白名单,
+    **空 = fail-closed 谁的 @ 都不驱动**(群里任何人都能 @ 到机器人,必须白名单挡)。
+    """
+    client_id: str = ""
+    client_secret: str = dataclasses.field(default="", repr=False)  # 机密
+    role: str = ""                  # 绑定的 role_id(单个 agent)
+    domain_id: str = ""             # 可选:挂业务域(吃该域 value.md + 域记忆)
+    allow_senders: tuple = ()       # 白名单(staffId);空 = fail-closed
+    enabled: bool = True
+
+
+def dingtalk_channel_config_from_dict(cfg: dict) -> Optional[DingTalkChannelConfig]:
+    """从整份 config dict 解析 channels.dingtalk;不配/未启用/缺凭据/缺 role → None(不跑)。
+
+    校验失败只报字段名,绝不带值(client_secret 是机密)。
+    """
+    channels = (cfg or {}).get("channels") or {}
+    if not isinstance(channels, dict):
+        return None
+    dt = channels.get("dingtalk") or {}
+    if not isinstance(dt, dict) or not dt:
+        return None
+    if not bool(dt.get("enabled")):
+        return None  # 显式 enabled: true 才跑(零负担默认)
+
+    client_id = str(dt.get("client_id") or "").strip()
+    client_secret = str(dt.get("client_secret") or "")
+    role = str(dt.get("role") or "").strip()
+    missing = [name for name, val in (("client_id", client_id), ("client_secret", client_secret),
+                                      ("role", role)) if not val]
+    if missing:
+        logger.warning("[channels.dingtalk] 已 enabled 但缺必填字段 %s —— 通道不启动", missing)
+        return None
+    raw_allow = dt.get("allow_senders") or []
+    allow = tuple(str(s).strip() for s in raw_allow if str(s).strip()) \
+        if isinstance(raw_allow, list) else ()
+    return DingTalkChannelConfig(
+        client_id=client_id, client_secret=client_secret, role=role,
+        domain_id=str(dt.get("domain_id") or "").strip(),
+        allow_senders=allow, enabled=True,
+    )
+
+
+def load_dingtalk_channel_config(config_path=None) -> Optional[DingTalkChannelConfig]:
+    """读 config.yaml 的 channels.dingtalk。文件缺失/读不出/块缺失 → None(完全不跑)。"""
+    p = Path(config_path) if config_path else _default_config_path()
+    if not p.exists():
+        return None
+    try:
+        import yaml
+        cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except Exception:
+        logger.warning("[channels.dingtalk] config.yaml 读取失败 —— 通道不启动")
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    return dingtalk_channel_config_from_dict(cfg)
+
+
 __all__ = [
     "EmailChannelConfig",
     "SmtpEndpoint",
     "ImapEndpoint",
     "InboxPipeConfig",
     "WebhookChannelConfig",
+    "DingTalkChannelConfig",
     "email_channel_config_from_dict",
     "load_email_channel_config",
     "inbox_pipe_config_from_dict",
     "load_inbox_pipe_config",
     "webhook_channel_config_from_dict",
     "load_webhook_channel_config",
+    "dingtalk_channel_config_from_dict",
+    "load_dingtalk_channel_config",
     "DEFAULT_DIGEST_MIN_INTERVAL_S",
     "DEFAULT_INBOX_FOLDER",
     "DEFAULT_INBOX_POLL_INTERVAL_S",

@@ -778,6 +778,21 @@ class ConversationManager:
         self._store.append_turn(conv, turn)
         return conv
 
+    # ---- 外部通道(钉钉等)专用:按 peer 续写对话,绝不切走 console 当前对话 ----
+
+    def channel_conversation(self, peer: Address) -> Conversation:
+        """取(或建)一条通道对话:同 peer 续最近一段,无则新开。**不动** self._current/_peer
+        (外部通道的消息不许抢用户 web 聊天现场)。"""
+        return self._store.most_recent(peer) or self._store.new(peer)
+
+    def record_channel_turn(self, peer: Address, conv: Conversation,
+                            *, user_intent: str, agent_response: str,
+                            brain: str = BRAIN_SLOW, task_id: str = "") -> Turn:
+        """往一条通道对话里记一轮(conv 须先经 channel_conversation 拿到;不碰当前对话)。"""
+        turn = Turn(user_intent=user_intent, agent_response=agent_response,
+                    brain=brain, task_id=task_id)
+        return self._store.append_turn(conv, turn)
+
     def _summarize_to_trace(self, conv: Optional[Conversation]) -> None:
         if self._trace_index is None or conv is None or not conv.turns:
             return

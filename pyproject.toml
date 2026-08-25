@@ -61,6 +61,12 @@ asr = [
 ocr = [
     "rapidocr-onnxruntime>=1.2,<2",
 ]
+# 钉钉双向通道(channels/dingtalk_channel.py):Stream 模式 SDK(官方 open-dingtalk 组织,MIT)
+# —— 家里机器只出站(WebSocket 长连接收消息 + API 回复),零公网端点。没装 → 通道不启动,
+# 日志明说 `pip install "karvyloop[dingtalk]"`,不影响 console。
+dingtalk = [
+    "dingtalk-stream>=0.20,<1",
+]
 # Windows Tier 3 沙箱(RestrictedToken 写隔离 + Job 资源上限)——**零额外依赖**:
 # 全用 stdlib ctypes 手绑 Win32,不引 pywin32(避免给非 Windows 用户加基础重量)。
 # 此 extra 故意留空,只作显式声明:装不装都一样,Windows 上探测到即启用 Tier 3,

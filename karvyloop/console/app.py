@@ -627,6 +627,21 @@ def build_console_app(
         app.state.webhook_channel_task = asyncio.create_task(
             _supervised_bg(app, "webhook_channel", _webhook_channel_loop))   # 断⑦ supervisor
 
+        # 钉钉双向通道(docs/100):Stream 长连接(主动出站 WebSocket,零公网端点)。
+        # 配置缺/未启用 → 不起(零负担);SDK 未装(karvyloop[dingtalk])→ 日志明说,不炸启动。
+        app.state.dingtalk_channel = None
+        try:
+            from karvyloop.config_channels import load_dingtalk_channel_config
+            _dt_cfg = load_dingtalk_channel_config(
+                getattr(app.state, "config_path", "") or None)
+            if _dt_cfg is not None:
+                from karvyloop.channels.dingtalk_channel import DingTalkChannel
+                _ch = DingTalkChannel(app, _dt_cfg)
+                if _ch.start(asyncio.get_running_loop()):
+                    app.state.dingtalk_channel = _ch
+        except Exception as e:
+            logger.warning(f"[karvyloop console] 钉钉通道接线失败(不影响启动): {e}")
+
         # 收件箱→决策卡管道心跳(docs/49 ⑲-①,inbox_pipe):出站 IMAP 轮询 UNSEEN → 分诊 →
         # 需拍板/需回复出 H2A 卡(纯通知归档)。**只进不出**:模块结构上发不了信。
         # 未配置(channels.inbox 缺 → build 返 None)→ tick 空转零开销。gateway 从 runtime_kwargs
@@ -808,6 +823,12 @@ def build_console_app(
         _inbox_task = getattr(app.state, "inbox_pipe_task", None)
         if _inbox_task is not None:
             _inbox_task.cancel()
+        _dt = getattr(app.state, "dingtalk_channel", None)
+        if _dt is not None:
+            try:
+                _dt.stop()
+            except Exception:
+                pass
         if mesh_tick_task is not None:
             mesh_tick_task.cancel()
         app.state.ws_clients.clear()

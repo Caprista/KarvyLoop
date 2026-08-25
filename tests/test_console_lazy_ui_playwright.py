@@ -39,7 +39,17 @@ playwright = pytest.importorskip(
     reason="Playwright 未装(pip install playwright && playwright install chromium)")
 from playwright.sync_api import sync_playwright  # noqa: E402
 
-_PORT = 8905          # 任务钦点端口
+def _free_port() -> int:
+    """动态挑一个**真空闲**端口(钦点 8905 在 Windows 上会撞 Hyper-V 保留段
+    (netsh excludedportrange)—— console 自带端口被占自动换端口,而本测试钉死轮询钦点口,
+    撞上保留段 = console 起在别的口、测试干等 40s。动态分配避免这个环境坑。"""
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+_PORT = 8905          # 任务钦点端口(不可用时动态让位)
 _SHOTS = os.path.join(os.path.dirname(__file__), "_artifacts", "lazy_ui")
 
 # 13 个左导航面板(= index.html data-panel 顺序 = app.js _PANEL_SCRIPTS nav 批)
@@ -52,18 +62,25 @@ _NAV_PANELS = ["domains", "roles", "atoms", "devices",
 
 @pytest.fixture(scope="module")
 def console_url():
+    port = _PORT
+    try:
+        import socket
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", port))   # 能绑上才用钦点口
+    except OSError:
+        port = _free_port()                # 钦点口被占(Windows Hyper-V 保留段)→ 动态让位
     proc = subprocess.Popen(
         [sys.executable, "-m", "karvyloop", "console", "--no-llm", "--no-browser",
-         "--host", "127.0.0.1", "--port", str(_PORT)],
+         "--host", "127.0.0.1", "--port", str(port)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    base = f"http://127.0.0.1:{_PORT}"
+    base = f"http://127.0.0.1:{port}"
     try:
         deadline = time.time() + 40
         up = False
         while time.time() < deadline:
             if proc.poll() is not None:
-                pytest.fail(f"console 进程提前退出(--no-llm --port {_PORT} 启动失败)")
+                pytest.fail(f"console 进程提前退出(--no-llm --port {port} 启动失败)")
             try:
                 with urllib.request.urlopen(base + "/api/snapshot", timeout=1) as r:
                     if r.status == 200:
