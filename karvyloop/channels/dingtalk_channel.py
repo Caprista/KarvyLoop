@@ -155,7 +155,9 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
             if first:
                 _refused_senders.add(sender)
         if first:
-            logger.info("[dingtalk] 白名单外 sender 被拒(不回 drive): %s", sender[:8] + "…" if sender else "?")
+            # 打完整 staffId:配白名单时要照它填(本机日志,不进群、不外发)。
+            logger.info("[dingtalk] 白名单外 sender 被拒(不驱动)。如这是你自己,"
+                        "把这个 staffId 填进 channels.dingtalk.allow_senders: %s", sender or "?")
             try:
                 reply_fn(REFUSAL_TEXT)
             except Exception:
