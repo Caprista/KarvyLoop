@@ -297,6 +297,20 @@ def set_default(role: str, mid: str, cfg_path=None) -> tuple[bool, str]:
     return True, ""
 
 
+def ensure_default_chat(mid: str, cfg_path=None) -> bool:
+    """**还没有默认 chat 模型**时,把它设上;已有默认 → 绝不动(CFG-01②:不悄悄换用户正在用的)。
+
+    首配闭环(Hardy 实拍 BUG):自定义模式保存只写 models: 层,不写 agents.defaults.model →
+    readiness 永远 no_default_model,引导弹窗关不掉。保存路径(api_model_save)调这个补齐。
+    返回 True = 本次真设了默认。
+    """
+    cfg = _load(cfg_path)
+    if _default_chat(cfg):
+        return False
+    ok, _ = set_default("chat", mid, cfg_path)
+    return ok
+
+
 def set_default_reasoning(level: str, cfg_path=None) -> tuple[bool, str]:
     """设全局推理强度档 `agents.defaults.reasoning`(碎碎念⑩)。空串 = 删掉(不设档,零注入)。
 

@@ -124,3 +124,73 @@ def test_validate_failure_scrubs_key():
     r = TestClient(app).post("/api/model/validate").json()
     assert r["ok"] is False and "401" in r["reason"]
     assert "sk-LEAKME1234567890ABCDEFG" not in r["reason"]
+
+
+# ---- 首配闭环(Hardy 实拍 BUG:自定义模式保存只写 models:、缺 agents.defaults →
+# readiness 永远 no_default_model,引导弹窗关不掉)----
+
+def test_first_chat_save_sets_default(tmp_path):
+    """空配置(无 agents 块)+ 保存 chat 模型 → 顺带设为默认;agents.defaults.model 落盘。"""
+    from karvyloop.gateway import config_models as cm
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("lang: zh\n", encoding="utf-8")
+    app = _app()
+    app.state.config_path = str(cfg)
+    r = TestClient(app).post("/api/model/save", json={
+        "provider": "anthropic", "model_id": "anthropic/claude", "model_name": "Claude",
+        "api": "anthropic-messages", "role": "chat", "base_url": "https://api.anthropic.com",
+        "api_key": "FAKE-DO-NOT-LEAK-k1", "auth_header": "x-api-key",
+        "context_window": 200000, "max_tokens": 8192,
+    }).json()
+    assert r["ok"] is True and r.get("set_as_default") is True
+    import yaml
+    saved = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert saved["agents"]["defaults"]["model"] == "anthropic/claude"
+    assert saved["models"]["providers"]["anthropic"]["api_key"] == "FAKE-DO-NOT-LEAK-k1"
+
+
+def test_second_model_save_never_overrides_default(tmp_path):
+    """已有默认 → 再存新模型绝不动默认(CFG-01②:不悄悄换你正在用的)。"""
+    import textwrap
+    import yaml
+    from karvyloop.gateway import config_models as cm
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(textwrap.dedent("""
+    models:
+      providers:
+        anthropic:
+          base_url: https://api.anthropic.com
+          api_key: FAKE-DO-NOT-LEAK-abc
+          models:
+            - id: anthropic/claude
+              name: Claude
+              api: anthropic-messages
+    agents:
+      defaults:
+        model: anthropic/claude
+    """), encoding="utf-8")
+    app = _app()
+    app.state.config_path = str(cfg)
+    r = TestClient(app).post("/api/model/save", json={
+        "provider": "openai", "model_id": "openai/gpt-5", "model_name": "GPT",
+        "api": "openai-completions", "role": "chat", "base_url": "https://api.openai.com",
+        "api_key": "FAKE-DO-NOT-LEAK-k2", "auth_header": "Authorization",
+        "context_window": 200000, "max_tokens": 8192,
+    }).json()
+    assert r["ok"] is True and r.get("set_as_default") is False
+    saved = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert saved["agents"]["defaults"]["model"] == "anthropic/claude"   # 默认没被偷换
+
+
+def test_embedding_save_does_not_set_chat_default(tmp_path):
+    """embedding 模型的保存不碰 chat 默认(only chat 关乎 readiness 门)。"""
+    from karvyloop.gateway import config_models as cm
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("lang: zh\n", encoding="utf-8")
+    ok, _ = cm.upsert_model({"provider": "ollama", "model_id": "ollama/nomic-embed",
+                             "api": "ollama", "role": "embedding"}, str(cfg))
+    assert ok
+    import yaml
+    saved = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    assert not ((saved.get("agents") or {}).get("defaults") or {}).get("model")
+

@@ -137,12 +137,20 @@ def api_model_save(req: ModelSaveRequest, request: Request) -> dict[str, Any]:
     ok, reason = upsert_model(req.model_dump(), cfgp)
     if not ok:
         return {"ok": False, "reason": reason}
+    # 首配闭环(Hardy 实拍 BUG):自定义模式保存只写 models: 层、缺 agents.defaults →
+    # readiness 永远 no_default_model,引导弹窗关不掉。chat 模型保存成功且**当前无默认**
+    # → 设为默认(已有默认绝不动,CFG-01②)。要在 reload 之前:注册表热加载读到新默认。
+    set_as_default = False
+    if (req.role or "chat") == "chat":
+        from karvyloop.gateway.config_models import ensure_default_chat
+        set_as_default = ensure_default_chat(req.model_id, cfgp)
     reloaded, rmsg = _reload_gateway_registry(request.app)
     # Kimi 三面孔诚实提示:sk-kimi- 前缀 = For Coding 的 key,粘在 moonshot 聊天端点必 401。
     # 不拦保存(key 归属只看前缀是推断不是断言),但当场把话说明白 —— 别等 validate 401 让用户猜。
     from karvyloop.gateway.presets import kimi_key_guidance
     hint = kimi_key_guidance(req.api_key, req.base_url)
     out: dict[str, Any] = {"ok": True, "reloaded": reloaded, "reload_note": rmsg,
+                           "set_as_default": set_as_default,   # 首配补齐:本次顺带设为默认
                            # 断②:保存成功≠能聊。fresh 进程无 gateway/main_loop → 明确告知要重启,
                            # 前端(引导页)据此显示"密钥已保存,重启 console 后生效"的大字提示,不再静默。
                            "restart_required": _restart_required(request.app, reloaded)}

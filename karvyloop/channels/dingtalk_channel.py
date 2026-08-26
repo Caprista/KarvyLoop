@@ -154,8 +154,10 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
         if sender not in refused:
             refused.add(sender)
             # 打完整 staffId:配白名单时要照它填(本机日志,不进群、不外发)。
-            logger.info("[dingtalk] 白名单外 sender 被拒(不驱动)。如这是你自己,"
-                        "把这个 staffId 填进 allow_senders: %s", sender or "?")
+            # 必须 warning 级:console 默认日志门是 WARNING,info 级打不出来
+            # (Hardy 实拍:引导说"日志会打 staffId"但什么都没出)。
+            logger.warning("[dingtalk] 白名单外 sender 被拒(不驱动)。如这是你自己,"
+                           "把这个 staffId 填进 allow_senders: %s", sender or "?")
             try:
                 reply_fn(REFUSAL_TEXT)
             except Exception:
@@ -238,6 +240,10 @@ class DingTalkChannel:
 
         self._thread = threading.Thread(target=_run, name="dingtalk-stream", daemon=True)
         self._thread.start()
+        # 用户要照启动日志确认通道活着 —— print 直出(logger.info 在默认 WARNING 门下不可见;
+        # 与 MCP 接入成功的 print 同款能见度)。
+        print(f"[karvyloop console] 钉钉通道已起(Stream 长连接;"
+              f"{self._cfg.name or '实例'} 绑定角色 {self._cfg.role})", flush=True)
         logger.info("[dingtalk] 通道已起(Stream 长连接;%s 绑定角色 %s)",
                     self._cfg.name or "实例", self._cfg.role)
         return True
