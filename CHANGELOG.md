@@ -11,22 +11,47 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+
+## [2026.8.26] — 2026-08-26
+
+The "decisions that don't interrupt you" release: non-blocking approval lands with real
+switches, skills can be paused without deleting, and your agent can live in a DingTalk group.
+
 ### Added
-- **Non-blocking H2A decisions: let it run, then confirm.** You can now set a decision card to
-  **non-blocking** mode — the agent goes ahead and executes the proposal immediately, then leaves
-  the card open for you to **confirm, reject, or defer later**. This is for the "porridge or noodles"
-  class of decisions: you don't care which one happens, but your later thumbs-up/thumbs-down still
-  feeds your decision-preference model, so the instance learns what "like you" means without
-  interrupting your flow. Rejecting an already-executed card does **not** roll back the result; it
-  simply records your taste for next time.
+- **Non-blocking H2A decisions — with the switches to actually use it.** Decision cards can run
+  in **non-blocking** mode: the agent executes immediately, and the card stays for you to
+  **confirm, reject, or defer later** — your follow-up still feeds your decision-preference model
+  (rejecting does **not** roll back what already ran; it teaches taste for next time). Two ways to
+  turn it on: a **⚡ Run first** button on each card, and a ✋/⚡ toggle in the decide column that
+  sets the default for new cards (persisted in `config.yaml`). High-risk kinds and irreversible
+  semantics (send/delete/pay/prod-write) are always forced back to blocking — the default mode
+  only loosens ordinary cards.
 - **H2A outcome vocabulary (fail-closed).** Decision outcomes are now drawn from a closed set
-  (`allowed-once`, `rejected`, `cancelled`, `unavailable`, `auto-allowed`, `pending`), inspired by
-  DeepSeek Harness's clean approval-seam design, and surfaced on every H2A envelope for audit.
+  (`allowed-once`, `rejected`, `cancelled`, `unavailable`, `auto-allowed`, `pending`), surfaced on
+  every H2A envelope for audit.
+- **Per-role tool presets.** A role's `COMPOSITION.yaml` can declare a `tools:` allowlist
+  (groups: `coding`, `network`, `mcp`, `computer`, `create_atom`, or explicit tool names) — the
+  role only sees those tools when it works. Narrower visibility for imported personas, less prompt
+  noise for everyone.
+- **Pause a skill without deleting it.** Every skill card now has ⏸ Disable / ▶ Enable: a disabled
+  skill stays in your library but is never recalled or auto-loaded with a role — unlike archiving
+  (which auto-revives on a hit), disabling is a switch only you flip. It's a plain
+  `disabled: true` line in the skill's frontmatter — visible and editable.
+- **DingTalk channel: your agent lives in a group chat.** Bind one role to a DingTalk robot and
+  it listens and answers in its own persona — no public endpoint needed (official Stream mode:
+  an outbound WebSocket from your machine; `pip install "karvyloop[dingtalk]"`). Safety is built
+  in: a sender allowlist (empty = nobody can drive it), inbound messages fenced as data-not-
+  instructions, per-group isolated conversation history, and the role's tool preset applies on
+  this channel too. Setup guide: [docs/DINGTALK.md](docs/DINGTALK.md).
 
 ### Changed
-- **Blocking remains the default.** Non-blocking is opt-in per card; high-risk kinds and any card
-  carrying irreversible semantics (send/delete/pay/prod-write) are forced back to blocking even when
-  non-blocking is requested.
+- **Capability seams (internal).** Backend capabilities (sandbox/filesystem/shell) now resolve
+  through a small three-part seam registry (definition / provider / consumer) — swapping a sandbox
+  backend becomes a one-line registration instead of per-tool rewiring. No behavior change.
+
+### Fixed
+- A Playwright console test pinned to port 8905 could collide with Windows' Hyper-V reserved port
+  range — it now falls back to a dynamically allocated free port.
 
 
 ## [2026.8.1] — 2026-08-01
