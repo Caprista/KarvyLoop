@@ -30,9 +30,6 @@ logger = logging.getLogger(__name__)
 
 # 拒驱动回执(白名单外):一条固定话,不烧模型
 REFUSAL_TEXT = "这个机器人仅对授权用户开放。"
-# 同一 sender 的拒绝提示只回一次(防刷群;进程内集合即可,重启重计无害)
-_refused_senders: set[str] = set()
-_refused_lock = threading.Lock()
 
 
 def _extract(payload: dict) -> tuple[str, str, str]:
@@ -141,23 +138,24 @@ async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
 
 
 async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
-                          reply_fn: Callable[[str], Any]) -> None:
+                          reply_fn: Callable[[str], Any],
+                          refused: Optional[set] = None) -> None:
     """入站消息处理(SDK 无关的纯逻辑,测试直接喂 payload + 假 reply_fn)。
 
     白名单 fail-closed → fence → drive → reply_fn(回复)。
+    `refused`:本实例"已拒绝过的 sender"集合(每机器人一份;None = 临时一份)——
+    同一 sender 只回一次拒绝,不刷群;多实例间互不干扰。
     """
     sender, chat, text = _extract(payload)
     if not text:
         return
+    refused = refused if refused is not None else set()
     if sender not in cfg.allow_senders:
-        with _refused_lock:
-            first = sender not in _refused_senders
-            if first:
-                _refused_senders.add(sender)
-        if first:
+        if sender not in refused:
+            refused.add(sender)
             # 打完整 staffId:配白名单时要照它填(本机日志,不进群、不外发)。
             logger.info("[dingtalk] 白名单外 sender 被拒(不驱动)。如这是你自己,"
-                        "把这个 staffId 填进 channels.dingtalk.allow_senders: %s", sender or "?")
+                        "把这个 staffId 填进 allow_senders: %s", sender or "?")
             try:
                 reply_fn(REFUSAL_TEXT)
             except Exception:
@@ -172,7 +170,10 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
 
 
 class DingTalkChannel:
-    """钉钉 Stream 通道的宿主:起线程跑 SDK 长连接,消息桥回 console 事件循环。"""
+    """钉钉 Stream 通道的宿主:起线程跑 SDK 长连接,消息桥回 console 事件循环。
+
+    一个实例 = 一个钉钉应用 ↔ 一个绑定角色;多实例并存(每 agent 一个机器人),
+    拒绝名单等状态全在实例上,互不干扰。"""
 
     def __init__(self, app: Any, cfg: DingTalkChannelConfig) -> None:
         self._app = app
@@ -180,6 +181,7 @@ class DingTalkChannel:
         self._thread: Optional[threading.Thread] = None
         self._client: Any = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._refused: set = set()   # 本实例已拒过的 sender(实例级,多机器人互不吃对方的名单)
 
     def start(self, loop: asyncio.AbstractEventLoop) -> bool:
         """起通道(成功 True)。SDK 缺席/起失败 → False + 日志明说,不影响 console。"""
@@ -201,7 +203,8 @@ class DingTalkChannel:
                     holder["reply"] = text
 
                 fut = asyncio.run_coroutine_threadsafe(
-                    handle_incoming(channel._app, channel._cfg, data, _reply), loop)
+                    handle_incoming(channel._app, channel._cfg, data, _reply,
+                                    refused=channel._refused), loop)
                 try:
                     await asyncio.to_thread(fut.result)
                 except Exception as e:
@@ -235,7 +238,8 @@ class DingTalkChannel:
 
         self._thread = threading.Thread(target=_run, name="dingtalk-stream", daemon=True)
         self._thread.start()
-        logger.info("[dingtalk] 通道已起(Stream 长连接;绑定角色 %s)", self._cfg.role)
+        logger.info("[dingtalk] 通道已起(Stream 长连接;%s 绑定角色 %s)",
+                    self._cfg.name or "实例", self._cfg.role)
         return True
 
     def stop(self) -> None:

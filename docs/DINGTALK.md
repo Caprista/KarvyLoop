@@ -24,6 +24,8 @@ channels:
 5. Restart the console. Look for `[dingtalk] 通道已起` in the startup log.
 6. In the group, @ the bot. It replies as the bound role, remembers context, and anyone not on `allow_senders` gets a single polite refusal.
 
+**Multiple robots (one per agent)**: create one DingTalk app per role, then write `channels.dingtalk` as a **list** — one entry per app with its own `client_id`/`client_secret`/`role`/`allow_senders`. Each gets its own Stream connection; the single-object form keeps working.
+
 **Finding your staffId**: send one @ mention with a placeholder in `allow_senders`; the console log prints the full staffId in the `[dingtalk] 白名单外 sender 被拒` line — paste it in and restart.
 
 **Safety**: never share `client_secret` (chat screenshots included) and never commit it. The agent's high-risk actions still require your approval — the DingTalk channel changes nothing about the H2A gates.

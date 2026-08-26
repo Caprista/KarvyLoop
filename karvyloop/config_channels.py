@@ -341,36 +341,26 @@ class DingTalkChannelConfig:
     client_secret 机密级(repr=False,不打日志/不进 export),同 SMTP 密码纪律。
     role = 绑定的单个 agent(role_id);allow_senders = 钉钉 staffId 白名单,
     **空 = fail-closed 谁的 @ 都不驱动**(群里任何人都能 @ 到机器人,必须白名单挡)。
+    name = 实例名(多机器人时区分日志用;缺省 = role)。
     """
     client_id: str = ""
     client_secret: str = dataclasses.field(default="", repr=False)  # 机密
     role: str = ""                  # 绑定的 role_id(单个 agent)
     domain_id: str = ""             # 可选:挂业务域(吃该域 value.md + 域记忆)
     allow_senders: tuple = ()       # 白名单(staffId);空 = fail-closed
+    name: str = ""                  # 实例名(多机器人日志区分;缺省 = role)
     enabled: bool = True
 
 
-def dingtalk_channel_config_from_dict(cfg: dict) -> Optional[DingTalkChannelConfig]:
-    """从整份 config dict 解析 channels.dingtalk;不配/未启用/缺凭据/缺 role → None(不跑)。
-
-    校验失败只报字段名,绝不带值(client_secret 是机密)。
-    """
-    channels = (cfg or {}).get("channels") or {}
-    if not isinstance(channels, dict):
-        return None
-    dt = channels.get("dingtalk") or {}
-    if not isinstance(dt, dict) or not dt:
-        return None
-    if not bool(dt.get("enabled")):
-        return None  # 显式 enabled: true 才跑(零负担默认)
-
+def _dingtalk_one_from_dict(dt: dict) -> Optional[DingTalkChannelConfig]:
+    """解析单个 dingtalk 实例 dict;缺凭据/缺 role → None(该实例不跑,只报字段名)。"""
     client_id = str(dt.get("client_id") or "").strip()
     client_secret = str(dt.get("client_secret") or "")
     role = str(dt.get("role") or "").strip()
     missing = [name for name, val in (("client_id", client_id), ("client_secret", client_secret),
                                       ("role", role)) if not val]
     if missing:
-        logger.warning("[channels.dingtalk] 已 enabled 但缺必填字段 %s —— 通道不启动", missing)
+        logger.warning("[channels.dingtalk] 实例已 enabled 但缺必填字段 %s —— 该实例不启动", missing)
         return None
     raw_allow = dt.get("allow_senders") or []
     allow = tuple(str(s).strip() for s in raw_allow if str(s).strip()) \
@@ -378,24 +368,63 @@ def dingtalk_channel_config_from_dict(cfg: dict) -> Optional[DingTalkChannelConf
     return DingTalkChannelConfig(
         client_id=client_id, client_secret=client_secret, role=role,
         domain_id=str(dt.get("domain_id") or "").strip(),
-        allow_senders=allow, enabled=True,
+        allow_senders=allow,
+        name=str(dt.get("name") or "").strip(),
+        enabled=True,
     )
 
 
-def load_dingtalk_channel_config(config_path=None) -> Optional[DingTalkChannelConfig]:
-    """读 config.yaml 的 channels.dingtalk。文件缺失/读不出/块缺失 → None(完全不跑)。"""
+def dingtalk_channels_from_dict(cfg: dict) -> list[DingTalkChannelConfig]:
+    """从整份 config dict 解析 channels.dingtalk → 实例列表(每 agent 一个机器人)。
+
+    两种写法都收(向后兼容):
+      - 单块:`dingtalk: {client_id: ..., role: ...}` → 一个实例
+      - 列表:`dingtalk: [{name: 资料机器人, ...}, {name: 写作机器人, ...}]` → 每 agent 一个
+    缺块/未启用/全部缺凭据 → [](零负担,一个都不跑)。
+    """
+    channels = (cfg or {}).get("channels") or {}
+    if not isinstance(channels, dict):
+        return []
+    dt = channels.get("dingtalk")
+    if dt is None:
+        return []
+    items = dt if isinstance(dt, list) else [dt]
+    out: list[DingTalkChannelConfig] = []
+    for item in items:
+        if not isinstance(item, dict) or not item or not bool(item.get("enabled")):
+            continue
+        one = _dingtalk_one_from_dict(item)
+        if one is not None:
+            out.append(one)
+    return out
+
+
+def dingtalk_channel_config_from_dict(cfg: dict) -> Optional[DingTalkChannelConfig]:
+    """单块写法的兼容口(老调用方):返回第一个实例;无 → None。"""
+    items = dingtalk_channels_from_dict(cfg)
+    return items[0] if items else None
+
+
+def load_dingtalk_channel_configs(config_path=None) -> list[DingTalkChannelConfig]:
+    """读 config.yaml 的 channels.dingtalk → 实例列表。文件缺失/读不出/块缺失 → [](零负担)。"""
     p = Path(config_path) if config_path else _default_config_path()
     if not p.exists():
-        return None
+        return []
     try:
         import yaml
         cfg = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     except Exception:
         logger.warning("[channels.dingtalk] config.yaml 读取失败 —— 通道不启动")
-        return None
+        return []
     if not isinstance(cfg, dict):
-        return None
-    return dingtalk_channel_config_from_dict(cfg)
+        return []
+    return dingtalk_channels_from_dict(cfg)
+
+
+def load_dingtalk_channel_config(config_path=None) -> Optional[DingTalkChannelConfig]:
+    """单实例兼容口:返回第一个实例;无 → None。"""
+    items = load_dingtalk_channel_configs(config_path)
+    return items[0] if items else None
 
 
 __all__ = [
@@ -412,7 +441,9 @@ __all__ = [
     "webhook_channel_config_from_dict",
     "load_webhook_channel_config",
     "dingtalk_channel_config_from_dict",
+    "dingtalk_channels_from_dict",
     "load_dingtalk_channel_config",
+    "load_dingtalk_channel_configs",
     "DEFAULT_DIGEST_MIN_INTERVAL_S",
     "DEFAULT_INBOX_FOLDER",
     "DEFAULT_INBOX_POLL_INTERVAL_S",

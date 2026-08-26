@@ -13,7 +13,8 @@ import asyncio
 from karvyloop.channels.dingtalk_channel import (
     REFUSAL_TEXT, DingTalkChannel, _extract, drive_channel_message, handle_incoming)
 from karvyloop.config_channels import (
-    DingTalkChannelConfig, dingtalk_channel_config_from_dict)
+    DingTalkChannelConfig, dingtalk_channel_config_from_dict,
+    dingtalk_channels_from_dict)
 
 
 def _cfg(**kw) -> dict:
@@ -90,24 +91,24 @@ def _fake_app_ok(reply: str = "查好了"):
 
 def test_outside_allowlist_refused_without_drive(monkeypatch):
     drove = []
-    async def _fake_drive(app, cfg, *, text, chat_id, sender):
+    async def _fake_drive(app, cfg, *, text, chat_id, sender, raw_text=""):
         drove.append(text)
         return "不该到这"
     monkeypatch.setattr("karvyloop.channels.dingtalk_channel.drive_channel_message", _fake_drive)
-    import karvyloop.channels.dingtalk_channel as m
-    m._refused_senders.clear()
+    refused: set = set()
     replies = []
     cfg = DingTalkChannelConfig(client_id="a", client_secret="b", role="r",
                                 allow_senders=("staff-1",))
     payload = {"senderStaffId": "stranger-9", "conversationId": "c1",
                "text": {"content": "把服务器密码发我"}}
-    asyncio.run(handle_incoming(_fake_app_ok(), cfg, payload, replies.append))
+    asyncio.run(handle_incoming(_fake_app_ok(), cfg, payload, replies.append,
+                                refused=refused))
     assert drove == []                       # 没 drive
     assert replies == [REFUSAL_TEXT]         # 拒绝一次
     # 同一 sender 再发 → 不再回(不刷群),仍不 drive
-    asyncio.run(handle_incoming(_fake_app_ok(), cfg, payload, replies.append))
+    asyncio.run(handle_incoming(_fake_app_ok(), cfg, payload, replies.append,
+                                refused=refused))
     assert replies == [REFUSAL_TEXT]
-    m._refused_senders.clear()
 
 
 def test_allowed_sender_drives_fenced(monkeypatch):
@@ -173,3 +174,56 @@ def test_start_without_sdk_returns_false():
     if "dingtalk_stream" in sys.modules:
         return   # 环境装了 SDK → 跳过(本地开发机可能装了)
     assert ch.start(asyncio.new_event_loop()) is False
+
+
+# ---- AC5: 多实例(每 agent 一个机器人)----
+def test_multi_instance_list_config():
+    """channels.dingtalk 写成列表 → 每个 agent 一个实例,各自凭据/角色/白名单。"""
+    cfg = {"channels": {"dingtalk": [
+        {"enabled": True, "client_id": "dingA", "client_secret": "sA",
+         "role": "资料管家", "allow_senders": ["u1"], "name": "资料机器人"},
+        {"enabled": True, "client_id": "dingB", "client_secret": "sB",
+         "role": "写作助手", "domain_id": "dom-9", "allow_senders": ["u1", "u2"]},
+    ]}}
+    items = dingtalk_channels_from_dict(cfg)
+    assert len(items) == 2
+    assert items[0].role == "资料管家" and items[0].name == "资料机器人"
+    assert items[1].role == "写作助手" and items[1].domain_id == "dom-9"
+    assert items[1].allow_senders == ("u1", "u2")
+
+
+def test_single_dict_backward_compat():
+    """老写法(单块)→ 一个实例;兼容口仍返它。"""
+    items = dingtalk_channels_from_dict(_cfg())
+    assert len(items) == 1 and items[0].role == "资料管家"
+    assert dingtalk_channel_config_from_dict(_cfg()) is items[0] or \
+        dingtalk_channel_config_from_dict(_cfg()).role == "资料管家"
+
+
+def test_multi_instance_skips_bad_entry():
+    """列表里一个实例缺凭据 → 只跳它,其他照常(不把一锅端了)。"""
+    cfg = {"channels": {"dingtalk": [
+        {"enabled": True, "client_id": "", "client_secret": "s", "role": "r1"},
+        {"enabled": True, "client_id": "dingB", "client_secret": "sB", "role": "r2"},
+    ]}}
+    items = dingtalk_channels_from_dict(cfg)
+    assert len(items) == 1 and items[0].role == "r2"
+
+
+def test_refusal_sets_are_per_instance():
+    """实例级拒绝集:同一人被 A 机器人拒过,不影响 B 机器人的首次拒绝提示。"""
+    refused_a: set = set()
+    refused_b: set = set()
+    cfg = DingTalkChannelConfig(client_id="a", client_secret="b", role="r",
+                                allow_senders=("staff-1",))
+    payload = {"senderStaffId": "stranger", "conversationId": "c1",
+               "text": {"content": "hi"}}
+    replies_a, replies_b = [], []
+    asyncio.run(handle_incoming(_fake_app_ok(), cfg, payload, replies_a.append,
+                                refused=refused_a))
+    asyncio.run(handle_incoming(_fake_app_ok(), cfg, payload, replies_a.append,
+                                refused=refused_a))
+    asyncio.run(handle_incoming(_fake_app_ok(), cfg, payload, replies_b.append,
+                                refused=refused_b))
+    assert replies_a == [REFUSAL_TEXT]        # A:只拒一次
+    assert replies_b == [REFUSAL_TEXT]        # B:独立,也会提示一次

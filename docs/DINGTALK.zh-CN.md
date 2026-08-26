@@ -61,6 +61,32 @@ karvyloop console --no-browser --port 8766
 启动日志里看到 `[dingtalk] 通道已起(Stream 长连接…)` 就是连上了。
 然后去钉钉群里 **@机器人 说句话**,比如:"你好,介绍一下你自己"。
 
+## 进阶:每个 agent 一个机器人
+
+想让几个角色各自有自己的钉钉机器人(各自的头像/名字/人格)?给每个角色在钉钉开放平台
+各建一个应用,然后把 `channels.dingtalk` 写成**列表**:
+
+```yaml
+channels:
+  dingtalk:
+    - name: "资料机器人"
+      enabled: true
+      client_id: "dingA..."
+      client_secret: "..."
+      role: "资料管家"
+      allow_senders: ["你的staffId"]
+    - name: "写作机器人"
+      enabled: true
+      client_id: "dingB..."
+      client_secret: "..."
+      role: "写作助手"
+      allow_senders: ["你的staffId"]
+```
+
+每个实例一条独立的 Stream 长连接,各自绑定各自的角色,互不干扰(白名单/对话历史都分开)。
+单块写法照旧有效(向后兼容)。
+
+
 ## 验收清单(一条条勾)
 
 - [ ] 群里 @机器人,几十秒内它用**角色的口吻**回话(不是系统腔)

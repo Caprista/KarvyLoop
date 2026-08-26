@@ -628,17 +628,24 @@ def build_console_app(
             _supervised_bg(app, "webhook_channel", _webhook_channel_loop))   # 断⑦ supervisor
 
         # 钉钉双向通道(docs/100):Stream 长连接(主动出站 WebSocket,零公网端点)。
+        # 每 agent 一个机器人:channels.dingtalk 支持列表(多实例,一条连接绑一个角色)。
         # 配置缺/未启用 → 不起(零负担);SDK 未装(karvyloop[dingtalk])→ 日志明说,不炸启动。
         app.state.dingtalk_channel = None
+        app.state.dingtalk_channels = []
         try:
-            from karvyloop.config_channels import load_dingtalk_channel_config
-            _dt_cfg = load_dingtalk_channel_config(
+            from karvyloop.config_channels import load_dingtalk_channel_configs
+            _dt_cfgs = load_dingtalk_channel_configs(
                 getattr(app.state, "config_path", "") or None)
-            if _dt_cfg is not None:
+            if _dt_cfgs:
                 from karvyloop.channels.dingtalk_channel import DingTalkChannel
-                _ch = DingTalkChannel(app, _dt_cfg)
-                if _ch.start(asyncio.get_running_loop()):
-                    app.state.dingtalk_channel = _ch
+                _loop = asyncio.get_running_loop()
+                for _dt_cfg in _dt_cfgs:
+                    _ch = DingTalkChannel(app, _dt_cfg)
+                    if _ch.start(_loop):
+                        app.state.dingtalk_channels.append(_ch)
+                if app.state.dingtalk_channels:
+                    # 兼容读法:第一个实例(老代码/测试读 dingtalk_channel)
+                    app.state.dingtalk_channel = app.state.dingtalk_channels[0]
         except Exception as e:
             logger.warning(f"[karvyloop console] 钉钉通道接线失败(不影响启动): {e}")
 
@@ -823,10 +830,10 @@ def build_console_app(
         _inbox_task = getattr(app.state, "inbox_pipe_task", None)
         if _inbox_task is not None:
             _inbox_task.cancel()
-        _dt = getattr(app.state, "dingtalk_channel", None)
-        if _dt is not None:
+        # 钉钉通道全停(dingtalk_channel 是列表首实例的别名,停列表即可,别停两次)
+        for _dtc in (getattr(app.state, "dingtalk_channels", None) or []):
             try:
-                _dt.stop()
+                _dtc.stop()
             except Exception:
                 pass
         if mesh_tick_task is not None:
