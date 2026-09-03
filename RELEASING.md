@@ -20,7 +20,7 @@ the process; it's short on purpose.
 2. **Changelog** — in `CHANGELOG.md`, move the `[Unreleased]` items into a new
    `YYYY.M.D` section (Added / Changed / Fixed / Removed). This *is* the release
    notes; keep it written for a reader, not a commit log.
-3. **Green** — `pytest -q` must pass.
+3. **Green** — `pytest -q` must pass
 4. **Commit** — `release: YYYY.M.D`.
 5. **Tag & push** — `git tag -a YYYY.M.D -m "YYYY.M.D"` then `git push && git push --tags`.
 6. **GitHub Release** — `gh release create YYYY.M.D --title YYYY.M.D --notes "<the CHANGELOG section>"`.
