@@ -278,6 +278,7 @@ class ConversationMeta:
     turn_count: int
     peer: Address
     closed_at: Optional[float] = None      # 沉淀关闭;None = 开着(未沉淀欠账)
+    chat: Optional[dict] = None            # 通道会话元信息(钉钉):{"type": "group"|"direct", "title": 群名}
 
 
 # ---- 存储(JSONL per-conversation,按场分区)----
@@ -333,6 +334,20 @@ class ConversationStore:
         conv.turns.append(turn)
         return turn
 
+    def append_meta(self, peer: Address, conv: Conversation, *,
+                    title: str = "", chat: Optional[dict] = None) -> None:
+        """回写会话 meta(通道会话标题/类型):**追加**一条 _meta 行,加载时后行覆盖前行 ——
+        不改写既有内容(合原子追加范式,同 `_closed` 墓碑)。title 空 = 保持原标题。"""
+        rec: dict = {"_meta": True}
+        if title:
+            conv.title = title   # 内存同步(disk 行才是权威,重开对话走 _load_path 一样读得到)
+            rec["title"] = _scrub_field(title)
+        if chat is not None:
+            rec["chat"] = chat
+        if len(rec) == 1:
+            return
+        _atomic_append(self._path(peer, conv.id), json.dumps(rec, ensure_ascii=False) + "\n")
+
     def rewrite_turn(self, conv: Conversation, turn: Turn) -> Turn:
         """就地回填一条已存在的挂起轮(同 turn_id):追加一条回填行(加载时 coalesce 覆盖 begin),
         并替换内存里那条 —— **不叠第二条**。找不到那条挂起轮 → 退化为 append_turn(绝不丢回复)。
@@ -376,6 +391,7 @@ class ConversationStore:
             return None
         created_at = self._clock()
         title = ""
+        chat: Optional[dict] = None
         peer = karvy_world_peer()
         turns: list[Turn] = []
         id_index: dict[str, int] = {}   # turn_id → 在 turns 里的位置(coalesce:后写覆盖)
@@ -391,7 +407,9 @@ class ConversationStore:
                     continue
                 if rec.get("_meta"):
                     created_at = float(rec.get("created_at", created_at))
-                    title = rec.get("title", "")
+                    title = rec.get("title", "") or title   # 追加式 meta 回写:缺 title 保前值
+                    if isinstance(rec.get("chat"), dict):
+                        chat = rec["chat"]
                     if isinstance(rec.get("peer"), dict):
                         peer = _peer_from_record(rec["peer"])
                     continue
@@ -451,6 +469,7 @@ class ConversationStore:
     def _read_meta(self, path: Path) -> Optional[ConversationMeta]:
         created_at = 0.0
         title = ""
+        chat: Optional[dict] = None
         peer = karvy_world_peer()
         last_ts = 0.0
         turn_count = 0
@@ -467,8 +486,10 @@ class ConversationStore:
                     except json.JSONDecodeError:
                         continue
                     if rec.get("_meta"):
-                        created_at = float(rec.get("created_at", 0.0))
-                        title = rec.get("title", "")
+                        created_at = float(rec.get("created_at", created_at))
+                        title = rec.get("title", "") or title   # 追加式 meta 回写:缺 title 保前值
+                        if isinstance(rec.get("chat"), dict):
+                            chat = rec["chat"]
                         if isinstance(rec.get("peer"), dict):
                             peer = _peer_from_record(rec["peer"])
                         continue
@@ -487,7 +508,7 @@ class ConversationStore:
         return ConversationMeta(
             id=path.stem, created_at=created_at, title=title,
             last_active_at=last_ts if last_ts else created_at,
-            turn_count=turn_count, peer=peer, closed_at=closed_at,
+            turn_count=turn_count, peer=peer, closed_at=closed_at, chat=chat,
         )
 
 
@@ -787,11 +808,21 @@ class ConversationManager:
 
     def record_channel_turn(self, peer: Address, conv: Conversation,
                             *, user_intent: str, agent_response: str,
-                            brain: str = BRAIN_SLOW, task_id: str = "") -> Turn:
-        """往一条通道对话里记一轮(conv 须先经 channel_conversation 拿到;不碰当前对话)。"""
+                            brain: str = BRAIN_SLOW, task_id: str = "",
+                            data: Optional[dict] = None) -> Turn:
+        """往一条通道对话里记一轮(conv 须先经 channel_conversation 拿到;不碰当前对话)。
+
+        `data`:可选结构化负载 —— 通道轮带 `{"channel": {sender, chat_type, ...}}`,
+        历史回放时前端能显示"是谁发的"(同圆桌 data 范式)。
+        """
         turn = Turn(user_intent=user_intent, agent_response=agent_response,
-                    brain=brain, task_id=task_id)
+                    brain=brain, task_id=task_id, data=data)
         return self._store.append_turn(conv, turn)
+
+    def set_channel_meta(self, peer: Address, conv: Conversation, *,
+                         title: str = "", chat: Optional[dict] = None) -> None:
+        """回写通道会话 meta(标题/类型)。只该在标题还是空时调一次,别每条消息都追加。"""
+        self._store.append_meta(peer, conv, title=title, chat=chat)
 
     def _summarize_to_trace(self, conv: Optional[Conversation]) -> None:
         if self._trace_index is None or conv is None or not conv.turns:

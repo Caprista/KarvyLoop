@@ -207,6 +207,10 @@
     } else if (msg.type === "drive_event") {
       // P4 逐字流式:drive 进行中的增量事件 → 实时追加(终态 drive_done 会清掉草稿、渲染权威版)
       onDriveEvent(msg.payload);
+    } else if (msg.type === "channel_message") {
+      // 外部通道消息只更新所属通道会话，不触碰当前小卡/角色聊天。
+      const p = msg.payload || {};
+      if (p.role && p.text) pushChannelMessage(p);
     } else if (msg.type === "drive_done") {
       // 9.4b:WS 实时追加即为权威渲染,不再回拉 chat_history 重建(那会抢选中/强制滚动)
       _clearLiveStream();   // P4:清掉逐字流式草稿 → renderDriveDone 渲染权威终态(含 markdown/高亮)
@@ -2044,6 +2048,7 @@
   }
   // 2e:打开一条工作流/圆桌线(点卡 / 料里追问都走这)。切到该线 + 渲染历史 + 标题。
   let _currentRunConv = "";
+  let _currentChannelConversationId = "";
   async function openLine(line) {
     openChatModal();
     try {
@@ -2054,6 +2059,8 @@
       const data = await r.json();
       if (!data.ok) return;
       _currentRunConv = data.conversation_id || line.conversation_id || "";
+      _currentChannelConversationId = "";
+      _setChannelReadOnly(false);
       _currentPeer = { domain_id: data.domain_id, role: data.role, agent_id: data.agent_id || "",
                        is_group: !!data.is_group };
       const log = document.getElementById("chat-log");
@@ -2083,8 +2090,17 @@
       const data = await r.json();
       if (!data.ok) return false;
       _currentRunConv = data.is_run_line ? data.conversation_id : "";
+      _currentChannelConversationId = data.role === "channel" ? data.conversation_id : "";
       _currentPeer = { domain_id: data.domain_id, role: data.role, agent_id: data.agent_id || "",
                        is_group: !!data.is_group };
+      if (_currentPeer.role === "channel") {
+        const row = document.querySelector('.channel-conversation-row[data-conversation-id="' + data.conversation_id + '"]');
+        _currentPeer.channel_label = data.channel === "dingtalk" ? "钉钉" : (row ? row.dataset.channelLabel : "通道");
+        _currentPeer.channel_role = data.channel_role || (row ? row.dataset.channelRole : "");
+        _currentPeer.channel_chat_type = (row ? row.dataset.chatType : "") || "";
+        _currentPeer.channel_chat_title = "";
+      }
+      _chatSpeaker = "";
       const log = document.getElementById("chat-log");
       if (log) log.innerHTML = "";
       const ttl = document.getElementById("chat-title");
@@ -2094,10 +2110,10 @@
             + "  ·  " + t("chat.from_group", { g: data.origin_group || "" });
         } else { _setChatTitle(_currentPeer); }
       }
-      _chatSpeaker = "";
       // #1:运行线无 新对话/历史/圆桌;普通线照常显
-      _toggleChannelTools(!!data.is_run_line);
+      _toggleChannelTools(!!data.is_run_line || data.role === "channel");
       if (!data.is_run_line) _toggleRoundtableBtn(_currentPeer);
+      _setChannelReadOnly(data.role === "channel");
       _ceClear(); _hideMentionPop(); _hideRoundtableBanner();
       _renderConversationTurns(data.turns);
       refreshPeers();
@@ -2206,6 +2222,15 @@
   function _setChatTitle(peer) {
     const ttl = document.getElementById("chat-title");
     if (!ttl) return;
+    if (peer && peer.role === "channel") {
+      const chatId = (peer.agent_id || "").replace(/^dingtalk:/, "");
+      const roleLabel = peer.channel_role ? peer.channel_role + " · " : "";
+      const icon = peer.channel_chat_type === "group" ? "👥" : "💬";   // 群聊 👥 / 单聊 💬
+      ttl.textContent = icon + " " + roleLabel + (peer.channel_label || "钉钉")
+        + (chatId ? " · " + chatId : "");
+      _chatSpeaker = peer.channel_role || "Agent";
+      return;
+    }
     // 群场(Karvy World / 业务域群)是**多人**,标题就是群名,不是"你 & 某人"(那是 1:1 的框)。
     if (peer && peer.is_world) { ttl.textContent = "👥 Karvy World"; _chatSpeaker = ""; return; }
     if (peer && peer.is_group) { ttl.textContent = "👥 " + (peer.domain_name || peer.role || ""); _chatSpeaker = ""; return; }
@@ -2256,6 +2281,8 @@
       const log = document.getElementById("chat-log");
       if (log) log.innerHTML = "";
       _currentRunConv = "";  // 切到普通场 → 清运行卡高亮(2d)
+      _currentChannelConversationId = "";
+      _setChannelReadOnly(false);
       _toggleChannelTools(false);   // #1:普通场恢复 新对话/历史
       _currentPeer = peer;   // ch4:记住当前场(圆桌按钮按它显隐)
       _saveActivePeer(peerJson, peer);   // bug竞态:记住非默认场,刷新时恢复回来(不回落小卡)
@@ -2280,23 +2307,65 @@
 
   // ============ 9.1d:对话(➕新对话 / 🕘历史 resume)============
 
+  async function refreshChannelConversations() {
+    const list = document.getElementById("channel-conversation-list");
+    if (!list) return;
+    try {
+      const r = await fetch("/api/channel-conversations");
+      if (!r.ok) return;
+      const data = await r.json();
+      const items = data.conversations || [];
+      list.innerHTML = "";
+      if (!items.length) return;   // 无通道会话 → 整块不渲染(同其他分段空态)
+      // 分组头/折叠:与 私聊/群聊/工作流/圆桌 同一套 peer-sec 样式;折叠态存 localStorage
+      const SEC_KEY = "chat.sec_channel";
+      const collapsed = _secCollapsed(SEC_KEY);
+      const head = el("div", { class: "peer-sec up peer-sec-head" },
+        el("span", { text: (collapsed ? "▸ " : "▾ ") + t(SEC_KEY) + "  " + items.length }));
+      head.addEventListener("click", () => { _toggleSec(SEC_KEY); refreshChannelConversations(); });
+      list.appendChild(head);
+      const body = el("div", { class: "peer-sec-body" + (collapsed ? " hidden" : "") });
+      list.appendChild(body);
+      for (const c of items) {
+        const channelLabel = c.channel === "dingtalk" ? "钉钉" : "通道";
+        const chatId = (c.peer_agent_id || "").replace(/^dingtalk:/, "") || "未知会话";
+        const isGroup = c.chat && c.chat.type === "group";
+        const icon = isGroup ? "👥" : "💬";   // 群聊 👥 / 单聊 💬(旧会话无 chat 信息 → 💬)
+        const title = c.title && c.title.trim() ? c.title : chatId;
+        const prefix = c.channel_role ? c.channel_role + " · " : "";
+        const active = c.id === _currentChannelConversationId;
+        const row = el("div", { class: "peer-row channel-conversation-row" + (active ? " active" : "") },
+          el("span", { class: "peer-nm", text: icon + " " + prefix + channelLabel + " · " + title }));
+        row.dataset.conversationId = c.id;
+        row.dataset.channelLabel = channelLabel;
+        row.dataset.channelRole = c.channel_role || "";
+        row.dataset.chatType = (c.chat && c.chat.type) || "";
+        row.title = channelLabel + " · " + chatId;
+        row.addEventListener("click", () => openConvById(c.id));
+        body.appendChild(row);
+      }
+    } catch (e) { console.warn("[channel-conv] list failed", e); }
+  }
+
   async function refreshConversations() {
     try {
       const r = await fetch("/api/conversations");
       if (!r.ok) return;
       const data = await r.json();
       const sel = document.getElementById("conv-history");
-      if (!sel) return;
-      // 保留首项占位,重建列表
-      sel.innerHTML = '<option value="">' + t("sel.history") + '</option>';
-      for (const c of data.conversations || []) {
-        const opt = el("option", { value: c.id });
-        const label = (c.title && c.title.trim()) ? c.title : t("conv.untitled");
-        // docs/66 §E:沉淀关闭的标 ✓(历史可翻但不算欠账)
-        const closed = c.closed_at ? t("conv.closed_suffix") : "";
-        opt.textContent = `${label} · ${t("conv.turns", { n: c.turn_count })}${closed}${c.id === data.current_id ? t("conv.current") : ""}`;
-        sel.appendChild(opt);
+      if (sel) {
+        // 保留首项占位,重建列表
+        sel.innerHTML = '<option value="">' + t("sel.history") + '</option>';
+        for (const c of data.conversations || []) {
+          const opt = el("option", { value: c.id });
+          const label = (c.title && c.title.trim()) ? c.title : t("conv.untitled");
+          // docs/66 §E:沉淀关闭的标 ✓(历史可翻但不算欠账)
+          const closed = c.closed_at ? t("conv.closed_suffix") : "";
+          opt.textContent = `${label} · ${t("conv.turns", { n: c.turn_count })}${closed}${c.id === data.current_id ? t("conv.current") : ""}`;
+          sel.appendChild(opt);
+        }
       }
+      refreshChannelConversations();
     } catch (e) {
       console.warn("[conv] list failed", e);
     }
@@ -3086,7 +3155,16 @@
       // 料→去聊天定位:渲染前记下起点,渲染后给这一轮新增的所有节点打 data-task-id,
       // 让 openConvById 能找到对应那一轮并滚过去 + 高亮(不只是开对话丢你在底部)。
       const start = log ? log.children.length : 0;
-      if (tn.data && tn.data.roundtable) {
+      const chInfo = tn.data && tn.data.channel;   // 通道轮(钉钉):带发送者昵称/单群聊
+      if (chInfo && _currentPeer && _currentPeer.role === "channel") {
+        // user 行挂真实发送者昵称(不是笼统的"你");顺手同步标题的单/群聊图标
+        if (chInfo.chat_type && _currentPeer.channel_chat_type !== chInfo.chat_type) {
+          _currentPeer.channel_chat_type = chInfo.chat_type;
+          _setChatTitle(_currentPeer);
+        }
+        pushChatLine("user", tn.user_intent, chInfo.sender || t("chat.you"));
+        _renderTurnReply(log, tn);
+      } else if (tn.data && tn.data.roundtable) {
         renderRoundtable(tn.data.roundtable);   // 卡里已有 🎡 主题头,不再单列 user 行
       } else if (tn.data && tn.data.workflow) {
         renderWorkflow(tn.data.workflow);       // ⚙ 工作流执行结果
@@ -3209,6 +3287,24 @@
     return { text: text, mentions: mentions };
   }
 
+  function _setChannelReadOnly(readonly) {
+    const wrap = document.querySelector(".chat-input-wrap");
+    const banner = document.getElementById("composer-readonly");
+    const input = document.getElementById("chat-input");
+    const send = document.getElementById("chat-send");
+    if (!wrap || !banner) return;
+    wrap.classList.toggle("is-channel-readonly", readonly);
+    if (readonly) {
+      input && input.setAttribute("contenteditable", "false");
+      if (send) send.disabled = true;
+      banner.textContent = "当前仅支持查看钉钉会话，请在钉钉中发送消息。";
+      banner.classList.remove("hidden");
+    } else {
+      banner.classList.add("hidden");
+      _refreshEngineState();
+    }
+  }
+
   // UX 诚实修:没接模型引擎(--no-llm / 没 init / 引擎构造失败 / 缺 Key)时,发消息只会撞
   // "MainLoop 未注入"stub。与其让人对着一个活输入框白打字,不如**当场置灰**+显真原因横幅。
   // 真原因由后端 /api/setup_status 的 absence_text 给(已本地化);拉不到就保持原样(不误伤)。
@@ -3221,6 +3317,8 @@
     const banner = document.getElementById("composer-readonly");
     const input = document.getElementById("chat-input");
     const send = document.getElementById("chat-send");
+    const channelReadonly = wrap.classList.contains("is-channel-readonly");
+    if (channelReadonly) return;
     const absent = !!s.absent;
     wrap.classList.toggle("is-readonly", absent);
     if (input) input.setAttribute("contenteditable", absent ? "false" : "true");
@@ -3469,7 +3567,39 @@
     if (role === "agent") return _chatSpeaker || t("chat.karvy");  // 小卡 / 花名(不是 [agent])
     return "";
   }
-  function pushChatLine(role, text) {
+  function pushChannelMessage(payload) {
+    const isCurrent = _currentPeer && _currentPeer.role === "channel"
+      && _currentPeer.agent_id === payload.peer_id
+      && (!payload.conversation_id || payload.conversation_id === _currentChannelConversationId);
+    refreshChannelConversations();
+    if (!isCurrent) return;
+
+    if (payload.channel_role) {
+      _currentPeer.channel_role = payload.channel_role;
+      _chatSpeaker = payload.channel_role;
+    }
+    // 单/群聊类型:实时消息捎带的 chat_type 优先(标题图标跟着切)
+    if (payload.chat_type) {
+      _currentPeer.channel_chat_type = payload.chat_type;
+      _currentPeer.channel_chat_title = payload.chat_title || _currentPeer.channel_chat_title || "";
+    }
+    if (payload.channel_role || payload.chat_type) _setChatTitle(_currentPeer);
+    const log = document.getElementById("chat-log");
+    if (!log) return;
+    const follow = isNearBottom(log);
+    // 群聊/单聊里"是谁发的":用户消息挂发送者昵称,不是笼统的"你"
+    const line = el("div", { class: "chat-line live channel-message " + payload.role },
+      el("span", { class: "role", text: payload.role === "agent"
+        ? (_chatSpeaker || "Agent")
+        : (payload.sender_nick || t("chat.you")) }));
+    const text = payload.role === "agent" ? tB(payload.text || "") : (payload.text || "");
+    if (window.KarvyRender) KarvyRender.appendMarkdown(line, text);
+    else line.appendChild(document.createTextNode(text));
+    log.appendChild(line);
+    if (follow) log.scrollTop = log.scrollHeight;
+  }
+
+  function pushChatLine(role, text, speakerOverride) {
     const log = document.getElementById("chat-log");
     const follow = isNearBottom(log);
     // 系统提示不是"说话人":做成居中淡提示,不挂 [system] 的 speaker tag(Hardy:[system] 是啥?)
@@ -3482,7 +3612,7 @@
       return notice;   // 返回节点:旅程收官要对「方法复用回执」聚光(调用方多数忽略)
     }
     const line = el("div", { class: "chat-line live " + role },
-      el("span", { class: "role", text: _roleLabel(role) }));
+      el("span", { class: "role", text: speakerOverride || _roleLabel(role) }));
     // 9.4:正文走 markdown + 消毒(KarvyRender);缺库回退裸文本。
     // agent 正文过 tB:后端静态整句(共创等)在 en 界面查 BACKEND_ZH_EN 整句/前缀译;
     // 用户自己的话绝不动(只译 agent 侧)。
@@ -4378,7 +4508,11 @@
   async function _submitChat() {
     // 只读态(引擎缺席)守卫:置灰后 Enter 仍可能触发提交 → 这里兜底拦住,顺手刷新一次横幅。
     const _wrap = document.querySelector(".chat-input-wrap");
-    if (_wrap && _wrap.classList.contains("is-readonly")) { _refreshEngineState(); return; }
+    if (_wrap && (_wrap.classList.contains("is-readonly")
+      || _wrap.classList.contains("is-channel-readonly"))) {
+      if (!_wrap.classList.contains("is-channel-readonly")) _refreshEngineState();
+      return;
+    }
     const { text, mentions } = _readChatInput();
     // 多模态:抓附件(文本内联 / 图片走 images),建展示清单(缩略图,落历史),再清附件区
     const _imgs = _attachmentsImages();

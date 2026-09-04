@@ -834,6 +834,8 @@ html, body {
 .chat-line { display: flex; flex-direction: column; max-width: 78%; }
 /* P4 逐字流式:进行中的草稿气泡(纯文本逐字追加;终态被权威 markdown 版替换) */
 .live-stream {
+  display: block;
+  width: 100%;
   white-space: pre-wrap; word-break: break-word; opacity: 0.9;
   font-size: 14px; line-height: 1.6; color: var(--text);
   padding: 8px 12px; background: var(--surface); border-radius: 12px;
@@ -1171,12 +1173,14 @@ html, body {
    别再让人对着一个发出去只会撞"MainLoop 未注入"的活框打字。 */
 .composer-readonly {
   display: flex; align-items: flex-start; gap: 6px;
-  margin: 0 0 8px; padding: 9px 12px;
+  margin: 8px 12px 0; padding: 9px 12px;
   background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: 10px;
   color: var(--warn); font-size: 12.5px; line-height: 1.5;
 }
 .chat-input-wrap.is-readonly .chat-input-ce,
-.chat-input-wrap.is-readonly .chat-toolbar {
+.chat-input-wrap.is-readonly .chat-toolbar,
+.chat-input-wrap.is-channel-readonly .chat-input-ce,
+.chat-input-wrap.is-channel-readonly .chat-toolbar {
   opacity: 0.45; pointer-events: none; user-select: none;
 }
 /* "让小卡帮你修一下":出问题时给个动手按钮,不甩 CLI 咒语。banner 内可点(不受 is-readonly 置灰影响)*/

@@ -191,7 +191,7 @@ async function _renderSearchConfig(body: HTMLElement): Promise<void> {
   body.appendChild(wrap);
 }
 
-function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void): HTMLElement {
+function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void, onboardingOpts?: OnbOpts): HTMLElement {
   const f = (k: string, ph?: string): HTMLInputElement => {
     const i = el("input", { type: "text", placeholder: ph || "" }) as HTMLInputElement;
     if (m[k] != null) i.value = m[k];
@@ -225,9 +225,14 @@ function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void)
         reasoning_styles: m.reasoning_styles || null,
       });
       if (r.ok && r.data && r.data.ok) {
-        // 诚实提示(如 sk-kimi- key 配在 moonshot 聊天端点):alert 弹一次,重渲染也不丢
+        // 首配里的高级/自定义表单与预设模型走同一套后续流程:设默认、真验证、按需提示重启。
+        if (onboardingOpts && onboardingOpts.setDefault !== false) {
+          await _finishOnboardingSave(r.data, idIn.value.trim(), msg, onSaved);
+          return;
+        }
+        // 普通模型管理仍只保存,不抢默认模型。
         if (r.data.hint) window.alert(tB(r.data.hint));
-        if (r.data.reloaded === false) _setMsg(msg, true, r.data.reload_note || "saved");
+        if (r.data.reloaded === false) _setMsg(msg, true, t("onb.saved_no_default"));
         if (onSaved) await onSaved(); else await renderModelsPanel();
       } else _setMsg(msg, false, t("mgmt.failed", { err: (r.data && (r.data.reason || r.data.detail)) || r.status }));
     } });
@@ -294,7 +299,7 @@ function _onbPicker(wrap: HTMLElement, presets: any[], onDone: () => Promise<voi
   wrap.appendChild(picker);
   // 高级/自定义 → 老的全字段表单(接没列出的端点 / 高手用)
   wrap.appendChild(el("button", { class: "mgmt-inline-link", text: t("onb.advanced"),
-    onClick: () => { wrap.innerHTML = ""; wrap.appendChild(_modelForm({}, t("setup.add_model"), onDone)); } }));
+    onClick: () => { wrap.innerHTML = ""; wrap.appendChild(_modelForm({}, t("setup.add_model"), onDone, opts || {})); } }));
 }
 function _onbProvider(wrap: HTMLElement, presets: any[], p: any, onDone: () => Promise<void> | void, opts?: OnbOpts): void {
   wrap.innerHTML = "";
@@ -320,6 +325,30 @@ function _onbProvider(wrap: HTMLElement, presets: any[], p: any, onDone: () => P
     onClick: () => _onbSave(p, keyIn.value, msg, onDone, opts) }));
   wrap.appendChild(msg);
 }
+async function _finishOnboardingSave(saved: any, modelId: string, msg: HTMLElement, onDone?: () => Promise<void> | void): Promise<void> {
+  await _postJSON("/api/model/set_default", { model_id: modelId, role: "chat" });
+  _setMsg(msg, true, t("onb.validating"));
+  const v = await _postJSON("/api/model/validate", {});
+  const needRestart = !!saved.restart_required;
+  if (v.ok && v.data && v.data.ok) {
+    if (needRestart) {
+      _setMsg(msg, true, t("onb.saved_restart_verified"));
+      msg.classList.add("onb-restart-big");
+    } else {
+      _setMsg(msg, true, t("onb.ok"));
+    }
+  } else {
+    const cls = (v.data && v.data.error_class) || "";
+    const hintKey = cls === "bad_key" ? "onb.err_bad_key"
+      : cls === "bad_url" ? "onb.err_bad_url"
+      : cls === "unreachable" ? "onb.err_unreachable" : "";
+    const hint = hintKey ? t(hintKey) + " — " : "";
+    const saveHint = saved.hint ? tB(saved.hint) + " — " : "";
+    _setMsg(msg, false, saveHint + hint + t("onb.validate_failed", { err: (v.data && v.data.reason) || "?" }));
+  }
+  if (onDone) await onDone();
+}
+
 async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Promise<void> | void, opts?: OnbOpts): Promise<void> {
   // 云端 provider 空 key 连请求都不发(Hardy 实拍:不填也"保存并验证成功",
   // 实际写出空壳配置还盖掉原值 —— 后端同有此闸,这里是第一道)
@@ -353,32 +382,8 @@ async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Pro
     if (onDone) await onDone();
     return;
   }
-  await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });  // 刚加的设为默认
-  // 实时校验:坏 key/连不上**当场抓**。fresh 进程后端会用临时 gateway 真验(不再跳过 ——
-  // 首配恰恰是最需要验证的场景);验完再按 restart_required 给诚实文案。
-  _setMsg(msg, true, t("onb.validating"));
-  const v = await _postJSON("/api/model/validate", {});
-  const needRestart = !!(r.data && r.data.restart_required);
-  if (v.ok && v.data && v.data.ok) {
-    if (needRestart) {
-      // 验证过了才说"重启生效"(不再有"已保存但没验过"的半截话)
-      _setMsg(msg, true, t("onb.saved_restart_verified"));
-      msg.classList.add("onb-restart-big");
-    } else {
-      _setMsg(msg, true, t("onb.ok"));
-    }
-  } else {
-    // #42 优化②:错误分类学 —— 先给人话(key 坏了/地址错了/没网),原始信息跟在后面
-    const cls = (v.data && v.data.error_class) || "";
-    const hintKey = cls === "bad_key" ? "onb.err_bad_key"
-      : cls === "bad_url" ? "onb.err_bad_url"
-      : cls === "unreachable" ? "onb.err_unreachable" : "";
-    const hint = hintKey ? t(hintKey) + " — " : "";
-    // 保存侧的诚实提示(如 sk-kimi- key 配在 moonshot 端点必 401)放最前 —— 它才是根因人话
-    const saveHint = (r.data && r.data.hint) ? tB(r.data.hint) + " — " : "";
-    _setMsg(msg, false, saveHint + hint + t("onb.validate_failed", { err: (v.data && v.data.reason) || "?" }));
-  }
-  if (onDone) await onDone();   // 不管校验成败都回判 must_setup(有 key 没通会留在引导继续提示)
+  // 与高级/自定义首配共用同一套设默认、验证和重启提示逻辑。
+  await _finishOnboardingSave(r.data, p.model_id, msg, onDone);
 }
 
 // ============ 无 Key 强制引导(进系统后判断有没有可用模型,没有就强制录入)============

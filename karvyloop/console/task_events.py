@@ -65,6 +65,11 @@ async def broadcast_drive_event(app: Any, ev: dict) -> int:
     return await _broadcast(app, {"type": WS_TYPE_DRIVE_EVENT, "payload": ev})
 
 
+async def broadcast_channel_message(app: Any, payload: dict) -> int:
+    """把外部通道的一条完整消息推给 console,不触发本地 drive 状态机。"""
+    return await _broadcast(app, {"type": WS_TYPE_CHANNEL_MESSAGE, "payload": payload})
+
+
 async def broadcast_role_presence(app: Any, row: dict) -> int:
     """P1.5 工位区:某角色的单行 presence(契约形状见 tasks.presence_row)→ push。
 

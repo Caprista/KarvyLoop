@@ -29,6 +29,35 @@ def _conv_meta_to_dict(m) -> dict[str, Any]:
     }
 
 
+@router.get("/channel-conversations")
+def api_channel_conversations(request: Request) -> dict[str, Any]:
+    """列出已产生的外部通道会话，供 console 独立选择。"""
+    mgr = getattr(request.app.state, "conversation_manager", None)
+    if mgr is None:
+        return {"conversations": []}
+
+    configs = [getattr(ch, "_cfg", None)
+               for ch in (getattr(request.app.state, "dingtalk_channels", None) or [])]
+    metas = [m for m in mgr.all_conversation_metas()
+             if getattr(m.peer, "role", "") == "channel"]
+    metas.sort(key=lambda m: -(m.last_active_at or 0))
+
+    conversations = []
+    for meta in metas:
+        item = _conv_meta_to_dict(meta)
+        agent_id = meta.peer.agent_id or ""
+        item["channel"] = "dingtalk" if agent_id.startswith("dingtalk:") else "channel"
+        # 通道会话元信息(单聊/群聊 + 群名):meta 回写自首条钉钉消息;旧会话无 → {}
+        item["chat"] = dict(getattr(meta, "chat", None) or {})
+        item["channel_role"] = next(
+            (cfg.role for cfg in configs
+             if cfg is not None and (cfg.domain_id or "l0") == meta.peer.domain_id),
+            "",
+        )
+        conversations.append(item)
+    return {"conversations": conversations}
+
+
 @router.get("/conversations")
 def api_conversations(request: Request) -> dict[str, Any]:
     """历史对话列表(0.1.0 刚需,按 last_active 倒序;K4 只读)。

@@ -12,8 +12,8 @@
 - **凭据**只在 ~/.karvyloop/config.yaml(仓外);repr=False 不打日志。
 - **角色工具预设自动生效**:绑定 role 的 COMPOSITION `tools:` 白名单经由
   build_role_paradigm_prompt → persona.tool_preset 管到这条通道(给钉钉角色配窄工具)。
-- **对话隔离**:每个钉钉群(conversationId)一条独立对话线,不碰 console 当前 peer
-  (web 聊天现场不被钉钉消息抢)。
+- **对话隔离**:每个钉钉会话(单聊/群聊,conversationId)一条独立对话线,不碰 console
+  当前 peer(web 聊天现场不被钉钉消息抢);会话标题取群名/对方昵称,轮次带发送者昵称。
 
 v1 边界:只应答式回复(被 @ 才回);主动推送/卡片外推走既有 digest/webhook 管道,不在此。
 """
@@ -32,8 +32,56 @@ logger = logging.getLogger(__name__)
 REFUSAL_TEXT = "这个机器人仅对授权用户开放。"
 
 
-def _extract(payload: dict) -> tuple[str, str, str]:
-    """从 SDK callback data 里抠 (sender_id, chat_id, text)。容错:缺 → 空串。"""
+async def _publish_channel_message(app: Any, *, role: str, text: str,
+                                    chat_id: str, sender: str,
+                                    conversation_id: str = "",
+                                    channel_role: str = "",
+                                    sender_nick: str = "",
+                                    chat_type: str = "",
+                                    chat_title: str = "") -> None:
+    """同步外部通道消息到对应通道会话和在线 WebSocket。"""
+    speaker = f"dingtalk:{chat_id or 'unknown'}"
+    # 通道消息不属于当前的小卡聊天，持久化由 record_channel_turn 负责。
+    try:
+        from karvyloop.console.task_events import broadcast_channel_message
+        await broadcast_channel_message(app, {
+            "channel": "dingtalk",
+            "peer_id": speaker,
+            "conversation_id": conversation_id,
+            "sender": sender,
+            "sender_nick": sender_nick,
+            "chat_type": chat_type,
+            "chat_title": chat_title,
+            "role": role,
+            "channel_role": channel_role,
+            "text": text,
+        })
+    except Exception:
+        logger.debug("[dingtalk] console channel_message 广播失败", exc_info=True)
+
+
+def _channel_conversation_id(app: Any, cfg: DingTalkChannelConfig, chat_id: str) -> str:
+    from karvyloop.domain import Address
+    mgr = getattr(app.state, "conversation_manager", None)
+    if mgr is None:
+        return ""
+    try:
+        conv = mgr.channel_conversation(Address(
+            domain_id=(cfg.domain_id or "l0"), role="channel",
+            agent_id=f"dingtalk:{chat_id or 'unknown'}"))
+        return conv.id if conv is not None else ""
+    except Exception:
+        return ""
+
+
+def _extract(payload: dict) -> dict:
+    """从 SDK callback data 里抠消息要素。容错:缺 → 空串。
+
+    - sender/chat/text:老三样(staffId、会话 ID、正文)
+    - sender_nick:发送者昵称(senderNick),界面上显示"是谁发的"
+    - chat_type:conversationType,"1"=单聊 "2"=群聊;归一成 direct/group
+    - chat_title:conversationTitle,群聊=群名,单聊=对方昵称(常空)
+    """
     d = payload or {}
     text = ""
     t = d.get("text")
@@ -43,12 +91,24 @@ def _extract(payload: dict) -> tuple[str, str, str]:
         text = t.strip()
     sender = str(d.get("senderStaffId") or d.get("senderId") or "").strip()
     chat = str(d.get("conversationId") or d.get("openConversationId") or "").strip()
-    return sender, chat, text
+    raw_type = str(d.get("conversationType") or "").strip()
+    chat_type = {"1": "direct", "2": "group"}.get(raw_type, raw_type)
+    return {
+        "sender": sender,
+        "chat": chat,
+        "text": text,
+        "sender_nick": str(d.get("senderNick") or "").strip(),
+        "chat_type": chat_type,
+        "chat_title": str(d.get("conversationTitle") or "").strip(),
+    }
 
 
 async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
                                 text: str, chat_id: str, sender: str,
-                                raw_text: str = "") -> str:
+                                raw_text: str = "",
+                                sender_nick: str = "",
+                                chat_type: str = "",
+                                chat_title: str = "") -> str:
     """把一条钉钉消息驱成绑定 role 的回复。返回回复文本(失败也回诚实人话,不抛)。
 
     text = 喂模型的(已过围栏);raw_text = 落对话历史的原文(围栏是给模型的,
@@ -127,13 +187,37 @@ async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
     if not reply:
         reply = "(这轮没产出文字回复 —— 可能跑了工具活,去 console 任务面板看结果)"
 
-    # 5) 记轮(通道对话自己的历史,不串 web 聊天;历史存原文,围栏版只给模型看)
+    # 5) 先落 meta/轮,再广播终态 —— 列表刷新时能立即读到最新标题、轮次和时间。
     if conv is not None and mgr is not None:
         try:
-            mgr.record_channel_turn(peer, conv, user_intent=raw_text or text,
-                                    agent_response=reply)
+            # 首条消息回写会话标题/类型(追加 _meta 行;只写一次):
+            # 群聊用群名,单聊用对方昵称 —— 列表不再显示一串 cid。
+            if not conv.title and (chat_title or sender_nick):
+                title = chat_title if chat_type == "group" else (sender_nick or chat_title)
+                meta = ({"type": chat_type, "title": chat_title}
+                        if chat_type in ("group", "direct") else None)
+                mgr.set_channel_meta(peer, conv, title=title, chat=meta)
         except Exception:
             pass
+        try:
+            info = {"sender": sender_nick or sender, "sender_id": sender}
+            if chat_type:
+                info["chat_type"] = chat_type
+            if chat_title:
+                info["chat_title"] = chat_title
+            mgr.record_channel_turn(peer, conv, user_intent=raw_text or text,
+                                    agent_response=reply,
+                                    data={"channel": info})
+        except Exception:
+            pass
+
+    await _publish_channel_message(app, role="agent", text=reply,
+                                   chat_id=chat_id, sender=sender,
+                                   conversation_id=conv.id if conv is not None else "",
+                                   channel_role=cfg.role,
+                                   sender_nick=sender_nick,
+                                   chat_type=chat_type,
+                                   chat_title=chat_title)
     return reply
 
 
@@ -146,7 +230,8 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
     `refused`:本实例"已拒绝过的 sender"集合(每机器人一份;None = 临时一份)——
     同一 sender 只回一次拒绝,不刷群;多实例间互不干扰。
     """
-    sender, chat, text = _extract(payload)
+    info = _extract(payload)
+    sender, chat, text = info["sender"], info["chat"], info["text"]
     if not text:
         return
     refused = refused if refused is not None else set()
@@ -163,11 +248,22 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
             except Exception:
                 pass
         return
+    conversation_id = _channel_conversation_id(app, cfg, chat)
+    await _publish_channel_message(app, role="user", text=text,
+                                   chat_id=chat, sender=sender,
+                                   conversation_id=conversation_id,
+                                   channel_role=cfg.role,
+                                   sender_nick=info["sender_nick"],
+                                   chat_type=info["chat_type"],
+                                   chat_title=info["chat_title"])
     # 不可信围栏在入站边界(群里的话是数据不是指令)——进 drive 前就包好。
     from karvyloop.cognition.fence import fence_untrusted
     fenced = fence_untrusted(text, source="dingtalk") or text
     reply = await drive_channel_message(app, cfg, text=fenced, chat_id=chat, sender=sender,
-                                        raw_text=text)
+                                        raw_text=text,
+                                        sender_nick=info["sender_nick"],
+                                        chat_type=info["chat_type"],
+                                        chat_title=info["chat_title"])
     reply_fn(reply)
 
 

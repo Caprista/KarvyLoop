@@ -186,6 +186,8 @@
             <aside class="chat-panel-side">
               <div class="chat-side-label up" data-i18n="chat.peers">Conversations</div>
               <div id="peer-list" class="peer-list"></div>
+              <!-- 通道会话:分组头/行由 refreshChannelConversations() 渲染,样式同 私聊/群聊/工作流/圆桌 -->
+              <div id="channel-conversation-list" class="peer-list"></div>
             </aside>
             <!-- 右:正文(对话流 + 圆桌阶段条 + 输入 + 频道内操作栏) -->
             <main class="chat-panel-main">
