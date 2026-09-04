@@ -536,8 +536,8 @@ def test_models_panel_add_uses_guided_picker():
     # _onbSave 按 opts 分叉:面板路径跳过 set_default 与 validate(validate 只验默认模型)
     assert "opts && opts.setDefault === false" in ts, "_onbSave 缺 setDefault 分叉"
     i_fork = ts.find("opts.setDefault === false")
-    i_setdef = ts.find('"/api/model/set_default", { model_id: p.model_id')
-    assert 0 < i_fork < i_setdef, "setDefault:false 分叉必须在 set_default 调用之前(先拦住)"
+    i_finish = ts.find("await _finishOnboardingSave", i_fork)
+    assert 0 < i_fork < i_finish, "setDefault:false 分叉必须在默认模型处理之前(先拦住)"
     # 首配/强制引导路径不变:openForcedSetup 里 _guidedSetup 不传 setDefault:false(缺省 = 设默认+真验)
     m = _re2.search(r"_guidedSetup\(guided,\s*done\)", ts)
     assert m, "强制引导路径应保持缺省 opts(首配仍设默认 + 当场真验)"

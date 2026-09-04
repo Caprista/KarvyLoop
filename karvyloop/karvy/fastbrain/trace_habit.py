@@ -407,6 +407,9 @@ def _extract_json_array(text: str) -> str:
     cleaned = _strip_code_fences(text)
     if len(cleaned) > _MAX_PARSE_CHARS:
         cleaned = cleaned[:_MAX_PARSE_CHARS]   # 只扫头部:真数组在可见输出前部,尾部散文不值得烧
+    # 没有对象起点时不可能得到目标标签数组，避免在方括号海上重复 raw_decode。
+    if "{" not in cleaned:
+        return cleaned
     decoder = json.JSONDecoder()
     first_any: Optional[str] = None
     idx = cleaned.find("[")
@@ -441,6 +444,10 @@ def _salvage_truncated_array(cleaned: str) -> Optional[str]:
     仍是严格 JSON(每个收进来的项都整体 loads 得过;绝不抽 prose,非 dict 项一律不算数,
     防止散文里 `[0-1]` 这类误捞)。一个完整 dict 项都捞不到 → None。
     """
+    # 没有数组或对象起点时没有任何可恢复的对象，直接退出，避免对每个起点
+    # 重复触发 json 的深层递归解析。
+    if "[" not in cleaned or "{" not in cleaned:
+        return None
     decoder = json.JSONDecoder()
     n = len(cleaned)
     start = cleaned.find("[")

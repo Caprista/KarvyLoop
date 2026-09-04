@@ -325,8 +325,8 @@ function _onbProvider(wrap: HTMLElement, presets: any[], p: any, onDone: () => P
     onClick: () => _onbSave(p, keyIn.value, msg, onDone, opts) }));
   wrap.appendChild(msg);
 }
-async function _finishOnboardingSave(saved: any, modelId: string, msg: HTMLElement, onDone?: () => Promise<void> | void): Promise<void> {
-  await _postJSON("/api/model/set_default", { model_id: modelId, role: "chat" });
+async function _finishOnboardingSave(saved: any, p: any, msg: HTMLElement, onDone?: () => Promise<void> | void): Promise<void> {
+  await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });
   _setMsg(msg, true, t("onb.validating"));
   const v = await _postJSON("/api/model/validate", {});
   const needRestart = !!saved.restart_required;
