@@ -409,6 +409,14 @@ def _extract_json_array(text: str) -> str:
         cleaned = cleaned[:_MAX_PARSE_CHARS]   # 只扫头部:真数组在可见输出前部,尾部散文不值得烧
     # 没有对象起点时不可能得到目标标签数组，避免在方括号海上重复 raw_decode。
     if "{" not in cleaned:
+        start = cleaned.find("[")
+        if start != -1:
+            try:
+                obj, _end = json.JSONDecoder().raw_decode(cleaned, start)
+                if isinstance(obj, list):
+                    return json.dumps(obj, ensure_ascii=False)
+            except (json.JSONDecodeError, RecursionError):
+                pass
         return cleaned
     decoder = json.JSONDecoder()
     first_any: Optional[str] = None
