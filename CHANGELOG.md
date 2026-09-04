@@ -11,6 +11,23 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.9.4] — 2026-09-04
+
+The channel conversations release: DingTalk chats are isolated, distinguishable, and attributable.
+
+### Added
+- **DingTalk channel conversation list.** Browse and select isolated DingTalk conversations from the console.
+- **Direct and group chat distinction.** Direct chats use the sender nickname; group chats use the group title, with `💬` and `👥` indicators.
+- **Sender attribution.** DingTalk sender nicknames appear in both live messages and historical turns.
+
+### Changed
+- **Channel conversation presentation.** Channel conversations now use the same collapsible peer-list styling as other conversation types.
+- **Read-only channel view spacing.** Improved the notice layout around channel conversation history.
+
+### Fixed
+- DingTalk messages no longer appear in the wrong local chat window.
+- JSON array extraction remains compatible with ordinary arrays while avoiding pathological bracket-input parsing costs.
+
 
 ## [2026.8.26] — 2026-08-26
 
