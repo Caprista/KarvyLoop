@@ -47,6 +47,7 @@ from .routes_mesh import router as mesh_router
 from .routes_pair import router as pair_router
 from .routes_peers import router as peers_router
 from .routes_pursuit import router as pursuit_router
+from .routes_prompt_review import router as prompt_review_router
 from .routes_workflow import router as workflow_router
 from .routes_roles import router as roles_router
 from .routes_schedules import router as schedules_router
@@ -888,6 +889,7 @@ def build_console_app(
     app.include_router(mesh_router)        # /api/mesh/{frontier,sync}(设备 mesh 日志同步,docs/74)
     app.include_router(pair_router)        # /api/pair/*(📱 设备配对管理:颁发/列表/吊销,管理权本地锁)
     app.include_router(pursuit_router)     # /api/pursuit*(docs/88 外环 Pursuit:跨天持久目标 create/列/详情)
+    app.include_router(prompt_review_router)  # /api/prompt/review(提示词只读评价 + 显式采用建议)
     app.include_router(tokens_router)      # /api/tokens*(P2-② 从 routes.py 拆出)
     app.include_router(decision_prefs_router)  # /api/decision_prefs*(P2-② 从 routes.py 拆出)
     app.include_router(atoms_router)       # /api/atoms* + /api/atom/*(P2-② 从 routes.py 拆出)

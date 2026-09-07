@@ -82,7 +82,8 @@ def build_role_paradigm_prompt(
             user_message=intent,
             environment={"cwd": cwd} if cwd else {},
         )
-        text = load_paradigm(ctx).to_system_prompt()
+        loaded = load_paradigm(ctx)
+        text = loaded.to_system_prompt()
         if not text.strip():
             return None
         # 权威身份锚(bug 修:私聊角色自称成"小卡")—— 角色系统提示的身份**只来自 IDENTITY.md
@@ -94,10 +95,37 @@ def build_role_paradigm_prompt(
             f"【你的名字】你叫「{_name}」。自我介绍、被问「你是谁」时,就用「{_name}」这个名字。"
             "「小卡」是 KarvyLoop 的全局助手,**不是你** —— 绝不要自称小卡。"
         ) if _name else ""
+        # 每个 paradigm layer 保持为独立 prompt block，trace 编辑才能精确回写对应层。
+        from karvyloop.paradigm.policy import LAYER_MEANING
+        static: list[str] = []
+        trace: list[dict] = []
+        if name_anchor:
+            static.append(name_anchor)
+            trace.append({
+                "id": "role.identity", "label": "role name anchor", "source": "system",
+                "origin": "role nickname", "kind": "static", "text": name_anchor, "editable": True,
+            })
+        for layer_index, layer_no in enumerate(loaded.loaded_layers):
+            layer = loaded.layers[layer_no]
+            separator = "\n" if layer_index < len(loaded.loaded_layers) - 1 else ""
+            block = f"<!-- layer {layer_no}: {LAYER_MEANING[layer_no]} -->\n{layer.text}{separator}"
+            static.append(block)
+            trace.append({
+                "id": f"role.layer_{layer_no}",
+                "label": f"L{layer_no} {LAYER_MEANING[layer_no]}",
+                "source": "runtime" if layer_no == 6 else ("soul" if layer_no in (1, 2, 3, 4, 5) else "system"),
+                "origin": layer.source,
+                "kind": "static",
+                "text": block,
+                "editable": True,
+            })
         # 工作区块照旧(9.5 P1):告诉它写哪
         ws = f"你的工作区:{cwd}(要写文件/跑代码就在这,有读写权限,别往 /tmp 写)"
-        cp = CodingPrompt(static=([name_anchor, text] if name_anchor else [text]),
-                          dynamic_blocks=[ws])
+        cp = CodingPrompt(static=static, dynamic_blocks=[ws])
+        cp.trace = trace + [
+            {"id": "workspace", "label": "workspace", "source": "runtime", "origin": "request workspace",
+             "kind": "dynamic", "text": ws, "editable": True},
+        ]
         # role 级工具可见性预设(B 方向最小一刀):COMPOSITION tools: 段 → ad-hoc 属性挂 persona,
         # forge 在工具合并后按它过滤(base/MCP/create_atom 全覆盖;空 = 全量,0 回归)。
         # 同 karvy_self / deontic_forbid 先例:机器可读属性,不进 prompt 文本。

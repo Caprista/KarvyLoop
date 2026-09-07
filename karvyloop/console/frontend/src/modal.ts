@@ -19,9 +19,15 @@ let _escClose = false;      // Esc 关闭默认关(与既有全局行为一致),
 
 interface OpenOpts { backdropClose?: boolean; escClose?: boolean }
 
+function resetModalPresentation(): void {
+  const modal = document.getElementById("mgmt-modal");
+  modal?.classList.remove("prompt-trace-modal", "prompt-trace-full");
+  document.getElementById("prompt-trace-expand")?.remove();
+}
 function openMgmtModal(title: string, opts?: OpenOpts): void {
   _backdropClose = !opts || opts.backdropClose !== false;
   _escClose = !!(opts && opts.escClose);
+  resetModalPresentation();
   const ttl = document.getElementById("mgmt-title");
   if (ttl) ttl.textContent = title;
   document.getElementById("mgmt-modal")?.classList.remove("hidden");
@@ -29,6 +35,7 @@ function openMgmtModal(title: string, opts?: OpenOpts): void {
 function closeMgmtModal(): void {
   if (_setupLocked) return;  // 强制引导期间:关不掉(没 Key 用不了)
   document.getElementById("mgmt-modal")?.classList.add("hidden");
+  resetModalPresentation();
 }
 function mgmtBody(): HTMLElement | null { return document.getElementById("mgmt-body"); }
 function setSetupLocked(locked: boolean): void { _setupLocked = locked; }

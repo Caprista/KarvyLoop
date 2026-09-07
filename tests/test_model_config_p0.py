@@ -84,6 +84,7 @@ def test_kimi_three_faces_in_presets():
     assert "api.moonshot.ai" in g["base_url"]
     assert "api.moonshot.cn" in cn["base_url"]          # 与 llm/profiles/kimi.py 已验通端点一致
     assert coding["base_url"] == "https://api.kimi.com/coding/v1"
+    assert cn["model_id"] == "kimi-cn/kimi-k3"
     for p in (g, cn, coding):
         assert p["api"] == "openai-completions"
         assert p["auth_header"] == "Authorization"       # Bearer 系(kimi.py 已验通)

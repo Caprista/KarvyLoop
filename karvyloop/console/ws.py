@@ -339,7 +339,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         pass
 
     # ch4 #1:群里 @ 角色 → 定向给它;@ 命中跳过路由 PROPOSE(你已点名)。
-    from .routes import _resolve_mention, _persona_for_current_peer, scope_for_peer, speaker_display
+    from .routes import _apply_prompt_override, _resolve_mention, _persona_for_current_peer, scope_for_peer, speaker_display
     ws_root = runtime_kwargs.get("workspace_root", "/")
     mention = (payload.get("mention") or "").strip()
     mention_domain = (payload.get("mention_domain") or "").strip()
@@ -378,6 +378,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     else:
         persona = _persona_for_current_peer(app, mgr, ws_root, intent=intent)
         eff_scope = scope_for_peer(mgr)
+    persona = _apply_prompt_override(persona, payload.get("prompt_override"))
 
     # 去重(对抗验收):paradigm 编译的 persona 已把域治理(value.md+deontic)编进 system prompt,
     # governance 里再带一份 = 双注入白烧 token。域块是 governance 的**尾段**(召回/预对齐都往前贴),
@@ -499,9 +500,13 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     _turn_speaker = m_speaker or speaker_display(app, mgr)   # @ 命中=角色花名,否则当前场署名
     if workbench_app is not None and not outcome.error:
         try:
-            workbench_app.push_chat_log_line("agent", outcome.text or "(empty result)",
-                                             events=getattr(outcome, "events", None),
-                                             speaker=_turn_speaker)   # per-turn 署名(历史重渲不再错标小卡)
+            workbench_app.push_chat_log_line(
+                "agent",
+                outcome.text or "(empty result)",
+                events=getattr(outcome, "events", None),
+                speaker=_turn_speaker,
+                prompt_trace=getattr(outcome, "prompt_trace", None),
+            )
             if outcome.crystallized and outcome.skill_name:
                 workbench_app.push_chat_log_line("system", f"🔔 已结晶: {outcome.skill_name}")
         except Exception:
@@ -533,6 +538,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
             logger.debug("[ws] 直聊角色经验沉淀触发失败(静默,不阻断)", exc_info=True)
 
     _payload = drive_outcome_to_dict(outcome)
+    _payload["prompt_override_status"] = getattr(persona, "override_status", [])
     _payload["speaker"] = _turn_speaker   # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
     _payload["recall_used"] = _recall_used   # Q1 召回解释:垫了哪几条记忆(空=没垫)
     # docs/90 刀3a 收口:带 drive trace id(与 turn.task_id 同源/同 REST outcome.task_id 语义)——

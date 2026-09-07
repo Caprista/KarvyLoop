@@ -137,6 +137,20 @@ def test_setup_status_live_network_error_classified_unreachable():
     assert r["live_error_class"] == "unreachable"
 
 
+def test_setup_status_live_error_event_is_not_success():
+    """Adapter 将 HTTP 错误放进事件流时，live check 必须失败，不能见到事件就算成功。"""
+    from fastapi.testclient import TestClient
+    from karvyloop.gateway.events import ErrorEvent
+
+    async def _not_found():
+        yield ErrorEvent(kind="HTTPStatusError", message="404 Not Found")
+
+    r = TestClient(_live_app(_fake_gw(_not_found))).get("/api/setup_status?live=1").json()
+    assert r["live_checked"] is True and r["live_ok"] is False
+    assert r["live_error_class"] == "bad_url"
+    assert "404" in r["live_reason"]
+
+
 def test_setup_status_live_skipped_when_must_setup():
     """配置级就没就绪(本来就强制引导)→ 不发真请求(live_checked=False)。"""
     from fastapi.testclient import TestClient

@@ -120,6 +120,57 @@ def test_app_js_uses_karvyrender():
     assert "KarvyRender.appendMarkdown" in js
 
 
+def test_prompt_trace_is_bound_to_turn_and_restored_from_history():
+    js = _read("app.js")
+    turn_start = js.index("function appendAgentTurn")
+    turn_end = js.index("function _recallWhy", turn_start)
+    turn_body = js[turn_start:turn_end]
+    assert "_appendPromptTraceChip(line, entry && entry.prompt_trace)" in turn_body
+    assert "appendAgentTurn(log, e)" in js
+
+
+def test_prompt_trace_edits_require_explicit_apply_and_reach_both_transports():
+    js = _read("app.js")
+    modal_start = js.index("function _openPromptTraceModal")
+    modal_end = js.index("function _appendPromptTraceChip", modal_start)
+    modal_body = js[modal_start:modal_end]
+    assert "下一轮使用这些修改" in modal_body
+    assert "applyBtn.onclick" in modal_body
+    assert "_promptTraceState = items.filter" in modal_body
+    assert "prompt-trace-expand" in modal_body
+    assert "prompt-trace-full" in modal_body
+    assert "单独查看此模块" in modal_body
+    assert "发送给模型的系统提示词" in modal_body
+    assert "随用户消息发送的请求上下文" in modal_body
+    assert "按发送顺序排列的最终提示词" in modal_body
+    assert "角色=系统 · 最终系统提示词" in modal_body
+    assert "角色=用户 · 请求上下文" in modal_body
+    assert "function makeCompositeSegment" in modal_body
+    assert "function renderSegment" in modal_body
+    assert "base_text: seg.baseText" in js
+    assert js.count("prompt_override: promptOverride") >= 2
+    assert 'text: "AI 评价与优化"' in modal_body
+    assert '"/api/prompt/review"' in modal_body
+    assert "采用此建议" in modal_body and "全部采用" in modal_body
+    assert "_promptTraceState = [];  // 修改只用于已发出的这一轮" in js
+    assert "prompt_override_status" in js and "修改仅用于本轮" in js
+    assert 'JSON.stringify({ intent: sendText' in js
+    switch_start = js.index("async function switchPeer")
+    switch_end = js.index("async function", switch_start + 20)
+    assert "_promptTraceState = []" in js[switch_start:switch_end]
+
+
+def test_prompt_trace_styles_include_sources_and_editor():
+    css = _read("styles.css")
+    for selector in (
+        ".prompt-trace-chip", ".prompt-trace-row", ".prompt-trace-text",
+        ".prompt-trace-inspect", ".prompt-trace-standalone", ".prompt-trace-full",
+        ".prompt-trace-composed", ".prompt-trace-module", ".prompt-trace-message-boundary",
+        ".source-system", ".source-soul", ".source-runtime",
+    ):
+        assert selector in css, f"缺 prompt trace 样式 {selector}"
+
+
 # ---- ch4 圆桌前端接线(小卡主持:开桌/结论卡/讨论折叠/追问问主持)----
 def test_roundtable_frontend_wired():
     html = _read("index.html")

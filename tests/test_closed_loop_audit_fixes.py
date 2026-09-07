@@ -67,6 +67,26 @@ def test_model_save_on_fresh_env_writes_config(tmp_path):
     assert any(m["id"] == "acme/foo-1" for m in listed["models"])
 
 
+def test_model_save_activates_fresh_console_runtime(tmp_path):
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    app.state.config_path = str(tmp_path / "config.yaml")
+
+    def activate():
+        app.state.main_loop = object()
+        app.state.runtime_kwargs = {"gateway": object()}
+        return True, ""
+
+    app.state.activate_runtime = activate
+    body = TestClient(app).post("/api/model/save", json={
+        "provider": "acme", "model_id": "acme/foo-1", "api": "openai-completions",
+        "base_url": "https://api.acme.test/v1", "api_key": "sk-FAKE-DO-NOT-LEAK",
+    }).json()
+    assert body["ok"] is True
+    assert body["activated"] is True
+    assert body["reloaded"] is True
+    assert body["restart_required"] is False
+
+
 def test_registry_loads_onboarding_shaped_config():
     """断②尾巴(冷启动演练逮到的):网页引导写的 config 只有 chat 模型、无 embedding 段 →
     ModelRegistry 必须能加载(否则重启后 gateway 仍构造失败,永远到不了首次对话 +

@@ -31,6 +31,8 @@ class ChatEntry:
     # 这条 agent 回合的**署名**(被 @ 的角色花名 / 小卡;""=小卡)。**必须 per-turn 持久**——
     # 否则历史重渲只能靠前端单个全局 speaker,@ 角色的回复会被错标成"小卡"(Hardy 报)。
     speaker: str = ""
+    # 生成本轮回复时实际使用的 system prompt 分段；供刷新/重连后继续回溯。
+    prompt_trace: list = field(default_factory=list)
 
 
 class ChatHistory:
@@ -45,9 +47,16 @@ class ChatHistory:
         self._lock = threading.Lock()
 
     def push(self, role: str, text: str, ts: str, events: Optional[list] = None,
-             speaker: str = "") -> None:
-        """追加一条(满则丢最旧)。events:agent 结构化回合(可选);speaker:agent 回合署名(可选)。"""
-        entry = ChatEntry(role=role, text=text, ts=ts, events=list(events or []), speaker=speaker or "")
+             speaker: str = "", prompt_trace: Optional[list] = None) -> None:
+        """追加一条(满则丢最旧),可携带 agent 回合的结构化事件与 prompt 回溯。"""
+        entry = ChatEntry(
+            role=role,
+            text=text,
+            ts=ts,
+            events=list(events or []),
+            speaker=speaker or "",
+            prompt_trace=[dict(segment) for segment in (prompt_trace or []) if isinstance(segment, dict)],
+        )
         with self._lock:
             self._buf.append(entry)
 
@@ -72,9 +81,9 @@ def get_chat_history() -> List[dict]:
 
 
 def push_chat_log_line(role: str, text: str, ts: str, events: Optional[list] = None,
-                       speaker: str = "") -> None:
+                       speaker: str = "", prompt_trace: Optional[list] = None) -> None:
     """追加一条到进程级历史(供 WorkbenchApp.push_chat_log_line() 用)。"""
-    _global_history.push(role, text, ts, events, speaker=speaker)
+    _global_history.push(role, text, ts, events, speaker=speaker, prompt_trace=prompt_trace)
 
 
 def reset_for_test() -> None:

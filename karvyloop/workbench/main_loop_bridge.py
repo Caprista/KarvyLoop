@@ -68,6 +68,7 @@ class DriveOutcome:
     task_id: str = ""          # 拍 9.1d:供 ConversationManager.record_turn 回查 trace
     ctx_dependent: bool = False  # 拍 9.1d:本句是否被上下文依赖门判为强依赖
     events: list = dataclass_field(default_factory=list)  # 9.4:结构化渲染事件(text/tool_call/tool_result/terminal)
+    prompt_trace: list | None = None
 
 
 async def drive_in_tui(
@@ -194,6 +195,7 @@ async def drive_in_tui(
             mcp_tools.update(_karvy_tools)
 
     def _run_drive() -> DriveOutcome:
+        slow_brain = None
         try:
             # 9.4:渲染事件收集器 —— forge 把 text/tool_call/tool_result/terminal 顺序攒进它,
             # drive 后随 DriveOutcome.events 下发给 UI 按类型渲染。全在本 worker 线程内同步收集,
@@ -232,6 +234,7 @@ async def drive_in_tui(
                 task_id=result.task_id,
                 ctx_dependent=result.ctx_dependent,
                 events=list(collector.events),
+                prompt_trace=getattr(slow_brain, "prompt_trace", None) or None,
             )
         except Exception as e:
             logger.exception(f"MainLoop.drive 异常: {e}")
@@ -257,6 +260,7 @@ async def drive_in_tui(
                 fast_brain_hit=False,
                 crystallized=False,
                 error=_humanize_drive_error(e),
+                prompt_trace=getattr(slow_brain, "prompt_trace", None) or None,
             )
 
     outcome = await asyncio.to_thread(_run_drive)

@@ -50,6 +50,9 @@ def drive_result_to_dict(result: DriveResult) -> dict[str, Any]:
 
 def drive_outcome_to_dict(outcome: DriveOutcome) -> dict[str, Any]:
     """DriveOutcome(TUI 桥)→ dict(JSON-friendly)。"""
+    trace = getattr(outcome, "prompt_trace", None)
+    if trace is not None and not isinstance(trace, list):
+        trace = [trace]
     return {
         "intent": outcome.intent,
         "brain": str(outcome.brain),
@@ -59,6 +62,7 @@ def drive_outcome_to_dict(outcome: DriveOutcome) -> dict[str, Any]:
         "crystallized": outcome.crystallized,
         "error": outcome.error,
         "events": list(getattr(outcome, "events", []) or []),  # 9.4:结构化渲染事件
+        "prompt_trace": trace,
     }
 
 

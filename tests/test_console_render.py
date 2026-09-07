@@ -59,8 +59,16 @@ def test_factory_passes_emitter(monkeypatch):
     monkeypatch.setattr(forge_mod, "generate_and_run", _fake_gen)
     from karvyloop.runtime.main_loop import forge_slow_brain_factory
     sentinel = RenderEventCollector()
-    forge_slow_brain_factory(token=1, sandbox=2, gateway=3, workspace_root="/tmp", emitter=sentinel)("x")
+    slow_brain = forge_slow_brain_factory(
+        token=1, sandbox=2, gateway=3, workspace_root="/tmp", emitter=sentinel,
+        governance="domain rules",
+    )
+    slow_brain("x")
     assert captured["emitter"] is sentinel
+    trace_ids = [segment["id"] for segment in slow_brain.prompt_trace]
+    assert trace_ids[-2:] == ["request.governance", "request.intent"]
+    assert any(segment["kind"] == "static" for segment in slow_brain.prompt_trace)
+    assert all(segment["editable"] is False for segment in slow_brain.prompt_trace[-2:])
     forge_slow_brain_factory(token=1, sandbox=2, gateway=3, workspace_root="/tmp")("y")
     assert captured["emitter"] is None
 
@@ -94,6 +102,31 @@ def test_drive_in_tui_fills_events(monkeypatch):
 
     outcome = asyncio.run(bridge.drive_in_tui("do x", _ML(), token=1, sandbox=2, gateway=3, workspace_root="/tmp"))
     assert [e["type"] for e in outcome.events] == ["text", "tool_call", "tool_result", "terminal"]
+
+
+def test_drive_in_tui_omits_trace_when_fast_brain_skips_model(monkeypatch):
+    import karvyloop.workbench.main_loop_bridge as bridge
+
+    def _stub_factory(**_):
+        def slow_brain(intent, *, ctx=None):
+            raise AssertionError("fast path must not call the model")
+        slow_brain.prompt_trace = []
+        return slow_brain
+
+    monkeypatch.setattr(bridge, "forge_slow_brain_factory", _stub_factory)
+
+    class _Res:
+        brain = types.SimpleNamespace(value="fast"); text = "cached"; skill_name = "known"
+        fast_brain_hit = True; crystallized = False; task_id = "t"; ctx_dependent = False
+
+    class _ML:
+        def drive(self, intent, *, slow_brain, ctx=None, scope=None, fresh=False):
+            return _Res()
+
+    outcome = asyncio.run(bridge.drive_in_tui(
+        "known request", _ML(), token=1, sandbox=2, gateway=3, workspace_root="/tmp",
+    ))
+    assert outcome.prompt_trace is None
 
 
 def test_drive_in_tui_accepts_and_forwards_mcp_tools(monkeypatch):
@@ -135,9 +168,13 @@ def test_serializer_includes_events():
     from karvyloop.console.serializers import drive_outcome_to_dict
     from karvyloop.workbench.main_loop_bridge import DriveOutcome
     from karvyloop.runtime.main_loop import Brain
+    trace = [{"id": "identity", "source": "soul", "text": "be precise"}]
     o = DriveOutcome(intent="x", brain=Brain.SLOW, text="t", skill_name="", fast_brain_hit=False,
-                     crystallized=False, events=[{"seq": 1, "type": "text", "text": "hi"}])
-    assert drive_outcome_to_dict(o)["events"] == [{"seq": 1, "type": "text", "text": "hi"}]
+                     crystallized=False, events=[{"seq": 1, "type": "text", "text": "hi"}],
+                     prompt_trace=trace)
+    payload = drive_outcome_to_dict(o)
+    assert payload["events"] == [{"seq": 1, "type": "text", "text": "hi"}]
+    assert payload["prompt_trace"] == trace
 
 
 # ---- AC6: chat_history 带 events ----

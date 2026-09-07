@@ -873,6 +873,72 @@ html, body {
   color: var(--text-dim); font-size: 12.5px; padding: 2px 8px; text-align: center;
 }
 .chat-line.agent { align-self: flex-start; }
+.prompt-trace-chip {
+  align-self: flex-start; margin: 5px 0 0 4px; padding: 3px 7px;
+  border: 1px solid var(--border); border-radius: 6px; background: transparent;
+  color: var(--text-dim); font-size: 11px; cursor: pointer;
+}
+.prompt-trace-chip:hover { border-color: var(--accent-line); color: var(--accent-strong); }
+.prompt-trace-summary { flex: none; margin-bottom: 8px; color: var(--text-dim); font-size: 12px; }
+.prompt-trace-legend { display: flex; flex: none; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text-dim); font-size: 11px; line-height: 1.45; }
+.prompt-trace-legend strong { color: var(--text); font-weight: 700; }
+.prompt-review-panel { flex: none; max-height: 44%; margin-bottom: 10px; padding: 10px; overflow-y: auto; border: 1px solid var(--proposal-line); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: 12px; }
+.prompt-review-heading { display: flex; align-items: baseline; gap: 12px; }
+.prompt-review-heading strong { color: var(--proposal); font-size: 14px; white-space: nowrap; }
+.prompt-review-list { margin-top: 9px; }
+.prompt-review-list ul { margin: 5px 0 0; padding-left: 20px; }
+.prompt-review-list li { margin: 3px 0; line-height: 1.45; }
+.prompt-review-risks { color: var(--warn); }
+.prompt-review-suggestions { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 9px; }
+.prompt-review-suggestions-head, .prompt-review-suggestion-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prompt-review-suggestion { margin-top: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.prompt-review-suggestion p { margin: 6px 0; color: var(--text-dim); }
+.prompt-review-suggestion pre { max-height: 180px; margin: 0; padding: 8px; overflow: auto; border: 1px solid var(--border); background: var(--bg-elev-1); color: var(--text); font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt-review-loading { padding: 8px; color: var(--proposal); text-align: center; }
+.prompt-review-error { display: flex; gap: 8px; border-color: var(--danger-line); color: var(--danger); }
+.prompt-trace-wrap { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; overflow-y: auto; }
+.prompt-trace-composed { flex: none; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.prompt-trace-message-boundary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim); font-size: 10px; }
+.prompt-trace-message-boundary:not(:first-child) { border-top: 4px solid var(--border); }
+.prompt-trace-message-boundary strong { color: var(--text); font-size: 11px; }
+.prompt-trace-module { --module-color: 120, 136, 160; border-left: 5px solid rgb(var(--module-color)); border-bottom: 1px solid var(--border); background: rgba(var(--module-color), 0.09); }
+.prompt-trace-module:last-child { border-bottom: 0; }
+.prompt-trace-tone-0 { --module-color: 205, 92, 92; }
+.prompt-trace-tone-1 { --module-color: 72, 132, 201; }
+.prompt-trace-tone-2 { --module-color: 59, 151, 114; }
+.prompt-trace-tone-3 { --module-color: 196, 143, 45; }
+.prompt-trace-tone-4 { --module-color: 139, 101, 184; }
+.prompt-trace-tone-5 { --module-color: 42, 151, 166; }
+.prompt-trace-module-head { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 8px 4px 10px; border-bottom: 1px solid rgba(var(--module-color), 0.25); }
+.prompt-trace-module-head .prompt-trace-label { margin-right: auto; }
+.prompt-trace-module-text { margin: 0; padding: 10px 12px 13px; overflow: visible; color: var(--text); font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt-trace-context-detail { margin: 8px 12px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.prompt-trace-context-turns { margin-top: 5px; border-top: 1px solid rgba(127, 127, 127, 0.2); }
+.prompt-trace-context-turns summary { cursor: pointer; padding: 5px 0; color: var(--accent); }
+.prompt-trace-context-turn { padding: 7px 0; border-top: 1px solid rgba(127, 127, 127, 0.14); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.prompt-trace-row { flex: none; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); overflow: hidden; }
+.prompt-trace-head { display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-bottom: 1px solid var(--border); }
+.prompt-trace-label { min-width: 0; margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
+.prompt-trace-source, .prompt-trace-kind { padding: 2px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+.prompt-trace-source.source-soul { border-color: var(--accent-line); color: var(--accent-strong); }
+.prompt-trace-source.source-system { border-color: var(--danger-line); color: var(--danger); }
+.prompt-trace-source.source-runtime { border-color: var(--proposal-line); color: var(--proposal); }
+.prompt-trace-text { width: 100%; min-height: 110px; max-height: 280px; resize: vertical; border: 0; padding: 9px; background: var(--surface); color: var(--text); font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.prompt-trace-text:focus { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.prompt-trace-text:disabled { color: var(--text-dim); cursor: not-allowed; }
+.prompt-trace-actions { display: flex; flex: none; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.prompt-trace-expand { margin-left: 4px; }
+.prompt-trace-inspect { flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 15px; }
+.prompt-trace-inspect:hover { background: var(--surface-hover); color: var(--text); }
+.prompt-trace-detail-bar { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text-dim); font-size: 12px; }
+.prompt-trace-standalone { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+.prompt-trace-standalone .prompt-trace-text { flex: 1 1 auto; min-height: 0; max-height: none; resize: none; }
+#mgmt-modal.prompt-trace-modal .modal { width: min(1120px, 96vw); height: min(860px, 92vh); max-height: 92vh; }
+#mgmt-modal.prompt-trace-modal .modal-body { display: flex; flex-direction: column; overflow: hidden; }
+#mgmt-modal.prompt-trace-full { padding: 0; }
+body #mgmt-modal.prompt-trace-full .modal,
+body.desk-view #mgmt-modal.prompt-trace-full .modal { position: fixed; inset: 0 !important; transform: none !important; width: 100vw; height: 100vh; max-width: none; max-height: none; border: 0; border-radius: 0; }
+#mgmt-modal.prompt-trace-full .prompt-trace-text { font-size: 13px; line-height: 1.6; }
 
 /* ch4 圆桌:小卡主持的产出卡 —— 结论为主角,内部讨论折叠 */
 .rt-card {
