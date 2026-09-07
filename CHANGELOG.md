@@ -11,6 +11,22 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.9.7] — 2026-09-07
+
+The DingTalk AI response release: authorized messages can drive bound roles and receive safe, streaming Markdown card replies.
+
+### Added
+- **Streaming DingTalk AI cards.** Model text deltas are throttled and serialized into one card before the authoritative final response is applied.
+- **Immediate processing feedback.** DingTalk users see a processing response while longer agent and tool workflows run.
+
+### Changed
+- **Authorized sender intent handling.** Messages from allowlisted DingTalk senders now drive the bound role as trusted intent; non-allowlisted senders remain fail-closed.
+- **Markdown fallback.** If an AI card cannot be created, processing and final responses use DingTalk Markdown messages.
+
+### Fixed
+- Internal reasoning and raw tool events are excluded from streamed card content.
+- Streaming output is scrubbed across delta boundaries before being sent to DingTalk.
+
 ## [2026.9.4] — 2026-09-04
 
 The channel conversations release: DingTalk chats are isolated, distinguishable, and attributable.

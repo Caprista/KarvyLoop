@@ -81,7 +81,14 @@ class _AIStreamController:
         await asyncio.sleep(0)
         task = self._flush_task
         if task is not None:
-            await task
+            if not task.done() and self._pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            else:
+                await task
         if self._pending:
             delta, self._pending = self._pending, ""
             try:
