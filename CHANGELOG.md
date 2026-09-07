@@ -11,6 +11,39 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.9.7] — 2026-09-07
+
+The DingTalk AI response release: authorized messages can drive bound roles and receive safe, streaming Markdown card replies.
+
+### Added
+- **Streaming DingTalk AI cards.** Model text deltas are throttled and serialized into one card before the authoritative final response is applied.
+- **Immediate processing feedback.** DingTalk users see a processing response while longer agent and tool workflows run.
+
+### Changed
+- **Authorized sender intent handling.** Messages from allowlisted DingTalk senders now drive the bound role as trusted intent; non-allowlisted senders remain fail-closed.
+- **Markdown fallback.** If an AI card cannot be created, processing and final responses use DingTalk Markdown messages.
+
+### Fixed
+- Internal reasoning and raw tool events are excluded from streamed card content.
+- Streaming output is scrubbed across delta boundaries before being sent to DingTalk.
+
+## [2026.9.4] — 2026-09-04
+
+The channel conversations release: DingTalk chats are isolated, distinguishable, and attributable.
+
+### Added
+- **DingTalk channel conversation list.** Browse and select isolated DingTalk conversations from the console.
+- **Direct and group chat distinction.** Direct chats use the sender nickname; group chats use the group title, with `💬` and `👥` indicators.
+- **Sender attribution.** DingTalk sender nicknames appear in both live messages and historical turns.
+
+### Changed
+- **Channel conversation presentation.** Channel conversations now use the same collapsible peer-list styling as other conversation types.
+- **Read-only channel view spacing.** Improved the notice layout around channel conversation history.
+
+### Fixed
+- DingTalk messages no longer appear in the wrong local chat window.
+- JSON array extraction remains compatible with ordinary arrays while avoiding pathological bracket-input parsing costs.
+
 
 ## [2026.8.26] — 2026-08-26
 

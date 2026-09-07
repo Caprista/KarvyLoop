@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 from karvyloop.console import build_console_app  # noqa: E402
 from karvyloop.cognition.conversation import ConversationManager, ConversationStore  # noqa: E402
+from karvyloop.domain import Address  # noqa: E402
 from karvyloop.karvy.observer import WorkbenchObserver  # noqa: E402
 
 
@@ -57,6 +58,32 @@ def test_conversations_no_manager_graceful():
     r = client.get("/api/conversations")
     assert r.status_code == 200
     assert r.json() == {"conversations": [], "current_id": None, "unsettled": 0}
+
+
+def test_channel_conversations_only_returns_channel_peers(app_with_mgr, mgr):
+    channel_peer = Address(domain_id="l0", role="channel", agent_id="dingtalk:chat-1")
+    mgr.channel_conversation(channel_peer)
+    mgr.record_channel_turn(channel_peer, mgr.channel_conversation(channel_peer),
+                            user_intent="查报表", agent_response="已查好")
+    mgr.set_peer(Address(domain_id="l0", role="observer", agent_id="karvy"))
+    client = TestClient(app_with_mgr)
+
+    r = client.get("/api/channel-conversations")
+    assert r.status_code == 200
+    items = r.json()["conversations"]
+    assert len(items) == 1
+    assert items[0]["peer_role"] == "channel"
+    assert items[0]["peer_agent_id"] == "dingtalk:chat-1"
+    assert items[0]["channel"] == "dingtalk"
+    assert items[0]["turn_count"] == 1
+
+
+def test_channel_conversations_no_manager_graceful():
+    app = build_console_app(workbench=WorkbenchObserver(), main_loop=None)
+    client = TestClient(app)
+    r = client.get("/api/channel-conversations")
+    assert r.status_code == 200
+    assert r.json() == {"conversations": []}
 
 
 # ---- AC2: new ----

@@ -182,7 +182,7 @@ var KarvyModelsPanelBundle = (function(exports) {
     wrap.appendChild(msg);
     body.appendChild(wrap);
   }
-  function _modelForm(m, title, onSaved) {
+  function _modelForm(m, title, onSaved, onboardingOpts) {
     const f = (k, ph) => {
       const i = el("input", { type: "text", placeholder: ph || "" });
       if (m[k] != null) i.value = m[k];
@@ -223,8 +223,12 @@ var KarvyModelsPanelBundle = (function(exports) {
           reasoning_styles: m.reasoning_styles || null
         });
         if (r.ok && r.data && r.data.ok) {
+          if (onboardingOpts && onboardingOpts.setDefault !== false) {
+            await _finishOnboardingSave(r.data, idIn.value.trim(), msg, onSaved);
+            return;
+          }
           if (r.data.hint) window.alert(tB(r.data.hint));
-          if (r.data.reloaded === false) _setMsg(msg, true, r.data.reload_note || "saved");
+          if (r.data.reloaded === false) _setMsg(msg, true, t("onb.saved_no_default"));
           if (onSaved) await onSaved();
           else await renderModelsPanel();
         } else _setMsg(msg, false, t("mgmt.failed", { err: r.data && (r.data.reason || r.data.detail) || r.status }));
@@ -315,7 +319,7 @@ var KarvyModelsPanelBundle = (function(exports) {
       text: t("onb.advanced"),
       onClick: () => {
         wrap.innerHTML = "";
-        wrap.appendChild(_modelForm({}, t("setup.add_model"), onDone));
+        wrap.appendChild(_modelForm({}, t("setup.add_model"), onDone, opts || {}));
       }
     }));
   }
@@ -357,6 +361,27 @@ var KarvyModelsPanelBundle = (function(exports) {
     }));
     wrap.appendChild(msg);
   }
+  async function _finishOnboardingSave(saved, modelId, msg, onDone) {
+    await _postJSON("/api/model/set_default", { model_id: modelId, role: "chat" });
+    _setMsg(msg, true, t("onb.validating"));
+    const v = await _postJSON("/api/model/validate", {});
+    const needRestart = !!saved.restart_required;
+    if (v.ok && v.data && v.data.ok) {
+      if (needRestart) {
+        _setMsg(msg, true, t("onb.saved_restart_verified"));
+        msg.classList.add("onb-restart-big");
+      } else {
+        _setMsg(msg, true, t("onb.ok"));
+      }
+    } else {
+      const cls = v.data && v.data.error_class || "";
+      const hintKey = cls === "bad_key" ? "onb.err_bad_key" : cls === "bad_url" ? "onb.err_bad_url" : cls === "unreachable" ? "onb.err_unreachable" : "";
+      const hint = hintKey ? t(hintKey) + " — " : "";
+      const saveHint = saved.hint ? tB(saved.hint) + " — " : "";
+      _setMsg(msg, false, saveHint + hint + t("onb.validate_failed", { err: v.data && v.data.reason || "?" }));
+    }
+    if (onDone) await onDone();
+  }
   async function _onbSave(p, key, msg, onDone, opts) {
     if (!p.is_local && !key.trim()) {
       _setMsg(msg, false, t("onb.key_required"));
@@ -392,25 +417,7 @@ var KarvyModelsPanelBundle = (function(exports) {
       if (onDone) await onDone();
       return;
     }
-    await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });
-    _setMsg(msg, true, t("onb.validating"));
-    const v = await _postJSON("/api/model/validate", {});
-    const needRestart = !!(r.data && r.data.restart_required);
-    if (v.ok && v.data && v.data.ok) {
-      if (needRestart) {
-        _setMsg(msg, true, t("onb.saved_restart_verified"));
-        msg.classList.add("onb-restart-big");
-      } else {
-        _setMsg(msg, true, t("onb.ok"));
-      }
-    } else {
-      const cls = v.data && v.data.error_class || "";
-      const hintKey = cls === "bad_key" ? "onb.err_bad_key" : cls === "bad_url" ? "onb.err_bad_url" : cls === "unreachable" ? "onb.err_unreachable" : "";
-      const hint = hintKey ? t(hintKey) + " — " : "";
-      const saveHint = r.data && r.data.hint ? tB(r.data.hint) + " — " : "";
-      _setMsg(msg, false, saveHint + hint + t("onb.validate_failed", { err: v.data && v.data.reason || "?" }));
-    }
-    if (onDone) await onDone();
+    await _finishOnboardingSave(r.data, p.model_id, msg, onDone);
   }
   function _liveFailOf(s) {
     return {

@@ -225,6 +225,26 @@ def api_line_open_by_conv(req: ConvOpenRequest, request: Request) -> dict[str, A
         _set_line_hidden(request.app, target.domain_id, "workflow", target.agent_id or "", False)
     elif is_round:
         _set_line_hidden(request.app, target.domain_id, "roundtable", conv.id, False)
+
+    channel = ""
+    channel_role = ""
+    if role == "channel":
+        agent_id = target.agent_id or ""
+        channel = "dingtalk" if agent_id.startswith("dingtalk:") else "channel"
+        configs = [
+            getattr(item, "_cfg", None)
+            for item in (getattr(request.app.state, "dingtalk_channels", None) or [])
+        ]
+        channel_role = next(
+            (
+                cfg.role
+                for cfg in configs
+                if cfg is not None
+                and (cfg.domain_id or "l0") == target.domain_id
+            ),
+            "",
+        )
+
     return {
         "ok": True, "domain_id": target.domain_id, "role": role,
         "agent_id": target.agent_id or "", "is_group": role == "group",
@@ -232,5 +252,6 @@ def api_line_open_by_conv(req: ConvOpenRequest, request: Request) -> dict[str, A
         "kind": "workflow" if role == "workflow" else ("roundtable" if is_round else ""),
         "title": title.lstrip("⚙🎡 ").strip(), "origin_group": _line_origin_name(request.app, target.domain_id),
         "conversation_id": conv.id, "turn_count": conv.turn_count,
+        "channel": channel, "channel_role": channel_role,
         "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
     }

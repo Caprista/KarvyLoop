@@ -51,7 +51,7 @@ def _backend_routes() -> set:
 def _frontend_calls() -> set:
     out = set()
     for p in STATIC.glob("*.js"):
-        for m in re.finditer(r'/api/[a-zA-Z0-9_/]+', p.read_text(encoding="utf-8")):
+        for m in re.finditer(r'/api/[a-zA-Z0-9_/-]+', p.read_text(encoding="utf-8")):
             out.add(m.group(0).rstrip("/"))
     return out
 
