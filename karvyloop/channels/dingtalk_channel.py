@@ -7,8 +7,7 @@
 安全地基(每条都有测试锁):
 - **白名单 fail-closed**:群里任何人都能 @ 到机器人 → `allow_senders`(钉钉 staffId)
   空 = 谁的 @ 都不驱动(回一句"仅授权用户可用",同一 sender 只回一次,不刷群)。
-- **入站 = 不可信输入**:消息文本过 `fence_untrusted(source="dingtalk")` 统一围栏
-  (群里的话是数据不是指令;注入面纪律)。
+- **白名单后原文驱动**:授权发送者的消息原文直接进入绑定角色;非白名单仍在驱动前拒绝。
 - **凭据**只在 ~/.karvyloop/config.yaml(仓外);repr=False 不打日志。
 - **角色工具预设自动生效**:绑定 role 的 COMPOSITION `tools:` 白名单经由
   build_role_paradigm_prompt → persona.tool_preset 管到这条通道(给钉钉角色配窄工具)。
@@ -22,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from karvyloop.config_channels import DingTalkChannelConfig
 
@@ -30,6 +29,66 @@ logger = logging.getLogger(__name__)
 
 # 拒驱动回执(白名单外):一条固定话,不烧模型
 REFUSAL_TEXT = "这个机器人仅对授权用户开放。"
+
+
+class _AIStreamController:
+    """把 worker 线程的模型增量节流、串行地写入同一张钉钉 AI 卡片。"""
+
+    def __init__(self, card: Any, loop: asyncio.AbstractEventLoop,
+                 interval_s: float = 0.25) -> None:
+        from karvyloop.cognition.fence import ScrubState
+        self._card = card
+        self._loop = loop
+        self._interval_s = interval_s
+        self._scrub_state = ScrubState()
+        self._pending = ""
+        self._flush_task: Optional[asyncio.Task] = None
+        self._closed = False
+
+    def on_event(self, event: dict) -> None:
+        """由 drive worker 线程调用；只接正文，不外发思维链和工具原始结果。"""
+        if event.get("type") != "text_delta" or self._closed:
+            return
+        try:
+            from karvyloop.cognition.fence import scrub_stream
+            delta = scrub_stream(str(event.get("text") or ""), self._scrub_state)
+            if delta:
+                self._loop.call_soon_threadsafe(self._enqueue, delta)
+        except Exception:
+            logger.debug("[dingtalk] 流式事件入队失败", exc_info=True)
+
+    def _enqueue(self, delta: str) -> None:
+        if self._closed:
+            return
+        self._pending += delta
+        if self._flush_task is None or self._flush_task.done():
+            self._flush_task = self._loop.create_task(self._flush())
+
+    async def _flush(self) -> None:
+        await asyncio.sleep(self._interval_s)
+        while self._pending and not self._closed:
+            delta, self._pending = self._pending, ""
+            try:
+                await asyncio.to_thread(self._card.ai_streaming, delta, True)
+            except Exception:
+                logger.warning("[dingtalk] AI 卡片流式更新失败", exc_info=True)
+                return
+            if self._pending:
+                await asyncio.sleep(self._interval_s)
+
+    async def finalize(self) -> None:
+        """drive 结束后排空已入队增量，再由调用方以权威终态覆盖卡片。"""
+        await asyncio.sleep(0)
+        task = self._flush_task
+        if task is not None:
+            await task
+        if self._pending:
+            delta, self._pending = self._pending, ""
+            try:
+                await asyncio.to_thread(self._card.ai_streaming, delta, True)
+            except Exception:
+                logger.warning("[dingtalk] AI 卡片末段流式更新失败", exc_info=True)
+        self._closed = True
 
 
 async def _publish_channel_message(app: Any, *, role: str, text: str,
@@ -108,11 +167,12 @@ async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
                                 raw_text: str = "",
                                 sender_nick: str = "",
                                 chat_type: str = "",
-                                chat_title: str = "") -> str:
+                                chat_title: str = "",
+                                on_event: Optional[Callable[[dict], None]] = None) -> str:
     """把一条钉钉消息驱成绑定 role 的回复。返回回复文本(失败也回诚实人话,不抛)。
 
-    text = 喂模型的(已过围栏);raw_text = 落对话历史的原文(围栏是给模型的,
-    历史里该存用户的原话)。复用主聊天路径的同一 drive,不新造执行链。
+    text = 喂模型的消息原文;raw_text = 落对话历史的原文。复用主聊天路径的同一 drive,
+    不新造执行链。
     """
     from karvyloop.domain import Address
     ml = getattr(app.state, "main_loop", None)
@@ -171,7 +231,7 @@ async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
     try:
         outcome = await drive_in_tui(
             text, ml, ctx=ctx, governance=governance, persona=persona, scope=scope,
-            **rk)
+            on_event=on_event, **rk)
     except Exception as e:
         logger.warning("[dingtalk] drive 失败(chat=%s): %s", chat_id, e)
         return f"(小卡这轮跑挂了:{type(e).__name__} —— 回 console 看看任务面板)"
@@ -223,10 +283,12 @@ async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
 
 async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
                           reply_fn: Callable[[str], Any],
-                          refused: Optional[set] = None) -> None:
+                          refused: Optional[set] = None,
+                          processing_fn: Optional[Callable[[], Awaitable[Any]]] = None,
+                          on_event: Optional[Callable[[dict], None]] = None) -> None:
     """入站消息处理(SDK 无关的纯逻辑,测试直接喂 payload + 假 reply_fn)。
 
-    白名单 fail-closed → fence → drive → reply_fn(回复)。
+    白名单 fail-closed → processing_fn(开始处理) → 原文 drive → reply_fn(回复)。
     `refused`:本实例"已拒绝过的 sender"集合(每机器人一份;None = 临时一份)——
     同一 sender 只回一次拒绝,不刷群;多实例间互不干扰。
     """
@@ -248,6 +310,8 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
             except Exception:
                 pass
         return
+    if processing_fn is not None:
+        await processing_fn()
     conversation_id = _channel_conversation_id(app, cfg, chat)
     await _publish_channel_message(app, role="user", text=text,
                                    chat_id=chat, sender=sender,
@@ -256,14 +320,12 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
                                    sender_nick=info["sender_nick"],
                                    chat_type=info["chat_type"],
                                    chat_title=info["chat_title"])
-    # 不可信围栏在入站边界(群里的话是数据不是指令)——进 drive 前就包好。
-    from karvyloop.cognition.fence import fence_untrusted
-    fenced = fence_untrusted(text, source="dingtalk") or text
-    reply = await drive_channel_message(app, cfg, text=fenced, chat_id=chat, sender=sender,
+    reply = await drive_channel_message(app, cfg, text=text, chat_id=chat, sender=sender,
                                         raw_text=text,
                                         sender_nick=info["sender_nick"],
                                         chat_type=info["chat_type"],
-                                        chat_title=info["chat_title"])
+                                        chat_title=info["chat_title"],
+                                        on_event=on_event)
     reply_fn(reply)
 
 
@@ -300,9 +362,32 @@ class DingTalkChannel:
                 def _reply(text: str) -> None:
                     holder["reply"] = text
 
+                async def _processing() -> None:
+                    from dingtalk_stream import ChatbotMessage
+                    msg = ChatbotMessage.from_dict(data)
+                    card = await asyncio.to_thread(
+                        self.ai_markdown_card_start, msg, title="AI 回复")
+                    if getattr(card, "card_instance_id", None):
+                        holder["card"] = card
+                        holder["stream"] = _AIStreamController(card, loop)
+                    else:
+                        await asyncio.to_thread(
+                            self.reply_markdown,
+                            "OA 审批助理",
+                            "## 已收到\n\n> 正在思考并查询 OA 待办，请稍候……",
+                            msg,
+                        )
+
+                def _on_event(event: dict) -> None:
+                    stream = holder.get("stream")
+                    if stream is not None:
+                        stream.on_event(event)
+
                 fut = asyncio.run_coroutine_threadsafe(
                     handle_incoming(channel._app, channel._cfg, data, _reply,
-                                    refused=channel._refused), loop)
+                                    refused=channel._refused,
+                                    processing_fn=_processing,
+                                    on_event=_on_event), loop)
                 try:
                     await asyncio.to_thread(fut.result)
                 except Exception as e:
@@ -311,9 +396,22 @@ class DingTalkChannel:
                 text = holder.get("reply")
                 if text:
                     try:
-                        from dingtalk_stream import ChatbotMessage
-                        msg = ChatbotMessage.from_dict(data)
-                        self.reply_text(text, msg)
+                        card = holder.get("card")
+                        if card is not None:
+                            stream = holder.get("stream")
+                            if stream is not None:
+                                finalize = asyncio.run_coroutine_threadsafe(stream.finalize(), loop)
+                                await asyncio.to_thread(finalize.result)
+                            await asyncio.to_thread(card.ai_finish, markdown=text)
+                        else:
+                            from dingtalk_stream import ChatbotMessage
+                            msg = ChatbotMessage.from_dict(data)
+                            await asyncio.to_thread(
+                                self.reply_markdown,
+                                "OA 审批助理",
+                                text,
+                                msg,
+                            )
                     except Exception as e:
                         logger.warning("[dingtalk] 回复发送失败: %s", e)
                 from dingtalk_stream import AckMessage
