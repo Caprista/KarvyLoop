@@ -135,10 +135,24 @@ def build_karvy_persona_prompt(cwd: str = "/", *, intent: str = "") -> CodingPro
                 dynamic.append(self_knowledge_block())
         except Exception:
             pass  # 自我认知注入失败不拖垮对话(退化=旧行为)
+    identity = "\n".join(KARVY_PERSONA)
+    coding_discipline = "\n".join(_CODING_DISCIPLINE)
     cp = CodingPrompt(
-        static=list(KARVY_PERSONA) + _CODING_DISCIPLINE,
+        static=[identity, coding_discipline],
         dynamic_blocks=dynamic,
     )
+    cp.trace = [
+        {"id": "karvy.identity", "label": "identity", "source": "system", "origin": "KARVY_PERSONA",
+         "kind": "static", "text": identity, "editable": True},
+        {"id": "karvy.coding_discipline", "label": "coding discipline", "source": "system",
+         "origin": "_CODING_DISCIPLINE", "kind": "static", "text": coding_discipline, "editable": True},
+    ]
+    for i, block in enumerate(dynamic):
+        cp.trace.append({
+            "id": f"karvy.dynamic_{i}", "label": f"dynamic[{i}]", "source": "runtime",
+            "origin": "workspace" if i == 0 else "self knowledge",
+            "kind": "dynamic", "text": block, "editable": True,
+        })
     # 标记"这是小卡本卡"(drive_in_tui 据此决定要不要挂 instantiate_domain_template 工具;
     # 业务角色 persona 无此标记 → 不挂,建域是小卡的编排职责不下放)。
     cp.karvy_self = True
@@ -157,8 +171,18 @@ def build_role_persona_prompt(
     (forge_slow_brain_factory),这里不重复塞,保持 system 段干净。
     """
     where = f"在业务域「{domain_name}」里干活的角色" if domain_name else "一个业务角色"
-    static = [f"你是「{role}」,{where}。", *_conversational_discipline(f"「{role}」")]
-    return CodingPrompt(static=static, dynamic_blocks=[_workspace_block(cwd)])
+    identity = f"你是「{role}」,{where}。"
+    discipline = "\n".join(_conversational_discipline(f"「{role}」"))
+    cp = CodingPrompt(static=[identity, discipline], dynamic_blocks=[_workspace_block(cwd)])
+    cp.trace = [
+        {"id": "role.identity", "label": "identity", "source": "system", "origin": "role selection",
+         "kind": "static", "text": identity, "editable": True},
+        {"id": "role.persona", "label": "role persona", "source": "system",
+         "origin": "conversation discipline", "kind": "static", "text": discipline, "editable": True},
+        {"id": "workspace", "label": "workspace", "source": "runtime", "origin": "request workspace",
+         "kind": "dynamic", "text": cp.dynamic_blocks[0], "editable": True},
+    ]
+    return cp
 
 
 def build_group_coordinator_prompt(
@@ -178,10 +202,23 @@ def build_group_coordinator_prompt(
         "你是协调者,不是替谁干活的人:看清这群有谁、用户要的活该谁来,"
         "就帮他把活分派给合适的成员(委派),自己能直接答的就答。别冒充群里的某个成员说话。"
     )
-    return CodingPrompt(
-        static=list(KARVY_PERSONA) + _CODING_DISCIPLINE,
+    identity = "\n".join(KARVY_PERSONA)
+    coding_discipline = "\n".join(_CODING_DISCIPLINE)
+    cp = CodingPrompt(
+        static=[identity, coding_discipline],
         dynamic_blocks=[group_block, _workspace_block(cwd)],
     )
+    cp.trace = [
+        {"id": "group.identity", "label": "identity", "source": "system", "origin": "KARVY_PERSONA",
+         "kind": "static", "text": identity, "editable": True},
+        {"id": "group.coding_discipline", "label": "coding discipline", "source": "system",
+         "origin": "_CODING_DISCIPLINE", "kind": "static", "text": coding_discipline, "editable": True},
+        {"id": "group.context", "label": "group context", "source": "runtime", "origin": "group roster",
+         "kind": "dynamic", "text": group_block, "editable": True},
+        {"id": "workspace", "label": "workspace", "source": "runtime", "origin": "request workspace",
+         "kind": "dynamic", "text": _workspace_block(cwd), "editable": True},
+    ]
+    return cp
 
 
 __all__ = [

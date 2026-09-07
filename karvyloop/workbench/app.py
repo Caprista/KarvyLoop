@@ -194,15 +194,16 @@ class WorkbenchApp(App):
     # ---- 批 8.5-A:聊天日志 API(供 h2a_input / 8.5-C console 复用) ----
 
     def push_chat_log_line(self, role: str, text: str, events: list | None = None,
-                           speaker: str = "") -> None:
+                           speaker: str = "", prompt_trace: list | None = None) -> None:
         """追加一条聊天日志(进程级 ring buffer + LChatLog widget 同步刷新)。
 
         events:9.4 agent 结构化回合(text/tool_call/tool_result/terminal),可选。
         speaker:agent 回合署名(被 @ 角色花名;""=小卡),per-turn 持久供历史正确署名。
+        prompt_trace:生成该 agent 回合时实际使用的 system prompt 分段。
         """
         ts = _now_ts()
         # 1. 写 ring buffer(8.5-C console 复用)
-        push_chat_log_line(role, text, ts, events, speaker=speaker)
+        push_chat_log_line(role, text, ts, events, speaker=speaker, prompt_trace=prompt_trace)
         # 2. 推 LChatLog widget(若已挂载)
         try:
             from karvyloop.workbench.widgets.l_chat_log import ChatLine
@@ -254,7 +255,12 @@ class WorkbenchApp(App):
         else:
             self._last_error = ""
             self._last_drive_text = outcome.text or "(empty result)"
-            self.push_chat_log_line("agent", self._last_drive_text)
+            self.push_chat_log_line(
+                "agent",
+                self._last_drive_text,
+                events=getattr(outcome, "events", None),
+                prompt_trace=getattr(outcome, "prompt_trace", None),
+            )
             # 这一轮已在 GlobalKarvy.ask() 里 record_turn(CV-10),这里不重复记。
         if outcome.crystallized and outcome.skill_name:
             if outcome.skill_name not in self._crystallized_skills:

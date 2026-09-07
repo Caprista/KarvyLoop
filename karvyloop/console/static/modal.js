@@ -6,10 +6,17 @@ var KarvyModalBundle = (function(exports) {
   let _setupLocked = false;
   let _backdropClose = true;
   let _escClose = false;
+  function resetModalPresentation() {
+    var _a;
+    const modal = document.getElementById("mgmt-modal");
+    modal == null ? void 0 : modal.classList.remove("prompt-trace-modal", "prompt-trace-full");
+    (_a = document.getElementById("prompt-trace-expand")) == null ? void 0 : _a.remove();
+  }
   function openMgmtModal(title, opts) {
     var _a;
     _backdropClose = !opts || opts.backdropClose !== false;
     _escClose = !!(opts && opts.escClose);
+    resetModalPresentation();
     const ttl = document.getElementById("mgmt-title");
     if (ttl) ttl.textContent = title;
     (_a = document.getElementById("mgmt-modal")) == null ? void 0 : _a.classList.remove("hidden");
@@ -18,6 +25,7 @@ var KarvyModalBundle = (function(exports) {
     var _a;
     if (_setupLocked) return;
     (_a = document.getElementById("mgmt-modal")) == null ? void 0 : _a.classList.add("hidden");
+    resetModalPresentation();
   }
   function mgmtBody() {
     return document.getElementById("mgmt-body");

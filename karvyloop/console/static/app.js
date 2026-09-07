@@ -66,6 +66,280 @@
     return false;
   }
 
+  let _promptTraceState = [];
+
+  function _normalizePromptTrace(trace) {
+    if (!Array.isArray(trace)) return [];
+    return trace.filter(Boolean).map((seg, idx) => ({
+      id: seg.id || seg.label || "trace-" + idx,
+      label: seg.label || seg.id || "segment " + (idx + 1),
+      source: seg.source || "system",
+      origin: seg.origin || "",
+      kind: seg.kind || "static",
+      text: typeof seg.text === "string" ? seg.text : "",
+      detail: seg.detail && typeof seg.detail === "object" ? seg.detail : null,
+      editable: typeof seg.editable === "boolean" ? seg.editable : true,
+      edited: Boolean(seg.edited),
+    }));
+  }
+
+  function _collectPromptOverride() {
+    return _promptTraceState.map((seg) => ({
+      id: seg.id, label: seg.label, text: seg.text || "", base_text: seg.baseText || "",
+    }));
+  }
+
+  const _promptTraceLabels = {
+    "identity": "身份设定",
+    "coding discipline": "编码纪律",
+    "domain governance": "领域治理",
+    "conversation context": "对话上下文",
+    "current request": "当前请求",
+  };
+  const _promptTraceSources = { system: "系统", soul: "灵魂设定", runtime: "运行时" };
+  const _promptTraceKinds = { static: "静态", dynamic: "动态", input: "输入" };
+  const _promptTraceOrigins = {
+    workspace: "工作区",
+    "business domain value": "业务领域价值",
+    "conversation history": "对话历史",
+    "user message": "用户消息",
+  };
+
+  function _promptTraceLabel(seg) {
+    if (_promptTraceLabels[seg.label]) return _promptTraceLabels[seg.label];
+    if (/^dynamic\[\d+\]$/.test(seg.label || "") && seg.origin === "workspace") return "工作区上下文";
+    return seg.label || seg.id;
+  }
+
+  function _promptTraceSource(seg) {
+    const source = _promptTraceSources[seg.source] || seg.source;
+    const origin = _promptTraceOrigins[seg.origin] || seg.origin;
+    return origin ? source + " · " + origin : source;
+  }
+
+  function _openPromptTraceModal(trace) {
+    const activeById = new Map(_promptTraceState.map((seg) => [seg.id, seg]));
+    const items = _normalizePromptTrace(trace).map((seg) => {
+      const active = activeById.get(seg.id);
+      return { ...seg, baseText: seg.text, text: active ? active.text : seg.text };
+    });
+    openMgmtModal("提示词回溯", { escClose: true });
+    const overlay = document.getElementById("mgmt-modal");
+    const body = mgmtBody();
+    if (!overlay || !body) return;
+    overlay.classList.add("prompt-trace-modal");
+    let reviewState = null;
+
+    function adoptSuggestion(suggestion) {
+      const target = items.find((seg) => seg.id === suggestion.id && seg.editable !== false);
+      if (target) target.text = suggestion.text;
+    }
+
+    async function runPromptReview() {
+      reviewState = { loading: true };
+      renderList();
+      try {
+        const result = await _postJSON("/api/prompt/review", { trace: items.map((seg) => ({
+          id: seg.id, label: seg.label, source: seg.source, origin: seg.origin,
+          kind: seg.kind, text: seg.text || "", editable: seg.editable !== false,
+        })) });
+        reviewState = result.ok ? result.data : {
+          error: result.data.detail || "AI 评价失败，请稍后重试。",
+        };
+      } catch (e) {
+        reviewState = { error: "无法连接 AI 评价服务。" };
+      }
+      renderList();
+    }
+
+    function makeReviewPanel() {
+      if (!reviewState) return null;
+      if (reviewState.loading) return el("section", { class: "prompt-review-panel" },
+        el("div", { class: "prompt-review-loading", text: "AI 正在评价提示词…" }));
+      if (reviewState.error) return el("section", { class: "prompt-review-panel prompt-review-error" },
+        el("strong", { text: "评价未完成" }), el("span", { text: String(reviewState.error) }));
+
+      const suggestions = Array.isArray(reviewState.suggestions) ? reviewState.suggestions : [];
+      const panel = el("section", { class: "prompt-review-panel" },
+        el("div", { class: "prompt-review-heading" },
+          el("strong", { text: "AI 评价 · " + Number(reviewState.score || 0) + " 分" }),
+          el("span", { text: reviewState.summary || "暂无总结" })));
+      function addList(title, values, className) {
+        if (!Array.isArray(values) || !values.length) return;
+        const list = el("ul", { class: className });
+        values.forEach((value) => list.appendChild(el("li", { text: String(value) })));
+        panel.appendChild(el("div", { class: "prompt-review-list" }, el("strong", { text: title }), list));
+      }
+      addList("优点", reviewState.strengths, "prompt-review-strengths");
+      addList("风险与问题", reviewState.risks, "prompt-review-risks");
+      if (suggestions.length) {
+        const suggestionWrap = el("div", { class: "prompt-review-suggestions" },
+          el("div", { class: "prompt-review-suggestions-head" },
+            el("strong", { text: "可选优化 · " + suggestions.length + " 项" }),
+            el("button", { class: "action-btn", type: "button", text: "全部采用",
+              onClick: () => { suggestions.forEach(adoptSuggestion); renderList(); } })));
+        suggestions.forEach((suggestion) => {
+          suggestionWrap.appendChild(el("article", { class: "prompt-review-suggestion" },
+            el("div", { class: "prompt-review-suggestion-head" },
+              el("strong", { text: _promptTraceLabels[suggestion.label] || suggestion.label || suggestion.id }),
+              el("button", { class: "action-btn", type: "button", text: "采用此建议",
+                onClick: () => { adoptSuggestion(suggestion); renderList(); } })),
+            el("p", { text: suggestion.reason || "建议优化此模块。" }),
+            el("pre", { text: suggestion.text || "" })));
+        });
+        panel.appendChild(suggestionWrap);
+      }
+      return panel;
+    }
+
+    const expandBtn = el("button", {
+      class: "modal-close prompt-trace-expand", id: "prompt-trace-expand", type: "button",
+      text: "⛶", title: "全屏查看", "aria-label": "全屏查看提示词回溯",
+    });
+    expandBtn.onclick = () => {
+      const full = overlay.classList.toggle("prompt-trace-full");
+      expandBtn.textContent = full ? "⤡" : "⛶";
+      expandBtn.title = full ? "退出全屏" : "全屏查看";
+      expandBtn.setAttribute("aria-label", full ? "退出提示词回溯全屏" : "全屏查看提示词回溯");
+    };
+    const close = document.getElementById("mgmt-close");
+    const head = close && close.parentElement;
+    if (head) head.insertBefore(expandBtn, close);
+
+    function makeEditor(seg, standalone) {
+      const labelText = _promptTraceLabel(seg);
+      const sourceText = _promptTraceSource(seg);
+      const inspectBtn = standalone ? null : el("button", {
+        class: "prompt-trace-inspect", type: "button", text: "⤢",
+        title: "单独查看此模块", "aria-label": "单独查看“" + labelText + "”模块",
+      });
+      const row = el("div", { class: "prompt-trace-row" + (standalone ? " prompt-trace-standalone" : "") });
+      const head = el("div", { class: "prompt-trace-head" },
+        el("span", { class: "prompt-trace-label", text: labelText }),
+        inspectBtn,
+        el("span", { class: "prompt-trace-source source-" + seg.source, text: sourceText }),
+        el("span", { class: "prompt-trace-kind", text: _promptTraceKinds[seg.kind] || seg.kind || "静态" }));
+      const ta = el("textarea", { class: "prompt-trace-text", rows: standalone ? 24 : 6 });
+      ta.value = seg.text || "";
+      ta.disabled = seg.editable === false;
+      ta.addEventListener("input", () => { seg.text = ta.value; });
+      if (inspectBtn) inspectBtn.onclick = () => renderSegment(seg);
+      row.appendChild(head);
+      row.appendChild(ta);
+      return row;
+    }
+
+    function makeContextDetail(seg) {
+      const detail = seg.detail;
+      if (!detail || !Number.isFinite(Number(detail.total_turns))) return null;
+      const omitted = Number(detail.omitted_turns || 0);
+      const label = "共 " + Number(detail.total_turns) + " 轮 · 已发送 " + Number(detail.included_turns || 0) + " 轮 · "
+        + Number(detail.token_count || 0) + "/" + Number(detail.token_budget || 0) + " tokens"
+        + (omitted ? " · 省略更早 " + omitted + " 轮" : "");
+      const meta = el("div", { class: "prompt-trace-context-detail", text: label });
+      if (Array.isArray(detail.turns) && detail.turns.length) {
+        const list = el("details", { class: "prompt-trace-context-turns" });
+        list.appendChild(el("summary", { text: "展开逐轮来源" }));
+        detail.turns.forEach((turn) => {
+          const parts = ["第 " + turn.index + " 轮 · " + Number(turn.tokens || 0) + " tokens"];
+          if (turn.user) parts.push("用户：" + turn.user);
+          if (turn.assistant) parts.push("小卡：" + turn.assistant);
+          list.appendChild(el("div", { class: "prompt-trace-context-turn", text: parts.join("\n") }));
+        });
+        meta.appendChild(list);
+      }
+      return meta;
+    }
+
+    function makeCompositeSegment(seg, index) {
+      const labelText = _promptTraceLabel(seg);
+      const sourceText = _promptTraceSource(seg);
+      const inspectBtn = el("button", {
+        class: "prompt-trace-inspect", type: "button", text: "⤢",
+        title: "单独查看和编辑此模块", "aria-label": "单独查看和编辑“" + labelText + "”模块",
+      });
+      inspectBtn.onclick = () => renderSegment(seg);
+      const block = el("section", { class: "prompt-trace-module prompt-trace-tone-" + (index % 6) },
+        el("div", { class: "prompt-trace-module-head" },
+          el("span", { class: "prompt-trace-label", text: labelText }),
+          el("span", { class: "prompt-trace-source source-" + seg.source, text: sourceText }),
+          el("span", { class: "prompt-trace-kind", text: _promptTraceKinds[seg.kind] || seg.kind || "静态" }),
+          inspectBtn),
+        makeContextDetail(seg),
+        el("pre", { class: "prompt-trace-module-text", text: seg.text || "" }));
+      return block;
+    }
+
+    function makeActions() {
+      const actions = el("div", { class: "prompt-trace-actions" });
+      const reviewBtn = el("button", { class: "action-btn", type: "button", text: "AI 评价与优化" });
+      reviewBtn.disabled = Boolean(reviewState && reviewState.loading);
+      reviewBtn.onclick = runPromptReview;
+      const resetBtn = el("button", { class: "action-btn", type: "button", text: "清除修改" });
+      resetBtn.onclick = () => { _promptTraceState = []; closeMgmtModal(); };
+      const applyBtn = el("button", { class: "action-btn primary", type: "button", text: "下一轮使用这些修改" });
+      applyBtn.onclick = () => {
+        _promptTraceState = items.filter((seg) => seg.editable !== false && seg.text !== seg.baseText)
+          .map((seg) => ({ id: seg.id, label: seg.label, text: seg.text, baseText: seg.baseText }));
+        closeMgmtModal();
+      };
+      actions.appendChild(reviewBtn);
+      actions.appendChild(resetBtn);
+      actions.appendChild(applyBtn);
+      return actions;
+    }
+
+    function renderList() {
+      body.innerHTML = "";
+      if (!items.length) {
+        body.appendChild(el("div", { class: "mgmt-note", text: "本轮对话没有可用的提示词回溯。" }));
+        return;
+      }
+      const systemItems = items.filter((seg) => seg.kind !== "input");
+      const inputItems = items.filter((seg) => seg.kind === "input");
+      const systemChars = systemItems.reduce((n, seg) => n + (seg.text || "").length, 0);
+      body.appendChild(el("div", { class: "prompt-trace-summary", text: "共 " + items.length + " 个模块 · " + _promptTraceState.length + " 处修改待应用" }));
+      body.appendChild(el("div", { class: "prompt-trace-legend" },
+        el("strong", { text: "发送给模型的系统提示词：" + systemItems.length + " 个模块 · " + systemChars + " 个字符" }),
+        el("span", { text: "随用户消息发送的请求上下文：" + inputItems.length + " 个模块" })));
+      const reviewPanel = makeReviewPanel();
+      if (reviewPanel) body.appendChild(reviewPanel);
+      const wrap = el("div", { class: "prompt-trace-wrap" });
+      const composed = el("div", { class: "prompt-trace-composed", "aria-label": "按发送顺序排列的最终提示词" });
+      items.forEach((seg, index) => {
+        if (index === 0 || (seg.kind === "input" && items[index - 1].kind !== "input")) {
+          composed.appendChild(el("div", { class: "prompt-trace-message-boundary" },
+            el("strong", { text: seg.kind === "input" ? "角色=用户 · 请求上下文" : "角色=系统 · 最终系统提示词" }),
+            el("span", { text: seg.kind === "input" ? "作为用户消息发送" : "通过模型的系统参数发送" })));
+        }
+        composed.appendChild(makeCompositeSegment(seg, index));
+      });
+      wrap.appendChild(composed);
+      body.appendChild(wrap);
+      body.appendChild(makeActions());
+    }
+
+    function renderSegment(seg) {
+      body.innerHTML = "";
+      const back = el("button", { class: "action-btn prompt-trace-back", type: "button", text: "← 返回全部模块" });
+      back.onclick = renderList;
+      body.appendChild(el("div", { class: "prompt-trace-detail-bar" }, back,
+        el("span", { text: "正在查看第 1 个，共 " + items.length + " 个模块" })));
+      body.appendChild(makeEditor(seg, true));
+      body.appendChild(makeActions());
+    }
+
+    renderList();
+  }
+
+  function _appendPromptTraceChip(line, trace) {
+    const items = _normalizePromptTrace(trace);
+    if (!items.length) return;
+    const chip = el("button", { class: "prompt-trace-chip", type: "button", text: "提示词回溯 · " + items.length });
+    chip.onclick = () => _openPromptTraceModal(items);
+    line.appendChild(chip);
+  }
+
   // ============ Snapshot poller (safety net) ============
 
   let snapshotInterval = null;
@@ -2252,6 +2526,7 @@
       });
       if (!r.ok) return;
       const data = await r.json();
+      _promptTraceState = [];
       // 重画聊天日志为这条线的历史(切场 = 独立上下文)
       const log = document.getElementById("chat-log");
       if (log) log.innerHTML = "";
@@ -3372,6 +3647,17 @@
       return;
     }
     _chatSpeaker = payload.speaker || "";   // brick2:这轮回复方身份(""=小卡)
+    const overrideStatus = Array.isArray(payload.prompt_override_status) ? payload.prompt_override_status : [];
+    if (overrideStatus.length) {
+      const applied = overrideStatus.filter((item) => item.status === "applied").length;
+      const conflicts = overrideStatus.filter((item) => item.status === "conflict").length;
+      const rejected = overrideStatus.length - applied - conflicts;
+      let receipt = "提示词修改：已应用 " + applied + " 项";
+      if (conflicts) receipt += "，基线冲突 " + conflicts + " 项";
+      if (rejected) receipt += "，不可应用 " + rejected + " 项";
+      receipt += "。修改仅用于本轮。";
+      pushChatLine("system", receipt);
+    }
     // 推到 chat log(同步乐观渲染;之后 pollChatHistory 会用带 events 的历史同样结构化重渲)
     const log = document.getElementById("chat-log");
     const follow = isNearBottom(log);
@@ -3418,6 +3704,7 @@
     } else {
       line.appendChild(document.createTextNode(tB(entry.text || "")));
     }
+    _appendPromptTraceChip(line, entry && entry.prompt_trace);
     log.appendChild(line);
   }
 
@@ -4457,17 +4744,22 @@
     const mention = mentions[0] ? mentions[0].agent_id : "";
     const mentionDomain = mentions[0] ? mentions[0].domain_id : "";
     const _attach = _manifest.length ? { q: _qText, items: _manifest } : null;
-    const sent = sendWS("intent", { intent: sendText, mention: mention, mention_domain: mentionDomain, images: _imgs, attachments: _attach });
-    if (sent) _sendBtnCelebrate();   // P1-5:WS 真送出才回弹
+    const promptOverride = _collectPromptOverride();
+    const sent = sendWS("intent", { intent: sendText, mention: mention, mention_domain: mentionDomain, images: _imgs, attachments: _attach, prompt_override: promptOverride });
+    if (sent) {
+      _promptTraceState = [];  // 修改只用于已发出的这一轮，避免后续对话意外继承。
+      _sendBtnCelebrate();
+    }   // P1-5:WS 真送出才回弹
     if (!sent) {
       try {
         const r = await fetch("/api/intent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ intent: sendText, mention: mention, mention_domain: mentionDomain, images: _imgs, attachments: _attach }),
+          body: JSON.stringify({ intent: sendText, mention: mention, mention_domain: mentionDomain, images: _imgs, attachments: _attach, prompt_override: promptOverride }),
         });
         if (r.ok) {
           const payload = await r.json();
+          _promptTraceState = [];  // REST 也保持下一轮一次性语义。
           _sendBtnCelebrate();   // P1-5:HTTP 兜底真送达才回弹
           renderDriveDone(payload);
         } else {

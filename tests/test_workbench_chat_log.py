@@ -56,6 +56,14 @@ class TestAC1PushUserLine:
         assert e.text == "hi"
         assert e.ts == "t1"
 
+    def test_agent_prompt_trace_survives_history_snapshot(self):
+        trace = [{"id": "identity", "source": "soul", "text": "be precise"}]
+        push_chat_log_line("agent", "done", "t1", prompt_trace=trace)
+        trace[0]["text"] = "mutated outside"
+        assert get_chat_history()[0]["prompt_trace"] == [
+            {"id": "identity", "source": "soul", "text": "be precise"}
+        ]
+
 
 # ---------- AC2: 空 intent 不 push(App 层 strip 兜底) ----------
 
@@ -113,7 +121,7 @@ class TestChatHistoryInstance:
         local = ChatHistory(maxlen=10)
         local.push("user", "local-only", "t1")
         assert local.snapshot() == [
-            {"role": "user", "text": "local-only", "ts": "t1", "events": [], "speaker": ""}  # 9.4:+events;@修:+speaker
+            {"role": "user", "text": "local-only", "ts": "t1", "events": [], "speaker": "", "prompt_trace": []}
         ]
         assert get_chat_history() == []  # 全局为空
 

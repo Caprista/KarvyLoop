@@ -116,15 +116,24 @@ class ModelSaveRequest(BaseModel):
 
 
 def _restart_required(app, reloaded: bool) -> bool:
-    """保存/改配置后,进程还到不到得了"能真聊"?(闭环审计断②诚实面)
-
-    fresh 进程(无 config 启动)gateway/main_loop 都是 None:热加载没有对象可替换,
-    且 pump/质量裁判/trace 漏斗/task sink 全在 entry 启动期按 main_loop 接线 ——
-    在线重建=半活状态,诚实答案是"重启 console"。前端拿这个标志显示大字提示。
-    """
+    """保存/改配置后,当前进程是否仍无法真聊。"""
     rk = getattr(app.state, "runtime_kwargs", None) or {}
     return (not reloaded) or rk.get("gateway") is None \
         or getattr(app.state, "main_loop", None) is None
+
+
+def _activate_saved_runtime(app) -> tuple[bool, str]:
+    """冷启动首配后调用 entry 注入的完整 runtime 激活器。"""
+    activate = getattr(app.state, "activate_runtime", None)
+    if not callable(activate):
+        return False, ""
+    try:
+        result = activate()
+        if isinstance(result, tuple):
+            return bool(result[0]), str(result[1] or "")
+        return bool(result), ""
+    except Exception as e:
+        return False, _scrub_secret(str(e) or e.__class__.__name__)
 
 
 @router.post("/model/save")
@@ -145,14 +154,20 @@ def api_model_save(req: ModelSaveRequest, request: Request) -> dict[str, Any]:
         from karvyloop.gateway.config_models import ensure_default_chat
         set_as_default = ensure_default_chat(req.model_id, cfgp)
     reloaded, rmsg = _reload_gateway_registry(request.app)
+    activated = False
+    if _restart_required(request.app, reloaded):
+        activated, activate_msg = _activate_saved_runtime(request.app)
+        if activated:
+            reloaded, rmsg = True, ""
+        elif activate_msg:
+            rmsg = activate_msg
     # Kimi 三面孔诚实提示:sk-kimi- 前缀 = For Coding 的 key,粘在 moonshot 聊天端点必 401。
     # 不拦保存(key 归属只看前缀是推断不是断言),但当场把话说明白 —— 别等 validate 401 让用户猜。
     from karvyloop.gateway.presets import kimi_key_guidance
     hint = kimi_key_guidance(req.api_key, req.base_url)
     out: dict[str, Any] = {"ok": True, "reloaded": reloaded, "reload_note": rmsg,
-                           "set_as_default": set_as_default,   # 首配补齐:本次顺带设为默认
-                           # 断②:保存成功≠能聊。fresh 进程无 gateway/main_loop → 明确告知要重启,
-                           # 前端(引导页)据此显示"密钥已保存,重启 console 后生效"的大字提示,不再静默。
+                           "activated": activated,
+                           "set_as_default": set_as_default,
                            "restart_required": _restart_required(request.app, reloaded)}
     if hint:
         out["hint"] = hint
@@ -216,9 +231,20 @@ async def validate_default_model(app) -> dict[str, Any]:
                 return {"ok": False, "reason": t("models.api_unimplemented_choice", api=api),
                         "error_class": "unimplemented_api", "model": ref}
         got = False
-        async for _ev in gw.complete([{"role": "user", "content": "ping"}], [], ref):
+        async for ev in gw.complete([{"role": "user", "content": "ping"}], [], ref):
+            # Provider adapter 把 HTTP/网络异常归一化成 ErrorEvent 后 yield；仅判断
+            # “收到首个事件”会把 401/404 误报为验证成功。完整消费这个极短请求，错误优先。
+            if type(ev).__name__ == "ErrorEvent" or (
+                isinstance(ev, dict) and ev.get("type") == "error"
+            ):
+                kind = getattr(ev, "kind", "") or (
+                    ev.get("kind", "") if isinstance(ev, dict) else ""
+                )
+                message = getattr(ev, "message", "") or (
+                    ev.get("message", "") if isinstance(ev, dict) else ""
+                )
+                raise RuntimeError(f"{kind}: {message}".strip(": "))
             got = True
-            break   # 收到第一个事件 = 端点+key 通了,够了
         return {"ok": True, "model": ref} if got \
             else {"ok": False, "reason": "no_response", "model": ref}
     except Exception as e:

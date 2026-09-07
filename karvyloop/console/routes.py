@@ -296,6 +296,7 @@ class IntentRequest(BaseModel):
     mention_domain: str = Field(default="", max_length=64)   # 该角色所属业务域(大群里同名消歧)
     images: list = Field(default_factory=list, max_length=6)  # 多模态:[{data_url, media_type, name}]
     attachments: dict = Field(default_factory=dict)  # 展示清单 {q, items:[{kind,name,thumb?}]} → 落历史给人回看
+    prompt_override: list[dict] = Field(default_factory=list, max_length=32)  # 交互式 prompt 回溯:用户编辑后,下一轮按 trace 覆盖
 
 
 def _normalize_images(images) -> list:
@@ -314,6 +315,41 @@ def _normalize_images(images) -> list:
         if data:
             out.append({"data": data, "media_type": mt or "image/png"})
     return out
+
+
+def _apply_prompt_override(persona, overrides):
+    """把有界、可识别的用户 prompt 编辑合并回实际 persona。"""
+    if persona is None or not overrides or not isinstance(overrides, list):
+        return persona
+    cleaned: list[dict] = []
+    total_chars = 0
+    for item in overrides[:32]:
+        if not isinstance(item, dict):
+            continue
+        key = "id" if item.get("id") else "label"
+        target = str(item.get(key) or "").strip()
+        text = item.get("text")
+        base_text = item.get("base_text")
+        if not target or len(target) > 128 or not isinstance(text, str) or len(text) > 20_000:
+            continue
+        if base_text is not None and (not isinstance(base_text, str) or len(base_text) > 20_000):
+            continue
+        total_chars += len(text) + (len(base_text) if base_text is not None else 0)
+        if total_chars > 64_000:
+            return persona
+        cleaned_item = {key: target, "text": text}
+        if base_text is not None:
+            cleaned_item["base_text"] = base_text
+        cleaned.append(cleaned_item)
+    if not cleaned:
+        return persona
+    try:
+        merge = getattr(persona, "merge_override", None)
+        if callable(merge):
+            return merge(cleaned)
+    except Exception:
+        logger.warning("prompt override 合并失败,继续使用原 prompt", exc_info=True)
+    return persona
 
 
 def _resolve_mention(app, mgr, mention: str, workspace_root: str, *, domain: str = "", intent: str = ""):
@@ -1007,6 +1043,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     else:
         persona = _persona_for_current_peer(request.app, mgr, ws_root, intent=req.intent)
         eff_scope = scope_for_peer(mgr)
+    persona = _apply_prompt_override(persona, req.prompt_override)
 
     # 去重(对抗验收):paradigm 编译的 persona 已把域治理(value.md+deontic)编进 system prompt,
     # governance 再带一份 = 双注入白烧 token。域块是 governance 尾段(召回/预对齐都往前贴),
@@ -1111,9 +1148,13 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
     _turn_speaker = m_speaker or speaker_display(request.app, mgr)   # @ 命中=角色花名,否则当前场署名
     if workbench_app is not None and not outcome.error:
         try:
-            workbench_app.push_chat_log_line("agent", outcome.text or "(empty result)",
-                                             events=getattr(outcome, "events", None),
-                                             speaker=_turn_speaker)   # per-turn 署名(历史重渲不再错标小卡)
+            workbench_app.push_chat_log_line(
+                "agent",
+                outcome.text or "(empty result)",
+                events=getattr(outcome, "events", None),
+                speaker=_turn_speaker,
+                prompt_trace=getattr(outcome, "prompt_trace", None),
+            )
             if outcome.crystallized and outcome.skill_name:
                 workbench_app.push_chat_log_line("system", f"🔔 已结晶: {outcome.skill_name}")
         except Exception:
@@ -1144,6 +1185,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
             logger.debug("[api_intent] 直聊角色经验沉淀触发失败(静默,不阻断)", exc_info=True)
 
     payload = drive_outcome_to_dict(outcome)
+    payload["prompt_override_status"] = getattr(persona, "override_status", [])
     payload["speaker"] = _turn_speaker  # @ 命中 → 被 @ 角色署名(与历史 push 同一值)
     payload["recall_used"] = _recall_used  # Q1 召回解释:垫了哪几条记忆(空=没垫)
     if _recall_as_of is not None:

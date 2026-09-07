@@ -10,12 +10,15 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import os
 import re
 import subprocess
 from dataclasses import dataclass, field
 from typing import Optional
+
+from .prompt_trace import PromptTrace, prompt_trace_from_blocks
 
 
 # 哨兵:动态段的占位符;发送前被实际内容替换,残留哨兵视为错误
@@ -109,7 +112,82 @@ class CodingPrompt:
 
     static: list[str] = field(default_factory=list)
     dynamic_blocks: list[str] = field(default_factory=list)
+    trace: list[dict] = field(default_factory=list)
+    override_status: list[dict] = field(default_factory=list)
     _unfiltered_text: str = ""  # 内部;供测试/调试
+
+    def __post_init__(self):
+        if not self.trace:
+            self.trace = self._default_trace()
+
+    def _default_trace(self) -> list[dict]:
+        segments: list[dict] = []
+        for i, s in enumerate(self.static):
+            segments.append({
+                "id": f"static_{i}", "label": f"static[{i}]", "source": "system",
+                "kind": "static", "text": s, "editable": False,
+            })
+        for i, d in enumerate(self.dynamic_blocks):
+            segments.append({
+                "id": f"dynamic_{i}", "label": f"dynamic[{i}]", "source": "runtime",
+                "kind": "dynamic", "text": d, "editable": True,
+            })
+        return segments
+
+    def to_trace(self, *, static_source: str = "system",
+                 dynamic_source: str = "runtime", labels: Optional[list[str]] = None) -> PromptTrace:
+        return prompt_trace_from_blocks(self.static, self.dynamic_blocks,
+                                        static_source=static_source,
+                                        dynamic_source=dynamic_source, labels=labels)
+
+    def merge_override(self, overrides) -> "CodingPrompt":
+        """按 trace id / label 合并用户编辑后的段落,返回一个新实例。"""
+        if not overrides:
+            return self
+        updates = overrides if isinstance(overrides, list) else [overrides]
+        merged = copy.copy(self)
+        merged.static = list(self.static)
+        merged.dynamic_blocks = list(self.dynamic_blocks)
+        merged.trace = [dict(s) for s in self.trace]
+        merged.override_status = []
+        for item in updates:
+            if not isinstance(item, dict):
+                continue
+            target_id = str(item.get("id") or item.get("label") or "").strip()
+            new_text = item.get("text")
+            base_text = item.get("base_text")
+            if new_text is None or not target_id:
+                continue
+            status = {"id": target_id, "status": "not_found"}
+            for seg in merged.trace:
+                keys = {str(seg.get("id") or "").strip(), str(seg.get("label") or "").strip()}
+                if target_id not in keys:
+                    continue
+                status["label"] = str(seg.get("label") or target_id)
+                if not seg.get("editable", True):
+                    status["status"] = "read_only"
+                    break
+                if base_text is not None and str(seg.get("text") or "") != str(base_text):
+                    status["status"] = "conflict"
+                    break
+                seg["text"] = str(new_text)
+                seg["edited"] = True
+                status["status"] = "applied"
+                break
+            merged.override_status.append(status)
+        static_index = 0
+        dynamic_index = 0
+        for seg in merged.trace:
+            text = str(seg.get("text") or "")
+            if seg.get("kind") == "static":
+                if static_index < len(merged.static):
+                    merged.static[static_index] = text
+                static_index += 1
+            elif seg.get("kind") == "dynamic":
+                if dynamic_index < len(merged.dynamic_blocks):
+                    merged.dynamic_blocks[dynamic_index] = text
+                dynamic_index += 1
+        return merged
 
     def to_text(self) -> str:
         """拼接静态+动态,中间用 BOUNDARY_MARKER 分隔(供 NDJSON 消费时再过滤)。"""

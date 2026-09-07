@@ -220,6 +220,45 @@ def _make_spend_card_emitter(app):
     return _emit
 
 
+def activate_runtime_after_setup(app, *, config_path: str, workspace_root: str,
+                                 workbench_app=None) -> tuple[bool, str]:
+    """首配落盘后在当前 console 进程中启用正式聊天 runtime。"""
+    if getattr(app.state, "no_llm", False):
+        return False, "--no-llm 模式不启用模型 runtime"
+    lock = getattr(app.state, "runtime_activation_lock", None)
+    if lock is None:
+        lock = threading.RLock()
+        app.state.runtime_activation_lock = lock
+    with lock:
+        rk = getattr(app.state, "runtime_kwargs", None) or {}
+        if getattr(app.state, "main_loop", None) is not None and rk.get("gateway") is not None:
+            return True, ""
+        try:
+            from karvyloop.cli._runtime import resolve_runtime
+            resolved = resolve_runtime(
+                config_path=Path(config_path), workspace_root=workspace_root)
+        except Exception as e:
+            return False, str(e) or e.__class__.__name__
+        gateway = resolved.runtime_kwargs.get("gateway")
+        if resolved.main_loop is None or gateway is None:
+            return False, resolved.build_error or "runtime 构造失败"
+
+        app.state.main_loop = resolved.main_loop
+        app.state.runtime_kwargs = resolved.runtime_kwargs
+        app.state.build_error = None
+        target = workbench_app or getattr(app.state, "workbench_app", None)
+        if target is not None:
+            target._main_loop = resolved.main_loop
+            target._runtime_kwargs = resolved.runtime_kwargs
+            karvy = getattr(target, "_karvy", None)
+            if karvy is not None:
+                karvy._ml = resolved.main_loop
+                karvy._rk = resolved.runtime_kwargs
+                karvy._mgr = getattr(app.state, "conversation_manager", None)
+        logger.info("[karvyloop console] 首配已在当前进程激活模型 runtime")
+        return True, ""
+
+
 def cmd_console(args: argparse.Namespace) -> int:
     """`karvyloop console` 入口(8.5-C-frontend 实做)。
 
@@ -704,6 +743,14 @@ def cmd_console(args: argparse.Namespace) -> int:
         sys.stderr.flush()
     except Exception as e:
         logger.warning(f"[karvyloop console] 对话编排器接线失败(console 照常起): {e}")
+
+    if not no_llm:
+        app.state.activate_runtime = lambda: activate_runtime_after_setup(
+            app,
+            config_path=str(app.state.config_path),
+            workspace_root=str(workspace_root),
+            workbench_app=workbench_app,
+        )
 
     # === 端口被占的处理(放在开浏览器/opening/uvicorn 之前,三者都用真实端口)===
     # 撞端口不挡用户,但**要区分**:外部进程占 → 安全挪到下一个空闲端口;KarvyLoop 自己占

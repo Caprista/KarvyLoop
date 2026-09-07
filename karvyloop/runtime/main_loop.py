@@ -979,16 +979,41 @@ def forge_slow_brain_factory(
         # 拍 9.1c:ctx(当前对话最近 N 轮)拼成前缀,让慢脑消解多轮指代(CV-8)。
         # 拍 9.2b:governance(域 value.md)拼最前(CV-14)。
         parts: list[str] = []
+        input_trace: list[dict] = []
         if governance:
             parts.append(governance)
-        prefix = _render_ctx_prefix(ctx)
+            input_trace.append({
+                "id": "request.governance", "label": "domain governance", "source": "soul",
+                "origin": "business domain value", "kind": "input", "text": governance,
+                "editable": False,
+            })
+        prefix, context_detail = _render_ctx_prefix_with_detail(ctx)
         if prefix:
             parts.append(prefix)
+            input_trace.append({
+                "id": "request.context", "label": "conversation context", "source": "runtime",
+                "origin": "conversation history", "kind": "input", "text": prefix,
+                "detail": context_detail,
+                "editable": False,
+            })
         if parts:
-            parts.append(f"当前请求:{intent}")
+            current_request = f"当前请求:{intent}"
+            parts.append(current_request)
             effective_intent = "\n\n".join(parts)
         else:
+            current_request = intent
             effective_intent = intent
+        input_trace.append({
+            "id": "request.intent", "label": "current request", "source": "runtime",
+            "origin": "user message", "kind": "input", "text": current_request,
+            "editable": False,
+        })
+        effective_persona = persona
+        if effective_persona is None:
+            from karvyloop.coding.prompt import build_coding_prompt
+            effective_persona = build_coding_prompt(workspace_root)
+        system_trace = [dict(segment) for segment in (getattr(effective_persona, "trace", None) or [])]
+        slow_brain.prompt_trace = system_trace + input_trace
         # 拍 9.3a:标 token 来源=forge(账本按 source 归属)
         from karvyloop.llm.token_ledger import token_source
         with token_source("forge"):
@@ -998,7 +1023,7 @@ def forge_slow_brain_factory(
                 model_ref=model_ref, max_turns=max_turns,
                 emitter=emitter,  # 9.4:渲染事件收集器(None=旧行为,0 回归)
                 renderer=renderer,  # I(内测 U-05):人读终端实时流(emitter 在场时 forge 内 emitter 优先)
-                system_prompt=persona,  # 9.4e 方案 A:人格 prompt(None=默认 coding)
+                system_prompt=effective_persona,  # 与 prompt_trace 共用同一个最终 system prompt
                 enable_compression=enable_compression,  # step4a:上下文治理
                 extra_tools=_extra_tools or None,  # A:MCP 工具 + §15.5 create_atom 并进 agent 工具集
                 images=images or None,  # 多模态:首条 user 消息带图块
@@ -1018,6 +1043,7 @@ def forge_slow_brain_factory(
         # 只写了 3/9 个文件却无任何"未完成"提示)。让用户/小卡知道"没干完,继续即可接着做"。
         return (_annotate_terminal(rr.text, getattr(rr, "terminal", None)), rr.run)
 
+    slow_brain.prompt_trace = []
     return slow_brain
 
 
@@ -1043,32 +1069,29 @@ def _annotate_terminal(text: str, terminal: object) -> str:
 DEFAULT_CTX_TOKEN_BUDGET = 2000
 
 
-def _render_ctx_prefix(ctx: object, *, token_budget: int = DEFAULT_CTX_TOKEN_BUDGET) -> str:
-    """把对话上下文渲染成喂慢脑的前缀文本,**按 token 预算裁剪**(docs/28 TK-2)。
-
-    ctx 是 duck-type:可迭代,每项有 .user_intent / .agent_response(Conversation.Turn)。
-    分层索引 tier-1(工作记忆):最近的轮**逐字保留**,从新往旧累积到 token 预算就停 ——
-    更早的丢(tier-2 LLM 摘要由 trace 漏斗异步做,见 docs/27/28,9.3c)。
-
-    避免"对话越长每轮越贵(O(n²))"—— 每轮喂慢脑的 ctx 被 token 预算封顶。
-    非该形态 / 空 → 返空串(0 回归)。
-    """
+def _render_ctx_prefix_with_detail(ctx: object, *, token_budget: int = DEFAULT_CTX_TOKEN_BUDGET) -> tuple[str, dict]:
+    """Render the sent context and a JSON-safe audit detail for Prompt Trace."""
+    empty = {"total_turns": 0, "included_turns": 0, "omitted_turns": 0,
+             "token_budget": token_budget, "token_count": 0, "truncated": False,
+             "turns": []}
     if not ctx:
-        return ""
+        return "", empty
     try:
         from karvyloop.context.budget import count_tokens_text
         turns = list(ctx)
-    except (TypeError, Exception):
-        return ""
+    except Exception:
+        return "", empty
     if not turns:
-        return ""
-    # 从最新往最旧累积,超预算停(保留最近的逐字)
+        return "", empty
     kept_rev: list[str] = []
+    kept_detail: list[dict] = []
     used = 0
     truncated = False
-    for t in reversed(turns):
-        u = getattr(t, "user_intent", "")
-        a = getattr(t, "agent_response", "")
+    omitted = 0
+    for index in range(len(turns) - 1, -1, -1):
+        t = turns[index]
+        u = str(getattr(t, "user_intent", "") or "")
+        a = str(getattr(t, "agent_response", "") or "")
         block_lines = []
         if u:
             block_lines.append(f"用户:{u}")
@@ -1080,16 +1103,27 @@ def _render_ctx_prefix(ctx: object, *, token_budget: int = DEFAULT_CTX_TOKEN_BUD
         cost = count_tokens_text(block)
         if used + cost > token_budget and kept_rev:
             truncated = True
+            omitted = index + 1
             break
         kept_rev.append(block)
+        kept_detail.append({"index": index + 1, "user": u, "assistant": a, "tokens": cost})
         used += cost
     if not kept_rev:
-        return ""
+        return "", empty
     body = "\n".join(reversed(kept_rev))
     head = "对话上下文(最近几轮,供你消解指代/承接):\n"
     if truncated:
         head = "对话上下文(更早的已省略,以下是最近几轮):\n"
-    return head + body
+    detail = {"total_turns": len(turns), "included_turns": len(kept_rev),
+              "omitted_turns": omitted, "token_budget": token_budget,
+              "token_count": used, "truncated": truncated,
+              "turns": list(reversed(kept_detail))}
+    return head + body, detail
+
+
+def _render_ctx_prefix(ctx: object, *, token_budget: int = DEFAULT_CTX_TOKEN_BUDGET) -> str:
+    """把对话上下文渲染成喂慢脑的前缀文本,按 token 预算裁剪。"""
+    return _render_ctx_prefix_with_detail(ctx, token_budget=token_budget)[0]
 
 
 __all__ = [
