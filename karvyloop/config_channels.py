@@ -342,7 +342,9 @@ class DingTalkChannelConfig:
     role = 绑定的单个 agent(role_id);allow_senders = 钉钉 staffId 白名单,
     **空 = fail-closed 谁的 @ 都不驱动**(群里任何人都能 @ 到机器人,必须白名单挡)。
     name = 实例名(多机器人时区分日志用;缺省 = role)。
+    instance_id = 配置管理生成的稳定实例 ID,用于热更新时精确复用/替换连接。
     """
+    instance_id: str = ""
     client_id: str = ""
     client_secret: str = dataclasses.field(default="", repr=False)  # 机密
     role: str = ""                  # 绑定的 role_id(单个 agent)
@@ -366,6 +368,7 @@ def _dingtalk_one_from_dict(dt: dict) -> Optional[DingTalkChannelConfig]:
     allow = tuple(str(s).strip() for s in raw_allow if str(s).strip()) \
         if isinstance(raw_allow, list) else ()
     return DingTalkChannelConfig(
+        instance_id=str(dt.get("id") or dt.get("instance_id") or "").strip(),
         client_id=client_id, client_secret=client_secret, role=role,
         domain_id=str(dt.get("domain_id") or "").strip(),
         allow_senders=allow,

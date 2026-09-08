@@ -13,6 +13,7 @@ import asyncio
 from karvyloop.channels.dingtalk_channel import (
     REFUSAL_TEXT, DingTalkChannel, _AIStreamController, _channel_conversation_id,
     _extract, drive_channel_message, handle_incoming)
+from karvyloop.channels.dingtalk_runtime import PendingSenderCache
 from karvyloop.config_channels import (
     DingTalkChannelConfig, dingtalk_channel_config_from_dict,
     dingtalk_channels_from_dict)
@@ -129,6 +130,20 @@ def test_outside_allowlist_refused_without_drive(monkeypatch):
     asyncio.run(handle_incoming(_fake_app_ok(), cfg, payload, replies.append,
                                 refused=refused))
     assert replies == [REFUSAL_TEXT]
+
+
+def test_repeated_refusal_increments_pending_attempt_count():
+    app = _fake_app_ok()
+    app.state.pending_channel_senders = PendingSenderCache()
+    cfg = DingTalkChannelConfig(instance_id="i1", client_id="a", client_secret="b", role="r")
+    payload = {"senderStaffId": "stranger-9", "conversationId": "c1",
+               "text": {"content": "请求授权"}}
+    refused: set = set()
+
+    asyncio.run(handle_incoming(app, cfg, payload, lambda _text: None, refused=refused))
+    asyncio.run(handle_incoming(app, cfg, payload, lambda _text: None, refused=refused))
+
+    assert app.state.pending_channel_senders.list()[0]["attempt_count"] == 2
 
 
 def test_allowed_sender_drives_raw_text(monkeypatch):

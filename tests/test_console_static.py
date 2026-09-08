@@ -563,11 +563,11 @@ def test_sidebar_nav_three_groups():
     # data-i18n 直挂标题 div 会把折叠箭头抹掉)
     groups = _re2.findall(r'nav-group-title"[^>]*>\s*<span data-i18n="([^"]+)"', sidebar)
     assert groups == ["nav.group.team", "nav.group.learned", "nav.group.engine"], groups
-    # 组内成员按序(以 data-panel 出现顺序锁分组;13 项 —— docs/90 刀1 把 pursuits 从左导航撤下)
+    # 组内成员按序(以 data-panel 出现顺序锁分组;渠道配置新增在引擎室)
     panels = _re2.findall(r'data-panel="([^"]+)"', sidebar)
     assert panels == ["domains", "roles", "atoms", "devices",          # 你的团队(docs/90 刀2)
                       "memory", "decision_prefs", "skills",            # 它学到的你
-                      "agents", "external", "models",                  # 引擎室(agents/external 挪入)
+                      "agents", "external", "channels", "models",      # 引擎室
                       "diagnose", "files", "schedules"], panels
     # 每组标题的位置在其成员之前(标题真的领着那一组)
     i_team = sidebar.find("nav.group.team"); i_learned = sidebar.find("nav.group.learned")
@@ -639,7 +639,7 @@ def test_decision_prefs_near_entry():
 
 
 _LAZY_PANEL_SCRIPTS = [   # T4 懒加载批(与 app.js _PANEL_SCRIPTS 一一对应)
-    "domains", "roles", "atoms", "agents", "external", "devices", "memory",
+    "domains", "roles", "atoms", "agents", "external", "channels", "devices", "memory",
     "decision_prefs", "skills", "models", "diagnose", "files", "schedules",
     "pursuits",   # docs/88 第三刀:🎯我的追求进主导航第 14 项(懒加载,和其它面板同批)
     "demo", "tokens",
