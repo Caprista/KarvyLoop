@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from karvyloop.coding.prompt_trace import PromptTrace, prompt_trace_from_blocks
-
 # 最小可缓存前缀 token 粗估下限(Anthropic Messages 缓存最小长度约 1024 tok)。
 # 低于此不打断点:小前缀写缓存的成本 > 省下的,加了只白付 cache_write。
 _MIN_CACHE_TOKENS = 1024
@@ -38,6 +36,8 @@ class SystemPrompt:
 
     def to_trace(self, *, static_source: str = "system",
            dynamic_source: str = "runtime") -> PromptTrace:
+      from karvyloop.coding.prompt_trace import prompt_trace_from_blocks
+
       return prompt_trace_from_blocks(self.static, self.dynamic,
                       static_source=static_source,
                       dynamic_source=dynamic_source)
