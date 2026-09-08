@@ -432,6 +432,7 @@
     atoms: { src: "/static/atoms_panel.js", global: "KarvyAtomsPanel" },
     agents: { src: "/static/agents_panel.js", global: "KarvyAgentsPanel" },
     external: { src: "/static/external_panel.js", global: "KarvyExternalPanel" },
+    channels: { src: "/static/channels_panel.js", global: "KarvyChannelsPanel" },
     devices: { src: "/static/devices_panel.js", global: "KarvyDevicesPanel" },
     memory: { src: "/static/memory_panel.js", global: "KarvyMemoryPanel" },
     decision_prefs: { src: "/static/decision_prefs_panel.js", global: "KarvyDecisionPrefs" },
@@ -485,6 +486,9 @@
       // 外部通道消息只更新所属通道会话，不触碰当前小卡/角色聊天。
       const p = msg.payload || {};
       if (p.role && p.text) pushChannelMessage(p);
+    } else if (msg.type === "channel_sender_pending") {
+      // 渠道配置面板按需消费；用 DOM 事件解耦懒加载面板与主 WS。
+      window.dispatchEvent(new CustomEvent("karvy:channel-sender-pending", { detail: msg.payload || {} }));
     } else if (msg.type === "drive_done") {
       // 9.4b:WS 实时追加即为权威渲染,不再回拉 chat_history 重建(那会抢选中/强制滚动)
       _clearLiveStream();   // P4:清掉逐字流式草稿 → renderDriveDone 渲染权威终态(含 markdown/高亮)
@@ -2849,6 +2853,7 @@
       domains: () => openDomainsPanel(),
       agents: () => window.KarvyAgentsPanel.open({ refreshPeers }),
       external: () => openExternalPanel(),
+      channels: () => window.KarvyChannelsPanel.open(),
       devices: () => window.KarvyDevicesPanel.open(),
       memory: () => window.KarvyMemoryPanel.open(),
       decision_prefs: () => window.KarvyDecisionPrefs.open(),

@@ -20,6 +20,8 @@ WS_TYPE_TASK_STEP = "task_step"
 WS_TYPE_SYSTEM_ERROR = "system_error"
 WS_TYPE_DRIVE_EVENT = "drive_event"   # P4 逐字流式:drive 进行中的增量 render 事件
 WS_TYPE_ROLE_PRESENCE = "role_presence"   # P1.5 工位区:任务 start/done/error 顺势推该角色单行 presence
+WS_TYPE_CHANNEL_MESSAGE = "channel_message"
+WS_TYPE_CHANNEL_SENDER_PENDING = "channel_sender_pending"
 
 
 async def _broadcast(app: Any, message: dict) -> int:
@@ -68,6 +70,11 @@ async def broadcast_drive_event(app: Any, ev: dict) -> int:
 async def broadcast_channel_message(app: Any, payload: dict) -> int:
     """把外部通道的一条完整消息推给 console,不触发本地 drive 状态机。"""
     return await _broadcast(app, {"type": WS_TYPE_CHANNEL_MESSAGE, "payload": payload})
+
+
+async def broadcast_channel_sender_pending(app: Any, payload: dict) -> int:
+    """把待授权发送者发现事件推给 console。"""
+    return await _broadcast(app, {"type": WS_TYPE_CHANNEL_SENDER_PENDING, "payload": payload})
 
 
 async def broadcast_role_presence(app: Any, row: dict) -> int:
@@ -229,8 +236,10 @@ def make_task_change_sink(app: Any, trace: Any) -> Callable[[dict], None]:
 
 __all__ = [
     "WS_TYPE_TASK_STATUS", "WS_TYPE_TASK_STEP", "WS_TYPE_SYSTEM_ERROR",
-    "WS_TYPE_ROLE_PRESENCE",
+    "WS_TYPE_ROLE_PRESENCE", "WS_TYPE_CHANNEL_MESSAGE",
+    "WS_TYPE_CHANNEL_SENDER_PENDING",
     "broadcast_task_status", "broadcast_task_step", "broadcast_system_error",
+    "broadcast_channel_message", "broadcast_channel_sender_pending",
     "broadcast_role_presence", "roles_for_presence", "presence_row_for_task",
     "schedule_task_broadcast", "schedule_system_error", "make_task_change_sink",
 ]

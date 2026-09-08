@@ -31,6 +31,7 @@ from .routes import router as api_router
 from .routes_atoms import router as atoms_router
 from .routes_budget import router as budget_router
 from .routes_capability import router as capability_router
+from .routes_channels import router as channels_router
 from .routes_conversations import router as conversations_router
 from .routes_decision_prefs import router as decision_prefs_router
 from .routes_demo import router as demo_router
@@ -638,15 +639,8 @@ def build_console_app(
             _dt_cfgs = load_dingtalk_channel_configs(
                 getattr(app.state, "config_path", "") or None)
             if _dt_cfgs:
-                from karvyloop.channels.dingtalk_channel import DingTalkChannel
-                _loop = asyncio.get_running_loop()
-                for _dt_cfg in _dt_cfgs:
-                    _ch = DingTalkChannel(app, _dt_cfg)
-                    if _ch.start(_loop):
-                        app.state.dingtalk_channels.append(_ch)
-                if app.state.dingtalk_channels:
-                    # 兼容读法:第一个实例(老代码/测试读 dingtalk_channel)
-                    app.state.dingtalk_channel = app.state.dingtalk_channels[0]
+                from karvyloop.channels.dingtalk_runtime import reconcile_dingtalk_channels
+                reconcile_dingtalk_channels(app, _dt_cfgs)
         except Exception as e:
             logger.warning(f"[karvyloop console] 钉钉通道接线失败(不影响启动): {e}")
 
@@ -876,6 +870,10 @@ def build_console_app(
     # 未接(测试/--no-llm 前)→ None,pursuit_tick / routes / snapshot 一律 getattr 兜 None(0 影响)。
     app.state.pursuit_store = None
     app.state.pursuit_manager = None
+    from karvyloop.channels.dingtalk_runtime import PendingSenderCache
+    app.state.pending_channel_senders = PendingSenderCache()
+    app.state.dingtalk_channel = None
+    app.state.dingtalk_channels = []
     app.state.ws_clients = set()  # 立即 set,lifespan 里也 set 同引用
 
     # mount routers
@@ -895,6 +893,7 @@ def build_console_app(
     app.include_router(atoms_router)       # /api/atoms* + /api/atom/*(P2-② 从 routes.py 拆出)
     app.include_router(memory_router)      # /api/memory*(P2-② 从 routes.py 拆出)
     app.include_router(capability_router)  # /skills,/capability,/fs_grants,/silence,/mcp,/skill,/domains 等(P2-② 从 routes.py 拆出)
+    app.include_router(channels_router)    # /api/channels*(引擎室渠道配置)
     app.include_router(roles_router)       # /roles,/models,/role/*,/agent/import(P2-② 从 routes.py 拆出)
     app.include_router(domain_router)      # /api/domain/*(建域/归档/编辑/恢复)(P2-② 从 routes.py 拆出)
     app.include_router(lines_router)       # /api/line*,/api/lines(P2-② 从 routes.py 拆出)

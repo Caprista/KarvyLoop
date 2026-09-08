@@ -3607,4 +3607,48 @@ body.lite .karvy-fab:hover { filter: drop-shadow(0 2px 5px rgba(142, 95, 60, 0.3
 .dev-roster { border: 1px dashed var(--border); border-radius: 10px; padding: 8px 12px; margin: 4px 0 14px; }
 .dev-roster > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-dim); }
 .dev-roster > summary:hover { color: var(--text); }
+
+/* ---- 引擎室：消息渠道配置 ---- */
+.channel-toolbar {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px;
+}
+.channel-toolbar .mgmt-hint { margin: 0; max-width: 520px; }
+.channel-list { display: flex; flex-direction: column; gap: 10px; }
+.channel-card .mc-main { flex: 1; min-width: 0; }
+.channel-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.channel-state {
+  display: inline-flex; margin-left: 8px; padding: 2px 7px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; vertical-align: middle;
+}
+.channel-state.on { color: var(--green); background: var(--surface-2); border: 1px solid var(--green); }
+.channel-state.off { color: var(--text-dim); background: var(--surface-2); border: 1px solid var(--border); }
+.channel-label { margin-top: 9px; color: var(--text-dim); font-size: 12px; }
+.channel-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.channel-tag {
+  max-width: 100%; overflow-wrap: anywhere; padding: 3px 8px; border-radius: 999px;
+  color: var(--accent-deep); background: var(--accent-light); border: 1px solid var(--accent-line); font-size: 12px;
+}
+.channel-no-senders { color: var(--danger); font-size: 12px; }
+.channel-pending {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 8px; padding: 7px 9px; border-radius: 8px;
+  background: var(--warn-soft); border: 1px solid var(--warn-line); font-size: 12px;
+}
+.channel-allow-btn, .channel-disable {
+  padding: 5px 9px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 12px;
+  color: var(--text); background: var(--surface); border: 1px solid var(--border-strong);
+}
+.channel-allow-btn:hover { color: var(--accent-deep); border-color: var(--accent); }
+.channel-disable:hover { color: var(--danger); border-color: var(--danger); }
+.channel-form input[type="password"] {
+  width: 100%; padding: 9px 11px; font-family: inherit; font-size: 14px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 9px;
+}
+.channel-check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; }
+.channel-check input { width: auto; }
+@media (max-width: 720px) {
+  .channel-toolbar, .channel-card { align-items: stretch; flex-direction: column; }
+  .channel-actions { justify-content: flex-end; }
+  .channel-pending { align-items: flex-start; flex-direction: column; }
+}
 .dev-roster[open] > summary { margin-bottom: 8px; }
