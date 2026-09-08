@@ -11,6 +11,19 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.9.8] — 2026-09-08
+
+The delegated decision release: build a decision profile through a questionnaire, then let Karvy make bounded low-risk choices only after explicit authorization.
+
+### Added
+- **Decision delegation questionnaires.** Define goals, risk tolerance, uncertainty handling, authority scope, hard constraints, escalation triggers, and success criteria.
+- **Authorization contracts.** Review, explicitly activate, revoke, and test decision contracts from the console or chat.
+- **Bounded autonomous decisions.** Server-side gates enforce authorization, risk, reversibility, confidence, hard constraints, and escalation rules before recording a decision.
+- **Revocation-safe persistence.** Cross-process locking and atomic admission/receipt writes prevent revoked contracts from producing autonomous decisions.
+
+### Fixed
+- Empty model failures now surface a clear fallback message instead of an empty error.
+
 ## [2026.9.7] — 2026-09-07
 
 The DingTalk AI response release: authorized messages can drive bound roles and receive safe, streaming Markdown card replies.
