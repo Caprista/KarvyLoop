@@ -305,6 +305,18 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
         return
     refused = refused if refused is not None else set()
     if sender not in cfg.allow_senders:
+        try:
+            from karvyloop.channels.dingtalk_runtime import config_instance_id
+            from karvyloop.console.task_events import broadcast_channel_sender_pending
+            cache = getattr(app.state, "pending_channel_senders", None)
+            if cache is not None and sender:
+                pending = cache.put(config_instance_id(cfg), sender,
+                                    sender_nick=info["sender_nick"],
+                                    chat_type=info["chat_type"],
+                                    chat_title=info["chat_title"])
+                await broadcast_channel_sender_pending(app, pending)
+        except Exception:
+            logger.debug("[dingtalk] 待授权 sender 事件广播失败", exc_info=True)
         if sender not in refused:
             refused.add(sender)
             # 打完整 staffId:配白名单时要照它填(本机日志,不进群、不外发)。
