@@ -288,6 +288,31 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
             "cocreation": True, "text": _coc_reply}})
         return
 
+    # 明确委托一类决策时先建立授权契约，不让普通对话回复冒充授权。
+    try:
+        from karvyloop.crystallize.decision_delegation import (
+            build_questionnaire, detect_delegation_intent)
+        if detect_delegation_intent(intent):
+            _questionnaire = build_questionnaire(intent)
+            _reply = "可以。先回答这组针对当前判断的问题；完成后我会总结决策标准，待你明确授权后再自主拍板。"
+            if workbench_app is not None:
+                try:
+                    workbench_app.push_chat_log_line("agent", _reply)
+                except Exception:
+                    pass
+            if mgr is not None:
+                try:
+                    mgr.record_turn(intent, _reply, brain="slow")
+                except Exception:
+                    pass
+            await websocket.send_json({"type": "drive_done", "payload": {
+                "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
+                "crystallized": False, "skill_name": "", "routed": False,
+                "text": _reply, "decision_delegation": _questionnaire}})
+            return
+    except Exception:
+        logger.warning("[ws] 决策委托问卷生成失败，降级正常 drive", exc_info=True)
+
     if main_loop is None:
         outcome = stub_no_main_loop(intent, app)   # error 带缺席真因(no_llm/构造失败/需 init)
         await websocket.send_json({

@@ -16,8 +16,10 @@ HR-9：system prompt 拆静态段（角色/规范，全局可缓存）+ 动态�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from karvyloop.coding.prompt_trace import PromptTrace, prompt_trace_from_blocks
+if TYPE_CHECKING:
+    from karvyloop.coding.prompt_trace import PromptTrace
 
 # 最小可缓存前缀 token 粗估下限(Anthropic Messages 缓存最小长度约 1024 tok)。
 # 低于此不打断点:小前缀写缓存的成本 > 省下的,加了只白付 cache_write。
@@ -37,10 +39,14 @@ class SystemPrompt:
     dynamic: list[str] = field(default_factory=list)   # 动态段：每会话变
 
     def to_trace(self, *, static_source: str = "system",
-           dynamic_source: str = "runtime") -> PromptTrace:
-      return prompt_trace_from_blocks(self.static, self.dynamic,
-                      static_source=static_source,
-                      dynamic_source=dynamic_source)
+                 dynamic_source: str = "runtime") -> "PromptTrace":
+        from karvyloop.coding.prompt_trace import prompt_trace_from_blocks
+
+        return prompt_trace_from_blocks(
+            self.static, self.dynamic,
+            static_source=static_source,
+            dynamic_source=dynamic_source,
+        )
 
     def to_blocks(self, cache: bool = True) -> list[dict]:
         """组装成 provider 的 system blocks；静态前缀末块打 ephemeral 缓存断点（HR-9）。

@@ -33,6 +33,7 @@ from .routes_budget import router as budget_router
 from .routes_capability import router as capability_router
 from .routes_conversations import router as conversations_router
 from .routes_decision_prefs import router as decision_prefs_router
+from .routes_decision_delegations import router as decision_delegations_router
 from .routes_demo import router as demo_router
 from .routes_domain import router as domain_router
 from .routes_butler import router as butler_router
@@ -892,6 +893,7 @@ def build_console_app(
     app.include_router(prompt_review_router)  # /api/prompt/review(提示词只读评价 + 显式采用建议)
     app.include_router(tokens_router)      # /api/tokens*(P2-② 从 routes.py 拆出)
     app.include_router(decision_prefs_router)  # /api/decision_prefs*(P2-② 从 routes.py 拆出)
+    app.include_router(decision_delegations_router)  # /api/decision_delegations*(问卷→授权契约→门控裁决)
     app.include_router(atoms_router)       # /api/atoms* + /api/atom/*(P2-② 从 routes.py 拆出)
     app.include_router(memory_router)      # /api/memory*(P2-② 从 routes.py 拆出)
     app.include_router(capability_router)  # /skills,/capability,/fs_grants,/silence,/mcp,/skill,/domains 等(P2-② 从 routes.py 拆出)

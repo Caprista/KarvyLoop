@@ -1945,6 +1945,18 @@ button.files-dir { background: none; border: none; cursor: pointer; color: var(-
 .dpref-confirm:hover { background: var(--green); color: var(--text-on-accent); border-color: var(--green); }
 .dpref-edit { color: var(--accent-strong); }
 .dpref-edit:hover { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); }
+.ddelegate-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.ddelegate-wizard, .ddelegate-test { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.ddelegate-heading { color: var(--text); font-size: 14px; font-weight: 700; }
+.ddelegate-question { display: flex; flex-direction: column; gap: 5px; color: var(--text); font-size: 12px; }
+.ddelegate-question select, .ddelegate-question textarea, .ddelegate-test textarea { width: 100%; box-sizing: border-box; padding: 8px 9px; resize: vertical; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; font: inherit; }
+.ddelegate-summary, .ddelegate-feedback { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); font: inherit; line-height: 1.55; }
+.ddelegate-error { color: var(--danger); margin-top: 6px; }
+.ddelegate-contract { margin-bottom: 8px; }
+.ddelegate-test { margin-top: 10px; padding: 10px; }
+.ddelegate-chat { display: block; padding-left: 42px; }
+.ddelegate-chat .ddelegate-wizard { max-width: 680px; }
+@media (max-width: 640px) { .ddelegate-chat { padding-left: 0; } .ddelegate-toolbar { align-items: flex-start; flex-direction: column; } }
 
 /* ---- 🔌 外部 runtime 管理面(醒目外部徽标 + 在线状态灯;异色,绝不与原生角色混脸) ---- */
 /* 徽标用紫罗兰系(既不是咖啡主色、也不是 teal 信息态)—— 一眼区分"不透明外部执行体、输出 untrusted"。 */

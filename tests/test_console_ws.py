@@ -67,6 +67,19 @@ class TestAC7WSIntentRoundtrip:
             msg = ws.receive_json()
             assert msg["type"] == "error"
 
+    def test_explicit_decision_delegation_returns_questionnaire(self, client):
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "intent", "payload": {
+                "intent": "以后让小卡替我做低风险的技术选型决策",
+            }})
+            msg = ws.receive_json()
+            assert msg["type"] == "drive_done"
+            questionnaire = msg["payload"]["decision_delegation"]
+            assert questionnaire["goal"].startswith("以后让小卡")
+            assert len(questionnaire["questions"]) == 7
+            assert "error" not in msg["payload"]
+
 
 # ---------- AC8: K5 audit — h2a_decision ACCEPT → envelope, by=[] ----------
 

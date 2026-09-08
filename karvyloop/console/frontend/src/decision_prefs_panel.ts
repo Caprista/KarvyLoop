@@ -91,6 +91,116 @@ function _evidencePanel(p: any): HTMLElement {
   return panel;
 }
 
+function _questionField(q: any): HTMLElement {
+  let input: HTMLElement;
+  if (q.type === "choice") {
+    input = el("select", { "data-question-id": q.id });
+    input.appendChild(el("option", { value: "", text: t("ddelegate.choose") }));
+    for (const option of q.options || []) input.appendChild(el("option", { value: option, text: option }));
+  } else {
+    input = el("textarea", { "data-question-id": q.id, rows: "2", placeholder: q.placeholder || "" });
+  }
+  return el("label", { class: "ddelegate-question" }, el("span", { text: q.text }), input);
+}
+
+function renderQuestionnaire(container: HTMLElement, questionnaire: any, onComplete?: (contract: any) => void): HTMLElement {
+  const card = el("div", { class: "ddelegate-wizard" },
+    el("div", { class: "ddelegate-heading", text: t("ddelegate.questionnaire") }),
+    el("div", { class: "mc-meta", text: questionnaire.goal || "" }));
+  for (const q of questionnaire.questions || []) card.appendChild(_questionField(q));
+  const feedback = el("div", { class: "ddelegate-feedback" });
+  const submit = el("button", { class: "mgmt-add-btn", text: t("ddelegate.compile") });
+  submit.addEventListener("click", async () => {
+    const answers: Record<string, string> = {};
+    card.querySelectorAll<HTMLElement>("[data-question-id]").forEach(node => {
+      answers[node.dataset.questionId || ""] = (node as HTMLInputElement).value || "";
+    });
+    (submit as HTMLButtonElement).disabled = true;
+    feedback.textContent = t("ddelegate.compiling");
+    const result = await _postJSON("/api/decision_delegations/compile", {
+      goal: questionnaire.goal, domain: questionnaire.domain || "", answers,
+    });
+    (submit as HTMLButtonElement).disabled = false;
+    if (!result.ok) { feedback.textContent = (result.data && result.data.detail) || t("ddelegate.failed"); return; }
+    const contract = result.data.contract;
+    feedback.innerHTML = "";
+    feedback.appendChild(el("pre", { class: "ddelegate-summary", text: result.data.summary || "" }));
+    if (contract.authority && contract.authority.mode !== "recommend") {
+      feedback.appendChild(el("button", { class: "mgmt-add-btn", text: t("ddelegate.activate"),
+        onclick: async (event: Event) => {
+          const button = event.currentTarget as HTMLButtonElement;
+          button.disabled = true;
+          const activated = await _postJSON("/api/decision_delegations/" + encodeURIComponent(contract.id) + "/activate", { authorization_confirmed: true });
+          if (activated.ok) {
+            button.textContent = t("ddelegate.active");
+            if (onComplete) onComplete(activated.data.contract);
+          } else {
+            button.disabled = false;
+            feedback.appendChild(el("div", { class: "ddelegate-error", text: (activated.data && activated.data.detail) || t("ddelegate.failed") }));
+          }
+        } }));
+    } else {
+      feedback.appendChild(el("div", { class: "mc-meta", text: t("ddelegate.recommend_saved") }));
+      if (onComplete) onComplete(contract);
+    }
+  });
+  card.appendChild(submit); card.appendChild(feedback); container.appendChild(card);
+  return card;
+}
+
+function _decisionTester(contract: any): HTMLElement {
+  const box = el("div", { class: "ddelegate-test hidden" });
+  const scenario = el("textarea", { rows: "2", placeholder: t("ddelegate.scenario_placeholder") }) as HTMLTextAreaElement;
+  const options = el("textarea", { rows: "3", placeholder: t("ddelegate.options_placeholder") }) as HTMLTextAreaElement;
+  const output = el("div", { class: "ddelegate-feedback" });
+  const run = el("button", { class: "mgmt-add-btn", text: t("ddelegate.decide") }) as HTMLButtonElement;
+  run.addEventListener("click", async () => {
+    const labels = options.value.split(/\n+/).map(value => value.trim()).filter(Boolean);
+    if (!scenario.value.trim() || labels.length < 2) { output.textContent = t("ddelegate.need_scenario"); return; }
+    run.disabled = true; output.textContent = t("ddelegate.deciding");
+    const result = await _postJSON("/api/decision_delegations/decide", {
+      contract_id: contract.id, scenario: scenario.value.trim(),
+      options: labels.map((label, index) => ({ id: "option-" + (index + 1), label })),
+    });
+    run.disabled = false;
+    if (!result.ok) { output.textContent = (result.data && result.data.detail) || t("ddelegate.failed"); return; }
+    const data = result.data;
+    const picked = (data.selected_option && data.selected_option.label) || t("ddelegate.no_pick");
+    output.textContent = (data.status === "decided" ? t("ddelegate.decided") : t("ddelegate.escalated")) + "：" + picked +
+      "\n" + ((data.assessment && data.assessment.reason) || "") +
+      (data.gate_reasons && data.gate_reasons.length ? "\n" + data.gate_reasons.join("；") : "");
+  });
+  box.appendChild(scenario); box.appendChild(options); box.appendChild(run); box.appendChild(output);
+  return box;
+}
+
+async function _renderDelegations(body: HTMLElement): Promise<void> {
+  const head = el("div", { class: "ddelegate-toolbar" },
+    el("div", { class: "mgmt-section-title", text: t("ddelegate.title") }),
+    el("button", { class: "mgmt-add-btn", text: t("ddelegate.new"), onclick: async () => {
+      const goal = window.prompt(t("ddelegate.goal_prompt"), "");
+      if (!goal || !goal.trim()) return;
+      const result = await _postJSON("/api/decision_delegations/questionnaire", { goal: goal.trim() });
+      if (result.ok) renderQuestionnaire(body, result.data.questionnaire, () => { void renderDecisionPrefs(); });
+    } }));
+  body.appendChild(head);
+  const data = await _getJSON("/api/decision_delegations");
+  for (const contract of (data && data.contracts) || []) {
+    const tester = _decisionTester(contract);
+    const actions = el("div", { class: "dpref-actions" });
+    if (contract.status === "active") {
+      actions.appendChild(el("button", { class: "dpref-edit", text: t("ddelegate.test"), onclick: () => tester.classList.toggle("hidden") }));
+      actions.appendChild(el("button", { class: "mc-del", text: t("ddelegate.revoke"), onclick: async () => {
+        await _postJSON("/api/decision_delegations/" + encodeURIComponent(contract.id) + "/revoke", {});
+        await renderDecisionPrefs();
+      } }));
+    }
+    body.appendChild(el("div", { class: "mgmt-card ddelegate-contract" },
+      el("div", { class: "mc-main" }, el("div", { class: "mc-name", text: contract.goal }),
+        el("div", { class: "mc-meta", text: t("ddelegate.status_" + contract.status) }), tester), actions));
+  }
+}
+
 async function renderDecisionPrefs(): Promise<void> {
   const body = mgmtBody(); if (!body) return; body.innerHTML = "";
   const stats = await _getJSON("/api/decision_prefs/stats");
@@ -99,6 +209,7 @@ async function renderDecisionPrefs(): Promise<void> {
     const tasteTxt = _tasteHitText(stats);
     if (tasteTxt) body.appendChild(el("div", { class: "dpref-signal dpref-taste", text: "🎯 " + tasteTxt }));
   }
+  await _renderDelegations(body);
   body.appendChild(el("div", { class: "mgmt-section-title", text: t("dpref.subtitle") }));
   const data = await _getJSON("/api/decision_prefs");
   const prefs = (data && data.prefs) || [];
@@ -151,6 +262,6 @@ async function open(): Promise<void> {
   openMgmtModal(t("dpref.title")); await renderDecisionPrefs();
 }
 
-const KarvyDecisionPrefs = { open };
+const KarvyDecisionPrefs = { open, renderQuestionnaire };
 (window as unknown as { KarvyDecisionPrefs: typeof KarvyDecisionPrefs }).KarvyDecisionPrefs = KarvyDecisionPrefs;
 export { KarvyDecisionPrefs };

@@ -653,6 +653,10 @@ def cmd_console(args: argparse.Namespace) -> int:
         app.state.decision_log = DecisionLog(
             path=_Path.home() / ".karvyloop" / "decision_log.json",
         )
+        # 决策委托契约:问卷答案、显式授权边界和自主裁决回执跨重启保留。
+        from karvyloop.crystallize.decision_delegation import DecisionDelegationStore
+        app.state.decision_delegations = DecisionDelegationStore(
+            _Path.home() / ".karvyloop" / "decision_delegations.json")
         # fs_grants:工作区外访问授权台账(敏感路径硬地板;工具层/沙箱/能力链共用全局注册)
         from karvyloop.capability.fs_grants import FsGrantsStore, register_store as _reg_fs
         app.state.fs_grants = FsGrantsStore(_Path.home() / ".karvyloop" / "fs_grants.json")

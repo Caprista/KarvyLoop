@@ -3764,6 +3764,16 @@
     } else if ((payload.events && payload.events.length) || payload.text) {
       appendAgentTurn(log, payload);
       _appendRecallChip(log, payload.recall_used, payload.recall_as_of);   // Q1 召回解释:垫了哪几条记忆(空/缺=不渲染);docs/69 Q4:带时点则标"按 X 时点的记忆"
+      if (payload.decision_delegation) {
+        const host = el("div", { class: "chat-line agent ddelegate-chat" });
+        log.appendChild(host);
+        _ensurePanelScript("decision_prefs").then(() => {
+          if (window.KarvyDecisionPrefs && window.KarvyDecisionPrefs.renderQuestionnaire) {
+            window.KarvyDecisionPrefs.renderQuestionnaire(host, payload.decision_delegation);
+            if (follow) log.scrollTop = log.scrollHeight;
+          }
+        }).catch(err => { host.textContent = "⚠ " + err.message; });
+      }
       if (follow) log.scrollTop = log.scrollHeight;
     }
     if (payload.crystallized && payload.skill_name) {

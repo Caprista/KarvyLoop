@@ -31,12 +31,20 @@ load("decision_prefs_panel.js");
 
 const D = dom.window.KarvyDecisionPrefs;
 assert.ok(D && typeof D.open === "function", "window.KarvyDecisionPrefs.open 契约缺失");
+assert.equal(typeof D.renderQuestionnaire, "function", "聊天委托问卷渲染契约缺失");
 
 await D.open();
 const body = dom.window.document.getElementById("mgmt-body");
 assert.equal(dom.window.document.getElementById("mgmt-title").textContent, "dpref.title", "标题应是 dpref.title");
 assert.ok(body.querySelector(".dpref-signal"), "应有复利信号行(教会几条/接受率)");
+assert.ok(body.querySelector(".ddelegate-toolbar"), "应有决策委托入口");
 assert.ok([...body.querySelectorAll(".dpref-content")].some((n) => n.textContent.includes("碰生产必须先有测试")), "应渲染决策偏好卡");
+const chatHost = dom.window.document.createElement("div");
+D.renderQuestionnaire(chatHost, { goal: "技术选型", questions: [
+  { id: "risk", type: "choice", text: "风险？", options: ["低", "中"] },
+  { id: "constraint", type: "text", text: "约束？", placeholder: "不能丢数据" },
+] });
+assert.equal(chatHost.querySelectorAll("[data-question-id]").length, 2, "聊天问卷应按 payload 渲染字段");
 // provisional 的有「确认」按钮;每条都有「撤回」(易撤回·不固化你)
 assert.ok(body.querySelector(".dpref-confirm"), "provisional 偏好应有确认按钮");
 assert.ok([...body.querySelectorAll(".mc-del")].some((b) => b.textContent === "dpref.revoke"), "每条应有撤回按钮");
