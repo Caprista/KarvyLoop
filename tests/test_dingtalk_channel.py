@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from karvyloop.channels.dingtalk_channel import (
-    REFUSAL_TEXT, DingTalkChannel, _AIStreamController, _channel_conversation_id,
-    _extract, drive_channel_message, handle_incoming)
+    REFUSAL_TEXT, DingTalkChannel, _DingTalkDelivery, _channel_conversation_id,
+    _extract, _normalize_dingtalk_markdown, _requires_markdown_fallback,
+    drive_channel_message, handle_incoming)
 from karvyloop.channels.dingtalk_runtime import PendingSenderCache
 from karvyloop.config_channels import (
     DingTalkChannelConfig, dingtalk_channel_config_from_dict,
@@ -481,45 +484,238 @@ def test_refusal_sets_are_per_instance():
 
 
 class _FakeCard:
-    def __init__(self):
-        self.calls = []
+    card_instance_id = "card-1"
 
-    def ai_streaming(self, text, finished):
-        self.calls.append((text, finished))
+    def __init__(self, *, streaming_error=False, finish_error=False, order=None):
+        self.streaming_calls = []
+        self.finish_calls = []
+        self.streaming_error = streaming_error
+        self.finish_error = finish_error
+        self.order = order
+
+    def ai_streaming(self, markdown, append=True):
+        self.streaming_calls.append((markdown, append))
+        if self.order is not None:
+            self.order.append("streaming")
+        if self.streaming_error:
+            raise RuntimeError("streaming failed")
+
+    def ai_finish(self, *, markdown):
+        self.finish_calls.append(markdown)
+        if self.order is not None:
+            self.order.append("finish")
+        if self.finish_error:
+            raise RuntimeError("finish failed")
 
 
-def test_stream_controller_on_event_only_forwards_text_delta():
+class _FakeHandler:
+    def __init__(self, *, markdown_error=False):
+        self.replies = []
+        self.markdown_error = markdown_error
+
+    def reply_markdown(self, title, text, msg):
+        self.replies.append((title, text, msg))
+        if self.markdown_error:
+            raise RuntimeError("markdown failed")
+
+
+def test_normalize_dingtalk_markdown_stable_subset():
+    source = "#### 标题\n<div>正文</div>\n![图](https://example.test/a_b.png)\n| A | B |\n|---|:--:|\n| 1 | 2 |\n- [x] 完成\n```python\nvalue = 1\n```\n**粗体** `代码` [链接](https://example.test/x?a_b=1)"
+    normalized = _normalize_dingtalk_markdown(source)
+    assert normalized == _normalize_dingtalk_markdown(normalized)
+    assert "### 标题" in normalized and "####" not in normalized
+    assert "<div>" not in normalized and "图（https://example.test/a_b.png）" in normalized
+    assert "- A：1；B：2" in normalized and "|---|" not in normalized
+    assert "- 完成" in normalized and "```" not in normalized
+    assert "**粗体**" in normalized and "`代码`" in normalized and "[链接](https://example.test/x?a_b=1)" in normalized
+
+
+def test_normalize_standard_table_as_semantic_list_preserves_title():
+    source = "## 执行结果\n\n| 姓名 | 状态 |\n|---|---|\n| 张三 | 已完成 |"
+    assert _normalize_dingtalk_markdown(source) == (
+        "## 执行结果\n\n- 姓名：张三；状态：已完成")
+
+
+def test_normalize_table_without_outer_pipes_and_alignment():
+    source = "姓名 | 状态\n:--- | ---:\n张三 | [详情](https://example.test/a|b)"
+    assert _normalize_dingtalk_markdown(source) == (
+        "- 姓名：张三；状态：[详情](https://example.test/a|b)")
+
+
+def test_normalize_empty_table_keeps_readable_headers():
+    source = "| 姓名 | 状态 |\n| --- | :---: |"
+    assert _normalize_dingtalk_markdown(source) == "姓名；状态"
+
+
+def test_normalize_table_handles_missing_and_extra_values():
+    source = (
+        "| 姓名 | 状态 |\n|---|---|\n"
+        "| 张三 |\n"
+        "| 李四 | 处理中 | 高优先级 |")
+    assert _normalize_dingtalk_markdown(source) == (
+        "- 姓名：张三\n"
+        "- 姓名：李四；状态：处理中；字段3：高优先级")
+
+
+def test_normalize_table_is_idempotent():
+    source = "标题\n姓名 | 状态\n---|:---:\n张三 | 已完成"
+    once = _normalize_dingtalk_markdown(source)
+    assert once == "标题\n- 姓名：张三；状态：已完成"
+    assert _normalize_dingtalk_markdown(once) == once
+
+
+@pytest.mark.parametrize("text", [
+    "| A | B |\n| --- | --- |\n| 1 | 2 |",
+    "<div>正文</div>",
+    "<!-- comment -->",
+    "![图](https://example.test/a.png)",
+    "```python\nprint(1)\n```",
+    "~~~text\nhello\n~~~",
+    "- [x] 完成",
+])
+def test_requires_markdown_fallback_complex_positive_cases(text):
+    assert _requires_markdown_fallback(text) is True
+
+
+@pytest.mark.parametrize("text", [
+    "普通文本",
+    "# 标题\n**粗体**\n- 列表\n> 引用\n[链接](https://example.test/a) `代码`",
+    "普通 | 竖线",
+    r"转义 \| 竖线",
+    "[链接](https://example.test/a|b)",
+])
+def test_requires_markdown_fallback_stable_negative_cases(text):
+    assert _requires_markdown_fallback(text) is False
+
+
+@pytest.mark.parametrize("text", [
+    "| A | B |\n| --- | --- |\n| 1 | 2 |",
+    "![图](https://example.test/a.png)",
+    "```python\nprint(1)\n```",
+])
+def test_delivery_complex_text_uses_original_markdown_without_card(text):
     async def _run():
+        handler = _FakeHandler()
         card = _FakeCard()
-        controller = _AIStreamController(card, asyncio.get_running_loop(), interval_s=0)
-        controller.on_event({"type": "reasoning", "text": "secret"})
-        controller.on_event({"type": "tool_result", "text": "raw"})
-        controller.on_event({"type": "text_delta", "text": "hello"})
-        await controller.finalize()
-        assert card.calls == [("hello", True)]
+        starts = []
+        delivery = _DingTalkDelivery(handler, "msg")
+
+        def _start_card():
+            starts.append("created")
+            return card
+
+        await delivery.finish(text, start_card=_start_card)
+        await delivery.finish(text, start_card=_start_card)
+        assert starts == []
+        assert card.streaming_calls == []
+        assert card.finish_calls == []
+        assert handler.replies == [("AI 回复", text, "msg")]
 
     asyncio.run(_run())
 
 
-def test_stream_controller_throttles_and_serializes_updates():
+def test_delivery_stable_text_starts_card_after_drive_and_finishes_once():
     async def _run():
-        card = _FakeCard()
-        controller = _AIStreamController(card, asyncio.get_running_loop(), interval_s=0.01)
-        controller.on_event({"type": "text_delta", "text": "a"})
-        controller.on_event({"type": "text_delta", "text": "b"})
-        await controller.finalize()
-        assert card.calls == [("ab", True)]
+        handler = _FakeHandler()
+        order = []
+        card = _FakeCard(order=order)
+        delivery = _DingTalkDelivery(handler, "msg")
+
+        async def _drive():
+            order.append("drive")
+            return "**稳定回复**"
+
+        def _start_card():
+            order.append("start_card")
+            return card
+
+        text = await _drive()
+        await delivery.finish(text, start_card=_start_card)
+        await delivery.finish(text, start_card=_start_card)
+        assert order == ["drive", "start_card", "streaming", "finish"]
+        assert card.streaming_calls == [("**稳定回复**", False)]
+        assert card.finish_calls == ["**稳定回复**"]
+        assert handler.replies == []
+        assert delivery.markdown_sent is False
 
     asyncio.run(_run())
 
 
-def test_stream_controller_finalize_drains_pending_delta():
+@pytest.mark.parametrize("factory", [
+    lambda: None,
+    lambda: object(),
+    lambda: (_ for _ in ()).throw(RuntimeError("create failed")),
+])
+def test_delivery_invalid_or_failed_factory_falls_back_once(factory):
     async def _run():
+        handler = _FakeHandler()
+        delivery = _DingTalkDelivery(handler, "msg")
+        await delivery.finish("普通回复", start_card=factory)
+        await delivery.finish("普通回复", start_card=factory)
+        assert handler.replies == [("AI 回复", "普通回复", "msg")]
+
+    asyncio.run(_run())
+
+
+def test_delivery_normalized_stable_text_streams_and_finishes_same_content():
+    async def _run():
+        handler = _FakeHandler()
         card = _FakeCard()
-        controller = _AIStreamController(card, asyncio.get_running_loop(), interval_s=1)
-        controller.on_event({"type": "text_delta", "text": "tail"})
-        await asyncio.sleep(0)
-        await controller.finalize()
-        assert card.calls == [("tail", True)]
+        delivery = _DingTalkDelivery(handler, "msg")
+        await delivery.finish("#### 标题", start_card=lambda: card)
+        assert card.streaming_calls == [("### 标题", False)]
+        assert card.finish_calls == ["### 标题"]
+        assert handler.replies == []
+
+    asyncio.run(_run())
+
+
+def test_delivery_card_streaming_failure_skips_finish_and_falls_back_once():
+    async def _run():
+        handler = _FakeHandler()
+        card = _FakeCard(streaming_error=True)
+        delivery = _DingTalkDelivery(handler, "msg")
+        await delivery.finish("普通回复", start_card=lambda: card)
+        await delivery.finish("普通回复", start_card=lambda: card)
+        assert card.streaming_calls == [("普通回复", False)]
+        assert card.finish_calls == []
+        assert handler.replies == [("AI 回复", "普通回复", "msg")]
+
+    asyncio.run(_run())
+
+
+def test_delivery_card_finish_failure_falls_back_to_original_markdown_once():
+    async def _run():
+        handler = _FakeHandler()
+        card = _FakeCard(finish_error=True)
+        delivery = _DingTalkDelivery(handler, "msg")
+        await delivery.finish("普通回复", start_card=lambda: card)
+        await delivery.finish("普通回复", start_card=lambda: card)
+        assert card.streaming_calls == [("普通回复", False)]
+        assert card.finish_calls == ["普通回复"]
+        assert handler.replies == [("AI 回复", "普通回复", "msg")]
+
+    asyncio.run(_run())
+
+
+def test_delivery_without_factory_sends_original_markdown_once():
+    async def _run():
+        handler = _FakeHandler()
+        delivery = _DingTalkDelivery(handler, "msg")
+        await delivery.finish("原始回复")
+        await delivery.finish("原始回复")
+        assert handler.replies == [("AI 回复", "原始回复", "msg")]
+
+    asyncio.run(_run())
+
+
+def test_delivery_markdown_failure_does_not_claim_markdown_sent():
+    async def _run():
+        handler = _FakeHandler(markdown_error=True)
+        delivery = _DingTalkDelivery(handler, "msg")
+        with pytest.raises(RuntimeError, match="markdown failed"):
+            await delivery.finish("回复")
+        assert delivery.markdown_sent is False
+        assert delivery.finished is True
 
     asyncio.run(_run())

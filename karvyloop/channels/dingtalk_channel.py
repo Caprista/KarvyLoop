@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 from typing import Any, Awaitable, Callable, Optional
 
@@ -31,71 +32,179 @@ logger = logging.getLogger(__name__)
 REFUSAL_TEXT = "这个机器人仅对授权用户开放。"
 
 
-class _AIStreamController:
-    """把 worker 线程的模型增量节流、串行地写入同一张钉钉 AI 卡片。"""
+def _split_markdown_table_row(line: str) -> list[str]:
+    """拆分 GFM 表格行，同时不把链接目标或转义竖线当作列边界。"""
+    content = line.strip()
+    if content.startswith("|"):
+        content = content[1:]
+    if content.endswith("|") and not content.endswith(r"\|"):
+        content = content[:-1]
 
-    def __init__(self, card: Any, loop: asyncio.AbstractEventLoop,
-                 interval_s: float = 0.25) -> None:
-        from karvyloop.cognition.fence import ScrubState
-        self._card = card
-        self._loop = loop
-        self._interval_s = interval_s
-        self._scrub_state = ScrubState()
-        self._pending = ""
-        self._flush_task: Optional[asyncio.Task] = None
-        self._closed = False
+    cells: list[str] = []
+    cell: list[str] = []
+    escaped = False
+    bracket_depth = 0
+    link_depth = 0
+    for char in content:
+        if escaped:
+            cell.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            cell.append(char)
+            escaped = True
+            continue
+        if char == "[" and not link_depth:
+            bracket_depth += 1
+        elif char == "]" and bracket_depth:
+            bracket_depth -= 1
+        elif char == "(" and not bracket_depth:
+            link_depth += 1
+        elif char == ")" and link_depth:
+            link_depth -= 1
+        if char == "|" and not bracket_depth and not link_depth:
+            cells.append("".join(cell).strip())
+            cell = []
+        else:
+            cell.append(char)
+    cells.append("".join(cell).strip())
+    return cells
 
-    def on_event(self, event: dict) -> None:
-        """由 drive worker 线程调用；只接正文，不外发思维链和工具原始结果。"""
-        if event.get("type") != "text_delta" or self._closed:
+
+def _requires_markdown_fallback(text: str) -> bool:
+    """判断正文是否包含钉钉 AI 交互卡片不稳定的 Markdown。"""
+    value = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if re.search(r"<!--|</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*?)?/?>", value):
+        return True
+    if re.search(r"!\[[^\]]*\]\([^\n)]+\)", value):
+        return True
+    if re.search(r"(?m)^\s{0,3}(?:```|~~~)", value):
+        return True
+    if re.search(r"(?m)^\s*(?:[-+*]|\d+[.)])\s+\[[ xX]\](?:\s+|$)", value):
+        return True
+
+    lines = value.split("\n")
+    separator_cell = re.compile(r"^:?-{3,}:?$")
+    for index in range(1, len(lines)):
+        separator_line = lines[index].strip()
+        if "|" not in separator_line:
+            continue
+        separators = _split_markdown_table_row(separator_line)
+        if not separators or not all(separator_cell.fullmatch(cell) for cell in separators):
+            continue
+        header_line = lines[index - 1].strip()
+        if "|" not in header_line:
+            continue
+        headers = _split_markdown_table_row(header_line)
+        explicit_single_column = (
+            len(headers) == 1
+            and header_line.startswith("|") and header_line.endswith("|")
+            and separator_line.startswith("|") and separator_line.endswith("|")
+        )
+        if len(headers) == len(separators) and (len(headers) > 1 or explicit_single_column):
+            return True
+    return False
+
+
+def _normalize_dingtalk_markdown(markdown: str) -> str:
+    """规范 AI 卡片可承载的 Markdown；复杂格式仅供历史纯函数兼容。"""
+    text = str(markdown or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    output: list[str] = []
+    i = 0
+    separator_cell = re.compile(r"^:?-{2,}:?$")
+    while i < len(lines):
+        if i + 1 < len(lines) and "|" in lines[i] and "|" in lines[i + 1]:
+            headers = _split_markdown_table_row(lines[i])
+            separators = _split_markdown_table_row(lines[i + 1])
+            if (len(headers) == len(separators) and len(headers) > 1
+                    and all(separator_cell.fullmatch(c) for c in separators)):
+                rows = []
+                i += 2
+                while i < len(lines) and "|" in lines[i] and lines[i].strip():
+                    rows.append(_split_markdown_table_row(lines[i]))
+                    i += 1
+                if not rows:
+                    output.append("；".join(headers))
+                else:
+                    for row in rows:
+                        parts = []
+                        for n, value in enumerate(row):
+                            name = headers[n] if n < len(headers) else f"字段{n + 1}"
+                            if value:
+                                parts.append(f"{name}：{value}")
+                        if parts:
+                            output.append("- " + "；".join(parts))
+                continue
+        line = lines[i]
+        heading = re.match(r"^(\s*)(#{1,})\s+(.*)$", line)
+        if heading:
+            line = heading.group(1) + "#" * min(len(heading.group(2)), 3) + " " + heading.group(3)
+        line = re.sub(r"<!--.*?-->", "", line)
+        line = re.sub(r"<[^>]+>", "", line)
+        line = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", r"\1（\2）", line)
+        line = re.sub(r"^\s*(?:[-+*]|\d+[.)])\s+\[[ xX]\]\s*", "- ", line)
+        if re.match(r"^\s*(?:```|~~~)", line):
+            i += 1
+            continue
+        output.append(line)
+        i += 1
+    return "\n".join(output).strip()
+
+
+class _DingTalkDelivery:
+    """按最终正文判型，稳定消息才延迟创建 AI 卡片。"""
+
+    def __init__(self, handler: Any, msg: Any) -> None:
+        self.handler = handler
+        self.msg = msg
+        self.card: Any = None
+        self.finished = False
+        self.markdown_sent = False
+        self._finish_lock = asyncio.Lock()
+
+    async def markdown(self, text: str) -> None:
+        if self.markdown_sent:
             return
-        try:
-            from karvyloop.cognition.fence import scrub_stream
-            delta = scrub_stream(str(event.get("text") or ""), self._scrub_state)
-            if delta:
-                self._loop.call_soon_threadsafe(self._enqueue, delta)
-        except Exception:
-            logger.debug("[dingtalk] 流式事件入队失败", exc_info=True)
+        await asyncio.to_thread(self.handler.reply_markdown, "AI 回复", text, self.msg)
+        self.markdown_sent = True
 
-    def _enqueue(self, delta: str) -> None:
-        if self._closed:
-            return
-        self._pending += delta
-        if self._flush_task is None or self._flush_task.done():
-            self._flush_task = self._loop.create_task(self._flush())
-
-    async def _flush(self) -> None:
-        await asyncio.sleep(self._interval_s)
-        while self._pending and not self._closed:
-            delta, self._pending = self._pending, ""
-            try:
-                await asyncio.to_thread(self._card.ai_streaming, delta, True)
-            except Exception:
-                logger.warning("[dingtalk] AI 卡片流式更新失败", exc_info=True)
+    async def finish(self, text: str,
+                     start_card: Optional[Callable[[], Any]] = None) -> None:
+        async with self._finish_lock:
+            if self.finished:
                 return
-            if self._pending:
-                await asyncio.sleep(self._interval_s)
-
-    async def finalize(self) -> None:
-        """drive 结束后排空已入队增量，再由调用方以权威终态覆盖卡片。"""
-        await asyncio.sleep(0)
-        task = self._flush_task
-        if task is not None:
-            if not task.done() and self._pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            else:
-                await task
-        if self._pending:
-            delta, self._pending = self._pending, ""
             try:
-                await asyncio.to_thread(self._card.ai_streaming, delta, True)
-            except Exception:
-                logger.warning("[dingtalk] AI 卡片末段流式更新失败", exc_info=True)
-        self._closed = True
+                if _requires_markdown_fallback(text):
+                    await self.markdown(text)
+                    return
+
+                try:
+                    card = (await asyncio.to_thread(start_card)
+                            if start_card is not None else None)
+                    if not getattr(card, "card_instance_id", None):
+                        raise RuntimeError("AI 卡片创建未返回有效实例")
+                    self.card = card
+                except Exception:
+                    logger.warning("[dingtalk] AI 卡片创建失败，改用 Markdown 消息", exc_info=True)
+                    await self.markdown(text)
+                    return
+
+                normalized = _normalize_dingtalk_markdown(text)
+                try:
+                    await asyncio.to_thread(card.ai_streaming, normalized, append=False)
+                except Exception:
+                    logger.warning("[dingtalk] AI 卡片正文写入失败，改用 Markdown 消息", exc_info=True)
+                    await self.markdown(text)
+                    return
+
+                try:
+                    await asyncio.to_thread(card.ai_finish, markdown=normalized)
+                except Exception:
+                    logger.warning("[dingtalk] AI 卡片收敛失败，改用 Markdown 消息", exc_info=True)
+                    await self.markdown(text)
+            finally:
+                self.finished = True
 
 
 async def _publish_channel_message(app: Any, *, role: str, text: str,
@@ -377,36 +486,16 @@ class DingTalkChannel:
             async def process(self, callback):  # noqa: ANN001
                 data = getattr(callback, "data", {}) or {}
                 holder: dict = {}
+                from dingtalk_stream import ChatbotMessage
+                msg = ChatbotMessage.from_dict(data)
+                delivery = _DingTalkDelivery(self, msg)
 
                 def _reply(text: str) -> None:
                     holder["reply"] = text
 
-                async def _processing() -> None:
-                    from dingtalk_stream import ChatbotMessage
-                    msg = ChatbotMessage.from_dict(data)
-                    card = await asyncio.to_thread(
-                        self.ai_markdown_card_start, msg, title="AI 回复")
-                    if getattr(card, "card_instance_id", None):
-                        holder["card"] = card
-                        holder["stream"] = _AIStreamController(card, loop)
-                    else:
-                        await asyncio.to_thread(
-                            self.reply_markdown,
-                            "OA 审批助理",
-                            "## 已收到\n\n> 正在思考并查询 OA 待办，请稍候……",
-                            msg,
-                        )
-
-                def _on_event(event: dict) -> None:
-                    stream = holder.get("stream")
-                    if stream is not None:
-                        stream.on_event(event)
-
                 fut = asyncio.run_coroutine_threadsafe(
                     handle_incoming(channel._app, channel._cfg, data, _reply,
-                                    refused=channel._refused,
-                                    processing_fn=_processing,
-                                    on_event=_on_event), loop)
+                                    refused=channel._refused), loop)
                 try:
                     await asyncio.to_thread(fut.result)
                 except Exception as e:
@@ -415,22 +504,11 @@ class DingTalkChannel:
                 text = holder.get("reply")
                 if text:
                     try:
-                        card = holder.get("card")
-                        if card is not None:
-                            stream = holder.get("stream")
-                            if stream is not None:
-                                finalize = asyncio.run_coroutine_threadsafe(stream.finalize(), loop)
-                                await asyncio.to_thread(finalize.result)
-                            await asyncio.to_thread(card.ai_finish, markdown=text)
-                        else:
-                            from dingtalk_stream import ChatbotMessage
-                            msg = ChatbotMessage.from_dict(data)
-                            await asyncio.to_thread(
-                                self.reply_markdown,
-                                "OA 审批助理",
-                                text,
-                                msg,
-                            )
+                        await delivery.finish(
+                            text,
+                            start_card=lambda: self.ai_markdown_card_start(
+                                msg, title="AI 回复"),
+                        )
                     except Exception as e:
                         logger.warning("[dingtalk] 回复发送失败: %s", e)
                 from dingtalk_stream import AckMessage

@@ -8,7 +8,7 @@
 - infra-dead 判定必须**白名单式**(网络/超时/认证/限流/5xx 才算 infra);
 - TypeError/AttributeError/KeyError 等代码缺陷**绝不**归为 infra-dead ——
   fail-loud 上冒原始异常链,真因(异常类名 + traceback)落 Trace;
-- 预算/上下文天花板(系统**有意**拒发)按 BLOCKING_LIMIT 报,提示语才对得上真因。
+- 预算/上下文天花板(系统**有意**拒发)分别按 SPEND_BUDGET_LIMIT/CONTEXT_LIMIT 报。
 """
 from __future__ import annotations
 
@@ -60,11 +60,11 @@ def test_httpx_bad_request_4xx_is_not_infra():
         assert classify_model_call_exception(err) is None, status
 
 
-def test_deliberate_gates_map_to_blocking_limit():
+def test_deliberate_gates_keep_specific_limit_reason():
     from karvyloop.gateway.client import ContextCeilingError
     from karvyloop.llm.spend_budget import SpendBudgetExceeded
-    assert classify_model_call_exception(SpendBudgetExceeded("budget")) == Terminal.BLOCKING_LIMIT
-    assert classify_model_call_exception(ContextCeilingError("ceiling")) == Terminal.BLOCKING_LIMIT
+    assert classify_model_call_exception(SpendBudgetExceeded("budget")) == Terminal.SPEND_BUDGET_LIMIT
+    assert classify_model_call_exception(ContextCeilingError("ceiling")) == Terminal.CONTEXT_LIMIT
 
 
 def test_resolve_whitelist():
@@ -196,8 +196,8 @@ async def test_spend_budget_maps_to_blocking_limit_not_infra():
     events = [ev async for ev in run(_atom(), {"q": "hi"}, _tok(), gateway=gw, tools={})]
     term = events[-1]
     assert isinstance(term, TerminalEvent)
-    assert term.reason == Terminal.BLOCKING_LIMIT   # 不是 INFRA_DEAD:预算闸是有意拒发
-    assert term.run.terminal == "blocking_limit"
+    assert term.reason == Terminal.SPEND_BUDGET_LIMIT   # 不是 INFRA_DEAD:预算闸是有意拒发
+    assert term.run.terminal == "spend_budget_limit"
 
 
 class _ErrorEventAdapter:

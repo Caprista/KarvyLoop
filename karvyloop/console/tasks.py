@@ -30,7 +30,8 @@ def _humanize_bare_terminal(error: str) -> str:
         return error
     code = e.lstrip("✗✘×xX ").strip()
     _KEYS = {"infra_dead": "task.err.infra_dead", "max_turns": "task.err.max_turns",
-             "blocking_limit": "task.err.blocking_limit", "circuit_open": "task.err.circuit_open",
+             "spend_budget_limit": "task.err.spend_budget_limit",
+             "context_limit": "task.err.context_limit", "circuit_open": "task.err.circuit_open",
              "aborted_streaming": "task.err.aborted", "aborted_tools": "task.err.aborted",
              "hook_stopped": "task.err.hook_stopped"}
     key = _KEYS.get(code)

@@ -1107,7 +1107,8 @@ EN = {
         "task's fault. Check Models (Global) and your network, then rerun."
     ),
     "task.err.max_turns": "⚠ Hit the per-run step limit before finishing — rerun to continue.",
-    "task.err.blocking_limit": "⚠ Token/cost budget ran out before finishing — raise the budget or rerun.",
+    "task.err.spend_budget_limit": "⚠ Token/cost budget ran out before finishing — raise the budget or rerun.",
+    "task.err.context_limit": "⚠ Context capacity was reached before finishing — compact the context, enable auto-compaction, or use a larger-context model, then rerun.",
     "task.err.circuit_open": "⚠ Stopped after repeated failures — something's stuck; take a look, then rerun.",
     "task.err.aborted": "⚠ Interrupted — the result may be incomplete.",
     "task.err.hook_stopped": "⚠ Stopped by a rule/hook.",

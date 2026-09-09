@@ -75,12 +75,13 @@ def test_ac4_terminal_completed_prints_green_check():
     assert "completed" in out
 
 
-def test_ac4_terminal_blocking_limit_prints_yellow():
-    r, buf = _make_renderer()
-    r.render(TerminalEvent(run=None, reason=Terminal.BLOCKING_LIMIT))
-    out = buf.getvalue()
-    assert "✗" in out
-    assert "blocking_limit" in out
+def test_ac4_terminal_limits_print_yellow():
+    for reason in (Terminal.SPEND_BUDGET_LIMIT, Terminal.CONTEXT_LIMIT):
+        r, buf = _make_renderer()
+        r.render(TerminalEvent(run=None, reason=reason))
+        out = buf.getvalue()
+        assert "✗" in out
+        assert reason.value in out
 
 
 # -------- AC5:未知事件不抛错,静默忽略(防御)--------

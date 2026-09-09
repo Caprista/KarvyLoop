@@ -17,7 +17,8 @@ class Terminal(Enum):
     ABORTED_STREAMING = "aborted_streaming"   # 流式传输中被中断
     ABORTED_TOOLS = "aborted_tools"    # 工具执行阶段被中断
     HOOK_STOPPED = "hook_stopped"      # hook 强制停
-    BLOCKING_LIMIT = "blocking_limit"  # token/成本预算耗尽
+    SPEND_BUDGET_LIMIT = "spend_budget_limit"  # token/成本预算耗尽
+    CONTEXT_LIMIT = "context_limit"    # 上下文治理/模型上下文窗口超限
     INFRA_DEAD = "infra_dead"          # 基础能力失效:网关/网络/模型解析不可用
 
 
@@ -79,8 +80,9 @@ def classify_model_call_exception(exc: BaseException) -> "Terminal | None":
 
     - 网络/超时/socket/ssl(OSError 家族、TimeoutError、httpx/aiohttp 等传输层)→ INFRA_DEAD
     - HTTP 认证/限流/超时状态(401/403/407/408/429)与 5xx(服务端不可用)→ INFRA_DEAD
-    - 预算/上下文天花板(SpendBudgetExceeded / ContextCeilingError,系统**有意**拒发)→ BLOCKING_LIMIT
-      (它们不是"网络调不通",按预算类语义报,提示语才对得上真因)
+    - 花费预算闸 SpendBudgetExceeded → SPEND_BUDGET_LIMIT
+    - 上下文天花板 ContextCeilingError → CONTEXT_LIMIT
+      (它们不是"网络调不通",且必须保留来源以展示准确提示)
     - 其余(TypeError/AttributeError/KeyError… = 代码缺陷,含 4xx 坏请求 = 请求体/协议 bug)
       → **None**:调用方必须 fail-loud 上冒原始异常链,绝不吞成"模型/网络调不通"。
     """
@@ -88,13 +90,13 @@ def classify_model_call_exception(exc: BaseException) -> "Terminal | None":
     try:
         from karvyloop.llm.spend_budget import SpendBudgetExceeded
         if isinstance(exc, SpendBudgetExceeded):
-            return Terminal.BLOCKING_LIMIT
+            return Terminal.SPEND_BUDGET_LIMIT
     except Exception:
         pass
     try:
         from karvyloop.gateway.client import ContextCeilingError
         if isinstance(exc, ContextCeilingError):
-            return Terminal.BLOCKING_LIMIT
+            return Terminal.CONTEXT_LIMIT
     except Exception:
         pass
     # 白名单 1:内建网络/超时家族(socket/ssl 错误都是 OSError 子类;3.11+ asyncio.TimeoutError=TimeoutError)

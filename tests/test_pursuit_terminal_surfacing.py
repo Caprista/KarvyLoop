@@ -74,8 +74,9 @@ async def _run_terminal(gw, atom, tools=None) -> TerminalEvent:
 def test_is_infra_dead_helper():
     assert is_infra_dead(Terminal.INFRA_DEAD) is True
     assert is_infra_dead("infra_dead") is True
-    # 关键:token 预算耗尽 ≠ infra-dead(否则 role 把"没预算"当"网络断")
-    assert is_infra_dead(Terminal.BLOCKING_LIMIT) is False
+    # 关键:预算/上下文限制 ≠ infra-dead(否则 role 会当成网络断)
+    assert is_infra_dead(Terminal.SPEND_BUDGET_LIMIT) is False
+    assert is_infra_dead(Terminal.CONTEXT_LIMIT) is False
     assert is_infra_dead(Terminal.MAX_TURNS) is False
     assert is_infra_dead(None) is False
     assert is_infra_dead("garbage") is False
@@ -93,13 +94,13 @@ def test_is_replannable_helper():
     assert is_replannable("garbage") is False
 
 
-def test_infra_and_budget_are_distinct_terminals():
-    """守 §15.7:infra-dead 与 token 预算是两个不同终止,别被合并吃掉。"""
-    assert Terminal.INFRA_DEAD != Terminal.BLOCKING_LIMIT
+def test_infra_budget_and_context_are_distinct_terminals():
+    """守 §15.7:infra、消费预算与上下文限制是不同终止。"""
+    assert len({Terminal.INFRA_DEAD, Terminal.SPEND_BUDGET_LIMIT, Terminal.CONTEXT_LIMIT}) == 3
     assert Terminal.INFRA_DEAD.value == "infra_dead"
 
 
-# ============ executor:infra 失败 → INFRA_DEAD(不再误标 BLOCKING_LIMIT)============
+# ============ executor:infra 失败 → INFRA_DEAD(不再误标为限制类型)============
 
 @pytest.mark.asyncio
 async def test_model_call_failure_is_infra_dead():
@@ -203,3 +204,13 @@ def test_annotate_terminal_has_infra_note():
     out = _annotate_terminal("半截结果", Terminal.INFRA_DEAD)
     assert "半截结果" in out
     assert "基础能力" in out  # 区别于 MAX_TURNS/预算 的提示语
+
+
+def test_annotate_terminal_distinguishes_budget_and_context_limits():
+    from karvyloop.runtime.main_loop import _annotate_terminal
+
+    budget = _annotate_terminal("半截结果", Terminal.SPEND_BUDGET_LIMIT)
+    context = _annotate_terminal("半截结果", Terminal.CONTEXT_LIMIT)
+    assert "token/成本预算用尽" in budget
+    assert "上下文容量已达上限" in context
+    assert "token/成本预算用尽" not in context

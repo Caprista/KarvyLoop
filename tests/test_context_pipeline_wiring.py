@@ -7,7 +7,7 @@ forge 用 enable_compression 开关 + 构造 GovConfig/摘要函数/取模型真
 AC:
 - AC1 enable_compression=True → govern 被调(每轮调模型前),且拿到模型真实 context_window + GovConfig + 摘要函数
 - AC2 enable_compression=False(默认)→ govern **不**被调(0 回归,旧路径行为不变)
-- AC3 govern 抛 BlockingLimitError → executor 终止为 BLOCKING_LIMIT(不崩)
+- AC3 govern 抛 BlockingLimitError → executor 终止为 CONTEXT_LIMIT(不崩)
 - AC4 enable_compression=True 走**真** govern(大窗口,阈值不触发)→ 正常完成,不崩
 - AC5 _make_summarizer 收集 TextDelta 文本拼成摘要
 """
@@ -105,7 +105,7 @@ async def test_govern_not_called_when_compression_disabled(tmp_path, monkeypatch
     assert calls == []                           # 0 回归:旧路径完全不碰 govern
 
 
-# ---- AC3:BlockingLimitError → 终止 BLOCKING_LIMIT ----
+# ---- AC3:BlockingLimitError → 终止 CONTEXT_LIMIT ----
 @pytest.mark.asyncio
 async def test_blocking_limit_terminates(tmp_path, monkeypatch):
     from karvyloop.coding.forge import generate_and_run
@@ -119,7 +119,7 @@ async def test_blocking_limit_terminates(tmp_path, monkeypatch):
     res = await generate_and_run("hi", _tok(), FakeSandbox(str(tmp_path)),
                                  gateway=gw, workspace_root=str(tmp_path),
                                  model_ref="p/a", enable_compression=True)
-    assert res.terminal == Terminal.BLOCKING_LIMIT  # 优雅终止,不崩
+    assert res.terminal == Terminal.CONTEXT_LIMIT  # 优雅终止且保留上下文来源
 
 
 # ---- AC4:真 govern(大窗口,阈值不触发)→ 正常完成 ----

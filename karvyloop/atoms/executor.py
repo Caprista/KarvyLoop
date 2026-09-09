@@ -360,9 +360,9 @@ async def run(
                         context_window=context_window,
                     )
                 except _BLE as e:
-                    state.transition = Transition(reason="blocking_limit",
+                    state.transition = Transition(reason="context_limit",
                                                   extra={"error": str(e)})
-                    final_reason = Terminal.BLOCKING_LIMIT
+                    final_reason = Terminal.CONTEXT_LIMIT
                     break
             # 2) 解析 model
             scope = ResolveScope(atom_model=atom.model)
@@ -488,7 +488,7 @@ async def run(
             except Exception as e:
                 # 白名单式分类(可观测性②,本周真痛的治本):只有网络/超时/认证/限流/5xx 才算
                 # **网关/网络调不通** = infra-dead(role 重规划同一条路也没用,fail-loud 标 infra,
-                # 不进 replan 阶梯,docs/02 §15);预算/上下文天花板(系统有意拒发)= BLOCKING_LIMIT;
+                # 不进 replan 阶梯,docs/02 §15);预算/上下文天花板(系统有意拒发)保留各自限制类型;
                 # TypeError/AttributeError/KeyError 等**代码缺陷**(含 400 坏请求 = 请求体/协议 bug)
                 # 绝不吞成"模型/网络调不通" —— fail-loud 上冒原始异常链(traceback 由 drive 记进
                 # Trace,用户可见文案由上层兜),否则误诊耽误排查(实捕:to_blocks 少 cache kwarg 的

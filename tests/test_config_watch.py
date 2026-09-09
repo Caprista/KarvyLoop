@@ -16,8 +16,8 @@ from karvyloop.console.tasks import TaskRegistry, _humanize_bare_terminal
 
 def test_bare_terminal_codes_become_human_words():
     """裸终态码(含「✗ 」前缀形态,内测实拍)→ 人话;i18n 键真存在(t 返回≠键名)。"""
-    for raw in ("infra_dead", "✗ infra_dead", "max_turns", "blocking_limit",
-                "circuit_open", "aborted_tools", "aborted_streaming", "hook_stopped"):
+    for raw in ("infra_dead", "✗ infra_dead", "max_turns", "spend_budget_limit",
+                "context_limit", "circuit_open", "aborted_tools", "aborted_streaming", "hook_stopped"):
         out = _humanize_bare_terminal(raw)
         assert out != raw and "task.err." not in out, f"{raw!r} 未被人话化: {out!r}"
         assert "_" not in out, f"人话里不该再有下划线机器码: {out!r}"

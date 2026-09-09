@@ -1054,7 +1054,8 @@ def _annotate_terminal(text: str, terminal: object) -> str:
         return text
     notes = {
         Terminal.MAX_TURNS: "⚠ 达到单次执行的步数上限,这个任务还没做完 —— 跟我说「继续」我就接着做。",
-        Terminal.BLOCKING_LIMIT: "⚠ token/成本预算用尽,任务可能没做完 —— 可继续或调高预算。",
+        Terminal.SPEND_BUDGET_LIMIT: "⚠ token/成本预算用尽,任务可能没做完 —— 可继续或调高预算。",
+        Terminal.CONTEXT_LIMIT: "⚠ 上下文容量已达上限,任务可能没做完 —— 请压缩上下文、开启自动压缩或更换大窗口模型。",
         Terminal.CIRCUIT_OPEN: "⚠ 连续失败触发断路,已停下 —— 多半是哪步卡住了,我们看看再继续。",
         Terminal.ABORTED_STREAMING: "⚠ 生成被中断,结果可能不完整。",
         Terminal.ABORTED_TOOLS: "⚠ 工具执行阶段被中断,结果可能不完整。",

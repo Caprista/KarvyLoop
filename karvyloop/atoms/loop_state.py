@@ -28,7 +28,7 @@ class LoopState:
     recovery_flags: dict = field(default_factory=dict)
     # 断路器：连续失败计数（任何工具执行失败即 +1；成功归 0）
     consecutive_failures: int = 0
-    # 累计 token / 成本（hook 给上层做 blocking_limit）
+    # 累计 token / 成本（hook 给上层做 spend_budget_limit）
     cumulative_input_tokens: int = 0
     cumulative_output_tokens: int = 0
     cumulative_cost_usd: float = 0.0

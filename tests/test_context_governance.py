@@ -98,6 +98,36 @@ def test_ac2_autocompact_threshold():
     assert autocompact_threshold(200_000) != 160_000
 
 
+@pytest.mark.asyncio
+async def test_govern_triggers_autocompact_and_preserves_tail():
+    """超过真实全局阈值时摘要 middle，且原样保留最近三条。"""
+    messages = [
+        {"role": "user", "content": f"historical-{i}-" + "x" * 4_000}
+        for i in range(8)
+    ]
+    middle_received = []
+    call_count = 0
+
+    async def summarize_stub(middle):
+        nonlocal call_count
+        call_count += 1
+        middle_received.append(middle)
+        return "compressed historical context"
+
+    cfg = GovConfig(autocompact_buffer=1)
+    state = GovState()
+    input_tokens = count_tokens_messages(messages)
+    out = await govern(messages, cfg, state, summarize_stub, context_window=20_000)
+
+    assert call_count == 1
+    assert middle_received == [messages[:-3]]
+    assert len([m for m in out if m.get("_meta", {}).get("kind") == "summary"]) == 1
+    assert count_tokens_messages(out) < input_tokens
+    assert out[-3:] == messages[-3:]
+    assert state.breaker_open is False
+    assert state.consecutive_failures == 0
+
+
 # ============ AC3:microcompact —— 超阈值时旧工具结果占位,最近 N 保留,id 配对不破 ============
 def test_ac3_microcompact_keeps_recent_and_preserves_ids():
     # 构造:10 个 Read 工具结果 + 1 个 user

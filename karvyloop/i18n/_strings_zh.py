@@ -982,7 +982,8 @@ ZH = {
         "去「模型(全局)」检查配置和网络,然后重跑。"
     ),
     "task.err.max_turns": "⚠ 达到单次执行步数上限,没做完 —— 重跑可继续。",
-    "task.err.blocking_limit": "⚠ token/成本预算用尽,没做完 —— 调高预算或重跑。",
+    "task.err.spend_budget_limit": "⚠ token/成本预算用尽,没做完 —— 调高预算或重跑。",
+    "task.err.context_limit": "⚠ 上下文容量已达上限,没做完 —— 压缩上下文、开启自动压缩或更换大窗口模型后重跑。",
     "task.err.circuit_open": "⚠ 连续失败触发断路,已停下 —— 看看哪步卡住了再重跑。",
     "task.err.aborted": "⚠ 执行被中断,结果可能不完整。",
     "task.err.hook_stopped": "⚠ 被规则/钩子拦下停止。",
