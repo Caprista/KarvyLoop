@@ -109,13 +109,15 @@ class McpConnectionManager:
             # fail-soft:登记失败只 warning,不挡接入(方向只可能少拦,不会误放行已登记的)。
             try:
                 from karvyloop.capability.outbound_gate import (
-                    register_curated_outbound, register_curated_server)
+                    clear_outbound_bypass, register_curated_outbound,
+                    register_curated_server, register_outbound_bypass)
                 try:
                     from karvyloop.console.mcp_presets import PRESETS as _PRESETS
                     _preset_ob = {str(p.get("id") or ""): list(p.get("outbound_tools") or [])
                                   for p in _PRESETS}
                 except Exception:
                     _preset_ob = {}
+                clear_outbound_bypass()
                 for cfg in cfgs:
                     # docs/98 刀1:预设目录里的 = 我们 vet 过的已策展 server;不在预设的
                     # (官方 Registry / 任意 URL)= 未策展,其名字判不出的工具吃 fail-safe 走卡。
@@ -128,6 +130,14 @@ class McpConnectionManager:
                     if _obs:
                         register_curated_outbound(
                             _obs + [f"mcp_{cfg.name}_{t}" for t in _obs])
+                    _bypass = [str(t).strip()
+                               for t in (getattr(cfg, "outbound_bypass", None) or ())
+                               if str(t).strip()]
+                    if _bypass:
+                        names = list(_bypass)
+                        names += [t if t.startswith("mcp_") else f"mcp_{cfg.name}_{t}"
+                                  for t in _bypass]
+                        register_outbound_bypass(names)
             except Exception:
                 logger.warning("[mcp_manager] 外发策展名单登记失败(名字判定仍在)", exc_info=True)
             connected: list[dict[str, Any]] = []

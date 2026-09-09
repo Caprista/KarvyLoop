@@ -298,6 +298,8 @@ def read_mcp_server_configs(config_path: str) -> list:
             # docs/96 刀0:策展元数据 —— 该 server 的发送类工具显式名单(短名/全名皆可;
             # 显式 > 名字猜测,console 接入时登记进 outbound_gate,判不出名字的也拦)。
             ob = [str(x).strip() for x in (s.get("outbound_tools") or []) if str(x).strip()]
+            bypass = [str(x).strip() for x in (s.get("outbound_bypass") or [])
+                      if str(x).strip()]
             # remote(streamable HTTP):有 url(或显式 transport: http)
             if url and transport != "stdio":
                 headers = {str(k): _resolve_env_value(v, data)
@@ -311,7 +313,7 @@ def read_mcp_server_configs(config_path: str) -> list:
                 scopes = [str(x).strip() for x in (s.get("scopes") or []) if str(x).strip()]
                 out.append(McpServerConfig(
                     name=name, url=url, transport="http", headers=headers,
-                    outbound_tools=ob,
+                    outbound_tools=ob, outbound_bypass=bypass,
                     auth_kind=("oauth" if auth_kind == "oauth" else ""),
                     oauth_scopes=scopes))
                 continue
@@ -323,7 +325,7 @@ def read_mcp_server_configs(config_path: str) -> list:
                 env = {str(k): _resolve_env_value(v, data) for k, v in s["env"].items()}
             out.append(McpServerConfig(name=name, command=command,
                                        args=[str(a) for a in (s.get("args") or [])], env=env,
-                                       outbound_tools=ob))
+                                       outbound_tools=ob, outbound_bypass=bypass))
     except Exception:
         return []
     return out

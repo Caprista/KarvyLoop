@@ -69,6 +69,8 @@ class McpServerConfig:
     # server_configs 读回);预设的策展标注**不落 config**,由 mcp_manager 接入时按
     # server 名回查 PRESETS 合并登记(老 config 也吃得到)。
     outbound_tools: list[str] = dataclasses.field(default_factory=list)
+    # 显式免审名单，极性与 outbound_tools 相反；纯元数据，连接/调用不消费。
+    outbound_bypass: list[str] = dataclasses.field(default_factory=list)
     # docs/96 刀2:remote server 的鉴权方式。""=静态 header/bearer(v1,住 headers);
     # "oauth"=OAuth 2.1 授权码流(SDK OAuthClientProvider,token 落 0600 文件不进 config)。
     auth_kind: str = ""

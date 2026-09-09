@@ -132,6 +132,7 @@ def _norm_name(name: str) -> str:
 # ---- 策展元数据(显式 outbound_tools 标注;显式 > 名字猜测)----
 
 _curated_outbound: set[str] = set()
+_outbound_bypass: set[str] = set()
 
 
 def register_curated_outbound(names: Iterable[str]) -> None:
@@ -151,6 +152,19 @@ def clear_curated_outbound() -> None:
     """测试/重载用(同时清来源可信档)。"""
     _curated_outbound.clear()
     _curated_servers.clear()
+
+
+def register_outbound_bypass(names: Iterable[str]) -> None:
+    """登记显式免审工具名；仅跳过 outbound 草稿闸，不跳过 authorize/deontic。"""
+    for name in names or ():
+        norm = _norm_name(str(name))
+        if norm:
+            _outbound_bypass.add(norm)
+
+
+def clear_outbound_bypass() -> None:
+    """清空免审名单，供 MCP 重载和测试使用。"""
+    _outbound_bypass.clear()
 
 
 # ---- 来源可信档(docs/98 刀1:已策展 vs 未策展 server)----
@@ -219,6 +233,10 @@ def is_outbound_send_tool(tool: str, *, extra_outbound: Iterable[str] = (),
                 return True
         except Exception:
             pass
+    # 显式加严优先于免审；bypass 只跳过本闸，其余授权与治理仍由执行链处理。
+    if norm in _outbound_bypass:
+        logger.info("[outbound_gate] 工具命中 outbound_bypass: %s", raw)
+        return False
     tokens = tool_tokens(raw)
     if not tokens:
         return False
@@ -320,6 +338,7 @@ __all__ = [
     "MAIL_PROGRAMS", "READ_VERB_PREFIXES", "NON_SEND_ACTION_VERBS",
     "tool_tokens", "is_outbound_send_tool",
     "register_curated_outbound", "curated_outbound", "clear_curated_outbound",
+    "register_outbound_bypass", "clear_outbound_bypass",
     "register_curated_server", "is_curated_server", "is_curated_tool",
     "OutboundDraftStore", "register_store", "get_store", "note_outbound_draft",
 ]

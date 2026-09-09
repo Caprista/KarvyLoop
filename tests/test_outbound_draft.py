@@ -36,9 +36,11 @@ def _clean_gate():
     """每个测试前后清全局草稿 store + 策展名单(全局注册表,防串测)。"""
     og.register_store(None)
     og.clear_curated_outbound()
+    og.clear_outbound_bypass()
     yield
     og.register_store(None)
     og.clear_curated_outbound()
+    og.clear_outbound_bypass()
 
 
 class _Tool:
@@ -166,6 +168,17 @@ class TestJudgment:
         # 归一:连字符/大小写
         register_curated_outbound(["Notion-Create-Pages"])
         assert is_outbound_send_tool("notion_create_pages")
+
+    def test_outbound_bypass_only_allows_named_tool(self):
+        assert is_outbound_send_tool("mcp_oa_submit_request", server_curated=False)
+        og.register_outbound_bypass(["mcp_oa_submit_request"])
+        assert not is_outbound_send_tool("mcp_oa_submit_request", server_curated=False)
+        assert is_outbound_send_tool("mcp_oa_run_workflow", server_curated=False)
+
+    def test_curated_outbound_beats_bypass(self):
+        og.register_outbound_bypass(["mcp_oa_submit_request"])
+        register_curated_outbound(["mcp_oa_submit_request"])
+        assert is_outbound_send_tool("mcp_oa_submit_request", server_curated=False)
 
     def test_deontic_shares_single_token_table(self):
         """deontic_gate 与本刀共用一份 token 表(单一事实源,别写两份)。"""
@@ -558,7 +571,8 @@ class TestCuratedConfig:
         from karvyloop.coding.tools.mcp_tool import read_mcp_server_configs
         cfg = {"mcp": {"servers": [
             {"name": "wechat", "command": "uvx", "args": ["wechat-mcp"],
-             "outbound_tools": ["send", "push_text"]},
+             "outbound_tools": ["send", "push_text"],
+             "outbound_bypass": ["approve_request"]},
             {"name": "notion", "url": "https://mcp.notion.com/mcp", "transport": "http",
              "outbound_tools": ["notion-create-pages"]},
         ]}}
@@ -567,6 +581,7 @@ class TestCuratedConfig:
         got = read_mcp_server_configs(str(p))
         assert [c.outbound_tools for c in got] == [["send", "push_text"],
                                                    ["notion-create-pages"]]
+        assert [c.outbound_bypass for c in got] == [["approve_request"], []]
 
     def test_register_short_and_full_names(self):
         """接入登记短名 + 全名(mcp_<server>_<tool>)两种形态皆命中。"""
