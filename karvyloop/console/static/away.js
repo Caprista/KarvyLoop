@@ -248,6 +248,7 @@ var KarvyAwayBundle = (function(exports) {
   function _card(p) {
     const card = el("div", { class: "m-card", "data-pid": String(p.proposal_id || "") });
     card.appendChild(el("div", { class: "m-card-summary", text: String(p.summary || "?") }));
+    if (typeof p.ts === "number" && p.ts > 0) card.appendChild(el("div", { class: "m-card-basis", text: t("away.proposed_at", { when: new Date(p.ts * 1e3).toLocaleString() }) }));
     if (p.basis) card.appendChild(el("div", { class: "m-card-basis", text: String(p.basis) }));
     const row = el("div", { class: "m-btn-row" });
     row.appendChild(el("button", {

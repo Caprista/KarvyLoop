@@ -107,6 +107,7 @@ var KarvyFilesPanelBundle = (function(exports) {
         dl.setAttribute("download", e.name);
         row.appendChild(dl);
       }
+      if (e.mtime) row.appendChild(el("span", { class: "files-size", text: t("files.modified", { when: new Date(e.mtime * 1e3).toLocaleString() }) }));
       row.appendChild(el("button", {
         class: "files-act files-del",
         text: t("files.delete"),

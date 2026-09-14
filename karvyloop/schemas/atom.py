@@ -57,6 +57,8 @@ class AtomSpec(Schema):
     # 语义标签(docs/02 §15.5,Hardy #1):创建/导入时 LLM 打的归一化概念标签(如 ["web","search"]),
     # 给跨语言/改写的语义匹配用(标签重叠,**无向量** —— 与 #0/#4「grep>RAG、无向量库」决策一致)。
     tags: list[str] = Field(default_factory=list)
+    created_at: Optional[float] = None
+    updated_at: Optional[float] = None
 
 
 class AtomRun(Schema):

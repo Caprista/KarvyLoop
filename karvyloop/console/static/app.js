@@ -2640,7 +2640,8 @@
           const label = (c.title && c.title.trim()) ? c.title : t("conv.untitled");
           // docs/66 §E:沉淀关闭的标 ✓(历史可翻但不算欠账)
           const closed = c.closed_at ? t("conv.closed_suffix") : "";
-          opt.textContent = `${label} · ${t("conv.turns", { n: c.turn_count })}${closed}${c.id === data.current_id ? t("conv.current") : ""}`;
+          const active = c.last_active_at ? ` · ${t("conv.last_active", { when: new Date(c.last_active_at * 1000).toLocaleString() })}` : "";
+          opt.textContent = `${label} · ${t("conv.turns", { n: c.turn_count })}${active}${closed}${c.id === data.current_id ? t("conv.current") : ""}`;
           sel.appendChild(opt);
         }
       }
@@ -3869,6 +3870,20 @@
     if (role === "agent") return _chatSpeaker || t("chat.karvy");  // 小卡 / 花名(不是 [agent])
     return "";
   }
+  function _formatMessageTime(ts) {
+    const date = typeof ts === "string" && !/^\d+(\.\d+)?$/.test(ts)
+      ? new Date(ts)
+      : new Date(Number(ts) < 1e12 ? Number(ts) * 1000 : Number(ts));
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString([], {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+  }
+  function _messageTimeNode(ts) {
+    const label = _formatMessageTime(ts);
+    return label ? el("span", { class: "message-time", text: label, title: label }) : null;
+  }
   function pushChannelMessage(payload) {
     const isCurrent = _currentPeer && _currentPeer.role === "channel"
       && _currentPeer.agent_id === payload.peer_id
@@ -3901,7 +3916,7 @@
     if (follow) log.scrollTop = log.scrollHeight;
   }
 
-  function pushChatLine(role, text, speakerOverride) {
+  function pushChatLine(role, text, speakerOverride, ts) {
     const log = document.getElementById("chat-log");
     const follow = isNearBottom(log);
     // 系统提示不是"说话人":做成居中淡提示,不挂 [system] 的 speaker tag(Hardy:[system] 是啥?)
@@ -3914,7 +3929,9 @@
       return notice;   // 返回节点:旅程收官要对「方法复用回执」聚光(调用方多数忽略)
     }
     const line = el("div", { class: "chat-line live " + role },
-      el("span", { class: "role", text: speakerOverride || _roleLabel(role) }));
+      el("span", { class: "role" },
+        el("span", { text: speakerOverride || _roleLabel(role) }),
+        _messageTimeNode(ts || Date.now())));
     // 9.4:正文走 markdown + 消毒(KarvyRender);缺库回退裸文本。
     // agent 正文过 tB:后端静态整句(共创等)在 en 界面查 BACKEND_ZH_EN 整句/前缀译;
     // 用户自己的话绝不动(只译 agent 侧)。
@@ -3944,7 +3961,9 @@
         appendAgentTurn(log, e);  // 9.4:agent 回合结构化(events 持久在历史里)
       } else {
         const line = el("div", { class: "chat-line " + e.role },
-          el("span", { class: "role", text: "[" + e.role + "]" }));
+          el("span", { class: "role" },
+            el("span", { text: "[" + e.role + "]" }),
+            _messageTimeNode(e.ts)));
         if (window.KarvyRender) KarvyRender.appendMarkdown(line, e.text || "");
         else line.appendChild(document.createTextNode(e.text || ""));
         log.appendChild(line);
@@ -4037,6 +4056,10 @@
       onclick: (e) => { if (e.target && (e.target.classList.contains("task-check") || e.target.classList.contains("task-abort"))) return; openTaskDetail(tk); } },
       top,
       el("div", { class: "task-intent", text: tk.intent || "" }),
+      (tk.started || tk.finished) ? el("div", { class: "mc-meta" },
+        tk.started ? t("task.started_at", { when: new Date(tk.started * 1000).toLocaleString() }) : "",
+        tk.started && tk.finished ? " · " : "",
+        tk.finished ? t("task.finished_at", { when: new Date(tk.finished * 1000).toLocaleString() }) : "") : null,
       blockedEl,
       stepsEl,
       abortEl,
@@ -4550,6 +4573,7 @@
         for (const en of entries) {
           const row = el("div", { class: "task-trace-row" });
           row.appendChild(el("span", { class: "task-trace-kind", text: en.kind || "?" }));
+          if (en.ts) row.appendChild(el("span", { class: "task-ev-time", text: t("task.entry_at", { when: new Date(en.ts * 1000).toLocaleString() }) }));
           if (en.tools && en.tools.length) {
             const tlist = el("div", { class: "task-trace-tools" });
             for (const c of en.tools) {
@@ -5009,7 +5033,9 @@
     const log = document.getElementById("chat-log");
     if (!log) return;
     const line = el("div", { class: "chat-line user" },
-      el("span", { class: "role", text: t("chat.you") }));
+      el("span", { class: "role" },
+        el("span", { text: t("chat.you") }),
+        _messageTimeNode(Date.now())));
     if (text) line.appendChild(document.createTextNode(text));
     const att = _renderAttachItems(items);
     if (att) line.appendChild(att);

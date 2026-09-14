@@ -113,7 +113,9 @@ var KarvyAtomsPanelBundle = (function(exports) {
             { class: "mc-meta" },
             ...a.tags.map((tg) => el("span", { class: "mc-tag mc-tag-sem", text: "🏷 " + _tagText(tg) }))
           ) : null,
-          a.tools && a.tools.length ? el("div", { class: "mc-meta", text: "🔧 " + a.tools.join(", ") }) : null
+          a.tools && a.tools.length ? el("div", { class: "mc-meta", text: "🔧 " + a.tools.join(", ") }) : null,
+          a.created_at ? el("div", { class: "mc-meta", text: t("atom.created_at", { when: new Date(a.created_at * 1e3).toLocaleString() }) }) : null,
+          a.updated_at ? el("div", { class: "mc-meta", text: t("atom.updated_at", { when: new Date(a.updated_at * 1e3).toLocaleString() }) }) : null
         ),
         el(
           "div",

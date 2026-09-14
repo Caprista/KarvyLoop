@@ -198,6 +198,7 @@ class Turn:
             "agent_response": self.agent_response,
             "brain": self.brain,
             "task_id": self.task_id,
+            "ts": self.ts,
             "data": self.data,
             "pending": self.pending,
             "status": self.status,

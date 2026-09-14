@@ -88,7 +88,8 @@ async function renderSchedulesPanel(): Promise<void> {
           s.enabled ? null : " ", s.enabled ? null : el("span", { class: "dpref-badge provisional", text: t("sched.paused") }),
           stBadge ? " " : null, stBadge),
         el("div", { class: "mc-meta", text: t("sched.line", { cron: s.cron, who: s.target || t("chat.karvy") }) }),
-        el("div", { class: "mc-meta", text: t("sched.next", { when: _fmtWhen(s.next_run) }) })),
+        el("div", { class: "mc-meta", text: t("sched.next", { when: _fmtWhen(s.next_run) }) }),
+        s.last_run ? el("div", { class: "mc-meta", text: t("sched.last_run", { when: _fmtWhen(s.last_run) }) }) : null),
       actions));
   }
   body.appendChild(wrap);

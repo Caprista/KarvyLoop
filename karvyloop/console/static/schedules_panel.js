@@ -125,7 +125,8 @@ var KarvySchedulesPanelBundle = (function(exports) {
             stBadge
           ),
           el("div", { class: "mc-meta", text: t("sched.line", { cron: s.cron, who: s.target || t("chat.karvy") }) }),
-          el("div", { class: "mc-meta", text: t("sched.next", { when: _fmtWhen(s.next_run) }) })
+          el("div", { class: "mc-meta", text: t("sched.next", { when: _fmtWhen(s.next_run) }) }),
+          s.last_run ? el("div", { class: "mc-meta", text: t("sched.last_run", { when: _fmtWhen(s.last_run) }) }) : null
         ),
         actions
       ));

@@ -465,6 +465,7 @@ var KarvySkillsPanelBundle = (function(exports) {
           disBadge
         ),
         el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
+        s.crystallized_ts ? el("div", { class: "mc-meta", text: t("skills.crystallized_at", { when: new Date(s.crystallized_ts * 1e3).toLocaleString() }) }) : null,
         semTags.length ? el("div", { class: "mc-meta" }, ...semTags) : null,
         spark ? el("div", { class: "mc-meta skill-spark-row" }, spark, el("span", { text: " " + stats })) : el("div", { class: "mc-meta", text: stats })
       ),

@@ -103,6 +103,7 @@ async function renderFilesPanel(): Promise<void> {
       dl.setAttribute("download", e.name);
       row.appendChild(dl);
     }
+    if (e.mtime) row.appendChild(el("span", { class: "files-size", text: t("files.modified", { when: new Date(e.mtime * 1000).toLocaleString() }) }));
     // 删除(不可逆 → 先确认)。文件夹只删空的(后端拒非空)。
     row.appendChild(el("button", { class: "files-act files-del", text: t("files.delete"),
       onClick: async () => {

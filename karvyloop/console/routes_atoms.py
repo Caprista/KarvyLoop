@@ -31,6 +31,7 @@ class AtomCreateRequest(BaseModel):
 def _atom_to_dict(a) -> dict[str, Any]:
     return {"id": a.id, "kind": a.kind, "prompt": a.prompt,
             "tools": list(a.tools), "model": a.model,
+            "created_at": a.created_at, "updated_at": a.updated_at,
             "is_read_only": a.is_read_only,
             # #3b:语义标签(可能是 "en|zh" 双语编码 / 旧英文串)——给面板筛选 + 双语显示
             "tags": list(getattr(a, "tags", []) or []),

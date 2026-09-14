@@ -255,6 +255,7 @@ function _toast(msg: string): void {
 function _card(p: Record<string, unknown>): HTMLElement {
   const card = el("div", { class: "m-card", "data-pid": String(p.proposal_id || "") });
   card.appendChild(el("div", { class: "m-card-summary", text: String(p.summary || "?") }));
+  if (typeof p.ts === "number" && p.ts > 0) card.appendChild(el("div", { class: "m-card-basis", text: t("away.proposed_at", { when: new Date(p.ts * 1000).toLocaleString() }) }));
   if (p.basis) card.appendChild(el("div", { class: "m-card-basis", text: String(p.basis) }));
   const row = el("div", { class: "m-btn-row" });
   row.appendChild(el("button", { class: "m-btn m-btn-accept", text: t("m.accept"),

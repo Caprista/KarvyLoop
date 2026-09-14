@@ -998,7 +998,8 @@ async function renderMemoryPanel(): Promise<void> {
             el("div", { class: "mc-meta" },
               el("span", { class: "mc-tag", text: _memKind(b.kind) }),
               " · ", _originNode(b.source, b.source_ref, b.conversation_id),
-              " · ", _usageNode(b))),   // Q6 读写审计薄版:被召回几次·最近何时
+              " · ", _usageNode(b)),   // Q6 读写审计薄版:被召回几次·最近何时
+            b.freshness_ts ? el("div", { class: "mc-meta", text: t("mem.freshness", { when: new Date(b.freshness_ts * 1000).toLocaleString() }) }) : null),
           actions);
       },
     }));

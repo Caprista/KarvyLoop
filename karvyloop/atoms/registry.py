@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -118,8 +119,11 @@ class AtomRegistry:
         # executable(至少一个真工具能调)/ advisory(合成名对不上,只靠人设推理)+ 列出对不上的。
         from karvyloop.atoms.tool_catalog import classify_atom_tools
         cls = classify_atom_tools(tools or [])
+        now = time.time()
         spec = AtomSpec(
             id=aid,
+            created_at=now,
+            updated_at=now,
             kind=kind,
             prompt=prompt or "",
             input_schema=input_schema or {"type": "object"},
@@ -144,7 +148,7 @@ class AtomRegistry:
         a = self._atoms.get(atom_id)
         if a is None or not a.provisional:
             return False
-        self._atoms[atom_id] = a.model_copy(update={"provisional": False})
+        self._atoms[atom_id] = a.model_copy(update={"provisional": False, "updated_at": time.time()})
         self._persist()
         return True
 
@@ -169,6 +173,7 @@ class AtomRegistry:
             changes["executable"] = cls["executable"]
             changes["unresolved_tools"] = cls["unresolved_tools"]
         if changes:
+            changes["updated_at"] = time.time()
             self._atoms[atom_id] = a.model_copy(update=changes)
             self._persist()
         return self._atoms[atom_id]

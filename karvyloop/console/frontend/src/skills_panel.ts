@@ -369,6 +369,7 @@ function _skillCard(s: any, curveBySig: Record<string, any[]>): HTMLElement {
       el("div", { class: "mc-name" }, el("span", { text: "🧩 " + s.name }), " ", stBadge,
         " ", badge, tpBadge ? " " : null, tpBadge, disBadge ? " " : null, disBadge),
       el("div", { class: "mc-meta", text: s.when_to_use || s.description || "" }),
+      s.crystallized_ts ? el("div", { class: "mc-meta", text: t("skills.crystallized_at", { when: new Date(s.crystallized_ts * 1000).toLocaleString() }) }) : null,
       semTags.length ? el("div", { class: "mc-meta" }, ...semTags) : null,
       spark
         ? el("div", { class: "mc-meta skill-spark-row" }, spark, el("span", { text: " " + stats }))

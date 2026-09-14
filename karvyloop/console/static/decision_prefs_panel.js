@@ -281,6 +281,7 @@ var KarvyDecisionPrefsBundle = (function(exports) {
           el("div", { class: "mc-name" }, el("span", { class: "dpref-kind", text: kindLbl }), " ", statusBadge),
           el("div", { class: "mc-meta dpref-content", text: p.content }),
           el("div", { class: "mc-meta dpref-strength", text: t("dpref.strength", { pct: Math.round((p.strength || 0) * 100) }) }),
+          p.freshness_ts ? el("div", { class: "mc-meta", text: t("dpref.freshness", { when: new Date(p.freshness_ts * 1e3).toLocaleString() }) }) : null,
           evToggle,
           evPanel
         ),

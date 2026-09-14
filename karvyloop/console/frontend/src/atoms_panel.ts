@@ -112,7 +112,9 @@ function _pagedAtoms(atoms: any[]): HTMLElement {
           ? el("div", { class: "mc-meta" },
               ...a.tags.map((tg: unknown) => el("span", { class: "mc-tag mc-tag-sem", text: "🏷 " + _tagText(tg) })))
           : null,
-        (a.tools && a.tools.length) ? el("div", { class: "mc-meta", text: "🔧 " + a.tools.join(", ") }) : null),
+        (a.tools && a.tools.length) ? el("div", { class: "mc-meta", text: "🔧 " + a.tools.join(", ") }) : null,
+        a.created_at ? el("div", { class: "mc-meta", text: t("atom.created_at", { when: new Date(a.created_at * 1000).toLocaleString() }) }) : null,
+        a.updated_at ? el("div", { class: "mc-meta", text: t("atom.updated_at", { when: new Date(a.updated_at * 1000).toLocaleString() }) }) : null),
       el("div", { class: "dpref-actions" },
         el("button", { class: "dpref-edit", text: t("mgmt.edit"), onclick: () => _renderForm(a) }),
         el("button", { class: "mc-del", text: t("mgmt.delete"),

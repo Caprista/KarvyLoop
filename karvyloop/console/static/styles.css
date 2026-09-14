@@ -859,6 +859,13 @@ html, body {
   margin: 0 0 3px 4px;
   font-weight: 600;
 }
+.chat-line .message-time {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-dim);
+  opacity: .8;
+}
 .chat-line .md, .chat-line .agent-turn {
   background: var(--surface);
   border: 1px solid var(--border);
