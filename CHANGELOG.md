@@ -11,6 +11,24 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.9.14] — 2026-09-14
+
+The reliable conversation history release: every WebUI conversation message now carries its send time, while CI and release assets remain reproducible.
+
+### Added
+- **Conversation message timestamps.** Live user messages, live agent responses, historical turns, resumed/pending records, and channel messages now display their send time in the WebUI.
+
+### Changed
+- **Historical turn contract.** Turn UI serialization now includes the timestamp used by the console renderer.
+- **Release assets.** Away distribution files and SRI metadata are synchronized with their source assets.
+
+### Fixed
+- **WebUI runtime safety.** Message timestamp rendering no longer references a missing helper.
+- **CI route wiring checks.** Backend route prefixes are resolved correctly when validating frontend API coverage.
+- **Cross-platform test isolation.** SQLite and temporary test files use pytest-managed temporary paths instead of host-specific paths.
+- **Module size gate.** Memory graph routes are kept in the memory routes module rather than the general console router.
+
+
 ## [2026.9.8] — 2026-09-08
 
 The delegated decision release: build a decision profile through a questionnaire, then let Karvy make bounded low-risk choices only after explicit authorization.
