@@ -687,7 +687,7 @@ def test_proposal_strength_must_be_0_to_1() -> None:
 # ---- default strength threshold 锁(Q2 锁 public surface)----
 
 
-def test_default_strength_threshold_constant() -> None:
+def test_default_strength_threshold_constant(tmp_path: Path) -> None:
     """Q2:0.7 锁 public surface(防止后面悄悄改)。"""
     from karvyloop.karvy.observer import WorkbenchObserver
     from karvyloop.karvy.fastbrain.trace_habit import HabitStore as _HS
@@ -696,8 +696,8 @@ def test_default_strength_threshold_constant() -> None:
     wb = WorkbenchObserver()
     a = _IA(
         workbench=wb,
-        habit_store=_HS(Path("/tmp/_dummy_h.db")),
-        trace_index=_TI(Path("/tmp/_dummy_t.db"), raw_capacity=1024, summary_capacity=1024),
+        habit_store=_HS(tmp_path / "_dummy_h.db"),
+        trace_index=_TI(tmp_path / "_dummy_t.db", raw_capacity=1024, summary_capacity=1024),
         behavior_analyzer=_FakeBehaviorAnalyzer(),
     )
     assert a.strength_threshold == 0.7

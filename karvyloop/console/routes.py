@@ -1797,52 +1797,11 @@ async def api_roundtable_align(req: RoundtableAlignRequest, request: Request) ->
     return {"ok": True, "reply": reply, "started": True, "result": result}
 
 
-def _concept_cache(app):
-    cc = getattr(app.state, "concept_cache", None)
-    if cc is None:
-        import pathlib
-        from karvyloop.cognition.concepts import ConceptCache
-        cfgp = getattr(app.state, "config_path", "") or ""
-        base = pathlib.Path(cfgp).parent if cfgp else (pathlib.Path.home() / ".karvyloop")
-        cc = ConceptCache(base / "concept_cache.json")
-        app.state.concept_cache = cc
-    return cc
-
-
-@router.get("/memory/graph")
-async def api_memory_graph(request: Request) -> dict[str, Any]:
-    """认知图谱(ch4 pillar 3):**语义边** —— LLM 抽每条的概念(沉淀/查图时抽,缓存),共享概念=边。
-
-    Hardy 选 B(LLM wiki 式互链,非 embedding)。抽过的看图零 LLM;没概念的 belief 回退词面边。
-    """
-    app = request.app
-    mem = getattr(app.state, "memory", None)
-    if mem is None:
-        return {"nodes": [], "edges": []}
-    from karvyloop.cognition.graph import concept_graph
-    beliefs = mem.index.all("personal")
-    contents = [getattr(b, "content", "") for b in beliefs]
-    cache = _concept_cache(app)
-    concepts, missing = cache.resolve(contents)
-    rk = getattr(app.state, "runtime_kwargs", None) or {}
-    gw = rk.get("gateway")
-    if missing and gw is not None:
-        from karvyloop.cognition.concepts import extract_concepts_batch
-        try:
-            extracted = await extract_concepts_batch([contents[i] for i in missing],
-                                                     gateway=gw, model_ref=rk.get("model_ref", ""))
-            for k, i in enumerate(missing):
-                cs = extracted[k] if k < len(extracted) else []
-                concepts[i] = cs
-                cache.put(contents[i], cs)   # 编译一次,下次零 LLM
-        except Exception as e:
-            logger.warning(f"[graph] 概念抽取失败,回退词面: {e}")
-    concepts = [c or [] for c in concepts]
-    return concept_graph(beliefs, concepts)
-
-
-# ---- 轮后自动蒸馏已下沉到 routes_memory.py(god-module 拆分:蒸馏维护属 memory 域)----
+# ---- /api/memory/* 已下沉到 routes_memory.py(P2-② 纯搬移) ----
+# 保留符号转出，兼容既有 import/monkeypatch 目标。
 from .routes_memory import (  # noqa: E402
+    _concept_cache,
+    api_memory_graph,
     maybe_auto_distill,
     schedule_auto_distill,
 )

@@ -241,7 +241,7 @@ def test_to_ui_dict_shape() -> None:
              turn_id="tid", pending=True, status=TURN_RUNNING)
     d = t.to_ui_dict()
     assert d == {"user_intent": "u", "agent_response": "a", "brain": "slow",
-                 "task_id": "x", "data": None, "pending": True, "status": TURN_RUNNING}
+                 "task_id": "x", "ts": 0.0, "data": None, "pending": True, "status": TURN_RUNNING}
 
 
 # ---- finalize 句柄为 None → 返回 None(begin 落账失败降级路径)----

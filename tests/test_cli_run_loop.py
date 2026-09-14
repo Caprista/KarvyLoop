@@ -132,7 +132,13 @@ class TestAC2ConfigYamlSkillsDir:
     def test_explicit_skills_dir_overrides_config(self, tmp_path, monkeypatch):
         cfg = _make_config_with_skills_dir(tmp_path, tmp_path / "from_config")
         explicit = tmp_path / "from_kwarg"
-        ml = build_main_loop(config_path=cfg, skills_dir=explicit)
+        ml = build_main_loop(
+            config_path=cfg,
+            skills_dir=explicit,
+            usage_store_path=tmp_path / "usage.sqlite",
+            verify_store_path=tmp_path / "verify.sqlite",
+            trace_store_path=tmp_path / "trace.sqlite",
+        )
         assert ml.skills_dir == explicit  # 显式 kwarg 优先级最高
 
     def test_missing_config_uses_default(self, tmp_path, monkeypatch):

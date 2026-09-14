@@ -43,8 +43,12 @@ def _backend_routes() -> set:
     out = set()
     for py in sorted(console_dir.glob("routes*.py")):
         txt = py.read_text(encoding="utf-8")
-        for m in re.finditer(r'@router\.(get|post|websocket)\("([^"]+)"', txt):
-            out.add("/api" + m.group(2))
+        prefix_match = re.search(r'router\s*=\s*APIRouter\(\s*prefix\s*=\s*"([^"]*)"', txt)
+        prefix = prefix_match.group(1) if prefix_match else "/api"
+        if not prefix.startswith("/api"):
+            prefix = "/api" + prefix
+        for m in re.finditer(r'@router\.(get|post|put|delete|websocket)\("([^"]+)"', txt):
+            out.add(prefix.rstrip("/") + "/" + m.group(2).lstrip("/"))
     return out
 
 
