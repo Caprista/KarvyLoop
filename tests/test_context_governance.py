@@ -21,7 +21,9 @@ from karvyloop.context import (
     autocompact,
     autocompact_threshold,
     build_system_for_request,
+    clip_to_tokens,
     count_tokens_messages,
+    count_tokens_text,
     find_sentinel_index,
     govern,
     is_sentinel,
@@ -371,6 +373,61 @@ def test_extra_count_tokens_messages():
     n = count_tokens_messages(msgs)
     # 100/4 + 4 + 100/4 + 4 = 58
     assert 50 <= n <= 70
+
+
+def test_cjk_tool_blocks_count_content_and_input_at_real_scale():
+    detail = "中" * 116_000
+    msgs = [{
+        "role": "user",
+        "content": [{
+            "type": "tool_result",
+            "content": detail,
+            "input": {"query": "中文详情"},
+        }],
+    }]
+
+    expected = 8 + 4 + count_tokens_text(detail) + count_tokens_text(str({"query": "中文详情"}))
+    assert count_tokens_text(detail) == 116_000
+    assert count_tokens_messages(msgs) == expected
+    assert count_tokens_messages(msgs) > 115_000
+
+
+def test_clip_to_tokens_respects_cjk_budget():
+    out, truncated = clip_to_tokens("中" * 200, 50)
+    assert truncated is True
+    assert out == "中" * 50
+    assert count_tokens_text(out) <= 50
+
+
+@pytest.mark.asyncio
+async def test_cjk_tool_result_triggers_autocompact_at_128k_window():
+    detail = "中" * 116_000
+    messages = [
+        {"role": "user", "content": [{"type": "tool_result", "content": detail}]},
+        {"role": "assistant", "content": "已读取工具详情"},
+        {"role": "user", "content": "继续分析"},
+        {"role": "assistant", "content": "正在分析"},
+    ]
+    summarized = []
+
+    async def summarize_stub(middle):
+        summarized.append(middle)
+        return "已压缩中文工具详情"
+
+    out = await govern(
+        messages,
+        GovConfig(tool_result_budget=200_000),
+        GovState(),
+        summarize_stub,
+        context_window=128_000,
+    )
+
+    old_estimate = 8 + 8  # 首条消息开合 + 非 text block 的旧固定计费
+    old_estimate += sum(8 + max(1, len(m["content"]) // 4) for m in messages[1:])
+    assert old_estimate < autocompact_threshold(128_000)
+    assert count_tokens_messages(messages) > autocompact_threshold(128_000)
+    assert summarized == [messages[:-3]]
+    assert any(m.get("_meta", {}).get("kind") == "summary" for m in out)
 
 
 # ============ AC8:v1.5 historical framing(参照工程的 context compressor)============

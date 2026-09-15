@@ -11,6 +11,16 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.9.15] — 2026-09-15
+
+The resilient DingTalk conversation release: reset commands now start clean channel sessions, and Chinese-heavy OA workflows are compacted before they exceed the model context window.
+
+### Fixed
+- **DingTalk `/new` reset.** The exact command now creates a fresh conversation for the current chat without invoking the model or changing the Console's active conversation.
+- **CJK context accounting.** Context governance now counts Chinese text and structured tool payloads consistently with the gateway, so OA workflow details trigger compaction before the provider hard limit.
+- **CJK-safe clipping.** Token-budget clipping now respects the same estimate for Chinese text.
+
+
 ## [2026.9.14] — 2026-09-14
 
 The reliable conversation history release: every WebUI conversation message now carries its send time, while CI and release assets remain reproducible.

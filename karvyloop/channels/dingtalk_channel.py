@@ -440,6 +440,30 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
         return
     if processing_fn is not None:
         await processing_fn()
+    if text == "/new":
+        mgr = getattr(app.state, "conversation_manager", None)
+        if mgr is None:
+            reply_fn("(对话管理器未接，暂时无法新建会话)")
+            return
+        try:
+            from karvyloop.domain import Address
+            peer = Address(domain_id=(cfg.domain_id or "l0"), role="channel",
+                           agent_id=f"dingtalk:{chat or 'unknown'}")
+            conv = mgr.new_channel_conversation(peer)
+        except Exception:
+            logger.warning("[dingtalk] /new 新建通道会话失败(chat=%s)", chat, exc_info=True)
+            reply_fn("(新建会话失败，请稍后重试)")
+            return
+        reply = "已开始新会话，之前的对话上下文不会带入。"
+        await _publish_channel_message(app, role="agent", text=reply,
+                                       chat_id=chat, sender=sender,
+                                       conversation_id=conv.id,
+                                       channel_role=cfg.role,
+                                       sender_nick=info["sender_nick"],
+                                       chat_type=info["chat_type"],
+                                       chat_title=info["chat_title"])
+        reply_fn(reply)
+        return
     conversation_id = _channel_conversation_id(app, cfg, chat)
     await _publish_channel_message(app, role="user", text=text,
                                    chat_id=chat, sender=sender,

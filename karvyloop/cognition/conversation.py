@@ -807,6 +807,11 @@ class ConversationManager:
         (外部通道的消息不许抢用户 web 聊天现场)。"""
         return self._store.most_recent(peer) or self._store.new(peer)
 
+    def new_channel_conversation(self, peer: Address, title: str = "") -> Conversation:
+        """为外部通道开新对话并沉淀旧对话，不切换 console 当前对话。"""
+        self._summarize_to_trace(self._store.most_recent(peer))
+        return self._store.new(peer, title)
+
     def record_channel_turn(self, peer: Address, conv: Conversation,
                             *, user_intent: str, agent_response: str,
                             brain: str = BRAIN_SLOW, task_id: str = "",

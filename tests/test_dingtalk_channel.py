@@ -270,6 +270,45 @@ def test_channel_conversation_id_reuses_same_chat_isolates_other(tmp_path):
     assert id2 and id1 != id2
 
 
+def test_new_command_resets_channel_without_driving_or_switching_console(monkeypatch, tmp_path):
+    """精确 /new 为当前钉钉 peer 开新会话，不进模型也不切走 console 会话。"""
+    import karvyloop.console.task_events as task_events
+
+    drove, sent, replies = [], [], []
+
+    async def _fake_drive(*args, **kwargs):
+        drove.append((args, kwargs))
+        return "不应调用"
+
+    async def _fake_broadcast(app, payload):
+        sent.append(payload)
+        return 1
+
+    monkeypatch.setattr("karvyloop.channels.dingtalk_channel.drive_channel_message", _fake_drive)
+    monkeypatch.setattr(task_events, "broadcast_channel_message", _fake_broadcast)
+
+    app = _fake_app_with_conv(tmp_path)
+    mgr = app.state.conversation_manager
+    console_id = mgr.current().id
+    peer = Address(domain_id="l0", role="channel", agent_id="dingtalk:c1")
+    old = mgr.channel_conversation(peer)
+    mgr.record_channel_turn(peer, old, user_intent="旧问题", agent_response="旧回复")
+    cfg = DingTalkChannelConfig(client_id="a", client_secret="b", role="资料管家",
+                                allow_senders=("staff-1",))
+    payload = {"senderStaffId": "staff-1", "conversationId": "c1",
+               "text": {"content": " /new "}}
+
+    asyncio.run(handle_incoming(app, cfg, payload, replies.append))
+
+    current = mgr.channel_conversation(peer)
+    assert current.id != old.id and current.turn_count == 0
+    assert mgr.current().id == console_id
+    assert drove == []
+    assert replies == ["已开始新会话，之前的对话上下文不会带入。"]
+    assert len(sent) == 1
+    assert sent[0]["role"] == "agent" and sent[0]["conversation_id"] == current.id
+
+
 def test_handle_incoming_broadcasts_user_message_with_conversation(monkeypatch, tmp_path):
     """入站用户消息广播 channel_message:peer_id/conversation_id/channel_role 绑定正确。"""
     import karvyloop.console.task_events as task_events

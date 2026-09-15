@@ -33,24 +33,36 @@ _CHARS_PER_TOKEN = 4
 LLM_MATERIAL_TOKENS = 6000
 
 
+def _is_cjk(ch: str) -> bool:
+    return "一" <= ch <= "鿿" or "　" <= ch <= "ヿ" or "＀" <= ch <= "￯"
+
+
 def count_tokens_text(s: str) -> int:
-    """粗估字符串的 token 数(M0:4 字符/token)。"""
-    return max(1, len(s) // _CHARS_PER_TOKEN)
+    """CJK 感知地粗估字符串 token:CJK≈1 token/字,其余≈4 字符/token。"""
+    cjk = sum(1 for ch in s if _is_cjk(ch))
+    return max(1, cjk + (len(s) - cjk) // _CHARS_PER_TOKEN)
 
 
 def clip_to_tokens(s: str, max_tokens: int) -> tuple[str, bool]:
     """把文本压到 token 预算内,**走 HR-9 唯一截断入口**(context engineering 基建,不许裸截)。
 
     任何"读 Trace / 组材料喂 LLM"的场合都该走它,而不是 `s[:N]`:预算用 `count_tokens_text` 估,
-    实际截断走 `truncate_str_utf8`(永不切坏 UTF-8 多字节)。token≈4 字符,故字节上限取
-    `max_tokens * _CHARS_PER_TOKEN`。返回 (clipped, truncated)。
+    实际截断走 `truncate_str_utf8`(永不切坏 UTF-8 多字节)。返回 (clipped, truncated)。
     """
     from .truncate import truncate_str_utf8
     if max_tokens <= 0:
         return "", bool(s)
     if not s or count_tokens_text(s) <= max_tokens:
         return s, False
-    return truncate_str_utf8(s, max_tokens * _CHARS_PER_TOKEN)
+
+    low, high = 0, min(len(s), max_tokens * _CHARS_PER_TOKEN)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if count_tokens_text(s[:middle]) <= max_tokens:
+            low = middle
+        else:
+            high = middle - 1
+    return truncate_str_utf8(s, len(s[:low].encode("utf-8")))
 
 
 def count_tokens_messages(messages: list[dict]) -> int:
@@ -68,10 +80,15 @@ def count_tokens_messages(messages: list[dict]) -> int:
         elif isinstance(c, list):
             for blk in c:
                 if isinstance(blk, dict):
-                    if "text" in blk:
-                        total += count_tokens_text(str(blk["text"]))
-                    else:
-                        total += 8  # tool_use / tool_result 等块
+                    block_tokens = 4  # 块类型、边界等结构开销
+                    counted_field = False
+                    for field_name in ("text", "content", "input"):
+                        if field_name in blk and blk[field_name] is not None:
+                            block_tokens += count_tokens_text(str(blk[field_name]))
+                            counted_field = True
+                    total += block_tokens if counted_field else 8
+                else:
+                    total += count_tokens_text(str(blk))
         total += 4  # 闭合
     return total
 
