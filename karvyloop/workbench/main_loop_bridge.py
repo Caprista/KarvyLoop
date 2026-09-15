@@ -67,6 +67,7 @@ class DriveOutcome:
     error: Optional[str] = None
     task_id: str = ""          # 拍 9.1d:供 ConversationManager.record_turn 回查 trace
     ctx_dependent: bool = False  # 拍 9.1d:本句是否被上下文依赖门判为强依赖
+    terminal: str = ""          # 慢脑终态；用于在渠道边界重试瞬时空模型输出
     events: list = dataclass_field(default_factory=list)  # 9.4:结构化渲染事件(text/tool_call/tool_result/terminal)
     prompt_trace: list | None = None
 
@@ -224,6 +225,18 @@ async def drive_in_tui(
                 ml.background_review()
             except Exception:
                 pass
+            collected_events = list(collector.events)
+            if not (result.text or "").strip():
+                logger.warning(
+                    "[drive] 空正文诊断 task=%s ctx=%s ctx_dependent=%s terminal=%s "
+                    "events=%s",
+                    result.task_id,
+                    len(ctx) if hasattr(ctx, "__len__") else (ctx is not None),
+                    result.ctx_dependent,
+                    getattr(result, "terminal", ""),
+                    [event.get("type") for event in collected_events
+                     if isinstance(event, dict)],
+                )
             return DriveOutcome(
                 intent=intent,
                 brain=result.brain,
@@ -233,7 +246,8 @@ async def drive_in_tui(
                 crystallized=result.crystallized,
                 task_id=result.task_id,
                 ctx_dependent=result.ctx_dependent,
-                events=list(collector.events),
+                terminal=getattr(result, "terminal", "") or "",
+                events=collected_events,
                 prompt_trace=getattr(slow_brain, "prompt_trace", None) or None,
             )
         except Exception as e:
@@ -264,19 +278,24 @@ async def drive_in_tui(
             )
 
     outcome = await asyncio.to_thread(_run_drive)
-    # EVE④/多渠道:**绝不静默空白**。成功但正文为空(多渠道并发撞同一把 key 把响应截成空、
-    # 偶发 LLM 空回)→ 重试一次;仍空 → 友好兜底文案(尤其语音不能没声音)。
-    # 放在 drive_in_tui 这个**渠道共同边界**:网页 console 和 GlobalKarvy.ask 都过这里,一处全覆盖。
-    if not outcome.error and not (outcome.text or "").strip():
-        logger.warning("[drive] 成功但正文空 → 重试一次(防多渠道并发静默空白)")
+    # EVE④/多渠道:**绝不静默空白**。Provider 偶发只返回 Done 时 executor 会标记
+    # infra_dead；它与旧版的“成功空正文”一样属于可安全重试一次的瞬时空输出。
+    empty_output = not (outcome.text or "").strip()
+    retryable_empty = not outcome.error and (
+        empty_output or outcome.terminal == "infra_dead"
+    )
+    if retryable_empty:
+        logger.warning("[drive] 模型正文为空 → 重试一次(防 Provider 偶发空流)")
         retry = await asyncio.to_thread(_run_drive)
         if not retry.error and (retry.text or "").strip():
             return retry
-        try:
-            from karvyloop.i18n import t
-            outcome.text = t("chat.empty_retry_fallback")
-        except Exception:
-            outcome.text = "(这次没接住,能再说一遍吗?)"
+        # 两次都是明确 infra_dead 时保留真实终态说明；旧式成功空响应仍使用友好兜底。
+        if outcome.terminal != "infra_dead":
+            try:
+                from karvyloop.i18n import t
+                outcome.text = t("chat.empty_retry_fallback")
+            except Exception:
+                outcome.text = "(这次没接住,能再说一遍吗?)"
     return outcome
 
 

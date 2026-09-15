@@ -11,21 +11,26 @@ import types
 import karvyloop.workbench.main_loop_bridge as bridge
 
 
-def _res(text: str):
+def _res(text: str, terminal: str = ""):
     return types.SimpleNamespace(
         brain=types.SimpleNamespace(value="slow"), text=text, skill_name="",
-        fast_brain_hit=False, crystallized=False, task_id="t", ctx_dependent=False)
+        fast_brain_hit=False, crystallized=False, task_id="t", ctx_dependent=False,
+        terminal=terminal)
 
 
 class _ML:
-    def __init__(self, texts):
+    def __init__(self, texts, terminals=None):
         self.texts = list(texts)
+        self.terminals = list(terminals or [""])
         self.calls = 0
 
     def drive(self, intent, *, slow_brain=None, ctx=None, scope=None, fresh=False):
         i = self.calls
         self.calls += 1
-        return _res(self.texts[min(i, len(self.texts) - 1)])
+        return _res(
+            self.texts[min(i, len(self.texts) - 1)],
+            self.terminals[min(i, len(self.terminals) - 1)],
+        )
 
     def background_review(self):
         pass
@@ -57,3 +62,14 @@ def test_nonempty_no_retry_zero_regression(monkeypatch):
     ml = _ML(["一次就好"])
     out = _run(ml, monkeypatch)
     assert out.text == "一次就好" and ml.calls == 1   # 非空不重试(0 回归,不浪费 token)
+
+
+def test_infra_dead_empty_then_retry_succeeds(monkeypatch):
+    ml = _ML(
+        ["⚠ 基础能力暂时不可用", "重试后的正常回复"],
+        ["infra_dead", "completed"],
+    )
+    out = _run(ml, monkeypatch)
+    assert out.text == "重试后的正常回复"
+    assert out.terminal == "completed"
+    assert ml.calls == 2

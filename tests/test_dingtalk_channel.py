@@ -309,6 +309,60 @@ def test_new_command_resets_channel_without_driving_or_switching_console(monkeyp
     assert sent[0]["role"] == "agent" and sent[0]["conversation_id"] == current.id
 
 
+def test_first_message_after_new_uses_empty_context_and_records_reply(monkeypatch, tmp_path):
+    """/new 后首条普通消息使用新会话空上下文，并把正常回复写回该会话。"""
+    import karvyloop.console.task_events as task_events
+    from karvyloop.runtime.main_loop import Brain
+    from karvyloop.workbench.main_loop_bridge import DriveOutcome
+
+    sent, replies, contexts = [], [], []
+
+    async def _fake_broadcast(app, payload):
+        sent.append(payload)
+        return 1
+
+    async def _fake_drive_in_tui(text, ml, *, ctx=None, **kw):
+        contexts.append(ctx)
+        return DriveOutcome(intent=text, brain=Brain.SLOW, text="您好，我是OA审批助手。",
+                            skill_name="", fast_brain_hit=False, crystallized=False,
+                            task_id="task-new-first")
+
+    monkeypatch.setattr(task_events, "broadcast_channel_message", _fake_broadcast)
+    monkeypatch.setattr("karvyloop.workbench.main_loop_bridge.drive_in_tui", _fake_drive_in_tui)
+
+    app = _fake_app_with_conv(tmp_path)
+    cfg = DingTalkChannelConfig(client_id="a", client_secret="b", role="资料管家",
+                                allow_senders=("staff-1",))
+    peer = Address(domain_id="l0", role="channel", agent_id="dingtalk:c1")
+    old = app.state.conversation_manager.channel_conversation(peer)
+    app.state.conversation_manager.record_channel_turn(
+        peer, old, user_intent="旧问题", agent_response="旧回复")
+
+    asyncio.run(handle_incoming(
+        app, cfg,
+        {"senderStaffId": "staff-1", "conversationId": "c1",
+         "text": {"content": "/new"}},
+        replies.append,
+    ))
+    fresh = app.state.conversation_manager.channel_conversation(peer)
+    asyncio.run(handle_incoming(
+        app, cfg,
+        {"senderStaffId": "staff-1", "conversationId": "c1",
+         "text": {"content": "你好"}},
+        replies.append,
+    ))
+
+    current = app.state.conversation_manager.channel_conversation(peer)
+    assert current.id == fresh.id and current.id != old.id
+    assert contexts and not contexts[0]
+    assert current.turn_count == 1
+    assert current.turns[0].user_intent == "你好"
+    assert current.turns[0].agent_response == "您好，我是OA审批助手。"
+    assert replies == ["已开始新会话，之前的对话上下文不会带入。", "您好，我是OA审批助手。"]
+    assert [item["role"] for item in sent] == ["agent", "user", "agent"]
+    assert all(item["conversation_id"] == current.id for item in sent)
+
+
 def test_handle_incoming_broadcasts_user_message_with_conversation(monkeypatch, tmp_path):
     """入站用户消息广播 channel_message:peer_id/conversation_id/channel_role 绑定正确。"""
     import karvyloop.console.task_events as task_events

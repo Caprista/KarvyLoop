@@ -11,6 +11,15 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.9.15.1] — 2026-09-15
+
+The DingTalk empty-response patch: empty provider streams are no longer reported as successful model completions, and new channel conversations retain correct first-message behavior.
+
+### Fixed
+- **Empty model completion semantics.** A provider stream containing only a terminal event, with no text or tool call, now terminates as an infrastructure failure instead of a successful empty response, and the shared channel boundary retries that transient failure once.
+- **DingTalk new-session regression coverage.** The first ordinary message after `/new` is verified to use the fresh empty context and persist its response in the new conversation.
+
+
 ## [2026.9.15] — 2026-09-15
 
 The resilient DingTalk conversation release: reset commands now start clean channel sessions, and Chinese-heavy OA workflows are compacted before they exceed the model context window.

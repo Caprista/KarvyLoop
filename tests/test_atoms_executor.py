@@ -104,6 +104,22 @@ async def test_ac1_no_tool_use_terminates_completed():
     assert last.run.success is True
 
 
+@pytest.mark.asyncio
+async def test_empty_model_output_is_not_completed_success():
+    """只有 Done、没有文本或工具调用时，不能伪装成成功完成。"""
+    from karvyloop.gateway.events import Done
+
+    adapter = ScriptedMockAdapter(rounds=[[Done("end_turn")]])
+    gw = _gw(adapter)
+    events = [ev async for ev in run(_atom(), {"q": "hi"}, _tok(), gateway=gw, tools={})]
+
+    last = events[-1]
+    assert isinstance(last, TerminalEvent)
+    assert last.reason == Terminal.INFRA_DEAD
+    assert last.run.success is False
+    assert last.run.output is None
+
+
 # ============ AC2：mock 模型可驱动完整多轮循环 ============
 @pytest.mark.asyncio
 async def test_ac2_mock_drives_multi_turn_loop():

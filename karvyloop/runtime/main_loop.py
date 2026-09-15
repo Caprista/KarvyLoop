@@ -585,6 +585,16 @@ class MainLoop:
             raise
         result.text = text
         result.terminal = getattr(run, "terminal", None) or ""  # docs/02 §15:终止语义上冒到 DriveResult
+        if not (text or "").strip():
+            logger.warning(
+                "[drive] 慢脑返回空正文 task=%s terminal=%s run_success=%s "
+                "run_output=%r tool_calls=%s",
+                result.task_id,
+                result.terminal,
+                getattr(run, "success", None),
+                getattr(run, "output", None),
+                len(getattr(run, "tool_calls", ()) or ()),
+            )
         result.sig = run.trace_ref  # 慢脑的 sig 由 observe 算出(下面再填)
         # 实际 sig:用 signature 模块从 run 算 —— 比 trace_ref 更准
         from karvyloop.crystallize.signature import compute_signature

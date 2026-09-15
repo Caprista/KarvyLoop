@@ -510,8 +510,14 @@ async def run(
                       f"tool_uses={len(assistant_tool_uses)} events={len(events)}",
                       file=_sys_ex.stderr)
             if not assistant_tool_uses:
-                state.transition = Transition(reason="no_tool_use")
-                final_reason = Terminal.COMPLETED
+                if assistant_text.strip():
+                    state.transition = Transition(reason="no_tool_use")
+                    final_reason = Terminal.COMPLETED
+                else:
+                    # 模型流只有 Done、没有任何可展示内容时不能算成功。
+                    # 否则上层会收到 completed + success=True + 空正文并静默重试。
+                    state.transition = Transition(reason="empty_model_output")
+                    final_reason = Terminal.INFRA_DEAD
                 if _os_ex.environ.get("KARVYLOOP_EXECUTOR_DEBUG"):
                     print(f"[executor debug] BREAK: no_tool_use, "
                           f"events were: {[type(e).__name__ for e in events]}",
