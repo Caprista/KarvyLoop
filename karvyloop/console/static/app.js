@@ -3443,22 +3443,22 @@
           _currentPeer.channel_chat_type = chInfo.chat_type;
           _setChatTitle(_currentPeer);
         }
-        pushChatLine("user", tn.user_intent, chInfo.sender || t("chat.you"));
+        pushChatLine("user", tn.user_intent, chInfo.sender || t("chat.you"), tn.ts);
         _renderTurnReply(log, tn);
       } else if (tn.data && tn.data.roundtable) {
         renderRoundtable(tn.data.roundtable);   // 卡里已有 🎡 主题头,不再单列 user 行
       } else if (tn.data && tn.data.workflow) {
         renderWorkflow(tn.data.workflow);       // ⚙ 工作流执行结果
       } else if (tn.data && tn.data.mention_fanout) {
-        pushChatLine("user", tn.data.mention_fanout.intent || tn.user_intent);
+        pushChatLine("user", tn.data.mention_fanout.intent || tn.user_intent, "", tn.ts);
         renderMentionReplies(tn.data.mention_fanout.replies || []);
       } else if (tn.data && tn.data.attachments) {
         // 多模态:回放也看得到当时发了什么图/文档(缩略图 + 文档块)
         const a = tn.data.attachments;
-        _pushUserWithAttachments(a.q || tn.user_intent, a.items || []);
+        _pushUserWithAttachments(a.q || tn.user_intent, a.items || [], tn.ts);
         _renderTurnReply(log, tn);
       } else {
-        pushChatLine("user", tn.user_intent);
+        pushChatLine("user", tn.user_intent, "", tn.ts);
         _renderTurnReply(log, tn);
       }
       if (log && tn.task_id) {
@@ -3806,7 +3806,9 @@
     // 缺(老历史/无 speaker)才回退当前全局 _chatSpeaker / 小卡。
     const _who = (entry && entry.speaker) || _chatSpeaker || t("chat.karvy");
     const line = el("div", { class: "chat-line agent" },
-      el("span", { class: "role", text: _who }));
+      el("span", { class: "role" },
+        el("span", { text: _who }),
+        _messageTimeNode((entry && entry.ts) || Date.now())));
     if (entry.events && entry.events.length && window.KarvyRender) {
       const body = el("div", { class: "agent-turn" });
       KarvyRender.renderEvents(body, entry.events);
@@ -5029,13 +5031,13 @@
     return box;
   }
   // 一条带附件的 user 消息(问题文字 + 缩略图/文档块)
-  function _pushUserWithAttachments(text, items) {
+  function _pushUserWithAttachments(text, items, ts) {
     const log = document.getElementById("chat-log");
     if (!log) return;
     const line = el("div", { class: "chat-line user" },
       el("span", { class: "role" },
         el("span", { text: t("chat.you") }),
-        _messageTimeNode(Date.now())));
+        _messageTimeNode(ts || Date.now())));
     if (text) line.appendChild(document.createTextNode(text));
     const att = _renderAttachItems(items);
     if (att) line.appendChild(att);
