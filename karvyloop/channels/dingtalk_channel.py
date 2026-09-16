@@ -153,11 +153,12 @@ def _normalize_dingtalk_markdown(markdown: str) -> str:
 
 
 class _DingTalkDelivery:
-    """按最终正文判型，稳定消息才延迟创建 AI 卡片。"""
+    """管理 AI 卡片生命周期，并隐藏 SDK 模板自带的来源栏和按钮槽位。"""
 
-    def __init__(self, handler: Any, msg: Any) -> None:
+    def __init__(self, handler: Any, msg: Any, *, title: str = "AI 回复") -> None:
         self.handler = handler
         self.msg = msg
+        self.title = title
         self.card: Any = None
         self.finished = False
         self.markdown_sent = False
@@ -166,8 +167,35 @@ class _DingTalkDelivery:
     async def markdown(self, text: str) -> None:
         if self.markdown_sent:
             return
-        await asyncio.to_thread(self.handler.reply_markdown, "AI 回复", text, self.msg)
+        await asyncio.to_thread(self.handler.reply_markdown, self.title, text, self.msg)
         self.markdown_sent = True
+
+    async def _create_card(self, start_card: Optional[Callable[[], Any]]) -> Any:
+        card = (await asyncio.to_thread(start_card) if start_card is not None else None)
+        if not getattr(card, "card_instance_id", None):
+            raise RuntimeError("AI 卡片创建未返回有效实例")
+        # SDK 模板默认 order 包含 msgButtons，会在正文下渲染空按钮区域。
+        if hasattr(card, "set_order"):
+            order = getattr(card, "order", None)
+            if isinstance(order, list):
+                await asyncio.to_thread(card.set_order, [item for item in order if item != "msgButtons"])
+        # hosting_context 会让 SDK 追加灰色来源长条；本通道不需要这段来源信息。
+        incoming = getattr(card, "incoming_message", None)
+        if incoming is not None and hasattr(incoming, "hosting_context"):
+            incoming.hosting_context = None
+        self.card = card
+        return card
+
+    async def start_thinking(self, start_card: Optional[Callable[[], Any]]) -> None:
+        async with self._finish_lock:
+            if self.card is not None or self.finished:
+                return
+            try:
+                card = await self._create_card(start_card)
+                await asyncio.to_thread(card.ai_streaming, "思考中…", append=False)
+            except Exception:
+                self.card = None
+                logger.warning("[dingtalk] AI 思考状态卡片创建失败，将在完成时降级", exc_info=True)
 
     async def finish(self, text: str,
                      start_card: Optional[Callable[[], Any]] = None) -> None:
@@ -175,16 +203,12 @@ class _DingTalkDelivery:
             if self.finished:
                 return
             try:
-                if _requires_markdown_fallback(text):
+                if _requires_markdown_fallback(text) and self.card is None:
                     await self.markdown(text)
                     return
 
                 try:
-                    card = (await asyncio.to_thread(start_card)
-                            if start_card is not None else None)
-                    if not getattr(card, "card_instance_id", None):
-                        raise RuntimeError("AI 卡片创建未返回有效实例")
-                    self.card = card
+                    card = self.card or await self._create_card(start_card)
                 except Exception:
                     logger.warning("[dingtalk] AI 卡片创建失败，改用 Markdown 消息", exc_info=True)
                     await self.markdown(text)
@@ -512,14 +536,22 @@ class DingTalkChannel:
                 holder: dict = {}
                 from dingtalk_stream import ChatbotMessage
                 msg = ChatbotMessage.from_dict(data)
-                delivery = _DingTalkDelivery(self, msg)
+                delivery = _DingTalkDelivery(
+                    self, msg, title=channel._agent_display_name())
 
                 def _reply(text: str) -> None:
                     holder["reply"] = text
 
+                def _start_card() -> Any:
+                    return self.ai_markdown_card_start(
+                        msg, title=channel._agent_display_name())
+
                 fut = asyncio.run_coroutine_threadsafe(
-                    handle_incoming(channel._app, channel._cfg, data, _reply,
-                                    refused=channel._refused), loop)
+                    handle_incoming(
+                        channel._app, channel._cfg, data, _reply,
+                        refused=channel._refused,
+                        processing_fn=lambda: delivery.start_thinking(_start_card)),
+                    loop)
                 try:
                     await asyncio.to_thread(fut.result)
                 except Exception as e:
@@ -528,11 +560,7 @@ class DingTalkChannel:
                 text = holder.get("reply")
                 if text:
                     try:
-                        await delivery.finish(
-                            text,
-                            start_card=lambda: self.ai_markdown_card_start(
-                                msg, title="AI 回复"),
-                        )
+                        await delivery.finish(text, start_card=_start_card)
                     except Exception as e:
                         logger.warning("[dingtalk] 回复发送失败: %s", e)
                 from dingtalk_stream import AckMessage
@@ -562,6 +590,17 @@ class DingTalkChannel:
         logger.info("[dingtalk] 通道已起(Stream 长连接;%s 绑定角色 %s)",
                     self._cfg.name or "实例", self._cfg.role)
         return True
+
+    def _agent_display_name(self) -> str:
+        role_reg = getattr(self._app.state, "role_registry", None)
+        if role_reg is not None:
+            try:
+                role = role_reg.get(self._cfg.role)
+                if role is not None and hasattr(role, "display_name"):
+                    return role.display_name()
+            except Exception:
+                pass
+        return self._cfg.role or self._cfg.name or "Agent"
 
     def stop(self) -> None:
         try:
