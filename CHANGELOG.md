@@ -11,6 +11,23 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.9.17] — 2026-09-17
+
+The platform notification release: agents can proactively push DingTalk messages through a governed platform capability — they express intent, the platform handles recipients, approval, delivery, retries, and audit.
+
+### Added
+- **notify_user platform capability.** A built-in tool for every agent persona: submit a notification intent (recipient, content, urgency), and the platform resolves the recipient, enforces the approval policy, and delivers asynchronously. Agents never see DingTalk credentials or APIs.
+- **DingTalk outbound adapter.** Single-chat and group robot sends over the official OpenAPI with cached OAuth access tokens, network/limit/permanent error classification, and provider message-id recording.
+- **Notification outbox and dispatcher.** SQLite-backed outbox with business dedupe keys, an approval state machine, a lease-based dispatch loop (5s tick, crash-safe restart, bounded retries), and per-delivery audit.
+- **Notification approval cards.** Notifications requiring approval surface as `notification_approval` decision cards in the existing H2A flow — ACCEPT queues for delivery, REJECT closes with an audit trail. Scripted REST endpoints (list / pending / approve / reject) are also available.
+- **Binding-level auto-approval.** `notify_auto_approve` in the DingTalk channel config waives approval for the owner's bindings — single chat and group alike — reconciled declaratively on startup (turning it off restores approval).
+- **DingTalk inbound auto-binding.** Whitelisted senders' single/group conversations are registered as push targets on their first message; bare staffId recipients resolve by exact match.
+
+### Fixed
+- **notify_user no longer dead-ends in the outbound draft gate.** The gate's send-verb heuristics intercepted the platform tool itself, and approving the resulting draft card could not execute it; the tool is now structurally exempt and governed by its own approval chain.
+- **DingTalk adapter token handling.** The default token path no longer misuses the Stream SDK credential object (which caused "不合法的access_token"); tokens come from the official OAuth endpoint with caching.
+- **WebSocket drive_done on closed connections.** A drive completing after the browser closed mid-run no longer raises into the ASGI error log.
+
 ## [2026.9.15.1] — 2026-09-15
 
 The DingTalk empty-response patch: empty provider streams are no longer reported as successful model completions, and new channel conversations retain correct first-message behavior.
