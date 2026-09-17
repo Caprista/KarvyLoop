@@ -184,6 +184,17 @@ class _DingTalkDelivery:
                             if start_card is not None else None)
                     if not getattr(card, "card_instance_id", None):
                         raise RuntimeError("AI 卡片创建未返回有效实例")
+                    # SDK 模板默认包含空按钮槽位和灰色来源栏，回复卡片无需展示。
+                    if hasattr(card, "set_order"):
+                        order = getattr(card, "order", None)
+                        if isinstance(order, list) and "msgButtons" in order:
+                            await asyncio.to_thread(
+                                card.set_order,
+                                [item for item in order if item != "msgButtons"],
+                            )
+                    incoming = getattr(card, "incoming_message", None)
+                    if incoming is not None and hasattr(incoming, "hosting_context"):
+                        incoming.hosting_context = None
                     self.card = card
                 except Exception:
                     logger.warning("[dingtalk] AI 卡片创建失败，改用 Markdown 消息", exc_info=True)

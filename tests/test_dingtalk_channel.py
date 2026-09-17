@@ -585,6 +585,13 @@ class _FakeCard:
         self.streaming_error = streaming_error
         self.finish_error = finish_error
         self.order = order
+        self.set_order_calls = []
+        self.incoming_message = type(
+            "IncomingMessage", (), {"hosting_context": "source"})()
+
+    def set_order(self, order):
+        self.set_order_calls.append(list(order))
+        self.order = list(order)
 
     def ai_streaming(self, markdown, append=True):
         self.streaming_calls.append((markdown, append))
@@ -703,6 +710,20 @@ def test_delivery_complex_text_uses_original_markdown_without_card(text):
         assert card.streaming_calls == []
         assert card.finish_calls == []
         assert handler.replies == [("AI 回复", text, "msg")]
+
+    asyncio.run(_run())
+
+
+def test_delivery_hides_default_source_bar_and_button_slot():
+    async def _run():
+        handler = _FakeHandler()
+        card = _FakeCard(order=["content", "msgButtons"])
+        delivery = _DingTalkDelivery(handler, "msg")
+
+        await delivery.finish("普通回复", start_card=lambda: card)
+
+        assert card.set_order_calls == [["content"]]
+        assert card.incoming_message.hosting_context is None
 
     asyncio.run(_run())
 
