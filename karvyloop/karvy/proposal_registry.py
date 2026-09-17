@@ -131,6 +131,12 @@ KIND_SCENE_READY = "scene_ready"
 # decision_log)。∈ silence.HIGH_RISK_KINDS:对外动作绝不被"挣来的静音"自动兑现,逐张拍。
 # 域 deontic_forbid 硬闸叠加在截点之前(域里禁了外发 → authorize 直接拒,连这张卡都不出)。
 KIND_OUTBOUND_DRAFT = "outbound_draft"
+# notify_user 平台通知的待审批卡:Agent 调 notify_user 后策略判 REQUIRE_APPROVAL → 通知进
+# notification_outbox(pending_approval)→ 本卡让用户在既有决策卡 UI 里拍。ACCEPT = outbox
+# 状态迁移 queued(后台 dispatch loop 真投递钉钉);REJECT = 迁移 rejected(永不发送)。
+# proposal_id 由 notification_id 派生 → 同一通知幂等只升一张卡。
+# ∈ silence.HIGH_RISK_KINDS:对外送达绝不被"挣来的静音"自动兑现,逐张拍。
+KIND_NOTIFICATION_APPROVAL = "notification_approval"
 
 ALL_KINDS = (
     KIND_CRYSTALLIZE_SKILL,
@@ -156,6 +162,7 @@ ALL_KINDS = (
     KIND_SCHEDULE_SUGGEST,
     KIND_SCENE_READY,
     KIND_OUTBOUND_DRAFT,
+    KIND_NOTIFICATION_APPROVAL,
 )
 
 # Handler 协议:(proposal) -> (ok: bool, detail: str)。注入式,默认无副作用。
@@ -1579,6 +1586,71 @@ def proposal_for_outbound_draft(
     )
 
 
+def proposal_for_notification_approval(
+    *,
+    notification_id: str,
+    recipient_ref: str,
+    content: str,
+    title: str = "",
+    actor_id: str = "",
+    urgency: str = "normal",
+    reason: str = "",
+    channel: str = "",
+    ts: float,
+    strength: float = 0.9,
+):
+    """notify_user 待审批通知 → 决策卡(kind=notification_approval)。
+
+    - 事实源 = notification_outbox 行(payload 带 notification_id;ACCEPT/REJECT 钩子
+      按 it 做 outbox 状态迁移,绝不二次生成内容)。
+    - proposal_id 按 notification_id 派生 → 同一通知幂等(升卡方拿 registry.get 判重)。
+    - kind ∈ silence.HIGH_RISK_KINDS:对外送达绝不被"挣来的静音"自动兑现,逐张拍。
+    """
+    from karvyloop import i18n
+    from .atoms import Proposal
+    nid = (notification_id or "").strip()
+    t = (title or "").strip()
+    body = (content or "").strip()
+    what = f"{t}:{body[:60]}" if t else body[:60]
+    if len(body) > 60:
+        what += "…"
+    summary = i18n.t("proposal.notification.summary",
+                     recipient=recipient_ref or "?", what=what)
+    who = (actor_id or "").strip() or "agent"
+    details = [i18n.t("proposal.notification.recipient_line", recipient=recipient_ref or "?"),
+               i18n.t("proposal.notification.who_line", who=who)]
+    if channel:
+        details.append(i18n.t("proposal.notification.channel_line", channel=channel))
+    if urgency and urgency != "normal":
+        details.append(i18n.t("proposal.notification.urgency_line", urgency=urgency))
+    if (reason or "").strip():
+        details.append(i18n.t("proposal.notification.reason_line", reason=reason.strip()[:200]))
+    details.append(i18n.t("proposal.notification.body_line",
+                          body=f"{body[:800]}{'…' if len(body) > 800 else ''}"))
+    return Proposal(
+        summary=summary,
+        options=("ACCEPT", "DEFER", "REJECT"),
+        strength=strength,
+        evidence_refs=(),
+        habit_id=0,
+        model_ref="",
+        ts=ts,
+        kind=KIND_NOTIFICATION_APPROVAL,
+        payload={
+            "notification_id": nid,          # ACCEPT/REJECT 钩子的唯一事实源
+            "recipient_ref": recipient_ref,
+            "title": t,
+            "content": body,
+            "actor_id": who,
+            "urgency": urgency,
+            "reason": (reason or "").strip()[:500],
+            "channel": channel,
+        },
+        proposal_id=f"{KIND_NOTIFICATION_APPROVAL}-0-{nid}",
+        basis=i18n.t("proposal.notification.basis", details="  ".join(details)),
+    )
+
+
 __all__ = [
     "PendingProposalRegistry",
     "AGING_THRESHOLD_S",
@@ -1614,6 +1686,8 @@ __all__ = [
     "KIND_SCENE_READY",
     "proposal_for_outbound_draft",
     "KIND_OUTBOUND_DRAFT",
+    "proposal_for_notification_approval",
+    "KIND_NOTIFICATION_APPROVAL",
     "proposal_for_confirm_result",
     "KIND_CRYSTALLIZE_SKILL",
     "KIND_RUN_TASK",

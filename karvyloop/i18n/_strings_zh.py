@@ -788,6 +788,17 @@ ZH = {
     ),
     # 卡面(summary/basis;对抗验收 BUG-1 盲拍修:收件人全集逐条 + 隐藏收件人红标 + 完整入参可核)
     "proposal.outbound_draft.summary": "📨 对外发送待你拍板:{what}",
+    # notify_user 待审批通知卡(通知能力)
+    "proposal.notification.summary": "📨 通知待你审批 → {recipient}「{what}」",
+    "proposal.notification.basis": (
+        "接受后经平台通知通道异步送达;驳回则永不发送。{details}"
+    ),
+    "proposal.notification.recipient_line": "接收人:{recipient}",
+    "proposal.notification.who_line": "发起:{who}",
+    "proposal.notification.channel_line": "渠道:{channel}",
+    "proposal.notification.urgency_line": "紧急程度:{urgency}",
+    "proposal.notification.reason_line": "缘由:{reason}",
+    "proposal.notification.body_line": "正文:{body}",
     "proposal.outbound_draft.hidden_warn": "⚠️[含隐藏收件人,展开核对]",
     "proposal.outbound_draft.hidden_detail": (
         "⚠ 这些收件人键没能直接展示 —— 请在下方完整入参里逐一核对:{keys}"

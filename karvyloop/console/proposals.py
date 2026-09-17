@@ -687,6 +687,10 @@ async def raise_drive_wrapup_cards(app: Any) -> int:
         n += await raise_outbound_draft_cards(app)
     except Exception:
         logger.debug("[proposals] 收尾升外发草稿卡失败(不阻断)", exc_info=True)
+    try:
+        n += await raise_notification_cards(app)
+    except Exception:
+        logger.debug("[proposals] 收尾升通知审批卡失败(不阻断)", exc_info=True)
     return n
 
 
@@ -720,5 +724,52 @@ async def raise_outbound_draft_cards(app: Any) -> int:
             raised += 1
         except Exception as e:
             logger.warning(f"[outbound] 升外发草稿卡失败(tool={d.get('tool')!r},该草稿丢失): {e}")
+    return raised
+
+
+async def raise_notification_cards(app: Any) -> int:
+    """notify_user 待审批通知 → 升 notification_approval 决策卡。
+
+    通知闸自具审批(notify_user → pending_approval),本函数把 outbox 里的待审批通知
+    呈现为既有决策卡(用户在 UI 拍板,不再需要 curl REST)。幂等:proposal_id 由
+    notification_id 派生,registry 里已挂着(含 DEFER)就不重复出卡;ACCEPT/REJECT 后
+    通知离开 pending_approvals,自然不再出。由通知 dispatch loop(5s)持续驱动。
+    单张失败跳过(debug),不阻断其他通知。返回升卡数。"""
+    rt = getattr(app.state, "notification_runtime", None)
+    store = getattr(rt, "store", None) if rt is not None else None
+    if store is None:
+        return 0
+    pending = store.pending_approvals()
+    if not pending:
+        return 0
+    import time as _t
+    from karvyloop.karvy.proposal_registry import proposal_for_notification_approval
+    registry = getattr(app.state, "proposal_registry", None)
+    raised = 0
+    for n in pending:
+        try:
+            nid = str(n.get("id") or "")
+            if not nid:
+                continue
+            card = proposal_for_notification_approval(
+                notification_id=nid,
+                recipient_ref=str(n.get("recipient_ref") or ""),
+                content=str(n.get("content") or ""),
+                title=str(n.get("title") or ""),
+                actor_id=str(n.get("actor_id") or ""),
+                urgency=str(n.get("urgency") or "normal"),
+                reason=str(n.get("reason") or ""),
+                channel=str(n.get("preferred_channel") or ""),
+                ts=float(n.get("created_at") or _t.time()))
+            if registry is not None:
+                try:
+                    if registry.get(card.proposal_id) is not None:
+                        continue   # 卡已挂着(待拍/DEFER)→ 不重复骚扰
+                except Exception:
+                    pass
+            await broadcast_proposal(app, card)
+            raised += 1
+        except Exception as e:
+            logger.debug(f"[notifications] 升通知审批卡失败(下轮再试): {e}")
     return raised
 

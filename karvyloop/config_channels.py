@@ -352,6 +352,10 @@ class DingTalkChannelConfig:
     allow_senders: tuple = ()       # 白名单(staffId);空 = fail-closed
     name: str = ""                  # 实例名(多机器人日志区分;缺省 = role)
     enabled: bool = True
+    # notify_user 绑定级自动放行(docs 通知能力):True = 该实例名下全部 dingtalk 绑定
+    # (单聊 + 群聊)consent=auto(2)→ 任何 agent 给这些接收人发通知免审批直投;
+    # False/缺省 → 恢复审批(启动时声明式回档)。原则:发**给谁**,由**谁**授权免审。
+    notify_auto_approve: bool = False
 
 
 def _dingtalk_one_from_dict(dt: dict) -> Optional[DingTalkChannelConfig]:
@@ -374,6 +378,7 @@ def _dingtalk_one_from_dict(dt: dict) -> Optional[DingTalkChannelConfig]:
         allow_senders=allow,
         name=str(dt.get("name") or "").strip(),
         enabled=True,
+        notify_auto_approve=bool(dt.get("notify_auto_approve") or False),
     )
 
 

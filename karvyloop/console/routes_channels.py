@@ -26,6 +26,8 @@ class DingTalkConfigInput(BaseModel):
     domain_id: str = Field(default="", max_length=256)
     allow_senders: list[str] = Field(default_factory=list, max_length=1000)
     enabled: bool = True
+    # notify_user 绑定级自动放行(单聊直投免审);None = 更新时保留旧值(手改 config 不被冲掉)
+    notify_auto_approve: bool | None = None
 
 
 def _config_path(app: Any) -> Path:
@@ -104,7 +106,8 @@ def _public(item: dict) -> dict:
             "role": str(item.get("role") or ""),
             "domain_id": str(item.get("domain_id") or ""),
             "allow_senders": [str(x) for x in (item.get("allow_senders") or [])],
-            "enabled": bool(item.get("enabled"))}
+            "enabled": bool(item.get("enabled")),
+            "notify_auto_approve": bool(item.get("notify_auto_approve") or False)}
 
 
 def _body(req: DingTalkConfigInput, ident: str, old: dict | None = None) -> dict:
@@ -123,7 +126,10 @@ def _body(req: DingTalkConfigInput, ident: str, old: dict | None = None) -> dict
     return {"id": ident, "enabled": req.enabled, "name": req.name.strip(),
             "client_id": client_id, "client_secret": secret,
             "role": role, "domain_id": req.domain_id.strip(),
-            "allow_senders": senders}
+            "allow_senders": senders,
+            "notify_auto_approve": (bool(req.notify_auto_approve)
+                                    if req.notify_auto_approve is not None
+                                    else bool((old or {}).get("notify_auto_approve") or False))}
 
 
 def _reconcile(app: Any, path: Path) -> dict:

@@ -871,6 +871,20 @@ EN = {
     ),
     # 卡面(summary/basis;对抗验收 BUG-1 盲拍修:收件人全集逐条 + 隐藏收件人红标 + 完整入参可核)
     "proposal.outbound_draft.summary": "📨 Outbound send awaiting your approval: {what}",
+    # notify_user 待审批通知卡(通知能力)
+    "proposal.notification.summary": (
+        "📨 Notification awaiting your approval → {recipient} \"{what}\""
+    ),
+    "proposal.notification.basis": (
+        "Accepting delivers it through the platform notification channel (async); "
+        "rejecting discards it — it will never be sent. {details}"
+    ),
+    "proposal.notification.recipient_line": "Recipient: {recipient}",
+    "proposal.notification.who_line": "Requested by: {who}",
+    "proposal.notification.channel_line": "Channel: {channel}",
+    "proposal.notification.urgency_line": "Urgency: {urgency}",
+    "proposal.notification.reason_line": "Reason: {reason}",
+    "proposal.notification.body_line": "Body: {body}",
     "proposal.outbound_draft.hidden_warn": "⚠️[hidden recipients — expand and verify]",
     "proposal.outbound_draft.hidden_detail": (
         "⚠ These recipient keys could not be rendered inline — verify them in the full "

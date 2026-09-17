@@ -46,6 +46,7 @@ from .routes_models import router as models_router
 from .routes_onboarding import router as onboarding_router
 from .routes_ops import router as ops_router
 from .routes_mesh import router as mesh_router
+from .routes_notifications import router as notifications_router
 from .routes_pair import router as pair_router
 from .routes_peers import router as peers_router
 from .routes_pursuit import router as pursuit_router
@@ -645,6 +646,48 @@ def build_console_app(
         except Exception as e:
             logger.warning(f"[karvyloop console] 钉钉通道接线失败(不影响启动): {e}")
 
+        # notify_user 平台能力运行时:钉钉 adapter + Outbox + 后台 dispatch loop。
+        # Agent 通过 notify_user 工具只提交通知意图;access token、投递、重试全收在本运行时。
+        # 钉钉未配置 / adapter 全失败 → None(notify_user 不挂,零负担)。
+        app.state.notification_runtime = None
+        app.state.notification_dispatch_task = None
+        try:
+            from karvyloop.notifications import build_notification_runtime
+            _nt = build_notification_runtime(
+                config_path=getattr(app.state, "config_path", "") or None)
+            if _nt is not None:
+                app.state.notification_runtime = _nt
+
+                async def _notification_dispatch_loop() -> None:
+                    while True:
+                        try:
+                            await asyncio.sleep(5)
+                            # 待审批通知先升决策卡(幂等;让用户在既有 UI 拍板,不必 curl REST)
+                            try:
+                                from karvyloop.console.proposals import raise_notification_cards
+                                _ncards = await raise_notification_cards(app)
+                                if _ncards:
+                                    logger.info(
+                                        f"[karvyloop console] 通知审批卡已升 {_ncards} 张")
+                            except Exception as ne:
+                                logger.debug(
+                                    f"[karvyloop console] 通知审批卡升卡异常(下轮再试): {ne}")
+                            delivered = await _nt.dispatcher.dispatch_once(limit=10)
+                            if delivered:
+                                logger.info(
+                                    f"[karvyloop console] 通知投递 {delivered} 条")
+                        except asyncio.CancelledError:
+                            break
+                        except Exception as e:
+                            logger.warning(
+                                f"[karvyloop console] 通知 dispatch tick 异常(下轮再试): {e}")
+                app.state.notification_dispatch_task = asyncio.create_task(
+                    _supervised_bg(app, "notification_dispatch",
+                                    _notification_dispatch_loop))
+                logger.info("[karvyloop console] 通知运行时已起(notify_user 可用)")
+        except Exception as e:
+            logger.warning(f"[karvyloop console] 通知运行时接线失败(不影响启动): {e}")
+
         # 收件箱→决策卡管道心跳(docs/49 ⑲-①,inbox_pipe):出站 IMAP 轮询 UNSEEN → 分诊 →
         # 需拍板/需回复出 H2A 卡(纯通知归档)。**只进不出**:模块结构上发不了信。
         # 未配置(channels.inbox 缺 → build 返 None)→ tick 空转零开销。gateway 从 runtime_kwargs
@@ -832,6 +875,16 @@ def build_console_app(
                 _dtc.stop()
             except Exception:
                 pass
+        # 通知运行时:停投递 loop + 关 outbox sqlite
+        _notif_task = getattr(app.state, "notification_dispatch_task", None)
+        if _notif_task is not None:
+            _notif_task.cancel()
+        _nt = getattr(app.state, "notification_runtime", None)
+        if _nt is not None:
+            try:
+                _nt.close()
+            except Exception:
+                pass
         if mesh_tick_task is not None:
             mesh_tick_task.cancel()
         app.state.ws_clients.clear()
@@ -875,6 +928,8 @@ def build_console_app(
     app.state.pending_channel_senders = PendingSenderCache()
     app.state.dingtalk_channel = None
     app.state.dingtalk_channels = []
+    app.state.notification_runtime = None   # notify_user 运行时(lifespan 起时按钉钉配置接;None=未接)
+    app.state.notification_dispatch_task = None
     app.state.ws_clients = set()  # 立即 set,lifespan 里也 set 同引用
 
     # mount routers
@@ -906,6 +961,7 @@ def build_console_app(
     app.include_router(demo_router)        # /api/demo/*(随包演示实例「小林/Lin」只读浏览,GET-only)
     app.include_router(butler_router)      # /api/butler/*(文件管家第一课:扫描→方案预览卡)
     app.include_router(external_router)    # /api/external/*(跨 runtime 协作:外部公民管理面 + 按需接入引导)
+    app.include_router(notifications_router)  # /api/notifications*(notify_user 审批/列表)
     app.include_router(ws_router)
 
     # 静态资源禁用浏览器**强缓存**(no-cache = 每次带 ETag 条件请求 → 没变 304、变了 200)。

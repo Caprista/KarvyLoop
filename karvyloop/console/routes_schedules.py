@@ -226,9 +226,13 @@ async def fire_schedule(app: Any, t) -> None:
                                          role=(t.target_role or ""))
         # docs/90 刀3a:定时触发 run 也登 running-run 注册表 → /api/task/cancel 可停。
         from karvyloop.atoms.abort import abort_scope as _abort_scope
+        # notify_user 平台能力:运行时接了 → 挂工具(定时任务"跑完通知我"的执行路径)。
+        from karvyloop.notifications.runtime import notification_drive_kwargs as _notification_kwargs
         with _abort_scope(task_id or ""):
             outcome = await _routes.drive_in_tui(t.intent, main_loop, governance=_sched_gov,
-                                                 persona=persona, scope=scope, **eff_rk)
+                                                 persona=persona, scope=scope,
+                                                 **_notification_kwargs(app, task_id=task_id or ""),
+                                                 **eff_rk)
         err = getattr(outcome, "error", "") or ""
         if task_reg and task_id:
             task_reg.finish(task_id, result=(outcome.text or ""), error=err)

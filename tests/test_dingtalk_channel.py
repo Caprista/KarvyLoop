@@ -64,12 +64,29 @@ def test_config_ok_and_secret_not_in_repr():
 def test_extract_fields():
     info = _extract({
         "senderStaffId": "u1", "conversationId": "c1",
-        "text": {"content": "  帮我查下报表  "}})
+        "msgId": "msg-1", "text": {"content": "  帮我查下报表  "}})
     assert (info["sender"], info["chat"], info["text"]) == ("u1", "c1", "帮我查下报表")
+    assert info["message_id"] == "msg-1"
     assert info["sender_nick"] == "" and info["chat_type"] == "" and info["chat_title"] == ""
     # 缺字段容错
     empty = _extract({})
     assert (empty["sender"], empty["chat"], empty["text"]) == ("", "", "")
+    assert empty["message_id"] == ""
+
+
+def test_channel_claims_each_stream_message_once(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr("karvyloop.channels.dingtalk_channel.time.monotonic", lambda: now[0])
+    channel = DingTalkChannel(object(), DingTalkChannelConfig(
+        client_id="a", client_secret="b", role="r"))
+
+    assert channel._claim_message("msg-1") is True
+    assert channel._claim_message("msg-1") is False
+    assert channel._claim_message("msg-2") is True
+    assert channel._claim_message("") is True  # SDK 缺 msgId 时不误吞正常消息
+
+    now[0] += 15 * 60
+    assert channel._claim_message("msg-1") is True
 
 
 def test_extract_distinguishes_direct_and_group():
@@ -523,6 +540,84 @@ def test_start_without_sdk_returns_false():
     assert ch.start(asyncio.new_event_loop()) is False
 
 
+def test_stream_callback_acks_immediately_and_deduplicates_msg_id(monkeypatch):
+    """慢 Agent 不得阻塞 ACK；同一个 msgId 的重投也不得再次 drive。"""
+    import sys
+    import types
+
+    clients = []
+    replies = []
+
+    class _FakeHandlerBase:
+        def reply_markdown(self, title, text, msg):
+            replies.append((title, text, msg))
+
+    class _FakeChatbotMessage:
+        TOPIC = "chatbot"
+
+        @staticmethod
+        def from_dict(data):
+            return data
+
+    class _FakeClient:
+        def __init__(self, credential):
+            self.credential = credential
+            self.handlers = {}
+            clients.append(self)
+
+        def register_callback_handler(self, topic, handler):
+            self.handlers[topic] = handler
+
+        def start_forever(self):
+            return None
+
+        def close(self):
+            return None
+
+    fake_sdk = types.ModuleType("dingtalk_stream")
+    fake_sdk.ChatbotHandler = _FakeHandlerBase
+    fake_sdk.ChatbotMessage = _FakeChatbotMessage
+    fake_sdk.AckMessage = types.SimpleNamespace(STATUS_OK=200)
+    fake_sdk.Credential = lambda client_id, client_secret: (client_id, client_secret)
+    fake_sdk.DingTalkStreamClient = _FakeClient
+    fake_sdk.chatbot = types.SimpleNamespace(ChatbotMessage=_FakeChatbotMessage)
+    monkeypatch.setitem(sys.modules, "dingtalk_stream", fake_sdk)
+
+    async def _run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def _slow_handle(app, cfg, data, reply_fn, **kw):
+            calls.append(data)
+            started.set()
+            await release.wait()
+            reply_fn("```text\nfinished\n```")  # 强制走 Markdown，避免测试卡片细节
+
+        monkeypatch.setattr("karvyloop.channels.dingtalk_channel.handle_incoming", _slow_handle)
+        channel = DingTalkChannel(_fake_app_ok(), DingTalkChannelConfig(
+            client_id="a", client_secret="b", role="r"))
+        assert channel.start(asyncio.get_running_loop()) is True
+        handler = clients[0].handlers["chatbot"]
+        callback = types.SimpleNamespace(data={
+            "msgId": "msg-1", "senderStaffId": "staff-1", "conversationId": "c1",
+            "text": {"content": "查报表"},
+        })
+
+        assert await handler.process(callback) == (200, "OK")
+        assert await handler.process(callback) == (200, "OK")
+        await asyncio.wait_for(started.wait(), timeout=0.2)
+        assert len(calls) == 1
+
+        release.set()
+        for _ in range(4):
+            await asyncio.sleep(0)
+        assert replies == [("AI 回复", "```text\nfinished\n```", callback.data)]
+        channel.stop()
+
+    asyncio.run(_run())
+
+
 # ---- AC5: 多实例(每 agent 一个机器人)----
 def test_multi_instance_list_config():
     """channels.dingtalk 写成列表 → 每个 agent 一个实例,各自凭据/角色/白名单。"""
@@ -784,7 +879,7 @@ def test_delivery_normalized_stable_text_streams_and_finishes_same_content():
     asyncio.run(_run())
 
 
-def test_delivery_card_streaming_failure_skips_finish_and_falls_back_once():
+def test_delivery_card_streaming_failure_recovers_on_same_card_without_markdown():
     async def _run():
         handler = _FakeHandler()
         card = _FakeCard(streaming_error=True)
@@ -792,13 +887,13 @@ def test_delivery_card_streaming_failure_skips_finish_and_falls_back_once():
         await delivery.finish("普通回复", start_card=lambda: card)
         await delivery.finish("普通回复", start_card=lambda: card)
         assert card.streaming_calls == [("普通回复", False)]
-        assert card.finish_calls == []
-        assert handler.replies == [("AI 回复", "普通回复", "msg")]
+        assert card.finish_calls == ["普通回复"]
+        assert handler.replies == []
 
     asyncio.run(_run())
 
 
-def test_delivery_card_finish_failure_falls_back_to_original_markdown_once():
+def test_delivery_card_finish_failure_never_creates_second_markdown_message():
     async def _run():
         handler = _FakeHandler()
         card = _FakeCard(finish_error=True)
@@ -807,7 +902,7 @@ def test_delivery_card_finish_failure_falls_back_to_original_markdown_once():
         await delivery.finish("普通回复", start_card=lambda: card)
         assert card.streaming_calls == [("普通回复", False)]
         assert card.finish_calls == ["普通回复"]
-        assert handler.replies == [("AI 回复", "普通回复", "msg")]
+        assert handler.replies == []
 
     asyncio.run(_run())
 

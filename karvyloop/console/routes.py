@@ -1077,6 +1077,8 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
         # per-task token 归因(#42):这轮 drive 烧的每个 token 记到任务名下(成本预估样本)
         from karvyloop.llm.token_ledger import token_task as _token_task
         from karvyloop.atoms.abort import abort_scope as _abort_scope
+        # notify_user 平台能力:运行时接了 → 挂工具(未接=空 splat,0 回归)
+        from karvyloop.notifications.runtime import notification_drive_kwargs as _notification_kwargs
         # docs/90 刀3a:登进 running-run 注册表 —— /api/task/cancel 拉旗 → executor 下一轮边界停。
         with _abort_scope(task_id or ""), _token_task(task_id or ""):
             outcome = await drive_in_tui(req.intent, main_loop, ctx=ctx, governance=governance,
@@ -1102,6 +1104,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
                                          citizen_registry=getattr(request.app.state, "citizen_registry", None),
                                          external_bridge_factory=getattr(request.app.state, "external_bridge_factory", None),
                                          external_token_recorder=getattr(request.app.state, "external_token_recorder", None),
+                                         **_notification_kwargs(request.app, task_id=task_id or ""),
                                          **eff_rk)
     except Exception as e:
         logger.exception(f"api_intent drive 异常: {e}")

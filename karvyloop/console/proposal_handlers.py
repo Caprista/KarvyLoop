@@ -27,6 +27,7 @@ from karvyloop.karvy.proposal_registry import (
     KIND_FS_ACCESS, KIND_EXTERNAL_ADOPT, KIND_MESH_TAKEOVER, KIND_MEMORY_CONFLICT,
     KIND_SCHEDULE_CATCHUP, KIND_SCHEDULE_SUGGEST, KIND_PURSUIT_COMMIT, KIND_PURSUIT_REVISE,
     KIND_ROUNDTABLE_CONCLUSION, KIND_SCENE_READY, KIND_OUTBOUND_DRAFT,
+    KIND_NOTIFICATION_APPROVAL,
 )
 
 logger = logging.getLogger(__name__)
@@ -1180,6 +1181,52 @@ def _outbound_draft_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
     return handler
 
 
+def _notification_approval_store(app: Any) -> Any:
+    """通知 outbox(经运行时;未接线 → None)。"""
+    rt = getattr(app.state, "notification_runtime", None)
+    return getattr(rt, "store", None) if rt is not None else None
+
+
+def _notification_approval_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """notification_approval ACCEPT:通知 outbox 迁移 pending_approval → queued。
+
+    事实源 = outbox 行(内容一字不改);真投递由后台 dispatch loop 兜(≤5s),
+    本 handler 只做状态迁移。重复 ACCEPT/并发双路由 outbox 状态机兜底
+    (transition_approval 只对 pending_approval 生效,其余返回诚实失败)。
+    """
+    def handler(proposal) -> Tuple[bool, str]:
+        payload = getattr(proposal, "payload", None) or {}
+        nid = str(payload.get("notification_id") or "")
+        if not nid:
+            return False, "通知 ID 缺失,无法兑现"
+        store = _notification_approval_store(app)
+        if store is None:
+            return False, "通知运行时未接线(需重启 console 接上通知通道)"
+        receipt = store.transition_approval(nid, approved=True)
+        if receipt.status == "queued":
+            return True, "已批准,进入投递队列(稍后送达钉钉)"
+        return False, f"审批兑现失败:通知状态为 {receipt.status}({receipt.reason or '状态不允许迁移'})"
+    return handler
+
+
+def _notification_approval_reject_handler(app: Any) -> Callable[[object], Tuple[bool, str]]:
+    """notification_approval REJECT 钩子:outbox 迁移 rejected(审计留痕,永不发送)。
+
+    registry 的 REJECT 默认=纯丢弃卡;通知的 outbox 行是事实源,必须显式关单,
+    否则 pending 行永远挂着(dispatch loop 会反复看到它)。"""
+    def handler(proposal) -> Tuple[bool, str]:
+        payload = getattr(proposal, "payload", None) or {}
+        nid = str(payload.get("notification_id") or "")
+        store = _notification_approval_store(app)
+        if not nid or store is None:
+            return True, "rejected"   # 无从关单 → 回退通用语义,不阻断驳回
+        receipt = store.transition_approval(nid, approved=False)
+        if receipt.status == "rejected" and receipt.reason != "invalid_approval_transition":
+            return True, "已驳回,该通知不会发送"
+        return True, "rejected"       # 状态已终态(重复驳回/并发)→ 通用回执
+    return handler
+
+
 def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool, str]]]:
     """构造 ACCEPT 兑现 handler 表(注入 app.state.proposal_handlers)。
 
@@ -1229,6 +1276,11 @@ def build_proposal_handlers(app: Any) -> Dict[str, Callable[[object], Tuple[bool
         # docs/96 刀0:外发草稿卡 —— ACCEPT 真调原工具原参数发出(∈ HIGH_RISK_KINDS,
         # 永不静音,逐张拍);REJECT 走通用丢弃(零副作用,卡里的草稿随卡消失)。
         KIND_OUTBOUND_DRAFT: _outbound_draft_handler(app),
+        # notify_user 待审批通知卡(∈ HIGH_RISK_KINDS):ACCEPT → outbox 迁移 queued
+        # (后台 dispatch loop 真投递);REJECT 钩子 → 迁移 rejected(永不发送,不是纯丢弃
+        # —— outbox 是审计事实源,必须留痕)。
+        KIND_NOTIFICATION_APPROVAL: _notification_approval_handler(app),
+        f"{KIND_NOTIFICATION_APPROVAL}:reject": _notification_approval_reject_handler(app),
         KIND_MEMORY_CONFLICT: _memory_conflict_handler(app),     # D2:按你的裁决处置钉住/人审记忆冲突
         KIND_MESH_TAKEOVER: make_mesh_takeover_handler(app),     # mesh 接活:claim→重跑→complete
         KIND_CONFIRM_DECISION_PREF: _confirm_decision_pref_handler(app),

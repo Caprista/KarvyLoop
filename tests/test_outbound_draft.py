@@ -103,10 +103,12 @@ SEND_INPUT = {"to": "boss@example.com", "subject": "周报", "body": "本周进�
 # ================================================================ ① 判定表
 class TestJudgment:
     # 对抗验收 LEAK 修后的判定表(真实 MCP 工具名,与验收方 65 名判定表同口径)
+    # 注:notify_user 原列于此 —— 它现是平台自治理工具(outbound_gate._PLATFORM_EXEMPT
+    # 结构性豁免,自具审批链),判 False 才对;回归在 tests/test_notification_cards.py。
     POSITIVE = [
         "mcp_gmail_send_message", "mcp_gmail_send_email", "send_email", "sendEmail",
         "mcp_slack_post_message", "mcp_twitter_tweet", "mcp_x_dm", "mcp_twilio_send_sms",
-        "mcp_twilio_sms", "notify_user", "mcp_gmail_reply", "mcp_gmail_forward_email",
+        "mcp_twilio_sms", "mcp_gmail_reply", "mcp_gmail_forward_email",
         "mcp_gmail_create_email", "create_message", "publish_post",
         "postMessage", "broadcast_message",
         # LEAK 补漏(对抗验收点名的真实名字,全部必须 True)

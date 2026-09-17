@@ -65,6 +65,22 @@ def _serialize_ws_send(websocket: WebSocket) -> None:
     websocket._send_lock = lock               # type: ignore[attr-defined]  # 留引用便于测试/调试
 
 
+async def _send_json_safe(websocket: WebSocket, data: Any) -> bool:
+    """对可能已断开的连接容错发送(True=送达/仍在)。
+
+    病根:drive 长跑(LLM 可能几十秒)期间客户端关页/刷新 → close 已发,drive 完成后
+    send_json 抛 RuntimeError('Cannot call "send" once a close message has been sent.')
+    且它不是 WebSocketDisconnect → 穿透 ws_endpoint 的 except 直冒 ASGI 500 噪音。
+    客户端已走 → 内容本就无人收,debug 记一行即可,不炸日志。"""
+    try:
+        await websocket.send_json(data)
+        return True
+    except (RuntimeError, WebSocketDisconnect) as e:
+        logger.debug("[ws] 客户端已断开,send 跳过(%s): %s",
+                     type(e).__name__, str(e)[:120])
+        return False
+
+
 # ---- HR-8 流式围栏 scrubber:剥模型输出里回声的 <memory-context> 标记(防注入越狱冒充指令)----
 # 病根(docs/87 §四):cognition.fence.scrub_stream(流式 delta 剥围栏标记)从没接进生产,
 # 只测试用;兄弟 fence()(入栏时剥)却在生产用 → 模型若把召回背景里的 <memory-context>…
@@ -282,7 +298,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                 mgr.record_turn(intent, _coc_reply, brain="slow")
             except Exception:
                 pass
-        await websocket.send_json({"type": "drive_done", "payload": {
+        await _send_json_safe(websocket, {"type": "drive_done", "payload": {
             "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
             "crystallized": False, "skill_name": "", "routed": False,
             "cocreation": True, "text": _coc_reply}})
@@ -305,7 +321,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                     mgr.record_turn(intent, _reply, brain="slow")
                 except Exception:
                     pass
-            await websocket.send_json({"type": "drive_done", "payload": {
+            await _send_json_safe(websocket, {"type": "drive_done", "payload": {
                 "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
                 "crystallized": False, "skill_name": "", "routed": False,
                 "text": _reply, "decision_delegation": _questionnaire}})
@@ -315,7 +331,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
 
     if main_loop is None:
         outcome = stub_no_main_loop(intent, app)   # error 带缺席真因(no_llm/构造失败/需 init)
-        await websocket.send_json({
+        await _send_json_safe(websocket, {
             "type": "drive_done",
             "payload": drive_outcome_to_dict(outcome),
         })
@@ -375,7 +391,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     from .routes import group_no_mention_nudge
     _nudge = group_no_mention_nudge(app, mgr, mention)
     if _nudge is not None:
-        await websocket.send_json({"type": "drive_done", "payload": _nudge})
+        await _send_json_safe(websocket, {"type": "drive_done", "payload": _nudge})
         return
 
     if m_persona is None:
@@ -394,7 +410,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                     mgr.record_turn(intent, routed["text"], brain="slow")
                 except Exception:
                     pass
-            await websocket.send_json({"type": "drive_done", "payload": routed})
+            await _send_json_safe(websocket, {"type": "drive_done", "payload": routed})
             return
 
     # 9.4e/step5:私聊→小卡人格,业务域→per-role;@ 命中 → 被 @ 角色人格 + domain scope。
@@ -461,6 +477,8 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         # token_task 做 per-task token 归因(#42)。task_id 空(registry 未接)→ 两者都 no-op。
         from karvyloop.atoms.abort import abort_scope as _abort_scope
         from karvyloop.llm.token_ledger import token_task as _token_task
+        # notify_user 平台能力:运行时接了 → 挂工具(未接=空 splat,0 回归)
+        from karvyloop.notifications.runtime import notification_drive_kwargs as _notification_kwargs
         with _abort_scope(task_id or ""), _token_task(task_id or ""):
             outcome = await drive_in_tui(intent, main_loop, ctx=ctx, governance=governance,
                                          persona=persona, scope=eff_scope, on_event=_on_event,
@@ -478,13 +496,14 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                                          citizen_registry=getattr(app.state, "citizen_registry", None),
                                          external_bridge_factory=getattr(app.state, "external_bridge_factory", None),
                                          external_token_recorder=getattr(app.state, "external_token_recorder", None),
+                                         **_notification_kwargs(app, task_id=task_id or ""),
                                          **runtime_kwargs)
     except Exception as e:
         # docs/90 刀3a 收口:异常也落卡终态(与 REST 同语义;人话化在 tasks.finish 咽喉)
         if task_reg is not None and task_id is not None:
             task_reg.finish(task_id, error=str(e))
         fail_drive_turn(mgr, _turn_handle, str(e))   # 挂起轮回填失败态,不留僵尸 pending
-        await websocket.send_json({
+        await _send_json_safe(websocket, {
             "type": "drive_done",
             "payload": {"intent": intent, "error": str(e), "brain": "SLOW", "text": "",
                         "recall_used": _recall_used},
@@ -571,7 +590,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
     _payload["task_id"] = outcome.task_id or ""
     if _recall_as_of is not None:
         _payload["recall_as_of"] = _recall_as_of   # docs/69 Q4:按此时点召回(chip 标"按 X 时点的记忆")
-    await websocket.send_json({"type": "drive_done", "payload": _payload})
+    await _send_json_safe(websocket, {"type": "drive_done", "payload": _payload})
 
     # docs/90 刀3c 时机能力提示:WS 直接聊天 = 用户**手动**发起的运行 —— 成功完成就旁路 bump
     # 手动运行计数(fire-and-forget,已发完 drive_done 才触发,不挡响应);攒到第 N 次且三道门

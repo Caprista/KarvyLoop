@@ -98,6 +98,10 @@ async def drive_in_tui(
     schedule_parser: Any = None,  # NL→cron 解析闭包(make_schedule_parser);None=工具仍挂但调用时诚实回"没接LLM"
     schedule_target_resolver: Any = None,  # (role_name)->(did,role,aid,disp):把委派角色名解析成定时目标;None=不解析
     memory: Any = None,           # 小卡随聊能力:给了+小卡人格 → 挂 remember_fact/recall_memory;None=不挂(0 回归)
+    notification_store: Any = None,
+    notification_actor_id: str = "",
+    notification_task_id: str = "",
+    notification_trace_ref: str = "",
     citizen_registry: Any = None,  # 跨 runtime 协作(docs/71):给了+小卡人格 → 挂 external_agent/attach/list;None=不挂(0 回归)
     external_bridge_factory: Any = None,  # (DriveRecipe)->Bridge;None=用内置 subprocess bridge_factory
     external_a2a_router: Any = None,      # 派活走信封+审计链(须 citizen-aware resolver 构造);None=跳过 route
@@ -138,8 +142,18 @@ async def drive_in_tui(
     # 小卡人格(karvy_self)+ 对应 registry/store 存在才挂,capability 护栏照走。业务角色 persona
     # 无 karvy_self 标记 → 不挂(定时任务收口在小卡;记忆是全局个人库,业务角色不直接写)。
     # 任一条件不满足 = 旧行为(0 回归)。挂载不看意图门(排程/记忆意图与"建 agent"不同门)。
+    _karvy_tools = {}
+    if notification_store is not None:
+        from karvyloop.notifications import make_notify_user_tool
+        _actor_id = notification_actor_id or str(getattr(persona, "agent_id", "") or getattr(persona, "role", "") or ("karvy_self" if getattr(persona, "karvy_self", False) else "persona"))
+        _t = make_notify_user_tool(
+            store=notification_store, actor_id=_actor_id, task_id=notification_task_id,
+            trace_ref=notification_trace_ref, actor_type="agent",
+            current_user_id=str(getattr(persona, "agent_id", "") or ""),
+            preauthorized=bool(getattr(persona, "karvy_self", False)),
+        )
+        _karvy_tools[_t.name] = _t
     if getattr(persona, "karvy_self", False):
-        _karvy_tools = {}
         try:
             if scheduler_store is not None:
                 from karvyloop.karvy.tools import make_create_schedule_tool
@@ -191,9 +205,9 @@ async def drive_in_tui(
         except Exception:
             logger.warning("[drive] 挂小卡随聊能力工具失败(降级=只这些工具缺席,不挡对话)",
                            exc_info=True)
-        if _karvy_tools:
-            mcp_tools = dict(mcp_tools) if isinstance(mcp_tools, dict) else {}
-            mcp_tools.update(_karvy_tools)
+    if _karvy_tools:
+        mcp_tools = dict(mcp_tools) if isinstance(mcp_tools, dict) else {}
+        mcp_tools.update(_karvy_tools)
 
     def _run_drive() -> DriveOutcome:
         slow_brain = None

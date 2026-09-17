@@ -31,6 +31,9 @@ write_file/edit_file/web_fetch/web_search/reconcile_receipt/create_schedule/reme
 recall_memory/create_role/create_domain/external_agent(起外部子进程,FULL 闸另管)/
 attach_/list_/revoke_external_agent —— **没有一个落在"对外发送"语义**(channels 的 email
 digest 是系统通道非 agent 工具;web_fetch 是读)。判定表对内置工具全量零命中,有测试锁着。
+唯一例外 = notify_user(通知平台工具,名字含 "notify" 会命中发送动词):它自具治理链
+(策略审批 → notification_outbox → 决策卡拍板 → dispatcher),在判定面里**结构性豁免**
+(_PLATFORM_EXEMPT)—— 截进 outbound_draft 是死路(ACCEPT 兑现回查不到 per-drive 挂载的工具)。
 
 **fail-closed**:--no-llm/测试桩/无 store(CLI 裸跑)场景,截住但注册不了草稿 →
 回执=「外发通道未接,草稿未能递交」,**绝不放行直发**。安全方向只收紧不放松。
@@ -167,6 +170,17 @@ def clear_outbound_bypass() -> None:
     _outbound_bypass.clear()
 
 
+# 平台自治理工具豁免(docs/96 刀0 判定面的显式例外):
+# notify_user 是平台通知能力,自具完整治理链(策略审批 → notification_outbox →
+# notification_approval 决策卡/REST 拍板 → dispatcher 真投递)。它名字里的 "notify"
+# 会命中 SEND_SELF_SUFFICIENT,但把调用截成 outbound_draft 卡是**死路**:
+# ACCEPT 兑现 handler 只回查 runtime_kwargs["mcp_tools"](该工具每轮 drive 动态挂载,
+# 不在那个池里)→ 批准后找不到工具,发送落空。豁免 = 判定面结构性例外(builtin 清单
+# 同源),不是放行 —— 审批语义由 notify_user 自己的策略闸承担,比草稿闸更细(带收件人
+# 解析、幂等、投递状态审计)。
+_PLATFORM_EXEMPT = frozenset({"notify_user"})
+
+
 # ---- 来源可信档(docs/98 刀1:已策展 vs 未策展 server)----
 # 已策展 server = 我们预设目录里、经我们 vet 过的(mcp_manager 接入 preset 时登记)。
 # 未策展 server(官方 Registry / 任意 URL)的**名字判不出**的工具,规则 10 由"放行"翻成
@@ -225,6 +239,8 @@ def is_outbound_send_tool(tool: str, *, extra_outbound: Iterable[str] = (),
     if not raw:
         return False
     norm = _norm_name(raw)
+    if norm in _PLATFORM_EXEMPT:
+        return False   # 平台自治理工具(notify_user 自具审批链),见 _PLATFORM_EXEMPT 注
     if norm in _curated_outbound:
         return True
     if extra_outbound:

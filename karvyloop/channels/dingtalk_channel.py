@@ -22,6 +22,7 @@ import asyncio
 import logging
 import re
 import threading
+import time
 from typing import Any, Awaitable, Callable, Optional
 
 from karvyloop.config_channels import DingTalkChannelConfig
@@ -30,6 +31,11 @@ logger = logging.getLogger(__name__)
 
 # 拒驱动回执(白名单外):一条固定话,不烧模型
 REFUSAL_TEXT = "这个机器人仅对授权用户开放。"
+
+# Stream 回调是至少一次投递。msgId 在短窗口内只允许进入一次，既覆盖平台重投，
+# 也避免短暂重连时同一条回调又驱动一遍 Agent。
+_MESSAGE_DEDUP_TTL_S = 15 * 60
+_MESSAGE_DEDUP_MAX_ITEMS = 4096
 
 
 def _split_markdown_table_row(line: str) -> list[str]:
@@ -184,6 +190,9 @@ class _DingTalkDelivery:
                             if start_card is not None else None)
                     if not getattr(card, "card_instance_id", None):
                         raise RuntimeError("AI 卡片创建未返回有效实例")
+                    # 走到这里代表卡片已经发到钉钉。后续更新失败时绝不能另发
+                    # Markdown，否则群里会留下两条 Agent 回复。
+                    self.card = card
                     # SDK 模板默认包含空按钮槽位和灰色来源栏，回复卡片无需展示。
                     if hasattr(card, "set_order"):
                         order = getattr(card, "order", None)
@@ -195,25 +204,32 @@ class _DingTalkDelivery:
                     incoming = getattr(card, "incoming_message", None)
                     if incoming is not None and hasattr(incoming, "hosting_context"):
                         incoming.hosting_context = None
-                    self.card = card
                 except Exception:
-                    logger.warning("[dingtalk] AI 卡片创建失败，改用 Markdown 消息", exc_info=True)
-                    await self.markdown(text)
+                    if self.card is None:
+                        logger.warning("[dingtalk] AI 卡片创建失败，改用 Markdown 消息", exc_info=True)
+                        await self.markdown(text)
+                    else:
+                        logger.warning("[dingtalk] AI 卡片已创建但初始化失败，不再另发 Markdown", exc_info=True)
                     return
 
                 normalized = _normalize_dingtalk_markdown(text)
                 try:
                     await asyncio.to_thread(card.ai_streaming, normalized, append=False)
                 except Exception:
-                    logger.warning("[dingtalk] AI 卡片正文写入失败，改用 Markdown 消息", exc_info=True)
-                    await self.markdown(text)
+                    # `ai_finish(markdown=...)` 仍能覆盖不少仅流式 API 失败的情形；
+                    # 两次都失败时宁可保留这一张卡，也不能再生成第二条 Markdown。
+                    logger.warning("[dingtalk] AI 卡片正文写入失败，尝试在原卡收敛", exc_info=True)
+                    try:
+                        await asyncio.to_thread(card.ai_finish, markdown=normalized)
+                    except Exception:
+                        logger.warning("[dingtalk] AI 卡片收敛失败，保留原卡且不重复发送", exc_info=True)
                     return
 
                 try:
                     await asyncio.to_thread(card.ai_finish, markdown=normalized)
                 except Exception:
-                    logger.warning("[dingtalk] AI 卡片收敛失败，改用 Markdown 消息", exc_info=True)
-                    await self.markdown(text)
+                    # 卡片正文已经写入，外发 Markdown 会让用户看到两次同一回复。
+                    logger.warning("[dingtalk] AI 卡片收敛失败，保留原卡且不重复发送", exc_info=True)
             finally:
                 self.finished = True
 
@@ -283,6 +299,7 @@ def _extract(payload: dict) -> dict:
         "sender": sender,
         "chat": chat,
         "text": text,
+        "message_id": str(d.get("msgId") or d.get("messageId") or "").strip(),
         "sender_nick": str(d.get("senderNick") or "").strip(),
         "chat_type": chat_type,
         "chat_title": str(d.get("conversationTitle") or "").strip(),
@@ -355,10 +372,13 @@ async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
         vm = getattr(domain, "value_md", None)
         governance = (getattr(vm, "text", None) or "") if vm is not None else ""
     from karvyloop.workbench.main_loop_bridge import drive_in_tui
+    from karvyloop.notifications.runtime import notification_drive_kwargs
     try:
         outcome = await drive_in_tui(
             text, ml, ctx=ctx, governance=governance, persona=persona, scope=scope,
-            on_event=on_event, **rk)
+            on_event=on_event,
+            **notification_drive_kwargs(app),   # notify_user 平台能力(未接运行时=空 splat,0 回归)
+            **rk)
     except Exception as e:
         logger.warning("[dingtalk] drive 失败(chat=%s): %s", chat_id, e)
         return f"(小卡这轮跑挂了:{type(e).__name__} —— 回 console 看看任务面板)"
@@ -449,6 +469,16 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
             except Exception:
                 pass
         return
+    # 通知运行时:白名单 sender 的会话自动登记为可推送目标(user:<staffId>/conversation:<cid>)。
+    # best-effort:登记失败只 debug,绝不挡消息驱动。
+    try:
+        _nt = getattr(app.state, "notification_runtime", None)
+        if _nt is not None:
+            from karvyloop.notifications.runtime import register_dingtalk_binding
+            register_dingtalk_binding(_nt.store, cfg, sender=sender, chat=chat,
+                                      chat_type=info["chat_type"])
+    except Exception:
+        logger.debug("[dingtalk] 通知 binding 登记失败(旁路忽略)", exc_info=True)
     if processing_fn is not None:
         await processing_fn()
     if text == "/new":
@@ -505,6 +535,41 @@ class DingTalkChannel:
         self._client: Any = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._refused: set = set()   # 本实例已拒过的 sender(实例级,多机器人互不吃对方的名单)
+        self._recent_message_ids: dict[str, float] = {}
+        self._message_lock = threading.Lock()
+        self._background_tasks: set[asyncio.Task] = set()
+
+    def _claim_message(self, message_id: str) -> bool:
+        """原子地领取一条 Stream 消息；重复投递返回 False。"""
+        if not message_id:
+            return True
+        now = time.monotonic()
+        with self._message_lock:
+            expired = [key for key, seen_at in self._recent_message_ids.items()
+                       if now - seen_at >= _MESSAGE_DEDUP_TTL_S]
+            for key in expired:
+                self._recent_message_ids.pop(key, None)
+            if message_id in self._recent_message_ids:
+                return False
+            self._recent_message_ids[message_id] = now
+            while len(self._recent_message_ids) > _MESSAGE_DEDUP_MAX_ITEMS:
+                self._recent_message_ids.pop(next(iter(self._recent_message_ids)))
+            return True
+
+    def _track_background_task(self, task: asyncio.Task) -> None:
+        """持有 ACK 后的任务，并把未预期异常完整写进通道日志。"""
+        self._background_tasks.add(task)
+
+        def _done(completed: asyncio.Task) -> None:
+            self._background_tasks.discard(completed)
+            if completed.cancelled():
+                return
+            try:
+                completed.result()
+            except Exception:
+                logger.exception("[dingtalk] ACK 后的入站任务异常退出")
+
+        task.add_done_callback(_done)
 
     def start(self, loop: asyncio.AbstractEventLoop) -> bool:
         """起通道(成功 True)。SDK 缺席/起失败 → False + 日志明说,不影响 console。"""
@@ -520,32 +585,42 @@ class DingTalkChannel:
         class _Handler(dingtalk_stream.ChatbotHandler):
             async def process(self, callback):  # noqa: ANN001
                 data = getattr(callback, "data", {}) or {}
-                holder: dict = {}
                 from dingtalk_stream import ChatbotMessage
                 msg = ChatbotMessage.from_dict(data)
-                delivery = _DingTalkDelivery(self, msg)
 
-                def _reply(text: str) -> None:
-                    holder["reply"] = text
+                message_id = _extract(data)["message_id"]
+                if not channel._claim_message(message_id):
+                    logger.info("[dingtalk] 忽略重复 Stream 回调 msgId=%s", message_id)
+                    from dingtalk_stream import AckMessage
+                    return AckMessage.STATUS_OK, "OK"
 
-                fut = asyncio.run_coroutine_threadsafe(
-                    handle_incoming(channel._app, channel._cfg, data, _reply,
-                                    refused=channel._refused), loop)
-                try:
-                    await asyncio.to_thread(fut.result)
-                except Exception as e:
-                    logger.warning("[dingtalk] 入站处理失败: %s", e)
-                    holder["reply"] = "(这条处理失败了,回 console 看日志)"
-                text = holder.get("reply")
-                if text:
+                async def _handle_after_ack() -> None:
+                    holder: dict = {}
+                    delivery = _DingTalkDelivery(self, msg)
+
+                    def _reply(text: str) -> None:
+                        holder["reply"] = text
+
+                    fut = asyncio.run_coroutine_threadsafe(
+                        handle_incoming(channel._app, channel._cfg, data, _reply,
+                                        refused=channel._refused), loop)
                     try:
-                        await delivery.finish(
-                            text,
-                            start_card=lambda: self.ai_markdown_card_start(
-                                msg, title="AI 回复"),
-                        )
+                        await asyncio.wrap_future(fut)
                     except Exception as e:
-                        logger.warning("[dingtalk] 回复发送失败: %s", e)
+                        logger.warning("[dingtalk] 入站处理失败: %s", e)
+                        holder["reply"] = "(这条处理失败了,回 console 看日志)"
+                    text = holder.get("reply")
+                    if text:
+                        try:
+                            await delivery.finish(
+                                text,
+                                start_card=lambda: self.ai_markdown_card_start(
+                                    msg, title="AI 回复"),
+                            )
+                        except Exception as e:
+                            logger.warning("[dingtalk] 回复发送失败: %s", e)
+
+                channel._track_background_task(asyncio.create_task(_handle_after_ack()))
                 from dingtalk_stream import AckMessage
                 return AckMessage.STATUS_OK, "OK"
 
