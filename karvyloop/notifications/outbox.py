@@ -197,7 +197,7 @@ class OutboxStore:
             return cur.rowcount == 1
 
     def _aggregate(self, did: str) -> None:
-        row=self._conn.execute("SELECT notification_id FROM notification_deliveries WHERE id=?",(did,)).fetchone();
+        row=self._conn.execute("SELECT notification_id FROM notification_deliveries WHERE id=?",(did,)).fetchone()
         if not row: return
         vals=[r[0] for r in self._conn.execute("SELECT status FROM notification_deliveries WHERE notification_id=?",(row[0],)).fetchall()]
         status=OutboxStatus.DELIVERED.value if vals and all(v==DeliveryStatus.DELIVERED.value for v in vals) else (OutboxStatus.FAILED.value if vals and all(v==DeliveryStatus.FAILED.value for v in vals) else OutboxStatus.PARTIALLY_DELIVERED.value)
