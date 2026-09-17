@@ -361,8 +361,8 @@ var KarvyModelsPanelBundle = (function(exports) {
     }));
     wrap.appendChild(msg);
   }
-  async function _finishOnboardingSave(saved, modelId, msg, onDone) {
-    await _postJSON("/api/model/set_default", { model_id: modelId, role: "chat" });
+  async function _finishOnboardingSave(saved, p, msg, onDone) {
+    await _postJSON("/api/model/set_default", { model_id: p.model_id, role: "chat" });
     _setMsg(msg, true, t("onb.validating"));
     const v = await _postJSON("/api/model/validate", {});
     const needRestart = !!saved.restart_required;

@@ -28,6 +28,12 @@ API_ONLY = {
     "/api/external/claim",      # 认领码反向接入回调:外部 runtime 的连接器 POST 秘钥回连,设计上无 UI caller(前端只调 create_pending/cancel_pending/citizens)
     "/api/mesh/frontier",       # 设备 mesh 日志同步:**设备间**接口,由 `mesh sync` 客户端经 relay 调(不是 web UI)——docs/74
     "/api/mesh/sync",           # 同上:对端推 delta / 拉本机 delta,device-to-device,无 web 前端 caller
+    # notify_user 通知面(通知能力):拍板 UI 走 notification_approval 决策卡(经 /api/h2a_decide,
+    # 已接前端);这三个是程序化/脚本备用面(列表/待审/批准驳回),非 UI 按钮。
+    "/api/notifications",
+    "/api/notifications/pending",
+    "/api/notifications/{notification_id}/approve",
+    "/api/notifications/{notification_id}/reject",
     "/api/oauth/callback",      # 跨机 OAuth 回调落点(docs/43+96 刀2):OAuth 厂商授权后把浏览器 **302 重定向**到这里,不是 app.js fetch。返回"可关页"HTML,由 broker 按 state 唤醒等待中的授权流程。跨机连接流程(发起 UI)接线是 finishing 步(docs/43 待接①②)
     # #54 逃生门 workflow 续/丢/查(pending_resume/resume/discard)已接前端 app.js 顶部横幅
     # (fetchPendingResume + 续跑/丢弃按钮,docs/56 ②)→ 不再是 API_ONLY,已从白名单移除。
