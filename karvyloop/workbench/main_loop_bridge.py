@@ -153,14 +153,21 @@ async def drive_in_tui(
             preauthorized=bool(getattr(persona, "karvy_self", False)),
         )
         _karvy_tools[_t.name] = _t
+    # Scheduling is platform-owned.  OA_A is the only bound business role
+    # currently authorized to submit OA scanning schedules; other roles keep
+    # the historical karvy-self-only behavior.
+    _schedule_role = str(getattr(persona, "role", "") or getattr(persona, "agent_id", ""))
+    if scheduler_store is not None and (_schedule_role == "OA_A" or getattr(persona, "karvy_self", False)):
+        try:
+            from karvyloop.karvy.tools import make_create_schedule_tool
+            _t = make_create_schedule_tool(
+                scheduler_store=scheduler_store, schedule_parser=schedule_parser,
+                target_resolver=schedule_target_resolver)
+            _karvy_tools[_t.name] = _t
+        except Exception:
+            logger.warning("[drive] 挂 create_schedule 失败", exc_info=True)
     if getattr(persona, "karvy_self", False):
         try:
-            if scheduler_store is not None:
-                from karvyloop.karvy.tools import make_create_schedule_tool
-                _t = make_create_schedule_tool(
-                    scheduler_store=scheduler_store, schedule_parser=schedule_parser,
-                    target_resolver=schedule_target_resolver)
-                _karvy_tools[_t.name] = _t
             if memory is not None:
                 from karvyloop.karvy.tools import (
                     make_recall_memory_tool, make_remember_fact_tool,

@@ -324,6 +324,24 @@ async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
     if ml is None:
         return "(引擎未接,暂时没法回答 —— console 是否以 --no-llm 起的?)"
 
+    # Parse short OA commands deterministically so the model receives the exact
+    # requested indexes/action; execution still goes through OA guards below.
+    try:
+        from karvyloop.oa.intent import parse_oa_intent, parse_rule_intent
+        rule_intent = parse_rule_intent(text, source="dingtalk")
+        if rule_intent is not None:
+            # This is a routing guard as well as context for the model: rule
+            # creation must never fall through to the approval-start flow.
+            text = (f"[结构化规则意图] ROUTE=create_rule; kind={rule_intent.kind}; "
+                    "最高优先级：必须先预览/模拟，用户确认后才能保存；"
+                    "禁止调用开始审批、查询待办或自动批准流程。\n原始请求:" + text)
+        parsed = parse_oa_intent(text, source="dingtalk")
+        if parsed is not None:
+            text = (f"[结构化审批指令] action={parsed.action}; indexes={list(parsed.indexes)}; "
+                    f"remark={parsed.remark!r}; target={parsed.target!r}\n原始请求:{text}")
+    except Exception:
+        pass
+
     # 1) 绑定 role → persona(paradigm 编译;tool_preset 自动带上)
     role_reg = getattr(app.state, "role_registry", None)
     rv = None
@@ -373,12 +391,85 @@ async def drive_channel_message(app: Any, cfg: DingTalkChannelConfig, *,
         governance = (getattr(vm, "text", None) or "") if vm is not None else ""
     from karvyloop.workbench.main_loop_bridge import drive_in_tui
     from karvyloop.notifications.runtime import notification_drive_kwargs
+    # OA 编号快照只在通道边界维护：模型看到的编号来自最近一次列表结果，
+    # 工具完成后推进游标；适配器仍会在每次写操作前实时校验待办。
+    _snapshot_store = getattr(app.state, "approval_snapshots", None)
+    _snapshot_instance = ""
     try:
-        outcome = await drive_in_tui(
-            text, ml, ctx=ctx, governance=governance, persona=persona, scope=scope,
-            on_event=on_event,
-            **notification_drive_kwargs(app),   # notify_user 平台能力(未接运行时=空 splat,0 回归)
-            **rk)
+        from karvyloop.channels.dingtalk_runtime import config_instance_id
+        _snapshot_instance = config_instance_id(cfg)
+    except Exception:
+        pass
+    _snapshot_chat = chat_id or "unknown"
+    _tool_names: dict[str, str] = {}
+
+    # Bind rule preview/commit tokens to this exact OA instance, conversation,
+    # and sender.  The MCP adapter reads this context in the worker thread and
+    # injects scope_key only for the three rule lifecycle tools.
+    _oa_scope_key = "/".join((
+        str(_snapshot_instance or "unknown").replace("/", "%2F"),
+        str(_snapshot_chat).replace("/", "%2F"),
+        str(sender or "unknown").replace("/", "%2F"),
+    ))
+
+    def _snapshot_event(ev: Any) -> None:
+        try:
+            kind = ev.get("type") if isinstance(ev, dict) else ""
+            if kind == "tool_call":
+                tool_id = str(ev.get("id") or ev.get("tool_use_id") or "")
+                if tool_id:
+                    _tool_names[tool_id] = str(ev.get("name") or "")
+            elif kind == "tool_result" and _snapshot_store is not None:
+                tool_id = str(ev.get("tool_use_id") or "")
+                tool_name = _tool_names.get(tool_id, "")
+                output = ev.get("output")
+                if isinstance(output, str):
+                    try:
+                        import json as _json
+                        output = _json.loads(output)
+                    except Exception:
+                        output = None
+                if not isinstance(output, dict):
+                    output = {}
+                if tool_name.endswith("get_doing_workflow_request_list"):
+                    mapping = output.get("index_map")
+                    if isinstance(mapping, dict) and _snapshot_instance:
+                        _snapshot_store.put(_snapshot_instance, _snapshot_chat, mapping)
+                elif tool_name.endswith(("submit_request", "reject_request", "forward_request")):
+                    request_id = str(output.get("request_id") or "")
+                    status = str(output.get("status") or "").lower()
+                    if request_id and status in {"approved", "success", "completed", "failed", "skipped"}:
+                        view = _snapshot_store.view(_snapshot_instance, _snapshot_chat)
+                        mapping = view.get("mapping", {}) if isinstance(view, dict) else {}
+                        indexes = [int(index) for index, rid in mapping.items() if str(rid) == request_id]
+                        if indexes:
+                            if status in {"approved", "success", "completed"}:
+                                _snapshot_store.mark(_snapshot_instance, _snapshot_chat, completed=indexes)
+                            else:
+                                _snapshot_store.mark(_snapshot_instance, _snapshot_chat, failed=indexes)
+        except Exception:
+            logger.debug("[dingtalk] OA 快照游标更新失败", exc_info=True)
+        if on_event is not None:
+            try:
+                on_event(ev)
+            except Exception:
+                pass
+    try:
+        from karvyloop.coding.tools.mcp_tool import oa_scope_key
+        # The platform scheduler is injected here for bound roles. The bridge
+        # applies the final role gate (currently OA_A/karvy-self only).
+        from karvyloop.console.routes_schedules import (
+            _schedule_parser, _scheduler_store, _resolve_schedule_target,
+        )
+        with oa_scope_key(_oa_scope_key):
+            outcome = await drive_in_tui(
+                text, ml, ctx=ctx, governance=governance, persona=persona, scope=scope,
+                on_event=_snapshot_event,
+                scheduler_store=_scheduler_store(app),
+                schedule_parser=_schedule_parser(app),
+                schedule_target_resolver=lambda role_name: _resolve_schedule_target(app, role_name),
+                **notification_drive_kwargs(app),   # notify_user 平台能力(未接运行时=空 splat,0 回归)
+                **rk)
     except Exception as e:
         logger.warning("[dingtalk] drive 失败(chat=%s): %s", chat_id, e)
         return f"(小卡这轮跑挂了:{type(e).__name__} —— 回 console 看看任务面板)"
@@ -490,7 +581,11 @@ async def handle_incoming(app: Any, cfg: DingTalkChannelConfig, payload: dict,
             from karvyloop.domain import Address
             peer = Address(domain_id=(cfg.domain_id or "l0"), role="channel",
                            agent_id=f"dingtalk:{chat or 'unknown'}")
-            conv = mgr.new_channel_conversation(peer)
+            snapshots = getattr(app.state, "approval_snapshots", None)
+            if snapshots is not None:
+                snapshots.clear(config_instance_id(cfg), chat or "unknown")
+            # /new 是硬重置：旧审批详情不能通过 trace 摘要在新会话中被召回。
+            conv = mgr.new_channel_conversation(peer, summarize_previous=False)
         except Exception:
             logger.warning("[dingtalk] /new 新建通道会话失败(chat=%s)", chat, exc_info=True)
             reply_fn("(新建会话失败，请稍后重试)")

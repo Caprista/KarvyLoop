@@ -636,6 +636,8 @@ def build_console_app(
         # 配置缺/未启用 → 不起(零负担);SDK 未装(karvyloop[dingtalk])→ 日志明说,不炸启动。
         app.state.dingtalk_channel = None
         app.state.dingtalk_channels = []
+        from karvyloop.channels.dingtalk_runtime import ApprovalSnapshotStore
+        app.state.approval_snapshots = ApprovalSnapshotStore()
         try:
             from karvyloop.config_channels import load_dingtalk_channel_configs
             _dt_cfgs = load_dingtalk_channel_configs(
@@ -928,6 +930,7 @@ def build_console_app(
     app.state.pending_channel_senders = PendingSenderCache()
     app.state.dingtalk_channel = None
     app.state.dingtalk_channels = []
+    app.state.approval_snapshots = None
     app.state.notification_runtime = None   # notify_user 运行时(lifespan 起时按钉钉配置接;None=未接)
     app.state.notification_dispatch_task = None
     app.state.ws_clients = set()  # 立即 set,lifespan 里也 set 同引用

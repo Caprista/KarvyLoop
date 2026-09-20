@@ -448,11 +448,13 @@ class ConversationStore:
         return metas
 
     def most_recent(self, peer: Address) -> Optional[Conversation]:
-        """该 peer 最近活跃的一段(默认续上,CV-6)。无则 None。"""
+        """该 peer 最近仍开放的一段(默认续上,CV-6)。无则 None。"""
         metas = self.list_conversations(peer)
-        if not metas:
-            return None
-        return self.load(peer, metas[0].id)
+        for meta in metas:
+            # 已沉淀/显式重置的会话不能被迟到的旧请求重新选为活动上下文。
+            if meta.closed_at is None:
+                return self.load(peer, meta.id)
+        return None
 
     def iter_all_metas(self) -> list[ConversationMeta]:
         """跨**所有** peer 扫历史 meta(用于"哪些对象沟通过 + 最近何时";左栏私聊/群聊排序)。
@@ -807,9 +809,19 @@ class ConversationManager:
         (外部通道的消息不许抢用户 web 聊天现场)。"""
         return self._store.most_recent(peer) or self._store.new(peer)
 
-    def new_channel_conversation(self, peer: Address, title: str = "") -> Conversation:
-        """为外部通道开新对话并沉淀旧对话，不切换 console 当前对话。"""
-        self._summarize_to_trace(self._store.most_recent(peer))
+    def new_channel_conversation(self, peer: Address, title: str = "",
+                                 *, summarize_previous: bool = True) -> Conversation:
+        """为外部通道开新对话，不切换 console 当前对话。
+
+        ``summarize_previous`` 默认保持历史行为；显式重置会话时应关闭它，
+        否则旧通道上下文会被写入全局 trace，后续角色召回仍可能重新带回旧内容。
+        """
+        previous = self._store.most_recent(peer)
+        if summarize_previous:
+            self._summarize_to_trace(previous)
+        elif previous is not None:
+            # /new 的硬边界：迟到的旧请求即使回写旧文件，也不能让它重新成为活动会话。
+            self._store.close(previous, reason="channel_reset")
         return self._store.new(peer, title)
 
     def record_channel_turn(self, peer: Address, conv: Conversation,

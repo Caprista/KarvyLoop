@@ -1,0 +1,24 @@
+role: OA_A
+created_by: console
+atoms: []
+skills: []
+# This is the executable OA allowlist. Scheduling remains owned by the
+# KarvyLoop platform scheduler; OA_A may submit a schedule through the
+# governed create_schedule tool when the platform injects it.
+tools:
+  - tool: mcp_oa_get_doing_workflow_request_list
+  - tool: mcp_oa_get_workflow_request
+  - tool: mcp_oa_get_workflow_request_summary
+  - tool: mcp_oa_get_approval_habits
+  - tool: mcp_oa_get_request_operator_info
+  - tool: mcp_oa_submit_request
+  - tool: mcp_oa_reject_request
+  - tool: mcp_oa_forward_request
+  - tool: mcp_oa_auto_approve_by_rule
+  - tool: mcp_oa_list_approval_rules
+  - tool: mcp_oa_set_approval_rule
+  - tool: mcp_oa_preview_approval_rule
+  - tool: mcp_oa_simulate_approval_rule
+  - tool: mcp_oa_disable_approval_rule
+  - tool: mcp_oa_delete_approval_rule
+  - tool: create_schedule

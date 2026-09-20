@@ -4,12 +4,86 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+import uuid
 from typing import Any, Iterable
 
 from karvyloop.config_channels import DingTalkChannelConfig
+from karvyloop.oa.approval_service import ApprovalSnapshotStore
 
 PENDING_SENDER_TTL_S = 24 * 60 * 60
 PENDING_SENDER_MAX_ITEMS = 1000
+APPROVAL_SNAPSHOT_TTL_S = 10 * 60
+
+
+class LegacyApprovalSnapshotStore:
+    """Per-chat todo snapshots and execution cursors.
+
+    This is deliberately a state boundary: model text is never used as the
+    source of truth for an index -> requestId mapping.
+    """
+
+    def __init__(self, ttl_s: float = APPROVAL_SNAPSHOT_TTL_S) -> None:
+        self.ttl_s = ttl_s
+        self._items: dict[tuple[str, str], dict[str, Any]] = {}
+        self._lock = threading.RLock()
+
+    def put(self, instance_id: str, chat_id: str,
+            mapping: dict[int, str], *, now: float | None = None) -> dict[str, Any]:
+        current = time.time() if now is None else now
+        normalized = {int(k): str(v) for k, v in mapping.items() if int(k) > 0 and str(v)}
+        item = {
+            "snapshot_id": uuid.uuid4().hex,
+            "instance_id": instance_id,
+            "chat_id": chat_id,
+            "mapping": normalized,
+            "completed": set(),
+            "failed": set(),
+            "created_at": current,
+            "expires_at": current + self.ttl_s,
+        }
+        with self._lock:
+            self._items[(instance_id, chat_id)] = item
+        return self.view(instance_id, chat_id, now=current)
+
+    def resolve(self, instance_id: str, chat_id: str, indexes: tuple[int, ...], *,
+                now: float | None = None) -> tuple[dict[int, str], str]:
+        current = time.time() if now is None else now
+        with self._lock:
+            item = self._items.get((instance_id, chat_id))
+            if item is None or item["expires_at"] <= current:
+                return {}, "EXPIRED"
+            missing = [index for index in indexes if index not in item["mapping"]]
+            if missing:
+                return {}, "UNKNOWN_INDEX"
+            selected = {index: item["mapping"][index] for index in indexes
+                        if index not in item["completed"]}
+            return selected, "OK"
+
+    def mark(self, instance_id: str, chat_id: str, *, completed=(), failed=()) -> None:
+        with self._lock:
+            item = self._items.get((instance_id, chat_id))
+            if item is None:
+                return
+            item["completed"].update(int(index) for index in completed)
+            item["failed"].update(int(index) for index in failed)
+
+    def clear(self, instance_id: str, chat_id: str) -> None:
+        with self._lock:
+            self._items.pop((instance_id, chat_id), None)
+
+    def view(self, instance_id: str, chat_id: str, *, now: float | None = None) -> dict[str, Any]:
+        current = time.time() if now is None else now
+        with self._lock:
+            item = self._items.get((instance_id, chat_id))
+            if item is None or item["expires_at"] <= current:
+                return {"status": "EXPIRED"}
+            return {
+                "status": "OK", "snapshot_id": item["snapshot_id"],
+                "mapping": dict(item["mapping"]),
+                "completed": sorted(item["completed"]),
+                "failed": sorted(item["failed"]),
+                "expires_at": item["expires_at"],
+            }
 
 
 class PendingSenderCache:

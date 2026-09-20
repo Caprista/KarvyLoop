@@ -109,6 +109,30 @@ def test_new_conversation_without_trace_index_ok(store: ConversationStore) -> No
     assert c2 is not None
 
 
+def test_new_channel_conversation_can_hard_reset_without_trace_summary(
+    store: ConversationStore,
+) -> None:
+    """外部通道 /new 不应把旧审批上下文重新写入全局召回 trace。"""
+    from karvyloop.domain import Address
+
+    trace = _FakeTraceIndex()
+    mgr = ConversationManager(store, trace_index=trace)
+    peer = Address(domain_id="l0", role="channel", agent_id="dingtalk:c1")
+    old = mgr.channel_conversation(peer)
+    mgr.record_channel_turn(peer, old, user_intent="旧审批详情", agent_response="旧回复")
+
+    fresh = mgr.new_channel_conversation(peer, summarize_previous=False)
+
+    assert fresh.id != old.id
+    assert fresh.turn_count == 0
+    assert trace.summaries == []
+    assert old.closed_at is not None
+
+    # 旧请求迟到回写旧文件时，自动续接仍必须留在 fresh。
+    mgr.record_channel_turn(peer, old, user_intent="迟到旧请求", agent_response="旧回复")
+    assert mgr.channel_conversation(peer).id == fresh.id
+
+
 # ---- AC6-AC7: resume / list ----
 
 

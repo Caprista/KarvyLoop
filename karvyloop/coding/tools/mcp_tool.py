@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import threading
 import time
 from typing import Any, Optional
@@ -22,6 +24,36 @@ from typing import Any, Optional
 from karvyloop.mcp_client import sanitize_untrusted_text
 
 from ._result import CodingResult
+
+
+# OA rule preview/commit tokens must be bound to the channel conversation that
+# created them.  The MCP tool objects are shared by all channels, so the
+# active scope is carried as a per-task context value instead of mutable tool
+# state.  ``asyncio.to_thread`` propagates contextvars into the agent worker.
+_OA_SCOPE_KEY: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "karvyloop_oa_scope_key", default="")
+
+
+def current_oa_scope_key() -> str:
+    """Return the current channel-bound OA rule scope, if any."""
+    return _OA_SCOPE_KEY.get()
+
+
+@contextlib.contextmanager
+def oa_scope_key(scope_key: str):
+    """Temporarily bind OA preview/commit calls to ``scope_key``."""
+    token = _OA_SCOPE_KEY.set(str(scope_key or ""))
+    try:
+        yield
+    finally:
+        _OA_SCOPE_KEY.reset(token)
+
+
+_OA_SCOPED_RULE_TOOLS = frozenset({
+    "preview_approval_rule",
+    "simulate_approval_rule",
+    "set_approval_rule",
+})
 
 
 class McpUsageCounter:
@@ -149,8 +181,16 @@ class McpAgentTool:
                 self._usage.release()
 
     async def _do_call(self, inp: dict) -> CodingResult:
+        # Only OA rule lifecycle tools accept scope_key.  Do not append an
+        # unknown argument to unrelated MCP tools, and force the channel scope
+        # over model-supplied input to prevent cross-conversation token reuse.
+        call_input = dict(inp or {})
+        active_scope = current_oa_scope_key()
+        if (str(self._server_name).lower() in {"oa", "oa_mcp"} and
+                self._mcp_tool_name in _OA_SCOPED_RULE_TOOLS and active_scope):
+            call_input["scope_key"] = active_scope
         try:
-            result = await self._call_tool(inp)
+            result = await self._call_tool(call_input)
         except Exception as e:
             return CodingResult(ok=False, payload=None, error_code=4,
                                 error_message=f"MCP 工具 '{self._mcp_tool_name}'"

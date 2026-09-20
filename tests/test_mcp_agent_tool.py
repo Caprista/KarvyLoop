@@ -12,7 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from karvyloop.coding.tools.mcp_tool import (  # noqa: E402
-    McpAgentTool, mcp_tools_from_session,
+    McpAgentTool, mcp_tools_from_session, oa_scope_key,
 )
 
 
@@ -79,6 +79,20 @@ async def test_adapter_exception_degrades():
     t = McpAgentTool(server_name="ws", mcp_tool_name="search", description="", parameters={}, session=sess)
     r = await t({})
     assert r.ok is False and "transport dead" in r.error_message
+
+
+async def test_oa_rule_scope_is_injected_only_for_rule_tools():
+    """Channel context binds rule tokens without contaminating other MCP calls."""
+    sess = _FakeSession(_Result([_Text("ok")]))
+    preview = McpAgentTool(server_name="oa", mcp_tool_name="preview_approval_rule",
+                           description="", parameters={}, session=sess)
+    other = McpAgentTool(server_name="oa", mcp_tool_name="get_workflow_request",
+                         description="", parameters={}, session=sess)
+    with oa_scope_key("inst/chat/user"):
+        await preview({"rule_json": "{}", "request_id": "r1", "scope_key": "spoof"})
+        await other({"request_id": "r1"})
+    assert sess.calls[0][1]["scope_key"] == "inst/chat/user"
+    assert "scope_key" not in sess.calls[1][1]
 
 
 def test_build_tools_from_session_keys_by_prefixed_name():
