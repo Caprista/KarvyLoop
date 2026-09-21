@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,12 +55,30 @@ class TestAC7WSIntentRoundtrip:
         """AC7: client 发 intent → server push drive_done(无 main_loop → error)。"""
         with client.websocket_connect("/ws") as ws:
             ws.receive_json()  # 首次 snapshot
+            before = time.time()
             ws.send_json({"type": "intent", "payload": {"intent": "hello"}})
             msg = ws.receive_json()
             assert msg["type"] == "drive_done"
             assert "error" in msg["payload"]
             # 缺席真因=needs_init(UX 诚实修:报真话不再一句"MainLoop 未注入")
             assert "karvyloop init" in msg["payload"]["error"]
+            assert before <= msg["payload"]["ts"] <= time.time()
+
+    def test_ws_cocreation_reply_has_completion_time(self, client, monkeypatch):
+        from karvyloop.karvy import cocreation
+
+        async def reply(*args, **kwargs):
+            return "共创回复"
+
+        monkeypatch.setattr(cocreation, "cocreation_take_turn", reply)
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            before = time.time()
+            ws.send_json({"type": "intent", "payload": {"intent": "继续共创"}})
+            msg = ws.receive_json()
+            assert msg["type"] == "drive_done"
+            assert msg["payload"]["text"] == "共创回复"
+            assert before <= msg["payload"]["ts"] <= time.time()
 
     def test_ws_empty_intent_returns_error(self, client):
         with client.websocket_connect("/ws") as ws:
@@ -70,6 +90,7 @@ class TestAC7WSIntentRoundtrip:
     def test_explicit_decision_delegation_returns_questionnaire(self, client):
         with client.websocket_connect("/ws") as ws:
             ws.receive_json()
+            before = time.time()
             ws.send_json({"type": "intent", "payload": {
                 "intent": "以后让小卡替我做低风险的技术选型决策",
             }})
@@ -79,6 +100,28 @@ class TestAC7WSIntentRoundtrip:
             assert questionnaire["goal"].startswith("以后让小卡")
             assert len(questionnaire["questions"]) == 7
             assert "error" not in msg["payload"]
+            assert before <= msg["payload"]["ts"] <= time.time()
+
+
+def test_conversation_history_keeps_turn_timestamp(tmp_path):
+    from karvyloop.cognition.conversation import ConversationManager, ConversationStore
+
+    mgr = ConversationManager(ConversationStore(tmp_path))
+    mgr.start()
+    turn = mgr.record_turn("问题", "历史回复")
+    resumed = ConversationManager(ConversationStore(tmp_path))
+    history = resumed.resume(mgr.current_peer(), mgr.current().id)
+    assert history.turns[0].to_ui_dict()["ts"] == turn.ts
+    assert turn.ts > 0
+
+
+def test_drive_outcome_serialization_has_server_completion_time():
+    from karvyloop.console.serializers import drive_outcome_to_dict
+    before = time.time()
+    payload = drive_outcome_to_dict(SimpleNamespace(
+        intent="hi", brain="slow", text="done", skill_name="",
+        fast_brain_hit=False, crystallized=False, error=None))
+    assert before <= payload["ts"] <= time.time()
 
 
 # ---------- AC8: K5 audit — h2a_decision ACCEPT → envelope, by=[] ----------

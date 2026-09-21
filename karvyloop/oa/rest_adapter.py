@@ -459,7 +459,7 @@ def _save_habits(data: dict[str, Any]) -> None:
 
 
 def _empty_rules() -> dict[str, Any]:
-    return {"version": 2, "updated_at": None, "rules": []}
+    return {"version": 3, "updated_at": None, "rules": []}
 
 
 def _load_rules() -> dict[str, Any]:
@@ -471,8 +471,8 @@ def _load_rules() -> dict[str, Any]:
         raise RuntimeError(f"approval rules file is invalid: {error}") from error
     if not isinstance(data, dict) or not isinstance(data.get("rules", []), list):
         raise RuntimeError("approval rules file has an invalid schema")
-    # The container can hold legacy v1 and schema-v2 rules during migration.
-    data["version"] = max(2, int(data.get("version") or 1))
+    # The container can hold legacy rules while natural-language rules use schema v3.
+    data["version"] = max(3, int(data.get("version") or 1))
     data.setdefault("updated_at", None)
     return data
 
@@ -569,6 +569,34 @@ def _is_v2_rule(rule: dict[str, Any]) -> bool:
     return rule.get("schema_version") == 2
 
 
+def _is_natural_language_rule(rule: dict[str, Any]) -> bool:
+    return bool(str(rule.get("condition") or "").strip())
+
+
+def _active_natural_language_rules() -> list[dict[str, Any]]:
+    return [
+        rule for rule in _load_rules()["rules"]
+        if _is_natural_language_rule(rule)
+        and rule.get("enabled")
+        and not rule.get("deleted")
+        and rule.get("action") in {"approve", "批准"}
+    ]
+
+
+def _rule_for_agent(rule: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "rule_id": str(rule.get("rule_id") or ""),
+        "name": str(rule.get("name") or "自动审批规则"),
+        "condition": str(rule.get("condition") or ""),
+        "examples": rule.get("examples") if isinstance(rule.get("examples"), list) else [],
+        "action": "approve",
+    }
+
+
+def _natural_language_rule_candidates() -> list[dict[str, Any]]:
+    return [_rule_for_agent(rule) for rule in _active_natural_language_rules()]
+
+
 def _legacy_rule_matches_context(rule: dict[str, Any], context: dict[str, str]) -> bool:
     if not rule.get("enabled") or not rule.get("auto_execute") or rule.get("action") != "批准":
         return False
@@ -638,13 +666,15 @@ def _v2_limit_reason(rule: dict[str, Any], context: dict[str, Any]) -> str:
     return ""
 
 
-def _record_v2_execution(data: dict[str, Any], rule: dict[str, Any], context: dict[str, Any]) -> None:
-    if not _is_v2_rule(rule):
+def _record_rule_execution(data: dict[str, Any], rule: dict[str, Any], context: dict[str, Any],
+                           *, match_reason: str = "") -> None:
+    if not (_is_v2_rule(rule) or _is_natural_language_rule(rule)):
         return
     executions = rule.setdefault("executions", [])
     executions.append({
         "request_id": context["request_id"],
         "amount": context["rule_context"]["request"].get("amount"),
+        "match_reason": match_reason.strip(),
         "occurred_at": datetime.now().astimezone().isoformat(timespec="seconds"),
     })
     rule["executions"] = executions[-500:]
@@ -792,8 +822,37 @@ def list_approval_rules(include_disabled: bool = True) -> dict[str, Any]:
 def set_approval_rule(workflow_name: str = "", workflow_id: str = "", applicant: str = "",
                       action: str = "批准", auto_execute: bool = False, enabled: bool = True,
                       expires_at: str = "", rule_id: str = "", rule_json: str = "",
-                      preview_token: str = "", scope_key: str = "") -> dict[str, Any]:
-    """新增或更新规则。rule_json 可提供完整 schema-v2 多维规则；旧字段仍兼容 v1。"""
+                      preview_token: str = "", scope_key: str = "", name: str = "",
+                      condition: str = "", examples_json: str = "") -> dict[str, Any]:
+    """新增或更新自然语言规则；rule_json 仅用于兼容旧 schema-v2 规则。"""
+    if condition.strip() or name.strip() or examples_json.strip():
+        if rule_json.strip():
+            raise ValueError("natural-language fields cannot be combined with rule_json")
+        if not name.strip() or not condition.strip():
+            raise ValueError("name and condition are required for a natural-language rule")
+        if action not in {"批准", "approve"}:
+            raise ValueError("natural-language auto rules must use approve action")
+        try:
+            examples = json.loads(examples_json) if examples_json.strip() else []
+        except json.JSONDecodeError as error:
+            raise ValueError("examples_json must be valid JSON") from error
+        if not isinstance(examples, list):
+            raise ValueError("examples_json must be a JSON array")
+        data = _load_rules()
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        existing = next((item for item in data["rules"] if item.get("rule_id") == rule_id), None) if rule_id else None
+        if rule_id and existing is None:
+            raise ValueError("rule_id does not exist")
+        rule = existing or {"rule_id": _rule_id(), "created_by": "OA_A用户", "created_at": now}
+        rule.update({"schema_version": 3, "name": name.strip(), "condition": condition.strip(),
+                     "examples": examples, "action": "approve", "enabled": bool(enabled),
+                     "deleted": False, "updated_at": now})
+        if existing is None:
+            data["rules"].append(rule)
+        data["updated_at"] = now
+        _save_rules(data)
+        return {"rule": rule, "schema_version": 3}
+
     if rule_json.strip():
         try:
             supplied = json.loads(rule_json)
@@ -898,7 +957,7 @@ def _preview_for_request(rule: dict[str, Any], request_id: str) -> dict[str, Any
 
 @mcp.tool()
 def preview_approval_rule(rule_json: str, request_id: str, scope_key: str = "") -> dict[str, Any]:
-    """只读预览 schema-v2 规则对一个当前待办的命中原因；不会保存或执行规则。"""
+    """兼容工具：仅预览历史 schema-v2 规则，不参与自然语言规则流程。"""
     rule = _parse_preview_rule(rule_json)
     return {"rule": rule, "preview": _preview_for_request(rule, request_id),
             "preview_token": _issue_preview_token(rule, source="preview", scope_key=scope_key)}
@@ -906,7 +965,7 @@ def preview_approval_rule(rule_json: str, request_id: str, scope_key: str = "") 
 
 @mcp.tool()
 def simulate_approval_rule(rule_json: str, max_requests: int = 20, scope_key: str = "") -> dict[str, Any]:
-    """只读模拟 schema-v2 规则在当前待办中的命中情况，最多检查 50 项，绝不执行审批。"""
+    """兼容工具：仅模拟历史 schema-v2 规则，不参与自然语言规则流程。"""
     rule = _parse_preview_rule(rule_json)
     max_requests = max(1, min(int(max_requests), 50))
     try:
@@ -1004,10 +1063,10 @@ def get_workflow_request(request_id: str) -> dict[str, Any]:
         context = _workflow_context(request_id, response)
     except OARequestError as error:
         return _error_result(request_id, error.category, str(error))
-    response["approval_rule"] = _matching_rule(context)
+    response["approval_rule_candidates"] = _natural_language_rule_candidates()
     response["auto_approval_boundary"] = (
-        "A matched rule skips per-item confirmation only. Before approval, verify the current todo, "
-        "exact workflow match, complete materials, and absence of anomalies."
+        "Compare the real approval detail with each natural-language rule. Return MATCH only when "
+        "the condition is clearly satisfied; otherwise use NO_MATCH or UNCERTAIN."
     )
     return response
 
@@ -1035,7 +1094,7 @@ def get_workflow_request_summary(request_id: str) -> dict[str, Any]:
         "department": rule_context["applicant"].get("department"),
         "amount": rule_context["request"].get("amount"),
         "currency": rule_context["request"].get("currency"),
-        "approval_rule": _matching_rule(context),
+        "approval_rule_candidates": _natural_language_rule_candidates(),
         "decision_habits": _habits_for_detail(response),
     }
 
@@ -1053,12 +1112,21 @@ def get_request_operator_info(request_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def auto_approve_by_rule(request_id: str, rule_id: str) -> dict[str, Any]:
-    """按指定明确规则自动批准。后端重新校验规则、待办和详情；任一异常均跳过。"""
+def auto_approve_by_rule(request_id: str, rule_id: str, decision: str = "",
+                         match_reason: str = "") -> dict[str, Any]:
+    """执行自然语言规则批准；必须由 Agent 明确提交 MATCH 判断和简短依据。"""
     rules_data = _load_rules()
     rule = next((item for item in rules_data["rules"] if item.get("rule_id") == rule_id), None)
     if rule is None:
         return {"status": "skipped", "reason": "规则不存在"}
+    if _is_natural_language_rule(rule):
+        normalized_decision = decision.strip().upper()
+        if normalized_decision != "MATCH":
+            return {"status": "skipped", "reason": "自然语言规则未明确判定为 MATCH", "rule_id": rule_id}
+        if not match_reason.strip():
+            return {"status": "skipped", "reason": "缺少自然语言规则命中依据", "rule_id": rule_id}
+        if not rule.get("enabled") or rule.get("deleted") or rule.get("action") not in {"approve", "批准"}:
+            return {"status": "skipped", "reason": "规则未启用或不允许自动批准", "rule_id": rule_id}
     todo_check = _current_todo_check(request_id)
     if todo_check:
         return todo_check | {"status": "skipped"}
@@ -1077,14 +1145,15 @@ def auto_approve_by_rule(request_id: str, rule_id: str) -> dict[str, Any]:
         return _error_result(request_id, error.category, str(error)) | {"status": "skipped"}
     if not context["workflow_id"] and not context["workflow_name"]:
         return {"status": "skipped", "reason": "无法识别审批工作流"}
-    if not _rule_matches_context(rule, context):
-        return {"status": "skipped", "reason": "规则与当前审批不完全匹配"}
-    conflicts = [item for item in _load_rules()["rules"]
-                 if item.get("rule_id") != rule_id and _rule_matches_context(item, context)
-                 and int(item.get("priority") or 0) == int(rule.get("priority") or 0)]
-    if conflicts:
-        return {"status": "skipped", "reason": "存在同优先级冲突规则，需人工确认",
-                "rule_id": rule_id, "conflict_rule_ids": [str(item.get("rule_id") or "") for item in conflicts]}
+    if not _is_natural_language_rule(rule):
+        if not _rule_matches_context(rule, context):
+            return {"status": "skipped", "reason": "规则与当前审批不完全匹配"}
+        conflicts = [item for item in _load_rules()["rules"]
+                     if item.get("rule_id") != rule_id and _rule_matches_context(item, context)
+                     and int(item.get("priority") or 0) == int(rule.get("priority") or 0)]
+        if conflicts:
+            return {"status": "skipped", "reason": "存在同优先级冲突规则，需人工确认",
+                    "rule_id": rule_id, "conflict_rule_ids": [str(item.get("rule_id") or "") for item in conflicts]}
     limit_reason = _v2_limit_reason(rule, context)
     if limit_reason:
         return {"status": "skipped", "reason": limit_reason, "rule_id": rule_id}
@@ -1126,7 +1195,7 @@ def auto_approve_by_rule(request_id: str, rule_id: str) -> dict[str, Any]:
             "request_id": str(request_id),
             "response_shape": _response_shape(response),
         }
-    _record_v2_execution(rules_data, rule, context)
+    _record_rule_execution(rules_data, rule, context, match_reason=match_reason)
     response["decision_habits"] = _record_decision(context, "批准", {"remark": "", "rule_id": rule_id, "source": "auto_rule"})
     return {"status": "approved", "rule_id": rule_id, "request_id": request_id, "response": response}
 

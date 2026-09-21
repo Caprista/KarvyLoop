@@ -87,228 +87,138 @@ Agent 七文件：流程、表达、承诺、验收要求
 
 ## 4. MCP 工具与白名单
 
-`COMPOSITION.yaml` 中 OA_A 可见的工具为 14 个。代码和 config 的职责不同：
+`COMPOSITION.yaml` 只暴露当前业务需要的工具。代码中仍保留旧版预览/模拟工具，供历史规则兼容和测试使用，但不再放入 OA_A 的主流程或角色白名单。
+
+角色主流程工具：
 
 ```text
-COMPOSITION.yaml：角色能看到哪些工具
-config.yaml outbound_bypass：哪些工具跳过通用 outbound 草稿卡
-OA adapter：实际是否允许执行
-```
-
-当前需要默认执行、并加入 `outbound_bypass` 的短工具名：
-
-```text
+get_doing_workflow_request_list
+get_workflow_request
+get_workflow_request_summary
+get_request_operator_info
+get_approval_habits
+list_approval_rules
+set_approval_rule
+disable_approval_rule
+delete_approval_rule
 submit_request
 reject_request
 forward_request
 auto_approve_by_rule
-set_approval_rule
-disable_approval_rule
-delete_approval_rule
+```
+
+以下工具不再由 OA_A 主动调用：
+
+```text
 preview_approval_rule
 simulate_approval_rule
 ```
 
-`outbound_bypass` 不绕过 requestId 校验、OA 权限、preview token、规则冲突、限额或业务结果检查。
+`outbound_bypass` 只影响通用 outbound 草稿卡，不绕过 requestId 校验、OA 权限、规则状态、异常检查或业务结果检查。
 
-## 5. 自动审批规则创建流程
+## 5. 自动审批规则创建、停用与删除
 
-### 5.1 创建状态机
+### 5.1 创建或更新
 
 ```text
-用户自然语言
-  -> RuleIntent
-  -> 结构化条件与关键词草案
-  -> schema v2
-  -> preview_approval_rule / simulate_approval_rule
-  -> preview_token
+用户描述规则
+  -> Agent 整理 name / condition / examples
+  -> 向用户展示规则草案
   -> 用户明确确认
   -> set_approval_rule
-  -> 保存并启用规则
+  -> 保存为 schema_version = 3
 ```
 
-没有预览令牌、令牌过期、规则内容在预览后变化、令牌重复使用或 scope 不一致时，`set_approval_rule` 会拒绝保存。
-
-scope 由 OA 实例、会话和 sender 组成，防止其他会话复用令牌。
-
-### 5.2 RuleIntent
-
-RuleIntent 只接受明确的规则管理语句，例如：
-
-```text
-创建自动审批规则，流程为报销，金额不超过5000
-创建自动审批规则，申请说明包含客户现场
-创建自动审批规则，关键词包含出差、上海
-创建自动审批规则，任一关键词为上海、杭州，排除关键词超标
-```
-
-模糊表达不会直接生成可执行规则。缺少明确条件时只能继续澄清或生成不可保存草案。
-
-### 5.3 schema v2
-
-示例：
+自然语言规则的最小结构：
 
 ```json
 {
-  "schema_version": 2,
-  "enabled": true,
-  "priority": 100,
-  "action": {
-    "type": "approve",
-    "auto_execute": true
-  },
-  "conditions": {
-    "all": [
-      {
-        "field": "request.amount",
-        "operator": "lte",
-        "value": 5000,
-        "currency": "CNY"
-      },
-      {
-        "field": "applicant.department",
-        "operator": "eq",
-        "value": "财务部"
-      }
-    ]
-  },
-  "keywords": {
-    "all": ["出差"],
-    "any": ["上海", "杭州"],
-    "none": ["超标", "补贴"]
-  },
-  "keyword_scope": [
-    "request.title",
-    "request.description",
-    "request.form_text",
-    "request.project"
+  "name": "小额差旅自动批准",
+  "condition": "申请金额不超过500元，属于正常出差，且没有明显异常",
+  "examples": [
+    {"summary": "客户拜访，金额 320 元"}
   ],
-  "limits": {
-    "max_per_day": 20,
-    "max_amount_per_day": 50000,
-    "expires_at": "2026-12-31T23:59:59+08:00"
-  },
-  "unknown_policy": "require_human",
-  "conflict_policy": "require_human"
+  "action": "approve",
+  "enabled": true
 }
 ```
 
-自动执行只允许 `action.type = approve`。拒绝和转发规则不能自动执行。
+创建规则时不再要求用户填写字段路径、操作符、关键词权重、优先级或预览令牌。`condition` 必须是可读的完整条件描述；无法表达清楚时先澄清，不保存为自动规则。
 
-## 6. 匹配算法
+### 5.2 停用与删除
 
-### 6.1 结构化条件
+- `disable_approval_rule(rule_id)`：保留规则和历史执行记录，仅设置 `enabled = false`。
+- `delete_approval_rule(rule_id)`：用户明确指定规则后删除规则记录；不修改历史审批偏好。
+- 停用或删除后，自动审批不得继续使用该规则。
 
-允许字段：
+### 5.3 规则判断
 
-```text
-workflow.id / workflow.name
-applicant.id / applicant.name / applicant.department
-request.amount / request.currency / request.project / request.cost_center
-request.created_at / request.tags
-attachment.count / risk.level
-```
-
-允许操作符：
+详情或摘要接口返回当前启用的 `approval_rule_candidates`，每项包含规则名称、自然语言条件和参考示例。Agent 必须结合真实审批详情逐条判断：
 
 ```text
-eq, neq, in, not_in, contains, starts_with,
-gt, gte, lt, lte, between, exists
+MATCH      条件全部明确满足
+NO_MATCH   条件明确不满足
+UNCERTAIN  信息缺失、存在异常、语义无法确认或规则之间冲突
 ```
 
-字段白名单以外的路径、任意 JSONPath、正则、脚本和模型表达式都不允许。
+规则候选仅是判断参考，不是后端已经确认的命中结果。
 
-### 6.2 关键词匹配
+## 6. 自动审批执行边界
 
-关键词匹配是确定性算法。文本会先按以下方式归一：
+调用：
 
 ```text
-Unicode NFKC
-大小写统一
-全角半角统一
-标点与空白统一
+auto_approve_by_rule(request_id, rule_id,
+                     decision="MATCH",
+                     match_reason="明确说明命中的审批事实")
 ```
 
-关键词语义：
-
-| 组 | 规则 |
-|---|---|
-| `all` | 每个关键词都必须出现 |
-| `any` | 至少一个关键词出现 |
-| `none` | 任一关键词出现即不命中 |
-
-结果只能为：
+自然语言规则分支只有同时满足以下条件才继续：
 
 ```text
-MATCH：关键词条件满足
-NO_MATCH：关键词明确不满足
-UNKNOWN：匹配文本缺失或不可用
+规则存在、已启用且 action = approve
+AND Agent 明确提交 decision = MATCH
+AND match_reason 非空
+AND requestId 仍在当前待办
+AND 详情接口业务成功
+AND 详情没有材料缺失或明显异常
+AND submitRequest 返回 OA 业务成功
+AND 刷新待办后确认 requestId 已离开待办
 ```
 
-`UNKNOWN` 必须转人工确认。
+`NO_MATCH`、`UNCERTAIN`、信息不足、规则停用、规则冲突、详情异常或提交结果无法确认时，不自动审批，返回原因并交用户确认。
 
-### 6.3 大模型的限定职责
+旧 schema-v2 的确定性匹配代码暂时仅用于兼容历史规则，不是新规则的创建格式，也不是自然语言规则的判断依据。
+
+## 7. 大模型与历史偏好的边界
 
 大模型可以：
 
 ```text
-从用户自然语言提取候选关键词
-建议关键词作用字段
-生成可审阅的规则草案
-解释规则为什么可能命中
+整理用户的自然语言规则
+对照审批详情和规则条件给出三态判断
+提供简短、可追溯的命中理由
 ```
 
 大模型不能：
 
 ```text
-最终授予自动审批
-修改金额、币种或身份字段
-绕过缺失字段
-修改规则有效期或限额
-将 UNKNOWN 当作 MATCH
-临时发明同义词作为授权依据
+把 NO_MATCH 或 UNCERTAIN 当作 MATCH
+在审批详情缺失时自行补全事实
+修改规则条件、启用状态或规则 ID
+把历史审批偏好当作自动审批授权
+声称后端已经验证了自然语言语义
 ```
 
-最终自动审批使用确定性结构化 matcher 和确定性 keyword matcher。模型候选内容必须先由用户确认并写入规则。
+`get_approval_habits` 仅提供历史参考，不改变审批权限和自动执行条件。
 
-### 6.4 最终自动审批判定
+## 8. 兼容工具说明
 
-```text
-规则已启用
-AND action = approve + auto_execute
-AND 未过期
-AND 当前 requestId 仍在待办
-AND 详情查询成功
-AND 所有结构化条件满足
-AND 关键词结果 = MATCH
-AND 无异常、材料缺失或风险标记
-AND 未超每日数量或金额限额
-AND 无同优先级冲突规则
-AND OA submitRequest 返回业务成功
-```
+`preview_approval_rule` 和 `simulate_approval_rule` 保留在 adapter 中，用于旧 schema-v2 规则兼容和回归测试；它们不参与 schema-v3 自然语言规则流程。后续确认没有旧规则依赖后，再删除实现和相关测试。
 
-任一条件失败、无法识别或冲突时：
+规则执行记录保存 `request_id`、金额、命中理由、规则 ID 和时间，用于审计；执行记录不代表自然语言命中已由后端独立验证。
 
-```text
-不自动审批，返回跳过原因，等待人工确认。
-```
-
-## 7. 规则预览、模拟与审计
-
-`preview_approval_rule` 对单个当前待办返回：
-
-```text
-结构化条件结果
-关键词结果
-命中、缺失和禁止关键词
-是否匹配及原因
-```
-
-`simulate_approval_rule` 最多检查 50 条当前待办，返回命中项、未命中项、原因和预览令牌。
-
-规则保存后记录 revision；自动批准记录 rule_id、执行时间和金额，供每日限额与审计使用。
-
-## 8. 安全原则摘要
+## 9. 安全原则摘要
 
 ```text
 历史偏好不是授权

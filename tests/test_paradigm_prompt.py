@@ -172,6 +172,16 @@ def test_no_role_dir_returns_none(tmp_path):
     assert build_role_paradigm_prompt(_Fake(), None) is None
 
 
+def test_role_prompt_exposes_machine_identity(tmp_path):
+    roles = RoleRegistry(tmp_path / "roles")
+    rv = roles.create("OA_A", identity="OA 自动化角色", soul="严谨", tool_ids=["coding"])
+    cp = build_role_paradigm_prompt(rv, None, intent="每天汇总", cwd="/w")
+    assert cp is not None
+    assert cp.role == "OA_A"
+    assert cp.agent_id == "OA_A"
+    assert cp.tool_preset == ["coding", "create_schedule"]
+
+
 def test_works_without_domain(tmp_path):
     """无域(个人场)也能编译角色灵魂,不炸。"""
     roles = RoleRegistry(tmp_path / "roles")

@@ -224,6 +224,18 @@ def _drive(monkeypatch, *, persona, **kw):
     return captured.get("mcp_tools") or {}
 
 
+def test_drive_mounts_create_schedule_for_oa_a_persona(monkeypatch, tmp_path):
+    from karvyloop.coding.paradigm_prompt import build_role_paradigm_prompt
+    from karvyloop.roles.registry import RoleRegistry
+    from karvyloop.karvy.scheduler import SchedulerStore
+    rv = RoleRegistry(tmp_path / "roles").create(
+        "OA_A", identity="自动化角色", tool_ids=["coding"])
+    persona = build_role_paradigm_prompt(rv, None, intent="每天汇总", cwd="/w")
+    tools = _drive(monkeypatch, persona=persona,
+                   scheduler_store=SchedulerStore(), schedule_parser=_fake_parser)
+    assert "create_schedule" in tools
+
+
 def test_drive_mounts_karvy_tools_for_karvy_persona(monkeypatch):
     from karvyloop.coding.persona import build_karvy_persona_prompt
     from karvyloop.karvy.scheduler import SchedulerStore

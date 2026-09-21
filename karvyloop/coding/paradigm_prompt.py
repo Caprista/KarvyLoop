@@ -126,10 +126,17 @@ def build_role_paradigm_prompt(
             {"id": "workspace", "label": "workspace", "source": "runtime", "origin": "request workspace",
              "kind": "dynamic", "text": ws, "editable": True},
         ]
+        # 机器可读身份供 bridge 做角色级能力门控;文本身份不能替代此字段。
+        _role_id = str(getattr(role_view, "id", "") or "").strip()
+        cp.role = _role_id
+        cp.agent_id = _role_id
         # role 级工具可见性预设(B 方向最小一刀):COMPOSITION tools: 段 → ad-hoc 属性挂 persona,
         # forge 在工具合并后按它过滤(base/MCP/create_atom 全覆盖;空 = 全量,0 回归)。
         # 同 karvy_self / deontic_forbid 先例:机器可读属性,不进 prompt 文本。
         _tool_preset = list(getattr(role_view, "tool_ids", None) or [])
+        # OA_A 的调度入口由 bridge 按角色授权注入；保留已授权的 platform-owned 工具。
+        if _role_id == "OA_A" and _tool_preset and "create_schedule" not in _tool_preset:
+            _tool_preset.append("create_schedule")
         if _tool_preset:
             cp.tool_preset = _tool_preset
         # 本 prompt 已编入域治理(value.md + deontic forbid/oblige)—— 调用方据此**不再**把

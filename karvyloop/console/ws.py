@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
@@ -301,7 +302,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         await _send_json_safe(websocket, {"type": "drive_done", "payload": {
             "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
             "crystallized": False, "skill_name": "", "routed": False,
-            "cocreation": True, "text": _coc_reply}})
+            "cocreation": True, "text": _coc_reply, "ts": time.time()}})
         return
 
     # 明确委托一类决策时先建立授权契约，不让普通对话回复冒充授权。
@@ -324,7 +325,8 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
             await _send_json_safe(websocket, {"type": "drive_done", "payload": {
                 "intent": intent, "brain": "SLOW", "fast_brain_hit": False,
                 "crystallized": False, "skill_name": "", "routed": False,
-                "text": _reply, "decision_delegation": _questionnaire}})
+                "text": _reply, "decision_delegation": _questionnaire,
+                "ts": time.time()}})
             return
     except Exception:
         logger.warning("[ws] 决策委托问卷生成失败，降级正常 drive", exc_info=True)
@@ -410,6 +412,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
                     mgr.record_turn(intent, routed["text"], brain="slow")
                 except Exception:
                     pass
+            routed["ts"] = time.time()
             await _send_json_safe(websocket, {"type": "drive_done", "payload": routed})
             return
 
@@ -506,7 +509,7 @@ async def _handle_intent_ws(websocket: WebSocket, app, payload: dict) -> None:
         await _send_json_safe(websocket, {
             "type": "drive_done",
             "payload": {"intent": intent, "error": str(e), "brain": "SLOW", "text": "",
-                        "recall_used": _recall_used},
+                        "recall_used": _recall_used, "ts": time.time()},
         })
         return
 

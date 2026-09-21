@@ -551,6 +551,7 @@ class ConversationManager:
         self._context_turns = context_turns
         self._peer: Optional[Address] = None
         self._current: Optional[Conversation] = None
+        self._channel_conversations: dict[tuple[str, str, Optional[str]], Conversation] = {}
 
     def set_peer(self, peer: Address) -> Conversation:
         """切到「场+角色」(peer)。续上该 peer 最近一段(CV-6),无则新。
@@ -807,7 +808,12 @@ class ConversationManager:
     def channel_conversation(self, peer: Address) -> Conversation:
         """取(或建)一条通道对话:同 peer 续最近一段,无则新开。**不动** self._current/_peer
         (外部通道的消息不许抢用户 web 聊天现场)。"""
-        return self._store.most_recent(peer) or self._store.new(peer)
+        key = (peer.domain_id, peer.role, peer.agent_id)
+        conv = self._channel_conversations.get(key)
+        if conv is None or conv.closed_at is not None:
+            conv = self._store.most_recent(peer) or self._store.new(peer)
+            self._channel_conversations[key] = conv
+        return conv
 
     def new_channel_conversation(self, peer: Address, title: str = "",
                                  *, summarize_previous: bool = True) -> Conversation:
@@ -816,13 +822,16 @@ class ConversationManager:
         ``summarize_previous`` 默认保持历史行为；显式重置会话时应关闭它，
         否则旧通道上下文会被写入全局 trace，后续角色召回仍可能重新带回旧内容。
         """
-        previous = self._store.most_recent(peer)
+        key = (peer.domain_id, peer.role, peer.agent_id)
+        previous = self._channel_conversations.get(key) or self._store.most_recent(peer)
         if summarize_previous:
             self._summarize_to_trace(previous)
         elif previous is not None:
             # /new 的硬边界：迟到的旧请求即使回写旧文件，也不能让它重新成为活动会话。
             self._store.close(previous, reason="channel_reset")
-        return self._store.new(peer, title)
+        fresh = self._store.new(peer, title)
+        self._channel_conversations[key] = fresh
+        return fresh
 
     def record_channel_turn(self, peer: Address, conv: Conversation,
                             *, user_intent: str, agent_response: str,

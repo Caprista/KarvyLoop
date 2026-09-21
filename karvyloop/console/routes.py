@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -927,7 +928,8 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
                             pass
                     return {"intent": req.intent, "brain": "SLASH", "fast_brain_hit": True,
                             "crystallized": False, "skill_name": "", "routed": False,
-                            "text": _sl["text"], "error": None, "slash": _sl.get("cmd", "")}
+                            "text": _sl["text"], "error": None, "slash": _sl.get("cmd", ""),
+                            "ts": time.time()}
     except Exception:
         logger.warning("[api_intent] slash 处理失败,降级正常 drive", exc_info=True)
 
@@ -964,7 +966,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
                 pass
         return {"intent": req.intent, "brain": "SLOW", "fast_brain_hit": False,
                 "crystallized": False, "skill_name": "", "routed": False,
-                "cocreation": True, "text": _coc_reply, "error": None}
+                "cocreation": True, "text": _coc_reply, "error": None, "ts": time.time()}
 
     ctx = mgr.context_view() if mgr is not None else None
     governance = mgr.governance_text() if mgr is not None else ""
@@ -1035,6 +1037,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
                     mgr.record_turn(req.intent, routed["text"], brain="slow")
                 except Exception:
                     pass
+            routed["ts"] = time.time()
             return routed
 
     # 9.4e 方案 A:按当前 peer 算人格;@ 命中 → 用被 @ 角色的人格/域 scope(定向协作)。
@@ -1112,7 +1115,7 @@ async def api_intent(req: IntentRequest, request: Request) -> dict[str, Any]:
             task_reg.finish(task_id, error=str(e))
         fail_drive_turn(mgr, _turn_handle, str(e))   # 挂起轮回填失败态,不留僵尸 pending
         return {"intent": req.intent, "error": str(e), "brain": "SLOW", "text": "",
-                "recall_used": _recall_used}
+                "recall_used": _recall_used, "ts": time.time()}
 
     if task_reg is not None and task_id is not None:
         task_reg.finish(task_id, result=(outcome.text or ""), error=(outcome.error or ""))

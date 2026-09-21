@@ -8,6 +8,7 @@ K 边界:K4 — 只做 JSON 转换,**不**构造 Envelope / **不**调 apply_*�
 from __future__ import annotations
 
 import dataclasses
+import time
 from typing import Any
 
 from karvyloop.a2a import Envelope
@@ -57,6 +58,7 @@ def drive_outcome_to_dict(outcome: DriveOutcome) -> dict[str, Any]:
         "intent": outcome.intent,
         "brain": str(outcome.brain),
         "text": outcome.text,
+        "ts": time.time(),
         "skill_name": outcome.skill_name,
         "fast_brain_hit": outcome.fast_brain_hit,
         "crystallized": outcome.crystallized,

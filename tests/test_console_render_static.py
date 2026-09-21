@@ -120,6 +120,19 @@ def test_app_js_uses_karvyrender():
     assert "KarvyRender.appendMarkdown" in js
 
 
+def test_conversation_reply_uses_recorded_time_without_render_time_fallback():
+    js = _read("app.js")
+    reply = js[js.index("function _renderTurnReply"):js.index("function _pushExecutingPlaceholder")]
+    assert 'tn.agent_response, "", tn.ts)' in reply
+    agent = js[js.index("function appendAgentTurn"):js.index("function _recallWhy")]
+    assert "_messageTimeNode(entry && entry.ts)" in agent
+    assert "Date.now()" not in agent
+    chat = js[js.index("function pushChatLine"):js.index("function renderChatHistory")]
+    assert "_messageTimeNode(ts)" in chat
+    assert "Date.now()" not in chat
+    assert 'if (ts === undefined || ts === null || ts === "" || Number(ts) === 0) return ""' in js
+
+
 def test_prompt_trace_is_bound_to_turn_and_restored_from_history():
     js = _read("app.js")
     turn_start = js.index("function appendAgentTurn")

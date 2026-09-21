@@ -142,6 +142,17 @@ def test_paradigm_prompt_attaches_preset(tmp_path):
     assert getattr(cp, "tool_preset", None) == ["coding"]
 
 
+def test_oa_a_schedule_tool_is_added_to_existing_preset(tmp_path):
+    reg = _registry(tmp_path)
+    rv = reg.create("OA_A", identity="自动化角色", tool_ids=["coding"])
+    from karvyloop.coding.paradigm_prompt import build_role_paradigm_prompt
+    cp = build_role_paradigm_prompt(rv, None, intent="建每日任务", cwd="/tmp")
+    assert cp is not None
+    assert cp.tool_preset == ["coding", "create_schedule"]
+    tools = {"read_file": object(), "run_command": object(), "create_schedule": object()}
+    assert set(apply_tool_preset(tools, cp.tool_preset)) == {"read_file", "run_command", "create_schedule"}
+
+
 def test_paradigm_prompt_no_preset_when_absent(tmp_path):
     reg = _registry(tmp_path)
     rv = reg.create("全量员", identity="x")

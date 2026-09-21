@@ -123,7 +123,7 @@ def _match_clause(config: Mapping[str, Any], text: str, known: bool) -> KeywordM
     forbidden = tuple(word for word in none_words if word in text)
     matched = matched_all + matched_any
     if forbidden:
-        return KeywordMatchResult("NO_MATCH", matched, missing, forbidden, "命中禁止关键词")
+        return KeywordMatchResult("UNKNOWN", matched, missing, forbidden, "命中禁止关键词，需人工确认")
     if missing or (any_words and not matched_any):
         return KeywordMatchResult("NO_MATCH", matched, missing, (), "未满足关键词条件")
     return KeywordMatchResult("MATCH", matched, (), (), "关键词条件满足")
@@ -189,27 +189,31 @@ def match_keywords(rule: Mapping[str, Any], context: Any) -> KeywordMatchResult:
             forbidden_keywords.extend(result.forbidden_keywords)
             if result.status == "MATCH":
                 matched_count += 1
-            elif result.status == "UNKNOWN":
+            elif result.status == "UNKNOWN" and not result.forbidden_keywords:
                 unknown = True
             matched_score += weight * len(result.matched_keywords)
-        score = matched_score
-        enough = matched_count >= min_groups and score > threshold
+        score = matched_score / total_score if total_score else 0.0
+        enough = matched_count >= min_groups and matched_score > threshold
         # Unknown source text is fail-closed even when the numeric threshold
         # would otherwise be met; a partial snapshot must not authorize an
         # approval merely because other groups happened to match.
         if enough and not unknown and not forbidden_keywords:
             status = "MATCH"
-            reason = f"命中 {matched_count}/{total} 个条件组，得分 {score:.0f}，超过阈值 {threshold:.0f}"
+            reason = f"命中 {matched_count}/{total} 个条件组，得分 {matched_score:.0f}，超过阈值 {threshold:.0f}"
         elif unknown:
             status, reason = "UNKNOWN", "条件组匹配文本缺失，需人工确认"
         else:
             status = "NO_MATCH"
-            reason = (f"命中得分 {score:.0f} 未超过阈值 {threshold:.0f}"
-                      if score < threshold else f"命中 {matched_count} 组，少于最低要求 {min_groups} 组")
+            if forbidden_keywords:
+                reason = "命中禁止关键词"
+            elif matched_score <= threshold:
+                reason = f"命中得分 {matched_score:.0f} 未超过阈值 {threshold:.0f}"
+            else:
+                reason = f"命中得分 {matched_score:.0f}，命中 {matched_count} 组，少于最低要求 {min_groups} 组"
         return KeywordMatchResult(status, tuple(dict.fromkeys(matched_keywords)),
                                   tuple(dict.fromkeys(missing_keywords)),
                                   tuple(dict.fromkeys(forbidden_keywords)), reason,
-                                  score / total_score if total_score else 0.0,
+                                  score,
                                   matched_count, total, threshold, score, matched_score,
                                   tuple(dict.fromkeys(matched_keywords)))
 

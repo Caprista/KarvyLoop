@@ -7,16 +7,28 @@ import importlib.util
 from datetime import datetime
 from pathlib import Path
 
+import json
+
 import pytest
 
 
 pytest.importorskip("mcp")
 
-_PATH = Path(__file__).parents[1] / "remote_oa_stage" / "oa_rest_adapter.py"
+_PATH = Path(__file__).parents[1] / "karvyloop" / "oa" / "rest_adapter.py"
 _SPEC = importlib.util.spec_from_file_location("oa_rest_adapter_guard_test", _PATH)
 assert _SPEC and _SPEC.loader
 oa = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(oa)
+
+
+@pytest.fixture(autouse=True)
+def isolate_rule_state(tmp_path, monkeypatch):
+    role_dir = tmp_path / "OA_A"
+    monkeypatch.setattr(oa, "ROLE_DIR", role_dir)
+    monkeypatch.setattr(oa, "RULES_PATH", role_dir / "approval_rules.json")
+    monkeypatch.setattr(oa, "HABITS_PATH", role_dir / "approval_habits.json")
+    monkeypatch.setattr(oa, "PREVIEWS_PATH", role_dir / "approval_rule_previews.json")
+    oa._PREVIEW_MEMORY.clear()
 
 
 def _ok_todos(request_id: str):
@@ -236,6 +248,94 @@ def test_auto_approve_todo_permission_is_structured(monkeypatch):
     result = oa.auto_approve_by_rule("r1", "rule-1")
     assert result["error_category"] == "TODO_PERMISSION_DENIED"
     assert result["status"] == "skipped"
+
+
+def test_set_natural_language_rule_persists_plain_text_fields(monkeypatch):
+    stored = {"version": 3, "updated_at": None, "rules": []}
+    persisted = []
+    monkeypatch.setattr(oa, "_load_rules", lambda: stored)
+    monkeypatch.setattr(oa, "_save_rules", lambda data: persisted.append(data))
+
+    result = oa.set_approval_rule(
+        name="小额差旅自动批准",
+        condition="申请金额不超过500元，且属于正常出差",
+        examples_json=json.dumps([{"summary": "客户拜访"}], ensure_ascii=False),
+    )
+
+    rule = result["rule"]
+    assert result["schema_version"] == 3
+    assert rule["name"] == "小额差旅自动批准"
+    assert rule["condition"] == "申请金额不超过500元，且属于正常出差"
+    assert rule["examples"] == [{"summary": "客户拜访"}]
+    assert rule["action"] == "approve"
+    assert persisted[0]["rules"][0] == rule
+
+
+def test_summary_returns_natural_language_rule_candidates(monkeypatch):
+    rules = {"version": 3, "rules": [{
+        "rule_id": "rule-nl", "name": "出差自动批准", "condition": "属于正常出差申请",
+        "examples": [{"request_id": "old-1", "summary": "客户拜访"}],
+        "action": "approve", "enabled": True,
+    }]}
+    monkeypatch.setattr(oa, "_load_rules", lambda: rules)
+    monkeypatch.setattr(
+        oa, "invoke",
+        lambda method, _params: _ok_todos("r1") if method == "getDoingWorkflowRequestList" else _detail(),
+    )
+
+    result = oa.get_workflow_request_summary("r1")
+
+    assert result["approval_rule_candidates"] == [{
+        "rule_id": "rule-nl", "name": "出差自动批准", "condition": "属于正常出差申请",
+        "examples": [{"request_id": "old-1", "summary": "客户拜访"}], "action": "approve",
+    }]
+
+
+def test_natural_language_rule_requires_explicit_match(monkeypatch):
+    stored = {"version": 3, "rules": [{
+        "rule_id": "rule-nl", "name": "出差自动批准", "condition": "属于正常出差申请",
+        "examples": [], "action": "approve", "enabled": True,
+    }]}
+    calls = []
+    monkeypatch.setattr(oa, "_load_rules", lambda: stored)
+    monkeypatch.setattr(oa, "invoke", lambda method, _params: calls.append(method) or pytest.fail(method))
+
+    result = oa.auto_approve_by_rule("r1", "rule-nl", decision="UNCERTAIN", match_reason="信息不足")
+
+    assert result["status"] == "skipped"
+    assert calls == []
+
+
+def test_natural_language_rule_match_approves_and_records_reason(monkeypatch):
+    stored = {"version": 3, "updated_at": None, "rules": [{
+        "rule_id": "rule-nl", "name": "出差自动批准", "condition": "属于正常出差申请",
+        "examples": [], "action": "approve", "enabled": True,
+    }]}
+    calls = []
+    todo_reads = 0
+
+    def fake_invoke(method, _params):
+        nonlocal todo_reads
+        calls.append(method)
+        if method == "getDoingWorkflowRequestList":
+            todo_reads += 1
+            return _ok_todos("r1") if todo_reads == 1 else _ok_todos("other")
+        if method == "getWorkflowRequest":
+            return _detail()
+        return {"code": "SUCCESS"}
+
+    monkeypatch.setattr(oa, "_load_rules", lambda: stored)
+    monkeypatch.setattr(oa, "_save_rules", lambda _data: None)
+    monkeypatch.setattr(oa, "_record_decision", lambda *_args: {})
+    monkeypatch.setattr(oa, "invoke", fake_invoke)
+
+    result = oa.auto_approve_by_rule(
+        "r1", "rule-nl", decision="MATCH", match_reason="审批内容明确属于正常出差申请"
+    )
+
+    assert result["status"] == "approved"
+    assert calls == ["getDoingWorkflowRequestList", "getWorkflowRequest", "submitRequest", "getDoingWorkflowRequestList"]
+    assert stored["rules"][0]["executions"][0]["match_reason"] == "审批内容明确属于正常出差申请"
 
 
 def test_preview_v2_rule_is_read_only_and_explains_match(monkeypatch):

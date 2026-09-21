@@ -5,7 +5,7 @@ import pytest
 
 
 pytest.importorskip("mcp")
-path = Path(__file__).parents[1] / "remote_oa_stage" / "oa_rest_adapter.py"
+path = Path(__file__).parents[1] / "karvyloop" / "oa" / "rest_adapter.py"
 spec = importlib.util.spec_from_file_location("oa_snapshot_metadata", path)
 assert spec and spec.loader
 oa = importlib.util.module_from_spec(spec)

@@ -3475,12 +3475,12 @@
   function _renderTurnReply(log, tn) {
     if (tn && tn.pending) { _pushExecutingPlaceholder(log, tn.task_id); return; }
     if (tn && tn.status === "interrupted") {
-      pushChatLine("system", "⚠ " + t("chat.turn_interrupted")); return;
+      pushChatLine("system", "⚠ " + t("chat.turn_interrupted"), "", tn.ts); return;
     }
     if (tn && tn.status === "error") {
-      pushChatLine("system", "⚠ " + tB(tn.agent_response || t("chat.turn_interrupted"))); return;
+      pushChatLine("system", "⚠ " + tB(tn.agent_response || t("chat.turn_interrupted")), "", tn.ts); return;
     }
-    pushChatLine(tn.brain === "fast" ? "system" : "agent", tn.agent_response);
+    pushChatLine(tn.brain === "fast" ? "system" : "agent", tn.agent_response, "", tn.ts);
   }
 
   // "执行中…" 占位:agent 侧一条带呼吸点的骨架行(不是空白)。drive 完成的 drive_done /
@@ -3808,7 +3808,7 @@
     const line = el("div", { class: "chat-line agent" },
       el("span", { class: "role" },
         el("span", { text: _who }),
-        _messageTimeNode((entry && entry.ts) || Date.now())));
+        _messageTimeNode(entry && entry.ts)));
     if (entry.events && entry.events.length && window.KarvyRender) {
       const body = el("div", { class: "agent-turn" });
       KarvyRender.renderEvents(body, entry.events);
@@ -3873,6 +3873,7 @@
     return "";
   }
   function _formatMessageTime(ts) {
+    if (ts === undefined || ts === null || ts === "" || Number(ts) === 0) return "";
     const date = typeof ts === "string" && !/^\d+(\.\d+)?$/.test(ts)
       ? new Date(ts)
       : new Date(Number(ts) < 1e12 ? Number(ts) * 1000 : Number(ts));
@@ -3933,7 +3934,7 @@
     const line = el("div", { class: "chat-line live " + role },
       el("span", { class: "role" },
         el("span", { text: speakerOverride || _roleLabel(role) }),
-        _messageTimeNode(ts || Date.now())));
+        _messageTimeNode(ts)));
     // 9.4:正文走 markdown + 消毒(KarvyRender);缺库回退裸文本。
     // agent 正文过 tB:后端静态整句(共创等)在 en 界面查 BACKEND_ZH_EN 整句/前缀译;
     // 用户自己的话绝不动(只译 agent 侧)。
@@ -4856,8 +4857,8 @@
     if (send) send.disabled = true;
     openChatModal();
     // 乐观渲染:**真**显示发了什么(缩略图/文档块),不再只写"(带了 N 个附件)"
-    if (_manifest.length) _pushUserWithAttachments(_qText, _manifest);
-    else pushChatLine("user", text);
+    if (_manifest.length) _pushUserWithAttachments(_qText, _manifest, Date.now());
+    else pushChatLine("user", text, "", Date.now());
     showBusy();
     // ch4 圆桌对话式对齐(Hardy:少按钮)—— 待对齐圆桌里,你的话走 /align;小卡聊清了自己开始。
     if (_pendingRoundtable) {
@@ -5037,7 +5038,7 @@
     const line = el("div", { class: "chat-line user" },
       el("span", { class: "role" },
         el("span", { text: t("chat.you") }),
-        _messageTimeNode(ts || Date.now())));
+        _messageTimeNode(ts)));
     if (text) line.appendChild(document.createTextNode(text));
     const att = _renderAttachItems(items);
     if (att) line.appendChild(att);

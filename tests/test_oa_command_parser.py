@@ -1,4 +1,4 @@
-from remote_oa_stage.oa_command_parser import OACommand, parse_oa_command
+from karvyloop.channels.oa_command_parser import OACommand, parse_oa_command
 
 
 def test_batch_approval_and_range_are_normalized():
