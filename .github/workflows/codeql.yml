@@ -24,7 +24,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+      - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           languages: python
           # 默认(code-scanning/security)高精度规则集:抓 path/command/sql-injection、凭证明文、
