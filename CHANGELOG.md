@@ -11,6 +11,22 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.11.5] — 2026-11-05
+
+The console interaction release: native browser dropdowns are replaced by KarvyLoop's
+own select panel, long conversations load page by page, and model edits apply without
+a restart.
+
+### Added
+- **Project-rendered select panel across the console.** Every native `<select>` — channels, models, agents, workflow nodes, pursuit gates — now renders through a component that follows the design tokens. The native element stays in the DOM at 1px and transparent, so `value`, `name`, `FormData` and `change` semantics are untouched; a body-level fixed popup keeps the panel from being clipped by modal overflow, and a MutationObserver adopts selects inserted later.
+- **Conversation history as a custom listbox.** The chat toolbar's `🕘` selector is a button plus listbox now, matching the other toolbar controls instead of opening the browser's native menu.
+- **Paged conversation replay.** Opening a conversation returns the most recent page of turns, and a "load earlier N turns" control fetches older pages on demand, so long sessions no longer ship their entire history in one response.
+
+### Fixed
+- **Dropdowns always fell back to their last option.** `el()` emitted boolean `false` as `selected="false"`, and the attribute's mere presence means *selected* — in a single select the last one wins. Editing a model therefore always showed `embedding` instead of the saved `chat`, and editing a channel always showed the last role instead of the saved one. Boolean attributes are now written only when true.
+- **Pending DingTalk sender hints lingered.** After a sender was added to the allow-list input, its authorization prompt stayed in the form; the row — and the container once empty — is now removed.
+- **Model hot-reload kept the old default model.** `runtime_kwargs["model_ref"]` was resolved at startup, so changing or deleting the default model still required a restart. Reload now re-resolves the reference, while an explicitly chosen non-default model is left untouched.
+
 ## [2026.9.17] — 2026-09-17
 
 The platform notification release: agents can proactively push DingTalk messages through a governed platform capability — they express intent, the platform handles recipients, approval, delivery, retries, and audit.
