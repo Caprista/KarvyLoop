@@ -28,7 +28,16 @@ def _reload_gateway_registry(app) -> tuple[bool, str]:
         return False, "无 gateway 或无 config 路径(--no-llm?)"
     try:
         from karvyloop.gateway.registry import ModelRegistry
-        gw.reg = ModelRegistry.load(cfgp)
+        old_reg = getattr(gw, "reg", None)
+        old_default = getattr(old_reg, "default_chat", "") or ""
+        new_reg = ModelRegistry.load(cfgp)
+        gw.reg = new_reg
+        # 只换注册表还不够:runtime_kwargs["model_ref"] 是启动时定死的引用串,
+        # 改默认模型/删旧模型后聊天仍拿旧 ref → 必须重启。这里跟随新默认重解析。
+        ref = (rk.get("model_ref") or "").strip()
+        new_default = new_reg.default_chat or ""
+        if new_default and (not ref or ref == old_default or ref not in new_reg.models):
+            rk["model_ref"] = new_default
         _mark_config_seen(app)   # 自己刚读过盘 → 记 mtime,外改检测别把这次当"别处修改"
         return True, ""
     except Exception as e:

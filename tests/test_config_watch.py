@@ -121,3 +121,65 @@ def test_own_save_does_not_count_as_external(tmp_path):
     _touch_later(p)                                         # 模拟自己写盘
     rm._mark_config_seen(app)                               # 保存路径的记账动作
     assert rm.check_config_external_change(app) is False    # 不误报
+
+
+# ================= ③ 热加载要真的换模型 =================
+
+def _cfg(default: str) -> str:
+    return f"""models:
+  providers:
+    a:
+      base_url: https://a.example.com
+      api_key: sk-a
+      models:
+        - id: a/m1
+          api: openai-completions
+          context_window: 128000
+          max_tokens: 4096
+    b:
+      base_url: https://b.example.com
+      api_key: sk-b
+      models:
+        - id: b/m2
+          api: openai-completions
+          context_window: 128000
+          max_tokens: 4096
+agents:
+  defaults:
+    model: {default}
+"""
+
+
+def test_reload_follows_new_default_model(tmp_path):
+    """换默认模型 → 热加载后聊天用的 model_ref 必须跟着换,否则"保存了还得重启"。
+
+    runtime_kwargs["model_ref"] 是启动时定死的引用串,只换 gw.reg 不重解析 → 仍打旧模型。
+    """
+    from karvyloop.console import routes_models as rm
+    from karvyloop.gateway.registry import ModelRegistry
+    p = tmp_path / "config.yaml"
+    p.write_text(_cfg("a/m1"), encoding="utf-8")
+    rk = {"gateway": SimpleNamespace(reg=ModelRegistry.load(p)), "model_ref": "a/m1"}
+    app = SimpleNamespace(state=SimpleNamespace(config_path=str(p), runtime_kwargs=rk))
+
+    p.write_text(_cfg("b/m2"), encoding="utf-8")
+    _touch_later(p)
+    ok, msg = rm._reload_gateway_registry(app)
+    assert ok, msg
+    assert rk["model_ref"] == "b/m2"
+    assert rm.check_config_external_change(app) is False    # 自己读的盘,不重复报外改
+
+
+def test_reload_keeps_explicit_model_override(tmp_path):
+    """显式指定的非默认模型仍然可用 → 热加载不该把它改回默认。"""
+    from karvyloop.console import routes_models as rm
+    from karvyloop.gateway.registry import ModelRegistry
+    p = tmp_path / "config.yaml"
+    p.write_text(_cfg("a/m1"), encoding="utf-8")
+    rk = {"gateway": SimpleNamespace(reg=ModelRegistry.load(p)), "model_ref": "b/m2"}
+    app = SimpleNamespace(state=SimpleNamespace(config_path=str(p), runtime_kwargs=rk))
+
+    p.write_text(_cfg("a/m1"), encoding="utf-8")
+    ok, msg = rm._reload_gateway_registry(app)
+    assert ok, msg
+    assert rk["model_ref"] == "b/m2"
