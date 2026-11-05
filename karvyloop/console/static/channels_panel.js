@@ -133,17 +133,20 @@ var KarvyChannelsPanelBundle = (function(exports) {
     const senderInput = form.querySelector("input[name='allow_senders']");
     if (!senderInput) return;
     const button = el("button", { type: "button", class: "channel-allow-btn", text: t("channels.add_pending") });
-    button.addEventListener("click", () => {
-      const values = senderInput.value.split(/[，,\n]/).map((value) => value.trim()).filter(Boolean);
-      if (!values.includes(item.sender)) senderInput.value = [...values, item.sender].join(", ");
-      button.disabled = true;
-    });
-    pendingWrap.appendChild(el(
+    const row = el(
       "div",
       { class: "channel-pending", "data-sender": item.sender },
       el("span", { text: t("channels.pending_sender", { name: item.sender_nick || item.sender, sender: item.sender }) }),
       button
-    ));
+    );
+    button.addEventListener("click", () => {
+      const values = senderInput.value.split(/[，,\n]/).map((value) => value.trim()).filter(Boolean);
+      if (!values.includes(item.sender)) senderInput.value = [...values, item.sender].join(", ");
+      // 已加入允许发送者输入框,待授权提示就不再需要展示
+      row.remove();
+      if (!pendingWrap.querySelector(".channel-pending")) pendingWrap.remove();
+    });
+    pendingWrap.appendChild(row);
   }
   async function openForm(channel, pending = []) {
     const body = KM.mgmtBody();

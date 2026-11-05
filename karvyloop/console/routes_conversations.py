@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .roundtable_engine import _roundtable_pending
+from karvyloop.cognition.conversation import DEFAULT_UI_TURNS, ui_turn_page
 
 router = APIRouter(prefix="/api")
 
@@ -104,9 +105,23 @@ def api_conversation_resume(req: ResumeRequest, request: Request) -> dict[str, A
     return {
         "id": conv.id, "title": conv.title, "turn_count": conv.turn_count,
         "closed_at": conv.closed_at,
-        "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
+        **ui_turn_page(conv),   # 最近一页;长会话不再全量回放
         "roundtable_pending": _roundtable_pending(request.app, conv.id),
     }
+
+
+@router.get("/conversation/turns")
+def api_conversation_turns(
+    conversation_id: str, request: Request, limit: int = DEFAULT_UI_TURNS,
+) -> dict[str, Any]:
+    """分页回放历史(前端"加载更早"用):只读加载,不切换当前场/会话。"""
+    mgr = getattr(request.app.state, "conversation_manager", None)
+    if mgr is None:
+        return {"ok": False, "reason": "未接对话编排器"}
+    conv = mgr.load_by_id(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    return {"ok": True, "conversation_id": conv.id, **ui_turn_page(conv, limit)}
 
 
 # ============================================================================

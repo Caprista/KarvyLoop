@@ -2323,6 +2323,8 @@
       const e = document.getElementById(id);
       if (e) e.classList.toggle("hidden", !!isRunLine);
     });
+    // 运行线把入口藏了 → 顺手收起还开着的下拉,别留一个悬空面板
+    if (isRunLine) _closeConvHistory(false);
   }
   // 2e:打开一条工作流/圆桌线(点卡 / 料里追问都走这)。切到该线 + 渲染历史 + 标题。
   let _currentRunConv = "";
@@ -2350,7 +2352,7 @@
       _chatSpeaker = "";
       _toggleChannelTools(true);   // #1:运行线无 新对话/历史/圆桌
       _ceClear(); _hideMentionPop(); _hideRoundtableBanner();
-      _renderConversationTurns(data.turns);
+      _renderTurnPage(data, data.conversation_id);
       refreshPeers();
       refreshConversations();
     } catch (e) { console.warn("[openLine] failed", e); }
@@ -2393,10 +2395,10 @@
       if (!data.is_run_line) _toggleRoundtableBtn(_currentPeer);
       _setChannelReadOnly(data.role === "channel");
       _ceClear(); _hideMentionPop(); _hideRoundtableBanner();
-      _renderConversationTurns(data.turns);
+      _renderTurnPage(data, data.conversation_id);
       refreshPeers();
       refreshConversations();
-      if (targetTaskId) _locateTurnByTask(targetTaskId);
+      if (targetTaskId) _locateTurnByTaskDeep(targetTaskId);
       return true;
     } catch (e) { console.warn("[openConvById] failed", e); return false; }
   }
@@ -2414,9 +2416,18 @@
 
   async function refreshPeers() {
     try {
-      const r = await fetch("/api/peers");
-      if (!r.ok) return;
-      const data = await r.json();
+      // 两个请求都先取回来,再一次性 clear + 重建(中间不留 await)。
+      // 旧写法先 list.innerHTML="" 再 await /api/lines:刷新时 boot 的 refreshPeers 与
+      // switchPeer 触发的 refreshPeers 会交错,后完成的那次把行 append 到已重建的列表上
+      // → 左栏「私聊/群聊/工作流/圆桌」整段重复一次。clear 到 append 必须同步完成。
+      const [rp, rl] = await Promise.all([
+        fetch("/api/peers"),
+        fetch("/api/lines").catch(() => null),
+      ]);
+      if (!rp.ok) return;
+      const data = await rp.json();
+      let lines = { workflows: [], roundtables: [] };
+      try { if (rl && rl.ok) lines = await rl.json(); } catch (e) {}
       const list = document.getElementById("peer-list");
       if (!list) return;
       // 高亮跟随**当前场**(_currentPeer);没切过 → 保住 DOM 上的高亮 → 都没有就高亮首项
@@ -2446,12 +2457,7 @@
       const karvy = peers.find((p) => p.is_private);
       const agents = peers.filter((p) => !p.is_private && !p.is_group && ts(p) >= 0).sort(byRecency);
       const groups = peers.filter((p) => p.is_group).sort(byRecency);
-      // 2d:工作流/圆桌线(各自跑出来的独立会话卡)
-      let lines = { workflows: [], roundtables: [] };
-      try {
-        const lr = await fetch("/api/lines");
-        if (lr.ok) lines = await lr.json();
-      } catch (e) {}
+      // 2d:工作流/圆桌线(各自跑出来的独立会话卡;lines 已在上面取好,此处不再 await)
       let first = true;
       const mk = (p) => ({ domain_id: p.domain_id, role: p.role, agent_id: p.agent_id, is_group: !!p.is_group });
       const addRow = (container, p, xable) => {
@@ -2572,7 +2578,7 @@
       _hideMentionPop();
       _hideRoundtableBanner();  // 切场 → 收起圆桌"开始讨论"横幅
       _maybeShowRoundtablePending(data);  // 切到的对话若是待讨论圆桌 → 重亮横幅
-      _renderConversationTurns(data.turns);
+      _renderTurnPage(data, data.conversation_id);
       const target = peer.domain_id === "l0" ? t("peer.private") : peer.domain_id + " / " + peer.role;
       pushChatLine("system", t("peer.switched", { target: target, n: data.turn_count }));
       refreshConversations();
@@ -2626,25 +2632,139 @@
     } catch (e) { console.warn("[channel-conv] list failed", e); }
   }
 
+  // ============ 会话历史:自绘下拉(替代原生 select 弹层) ============
+  // 数据由 refreshConversations() 灌入 _convHistoryItems;面板开合/键盘/外部关闭都在这里,
+  // 交互对齐 listbox:↑↓ 移动、Enter/Space 选中、Esc 关闭、点外部关闭。
+  let _convHistoryItems = [];
+  let _convHistoryIndex = -1;
+
+  function _convHistoryEls() {
+    return {
+      wrap: document.getElementById("conv-history"),
+      btn: document.getElementById("conv-history-btn"),
+      pop: document.getElementById("conv-history-pop"),
+    };
+  }
+
+  function _convHistoryIsOpen() {
+    const pop = document.getElementById("conv-history-pop");
+    return !!pop && !pop.classList.contains("hidden");
+  }
+
+  function _renderConvHistory() {
+    const pop = document.getElementById("conv-history-pop");
+    if (!pop) return;
+    pop.innerHTML = "";
+    _convHistoryItems.forEach((item, idx) => {
+      const opt = el("button", {
+        class: "chat-hist-item", type: "button", role: "option", id: "conv-history-opt-" + idx,
+        "aria-selected": item.current ? "true" : "false",
+        title: item.title + " · " + item.meta,
+      });
+      // 两行:标题(可截断)+ 元信息;「当前」做右侧小标,长标题下也不会被截掉
+      opt.appendChild(el("span", { class: "chat-hist-title", text: item.title }));
+      if (item.current) opt.appendChild(el("span", { class: "chat-hist-badge", text: t("conv.current").replace(/^[\s←]+/, "") }));
+      opt.appendChild(el("span", { class: "chat-hist-meta", text: item.meta }));
+      opt.addEventListener("click", () => _chooseConvHistory(item.id));
+      pop.appendChild(opt);
+    });
+    _convHistoryIndex = -1;
+    pop.removeAttribute("aria-activedescendant");
+  }
+
+  function _convHistoryMove(delta) {
+    const pop = document.getElementById("conv-history-pop");
+    if (!pop) return;
+    const items = Array.from(pop.querySelectorAll(".chat-hist-item"));
+    if (!items.length) return;
+    _convHistoryIndex = _convHistoryIndex < 0
+      ? (delta > 0 ? 0 : items.length - 1)
+      : Math.max(0, Math.min(items.length - 1, _convHistoryIndex + delta));
+    items.forEach((it, i) => it.classList.toggle("is-active", i === _convHistoryIndex));
+    const active = items[_convHistoryIndex];
+    active.scrollIntoView({ block: "nearest" });
+    pop.setAttribute("aria-activedescendant", active.id || "");
+  }
+
+  function _openConvHistory() {
+    const { btn, pop } = _convHistoryEls();
+    if (!pop || !_convHistoryItems.length) return;
+    _renderConvHistory();
+    pop.classList.remove("hidden");
+    if (btn) btn.setAttribute("aria-expanded", "true");
+    // 焦点进面板:默认落在「当前会话」上,便于一眼看到自己在哪
+    const items = Array.from(pop.querySelectorAll(".chat-hist-item"));
+    const cur = _convHistoryItems.findIndex((c) => c.current);
+    _convHistoryIndex = cur >= 0 ? cur : 0;
+    items.forEach((it, i) => it.classList.toggle("is-active", i === _convHistoryIndex));
+    pop.focus();
+  }
+
+  function _closeConvHistory(focusBtn) {
+    const { btn, pop } = _convHistoryEls();
+    if (!pop || pop.classList.contains("hidden")) return;
+    pop.classList.add("hidden");
+    pop.innerHTML = "";
+    pop.removeAttribute("aria-activedescendant");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    _convHistoryIndex = -1;
+    if (focusBtn && btn) btn.focus();
+  }
+
+  function _chooseConvHistory(id) {
+    _closeConvHistory(true);
+    if (id) resumeConversation(id);
+  }
+
+  function setupConvHistory() {
+    const { btn, pop } = _convHistoryEls();
+    if (!btn || !pop) return;
+    btn.addEventListener("click", () => {
+      if (_convHistoryIsOpen()) _closeConvHistory(true);
+      else _openConvHistory();
+    });
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        _openConvHistory();
+      }
+    });
+    pop.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); _closeConvHistory(true); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); _convHistoryMove(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); _convHistoryMove(-1); }
+      else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        const item = _convHistoryItems[_convHistoryIndex];
+        if (item) _chooseConvHistory(item.id);
+      } else if (e.key === "Tab") { _closeConvHistory(true); }
+    });
+    // 点面板外部 → 关闭(capture:先于其它 click 处理,不打断页面自身交互)
+    document.addEventListener("click", (e) => {
+      if (!_convHistoryIsOpen()) return;
+      const { wrap } = _convHistoryEls();
+      if (wrap && !wrap.contains(e.target)) _closeConvHistory(false);
+    }, true);
+  }
+
   async function refreshConversations() {
     try {
       const r = await fetch("/api/conversations");
       if (!r.ok) return;
       const data = await r.json();
-      const sel = document.getElementById("conv-history");
-      if (sel) {
-        // 保留首项占位,重建列表
-        sel.innerHTML = '<option value="">' + t("sel.history") + '</option>';
-        for (const c of data.conversations || []) {
-          const opt = el("option", { value: c.id });
-          const label = (c.title && c.title.trim()) ? c.title : t("conv.untitled");
-          // docs/66 §E:沉淀关闭的标 ✓(历史可翻但不算欠账)
-          const closed = c.closed_at ? t("conv.closed_suffix") : "";
-          const active = c.last_active_at ? ` · ${t("conv.last_active", { when: new Date(c.last_active_at * 1000).toLocaleString() })}` : "";
-          opt.textContent = `${label} · ${t("conv.turns", { n: c.turn_count })}${active}${closed}${c.id === data.current_id ? t("conv.current") : ""}`;
-          sel.appendChild(opt);
-        }
-      }
+      _convHistoryItems = (data.conversations || []).map((c) => {
+        const title = (c.title && c.title.trim()) ? c.title : t("conv.untitled");
+        // docs/66 §E:沉淀关闭的标 ✓(历史可翻但不算欠账)
+        const closed = c.closed_at ? t("conv.closed_suffix") : "";
+        const active = c.last_active_at ? ` · ${t("conv.last_active", { when: new Date(c.last_active_at * 1000).toLocaleString() })}` : "";
+        return {
+          id: c.id,
+          current: c.id === data.current_id,
+          title,
+          meta: `${t("conv.turns", { n: c.turn_count })}${active}${closed}`,
+        };
+      });
+      if (_convHistoryIsOpen()) _renderConvHistory();
       refreshChannelConversations();
     } catch (e) {
       console.warn("[conv] list failed", e);
@@ -2713,7 +2833,7 @@
       // 重画聊天日志为这段对话的历史(圆桌回合 → 群聊串渲染)
       const log = document.getElementById("chat-log");
       if (log) log.innerHTML = "";
-      _renderConversationTurns(data.turns);
+      _renderTurnPage(data, data.id);
       pushChatLine("system", t("conv.resumed", { n: data.turn_count }));
       _hideRoundtableBanner();
       _maybeShowRoundtablePending(data);   // 重开待讨论圆桌 → 重亮"开始讨论"
@@ -3429,6 +3549,82 @@
     if (crystallizable && plan) _offerCrystallize(plan);   // 跑稳了 → 问你沉淀不
   }
 
+  // 历史回放分页状态:后端只给最近一页(长会话全量渲染会卡死主线程),这里记当前页大小。
+  let _turnPageState = null;
+
+  function _renderTurnPage(data, convId) {
+    const log = document.getElementById("chat-log");
+    const turns = (data && data.turns) || [];
+    if (!log) { _renderConversationTurns(turns); return; }
+    _turnPageState = {
+      convId: convId || (data && (data.conversation_id || data.id)) || "",
+      limit: (data && data.returned_turns) || turns.length,
+      total: (data && data.total_turns) || turns.length,
+      hasMore: !!(data && data.has_more),
+    };
+    log.innerHTML = "";
+    if (_turnPageState.hasMore) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chat-load-older";
+      btn.textContent = t("conv.load_older", { n: _turnPageState.total - _turnPageState.limit });
+      btn.addEventListener("click", () => _loadOlderTurns(btn));
+      log.appendChild(btn);
+    }
+    _renderConversationTurns(turns);
+  }
+
+  async function _fetchOlderTurnPage(st) {
+    const next = Math.min(st.limit + 50, 500);
+    const r = await fetch(`/api/conversation/turns?conversation_id=${encodeURIComponent(st.convId)}&limit=${next}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  }
+
+  // 正在逐字流式时不要整块重画:草稿节点会被 innerHTML="" 摘掉,后续 delta 写进孤儿节点(肉眼=流消失)。
+  function _liveStreamActive() {
+    return !!(_liveStreamEl && _liveStreamEl.parentNode);
+  }
+
+  async function _loadOlderTurns(btn) {
+    const st = _turnPageState;
+    const log = document.getElementById("chat-log");
+    if (!st || !st.convId || !log || btn.disabled) return;
+    if (_liveStreamActive()) return;
+    const prevHeight = log.scrollHeight;
+    const prevTop = log.scrollTop;
+    btn.disabled = true;
+    btn.textContent = t("conv.loading_older");
+    try {
+      const data = await _fetchOlderTurnPage(st);
+      _renderTurnPage(data, st.convId);
+      // 重画后保持视口停在原处(否则会跳到底部)
+      log.scrollTop = Math.max(0, log.scrollHeight - prevHeight + prevTop);
+    } catch (e) {
+      console.warn("加载更早消息失败", e);
+      btn.disabled = false;
+      btn.textContent = t("conv.load_older_failed");
+    }
+  }
+
+  // 定位的那一轮可能不在首屏:按页往回翻,直到找到(最多 8 页,避免极端长会话反复重画)。
+  async function _locateTurnByTaskDeep(taskId) {
+    if (!taskId) return false;
+    for (let i = 0; i < 8; i++) {
+      if (_locateTurnByTask(taskId)) return true;
+      const st = _turnPageState;
+      const log = document.getElementById("chat-log");
+      if (!st || !st.hasMore || !st.convId || !log) return false;
+      const prevHeight = log.scrollHeight;
+      const prevTop = log.scrollTop;
+      let data;
+      try { data = await _fetchOlderTurnPage(st); } catch (e) { return false; }
+      _renderTurnPage(data, st.convId);
+      log.scrollTop = Math.max(0, log.scrollHeight - prevHeight + prevTop);
+    }
+    return false;
+  }
+
   // 重画一段对话的回合:圆桌/workflow/( @多人回应)→ 群聊串卡;普通回合 → user/agent 行。
   function _renderConversationTurns(turns) {
     const log = document.getElementById("chat-log");
@@ -3509,17 +3705,18 @@
 
   // 料→去聊天:滚到并高亮某条 task 对应的那一轮(找它的**第一个**节点 = 提问行)。
   function _locateTurnByTask(taskId) {
-    if (!taskId) return;
+    if (!taskId) return false;
     const log = document.getElementById("chat-log");
-    if (!log) return;
+    if (!log) return false;
     const node = log.querySelector('[data-task-id="' + (window.CSS && CSS.escape ? CSS.escape(taskId) : taskId) + '"]');
-    if (!node) return;
+    if (!node) return false;
     // 等渲染/布局稳定后再滚(markdown 异步排版),高亮脉冲一下随后自动消。
     setTimeout(() => {
       node.scrollIntoView({ behavior: "smooth", block: "center" });
       node.classList.add("turn-locate-flash");
       setTimeout(() => node.classList.remove("turn-locate-flash"), 1800);
     }, 60);
+    return true;
   }
 
   // ============ ch4 #1:群里 @ 角色(微信式选择器,contenteditable 行内高亮)============
@@ -5768,14 +5965,10 @@
       if (window.KarvyDemoPanel) return;   // 已载:demo_panel 自己的监听器负责
       _openLazyPanel("demo", () => window.KarvyDemoPanel.open());
     });
-    // 9.1d:绑对话控件(➕新对话 / 🕘历史)
+    // 9.1d:绑对话控件(➕新对话 / 🕘历史自绘下拉)
     const newBtn = document.getElementById("conv-new-btn");
     if (newBtn) newBtn.addEventListener("click", newConversation);
-    const histSel = document.getElementById("conv-history");
-    if (histSel) histSel.addEventListener("change", (e) => {
-      const v = e.target.value; e.target.selectedIndex = 0;   // 选完复位成 🕘 图标,不显长标题
-      if (v) resumeConversation(v);
-    });
+    setupConvHistory();
     // 9.2b:绑场+角色 picker
     const peerSel = document.getElementById("peer-picker");
     if (peerSel) peerSel.addEventListener("change", (e) => switchPeer(e.target.value));

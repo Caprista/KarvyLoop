@@ -14,6 +14,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from karvyloop.cognition.conversation import ui_turn_page
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
@@ -185,7 +187,7 @@ def api_line_open(req: LineOpenRequest, request: Request) -> dict[str, Any]:
     return {
         "ok": True, **ret_peer, "is_group": req.role == "roundtable",
         "conversation_id": conv.id, "turn_count": conv.turn_count,
-        "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
+        **ui_turn_page(conv),   # 最近一页;长会话不再全量回放
     }
 
 
@@ -253,5 +255,5 @@ def api_line_open_by_conv(req: ConvOpenRequest, request: Request) -> dict[str, A
         "title": title.lstrip("⚙🎡 ").strip(), "origin_group": _line_origin_name(request.app, target.domain_id),
         "conversation_id": conv.id, "turn_count": conv.turn_count,
         "channel": channel, "channel_role": channel_role,
-        "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
+        **ui_turn_page(conv),   # 最近一页;长会话不再全量回放
     }

@@ -588,3 +588,26 @@ def test_knowledge_discard_closes_without_sediment(app_with_mgr, mgr):
     # 主聊天当前会话没被碰
     assert mgr.current().id == work.id and mgr.current().closed_at is None
     assert client.post("/api/knowledge/discard", json={"session_id": "no-such"}).status_code == 404
+
+
+# ---- AC8: 长会话分页(点开不再全量回放) ----
+
+
+def test_long_conversation_only_returns_recent_page(app_with_mgr, mgr):
+    """120 轮私聊 → peer/switch 只回最近 50 轮 + has_more;加载更早走分页端点。"""
+    mgr.set_peer(Address(domain_id="l0", role="observer", agent_id="karvy"))
+    for i in range(120):
+        mgr.record_turn(f"q{i}", f"a{i}")
+    client = TestClient(app_with_mgr)
+    body = client.post("/api/peer/switch", json={
+        "domain_id": "l0", "role": "observer", "agent_id": "karvy"}).json()
+    assert body["total_turns"] == 120
+    assert body["returned_turns"] == 50 and body["has_more"] is True
+    assert len(body["turns"]) == 50
+    assert body["turns"][-1]["user_intent"] == "q119"
+
+    older = client.get("/api/conversation/turns", params={
+        "conversation_id": body["conversation_id"], "limit": 100}).json()
+    assert older["ok"] is True
+    assert older["returned_turns"] == 100 and older["has_more"] is True
+    assert older["turns"][0]["user_intent"] == "q20"

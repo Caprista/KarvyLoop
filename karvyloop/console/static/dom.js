@@ -1,5 +1,11 @@
 var KarvyDomBundle = (function(exports) {
   "use strict";
+  // 布尔属性:存在即真。传 false 必须"不写这个属性"——
+  // 之前写成 selected="false" 等于选中(所有 <option> 全被标成 selected,最后一个胜出)。
+  const BOOL_ATTRS = /* @__PURE__ */ new Set([
+    "selected", "checked", "disabled", "hidden", "multiple",
+    "readonly", "required", "autofocus", "open", "novalidate", "inert"
+  ]);
   function el(tag, attrs, ...children) {
     const e = document.createElement(tag);
     if (attrs) {
@@ -9,6 +15,8 @@ var KarvyDomBundle = (function(exports) {
         else if (k === "text") e.textContent = String(v);
         else if (k.startsWith("on") && typeof v === "function") {
           e.addEventListener(k.slice(2).toLowerCase(), v);
+        } else if (typeof v === "boolean" && BOOL_ATTRS.has(k.toLowerCase())) {
+          if (v) e.setAttribute(k, "");
         } else if (v != null) {
           e.setAttribute(k, String(v));
         }

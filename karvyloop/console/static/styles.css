@@ -624,6 +624,32 @@ html, body {
 }
 .chat-tool-sel:hover { background: var(--accent-soft); color: var(--accent-deep); }
 .chat-tool-sel:focus { outline: none; background: var(--accent-soft); }
+/* 键盘焦点仍要有:鼠标点击不显 ring,键盘进入显信号绿(同全局 :focus-visible 规范) */
+.chat-tool-sel:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+/* 会话历史自绘下拉:面板贴工具钮上方,卡片/圆角/阴影照设计规范,不再用原生 select 弹层 */
+.chat-hist { position: relative; display: inline-flex; }
+.chat-hist-pop {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 40;
+  width: 340px; max-width: min(340px, calc(100vw - 32px));
+  max-height: 300px; overflow-y: auto; overscroll-behavior: contain;
+  padding: 4px; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+}
+.chat-hist-pop .chat-hist-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  gap: 1px 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--r-sm);
+  background: transparent; text-align: left; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.chat-hist-title { grid-column: 1; min-width: 0; font-size: var(--fs-12); font-weight: 600; color: var(--text-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-hist-badge { grid-column: 2; font-size: 10px; font-weight: 700; color: var(--accent-strong); white-space: nowrap; }
+.chat-hist-meta { grid-column: 1 / -1; min-width: 0; font-size: 11px; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-hist-pop .chat-hist-item:hover,
+.chat-hist-pop .chat-hist-item.is-active { background: var(--surface-hover); }
+.chat-hist-pop .chat-hist-item[aria-selected="true"] { background: var(--accent-soft); }
+.chat-hist-pop .chat-hist-item[aria-selected="true"] .chat-hist-title { color: var(--accent-strong); }
 /* hover 气泡:告诉这个图标是干嘛的(data-tip 由 i18n 写入)*/
 .icon-btn[data-tip] { position: relative; }
 /* 微动效 P0-8:气泡常驻但透明,350ms 悬停意图后 150ms 淡入;移开立即隐(delay 只放显示向)——
@@ -853,6 +879,14 @@ html, body {
   font-size: 12px; color: var(--text-dim); background: var(--surface);
   border: 1px solid var(--border); border-radius: 12px; text-align: center;
 }
+/* 长会话历史分页:顶部"加载更早"按钮 */
+.chat-load-older {
+  align-self: center; margin: 8px auto 2px; padding: 5px 14px;
+  font-size: 12px; color: var(--text-dim); background: transparent;
+  border: 1px dashed var(--border); border-radius: 12px; cursor: pointer;
+}
+.chat-load-older:hover { color: var(--text); border-color: var(--text-dim); }
+.chat-load-older:disabled { cursor: default; opacity: .6; }
 .chat-line .role {
   font-size: 11px;
   color: var(--text-dim);
@@ -1336,6 +1370,13 @@ body.desk-view #mgmt-modal.prompt-trace-full .modal { position: fixed; inset: 0 
   border: 1px solid var(--accent-line); padding: 0;
 }
 .chat-input .chat-tool-btn:hover { background: var(--accent-soft); }
+/* 🕘 会话历史=自绘下拉的触发器:同豁免毯子实底,padding 归零(与原生 select 时期一致) */
+.chat-input .chat-tool-sel {
+  padding: 0; font-size: 16px; font-weight: 500;
+  background: transparent; color: var(--text-2); border: 1px solid transparent;
+}
+.chat-input .chat-tool-sel:hover,
+.chat-input .chat-tool-sel[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-deep); }
 
 /* === 右上下文栏 === */
 .context-panel {
@@ -3671,3 +3712,77 @@ body.lite .karvy-fab:hover { filter: drop-shadow(0 2px 5px rgba(142, 95, 60, 0.3
   .channel-pending { align-items: flex-start; flex-direction: column; }
 }
 .dev-roster[open] > summary { margin-bottom: 8px; }
+
+/* === 自绘下拉(ui_widgets.js 全局接管原生 select;保留原生语义,只换外观)===
+ * 结构: .kv-select > select.kv-select-native + button.kv-select-btn
+ * 弹层: body > #kv-select-pop(position:fixed,层级高于 mgmt-modal 9700 / 工作流画布 9999)
+ */
+.kv-select { position: relative; display: inline-block; max-width: 100%; min-width: 0; vertical-align: middle; }
+.kv-select[hidden] { display: none; }
+.kv-select-native {
+  position: absolute !important; left: 0 !important; top: 0 !important;
+  width: 1px !important; height: 1px !important; min-width: 0 !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important;
+  opacity: 0; pointer-events: none; overflow: hidden;
+}
+.kv-select-btn {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+  box-sizing: border-box; max-width: 100%; padding: 9px 11px;
+  font: inherit; font-weight: 500; font-size: 14px; line-height: 1.35; text-align: left;
+  color: var(--text); background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: 9px;
+  cursor: pointer; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.kv-select-btn:hover { border-color: var(--accent-line); }
+.kv-select-btn:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.kv-select-btn[aria-expanded="true"] { border-color: var(--accent); }
+.kv-select-btn:disabled { opacity: .55; cursor: not-allowed; }
+.kv-select-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-select-arrow { flex: 0 0 auto; font-size: 10px; line-height: 1; color: var(--text-3); transition: transform var(--dur-fast) var(--ease-out); }
+.kv-select-btn[aria-expanded="true"] .kv-select-arrow { transform: rotate(180deg); }
+
+/* 管理表单 / 委派问卷:占满一行(原来 select 是 width:100%) */
+.mgmt-form .kv-select { width: 100%; }
+.mgmt-form .kv-select > .kv-select-btn { width: 100%; }
+.ddelegate-question .kv-select { width: 100%; }
+.ddelegate-question .kv-select > .kv-select-btn { width: 100%; padding: 8px 9px; font-size: 12px; font-weight: 400; border-radius: 7px; }
+
+/* 工作流 / 追求门禁里的小控件:沿用原尺寸与底色 */
+.wf-step-role + .kv-select-btn {
+  padding: 5px 6px; font-size: 12px; border-radius: 8px;
+  background: var(--bg); border-color: var(--border); color: var(--text); max-width: 110px;
+}
+.wfn-onfail + .kv-select-btn {
+  width: 100%; margin-top: 5px; padding: 3px; font-size: 11px; font-weight: 400;
+  border-radius: 6px; background: var(--bg); border-color: var(--border); color: var(--text-dim);
+}
+.wf-cv-role + .kv-select-btn {
+  padding: 6px 8px; font-size: 12.5px; border-radius: 8px; max-width: 160px;
+  background: var(--bg); border-color: var(--border); color: var(--text);
+}
+.pursuit-gate-row .kv-select { flex: 0 0 auto; width: auto; }
+.pursuit-gate-sel + .kv-select-btn {
+  width: auto; padding: 8px 11px; font-size: 13px; border-radius: 9px;
+  background: var(--bg); border-color: var(--border);
+}
+.budget-in + .kv-select-btn { padding: 6px 9px; font-size: 13px; }
+.dev-share-role + .kv-select-btn { padding: 5px 9px; font-size: 12.5px; }
+
+/* 全局弹层 */
+.kv-select-pop {
+  position: fixed; z-index: 10100; box-sizing: border-box;
+  min-width: 150px; max-width: min(640px, calc(100vw - 16px)); max-height: 280px;
+  overflow-y: auto; overscroll-behavior: contain; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow-lg);
+}
+.kv-select-opt {
+  display: block; width: 100%; box-sizing: border-box; padding: 8px 10px;
+  border: 0; border-radius: var(--r-sm); background: transparent;
+  color: var(--text-1); font: inherit; font-size: 13px; font-weight: 400;
+  text-align: left; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kv-select-opt:hover, .kv-select-opt.is-active { background: var(--surface-hover); }
+.kv-select-opt[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.kv-select-opt:disabled { color: var(--text-3); cursor: default; background: transparent; }

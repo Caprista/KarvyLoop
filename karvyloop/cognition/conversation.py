@@ -37,6 +37,11 @@ FORMAT_VERSION = 1
 MAX_FIELD_CHARS = 64 * 1024
 DEFAULT_CONTEXT_TURNS = 12
 
+# UI 历史回放页大小:一次只把最近 N 轮发给浏览器(长会话全量返回会撑爆 DOM/主线程)。
+# 前端"加载更早"按页追加;上限兜底,防止用户连点把整段几百轮又拉回来。
+DEFAULT_UI_TURNS = 50
+MAX_UI_TURNS = 500
+
 BRAIN_FAST = "fast"
 BRAIN_SLOW = "slow"
 
@@ -282,6 +287,28 @@ class ConversationMeta:
     chat: Optional[dict] = None            # 通道会话元信息(钉钉):{"type": "group"|"direct", "title": 群名}
 
 
+def ui_turn_page(conv: Conversation, limit: int = DEFAULT_UI_TURNS) -> dict:
+    """UI 历史回放页:只序列化最近 `limit` 轮 + 分页元信息。
+
+    长会话(turn 上万字)全量 to_ui_dict → 响应体和前端 DOM 都线性膨胀,点开就卡死。
+    这里在**服务端**截页,前端按需"加载更早"(limit 递增重取),首屏恒定有界。
+    """
+    try:
+        n = int(limit)
+    except (TypeError, ValueError):
+        n = DEFAULT_UI_TURNS
+    n = max(1, min(n, MAX_UI_TURNS))
+    total = len(conv.turns)
+    start = max(0, total - n)
+    shown = conv.turns[start:]
+    return {
+        "turns": [t.to_ui_dict() for t in shown],
+        "total_turns": total,
+        "returned_turns": len(shown),
+        "has_more": start > 0,
+    }
+
+
 # ---- 存储(JSONL per-conversation,按场分区)----
 
 
@@ -292,6 +319,10 @@ class ConversationStore:
         self._root = Path(root_dir)
         self._root.mkdir(parents=True, exist_ok=True)
         self._clock = clock
+        # meta 缓存:原来每次 /api/peers、/api/conversations 都把所有会话文件逐行 JSON 解析
+        # 只为了算 turn_count/last_ts(长历史=点一下左栏就要重扫几百 MB)。按 (mtime,size)
+        # 失效,追加一轮只重读变化的那一个文件。
+        self._meta_cache: dict[Path, tuple[tuple[int, int], ConversationMeta]] = {}
 
     def _peer_dir(self, peer: Address) -> Path:
         return self._root / _safe(peer.domain_id) / _peer_key(peer)
@@ -387,6 +418,18 @@ class ConversationStore:
         path = self._path(peer, conv_id)
         return self._load_path(path)
 
+    def load_by_id(self, conv_id: str) -> Optional[Conversation]:
+        """按 id 跨 peer 定位并加载(UI 加载更早消息用;不改当前 peer/会话)。"""
+        if not conv_id:
+            return None
+        try:
+            for path in self._root.glob("*/*/*.jsonl"):
+                if path.stem == conv_id:
+                    return self._load_path(path)
+        except OSError:
+            pass
+        return None
+
     def _load_path(self, path: Path) -> Optional[Conversation]:
         if not path.exists():
             return None
@@ -470,6 +513,14 @@ class ConversationStore:
         return metas
 
     def _read_meta(self, path: Path) -> Optional[ConversationMeta]:
+        try:
+            st = path.stat()
+            stamp = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+        cached = self._meta_cache.get(path)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
         created_at = 0.0
         title = ""
         chat: Optional[dict] = None
@@ -508,11 +559,13 @@ class ConversationStore:
                     turn_count += 1
         except OSError:
             return None
-        return ConversationMeta(
+        meta = ConversationMeta(
             id=path.stem, created_at=created_at, title=title,
             last_active_at=last_ts if last_ts else created_at,
             turn_count=turn_count, peer=peer, closed_at=closed_at, chat=chat,
         )
+        self._meta_cache[path] = (stamp, meta)
+        return meta
 
 
 # ---- 编排器(ConversationManager,多场)----
@@ -594,6 +647,12 @@ class ConversationManager:
             self._current = loaded
             self._peer = loaded.peer
         return loaded
+
+    def load_by_id(self, conv_id: str) -> Optional[Conversation]:
+        """按 id 只读加载(不切换当前场/会话;优先返回内存里的当前对话)。"""
+        if self._current is not None and self._current.id == conv_id:
+            return self._current
+        return self._store.load_by_id(conv_id)
 
     def close_conversation(self, conv_id: str = "", *, reason: str = "sedimented") -> Optional[float]:
         """关闭会话(docs/66 §E:沉淀了才关)。缺省关当前;关的是当前 → 顺势开新的

@@ -227,9 +227,13 @@
                     <button type="button" id="chat-voice-btn" class="chat-tool-btn icon-btn hidden" data-i18n-tip="voice.btn.title" data-i18n-title="voice.btn.title">🎤</button>
                     <button type="button" id="conv-new-btn" class="chat-tool-btn icon-btn" data-i18n-tip="btn.conv_new.title" data-i18n-title="btn.conv_new.title">🆕</button>
                     <!-- (docs/66 §F Hardy 三次收敛:收敛/沉淀/欠账全住在知识库面板里,聊天工具栏零知识功能) -->
-                    <select id="conv-history" class="chat-hist chat-tool-sel" data-i18n-title="sel.history.title">
-                      <option value="">🕘</option>
-                    </select>
+                    <!-- 会话历史:自绘下拉面板(不用浏览器原生 select 弹层,视觉与工具栏图标钮一致) -->
+                    <div class="chat-hist" id="conv-history">
+                      <button type="button" id="conv-history-btn" class="chat-tool-sel"
+                              aria-haspopup="listbox" aria-expanded="false" aria-controls="conv-history-pop"
+                              data-i18n-title="sel.history.title">🕘</button>
+                      <div class="chat-hist-pop hidden" id="conv-history-pop" role="listbox" tabindex="-1"></div>
+                    </div>
                     <button type="button" id="roundtable-btn" class="chat-tool-btn icon-btn rt-btn hidden" data-i18n-tip="rt.open.title" data-i18n-title="rt.open.title">🎡</button>
                     <span class="chat-toolbar-spacer"></span>
                     <button type="submit" id="chat-send" class="chat-send-btn" data-i18n="btn.send">Send</button>

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .roundtable_engine import _roundtable_pending
 from .routes_lines import _is_line_hidden, _set_line_hidden
+from karvyloop.cognition.conversation import ui_turn_page
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,6 @@ def api_peer_switch(req: PeerSwitchRequest, request: Request) -> dict[str, Any]:
         "ok": True,
         "domain_id": peer.domain_id, "role": peer.role, "agent_id": peer.agent_id,
         "conversation_id": conv.id, "turn_count": conv.turn_count,
-        "turns": [t.to_ui_dict() for t in conv.turns],   # 含 pending/status(执行中占位/已中断)
+        **ui_turn_page(conv),   # 最近一页(含 pending/status);长会话不再全量回放
         "roundtable_pending": _roundtable_pending(request.app, conv.id),
     }
