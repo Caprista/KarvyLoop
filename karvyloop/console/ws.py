@@ -25,6 +25,10 @@ import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+try:  # starlette 1.x 把"连接已不可用"拆成 WebSocketDisconnected(RuntimeError);更老的版本直接抛 RuntimeError
+    from starlette.websockets import WebSocketDisconnected
+except ImportError:  # pragma: no cover - starlette < 1
+    WebSocketDisconnected = RuntimeError  # type: ignore[misc,assignment]
 
 from karvyloop.runtime.main_loop import MainLoop
 from karvyloop.karvy.observer import WorkbenchObserver
@@ -175,7 +179,11 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "pong"})
             else:
                 await websocket.send_json({"type": "error", "payload": f"unknown type: {mtype}"})
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, WebSocketDisconnected):
+        # 客户端已断开有两种表现:Starlette 收到 websocket.disconnect → WebSocketDisconnect;
+        # 而连接被并发广播的 send 失败(ASGI send 抛 OSError)标记成 DISCONNECTED 后,
+        # 下一轮 receive_text 的入口状态检查抛 WebSocketDisconnected(RuntimeError 子类,
+        # starlette<1 直接抛 RuntimeError)——两者都只是"客户端走了",不是服务端故障。
         pass
     finally:
         clients.discard(websocket)
