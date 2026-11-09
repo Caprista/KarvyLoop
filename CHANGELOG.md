@@ -11,6 +11,14 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.11.9] — 2026-11-09
+
+The disconnect-handling patch: console WebSocket clients that leave mid-run no longer
+raise into the ASGI error log.
+
+### Fixed
+- **Console WebSocket disconnects no longer surface as an ASGI exception.** Starlette 1.x raises `WebSocketDisconnected` (a `RuntimeError` subclass) when a connection is marked disconnected by a concurrent broadcast send and the next receive enters the disconnected state; the endpoint only caught `WebSocketDisconnect`. Both are now treated as "the client left", and older Starlette versions that raise a bare `RuntimeError` stay covered.
+
 ## [2026.11.5] — 2026-11-05
 
 The console interaction release: native browser dropdowns are replaced by KarvyLoop's
