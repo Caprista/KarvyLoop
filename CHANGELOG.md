@@ -11,6 +11,17 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.11.12] — 2026-11-12
+
+The configuration-recovery release: a broken or offline model no longer traps you
+on the setup screen, and self-hosted OpenAI-compatible endpoints that stream their
+thinking in `reasoning_content` no longer come back as empty answers.
+
+### Fixed
+- **An unavailable model no longer locks the model settings.** When the saved model failed its live check (bad key, wrong URL, offline), the setup gate took over the shared modal, made it unclosable, and offered only "reconfigure" — clicking *Models* in the sidebar could not get you in either. Failures now land on a degraded gate with an **Open model settings** exit, and opening model settings always clears the lock.
+- **A second model on the same supplier no longer swallows the first.** Saving a model whose id already existed silently overwrote the earlier entry, and the id prefix then missed the provider block (`provider_of` raised a bare `KeyError`), leaving a visible but unusable model. The provider prefix must now match the provider block, a duplicate id is rejected unless it is an edit, and edits carry `original_id` so renaming migrates the old entry (and its default-model pointer) instead of creating a twin.
+- **OpenAI-compatible streaming that keeps its content in `reasoning_content` no longer reads as an empty turn.** SGLang/vLLM/DeepSeek-style deltas now map `reasoning_content`/`reasoning` to thinking events, `content` accepted as a parts list, non-SSE JSON bodies parsed as a whole reply, and errors returned inside a `200` body surfaced instead of swallowed. Tool calls are flushed at `[DONE]` and at stream end, and empty turns / adapter errors / failure classifications now log at `WARNING` instead of passing silently.
+
 ## [2026.11.9] — 2026-11-09
 
 The disconnect-handling patch: console WebSocket clients that leave mid-run no longer
