@@ -306,7 +306,10 @@ async def drive_in_tui(
         empty_output or outcome.terminal == "infra_dead"
     )
     if retryable_empty:
-        logger.warning("[drive] 模型正文为空 → 重试一次(防 Provider 偶发空流)")
+        # 带上终态:光"空正文"无法区分 provider 真空流 / 传输层 infra / 协议字段没解析到
+        # (executor 侧另有 kind/stop_reason 明细)。
+        logger.warning("[drive] 模型正文为空 → 重试一次(防 Provider 偶发空流) terminal=%s",
+                       outcome.terminal)
         retry = await asyncio.to_thread(_run_drive)
         if not retry.error and (retry.text or "").strip():
             return retry

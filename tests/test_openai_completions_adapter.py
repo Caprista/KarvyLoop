@@ -15,7 +15,9 @@ import respx
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from karvyloop.gateway.events import Done, TextDelta, ToolUseStart, ToolUseStop, Usage  # noqa: E402
+from karvyloop.gateway.events import (  # noqa: E402
+    Done, ErrorEvent, TextDelta, ThinkingDelta, ToolUseStart, ToolUseStop, Usage,
+)
 from karvyloop.gateway.providers import default_adapters  # noqa: E402
 from karvyloop.gateway.providers.openai_completions import (  # noqa: E402
     OpenAICompletionsAdapter,
@@ -268,3 +270,73 @@ async def test_no_cached_field_keeps_cache_read_zero():
         [{"role": "user", "content": "x"}], [], _model(), _provider())]
     usages = [e for e in evs if isinstance(e, Usage)]
     assert usages and usages[-1].cache_read == 0
+
+
+# ---- 协议兼容(线上"模型正文为空"三处缺口) ----
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_reasoning_content_mapped_to_thinking_delta():
+    """SGLang/vLLM/DeepSeek 方言把输出放 reasoning_content:
+    只认 content 时这一轮就是"零文本" → 上层判 infra_dead。必须映射成 ThinkingDelta。"""
+    respx.post("https://api.test/v1/chat/completions").mock(return_value=httpx.Response(200, text=_sse(
+        '{"choices":[{"delta":{"reasoning_content":"先想一下"},"finish_reason":null}]}',
+        '{"choices":[{"delta":{"content":"答案"},"finish_reason":null}]}',
+        '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+    )))
+    evs = [ev async for ev in OpenAICompletionsAdapter().complete(
+        [{"role": "user", "content": "hi"}], [], _model(), _provider())]
+    assert "".join(e.text for e in evs if isinstance(e, ThinkingDelta)) == "先想一下"
+    assert "".join(e.text for e in evs if isinstance(e, TextDelta)) == "答案"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_non_sse_json_body_falls_back():
+    """网关忽略 stream=true 直接回一整段 JSON(没有 data: 帧):
+    旧实现全行跳过 → 零事件静默结束;现在必须整包解析出正文 + Done。"""
+    respx.post("https://api.test/v1/chat/completions").mock(return_value=httpx.Response(
+        200,
+        text='{"choices":[{"message":{"role":"assistant","content":"整包答案"},'
+             '"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3}}',
+        headers={"content-type": "application/json"},
+    ))
+    evs = [ev async for ev in OpenAICompletionsAdapter().complete(
+        [{"role": "user", "content": "hi"}], [], _model(), _provider())]
+    assert "".join(e.text for e in evs if isinstance(e, TextDelta)) == "整包答案"
+    assert any(isinstance(e, Done) and e.stop_reason == "stop" for e in evs)
+    assert any(isinstance(e, Usage) and e.input_tokens == 7 for e in evs)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_done_without_finish_reason_still_flushes_tools():
+    """端点只发 [DONE] 不发 finish_reason:累积的工具必须落地,否则"出了工具却什么都没发生"。"""
+    respx.post("https://api.test/v1/chat/completions").mock(return_value=httpx.Response(200, text=_sse(
+        '{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_7","function":{"name":"read_file","arguments":"{\\"path\\":"}}]},"finish_reason":null}]}',
+        '{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"b.txt\\"}"}}]},"finish_reason":null}]}',
+    )))
+    evs = [ev async for ev in OpenAICompletionsAdapter().complete(
+        [{"role": "user", "content": "读 b.txt"}],
+        [{"name": "read_file", "description": "", "input_schema": {}}],
+        _model(), _provider())]
+    stops = [e for e in evs if isinstance(e, ToolUseStop)]
+    assert len(stops) == 1 and stops[0].id == "call_7" and stops[0].input == {"path": "b.txt"}
+    assert any(isinstance(e, Done) and e.stop_reason == "tool_calls" for e in evs)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_error_body_with_200_is_reported_not_swallowed():
+    """自建网关常用 200 + {"error":...} 包错误:必须报真因,不能当"空流"静默。"""
+    respx.post("https://api.test/v1/chat/completions").mock(return_value=httpx.Response(
+        200,
+        text='{"error":{"message":"model is overloaded","type":"server_error"}}',
+        headers={"content-type": "application/json"},
+    ))
+    evs = [ev async for ev in OpenAICompletionsAdapter().complete(
+        [{"role": "user", "content": "hi"}], [], _model(), _provider())]
+    errs = [e for e in evs if isinstance(e, ErrorEvent)]
+    assert len(errs) == 1 and "overloaded" in errs[0].message
+

@@ -21,7 +21,9 @@ from typing import AsyncIterator, Optional
 
 from karvyloop.schemas import ModelDefinition, ProviderConfig
 
-from ..events import Done, Event, ErrorEvent, TextDelta, ToolUseStart, ToolUseStop, Usage
+from ..events import (
+    Done, Event, ErrorEvent, TextDelta, ThinkingDelta, ToolUseStart, ToolUseStop, Usage,
+)
 from ..system import SystemPrompt
 from .anthropic import StreamTimeoutError, provider_timeout, stream_deadline
 
@@ -197,6 +199,9 @@ class OpenAICompletionsAdapter:
         # keepalive 就能把 drive worker 无限吊住;从流开始计时,循环体顶部逐行核对,超了 fail-loud。
         _start = time.monotonic()
         _deadline = stream_deadline(provider)
+        _saw_sse = False
+        _plain_lines: list[str] = []   # 非 SSE 回包(整段 JSON)缓冲
+        _done = False
         try:
             async with httpx.AsyncClient(timeout=provider_timeout(provider)) as client:
                 async with client.stream("POST", url, json=body, headers=headers) as resp:
@@ -207,14 +212,55 @@ class OpenAICompletionsAdapter:
                                 f"流式响应超过整段墙钟上限 {_deadline:.0f}s "
                                 f"(provider={provider.name}) — provider 只吐 keepalive/未完成")
                         if not line.startswith("data:"):
+                            # 非 SSE 回包兜底:不少自建网关会忽略 stream=true,直接回一整段
+                            # application/json。此前这些行全被 continue 跳过 → 零事件且不报错,
+                            # 上层只看到"模型空流"。先攒着;整条流都没 SSE 帧时按整包解析。
+                            if not _saw_sse and line.strip():
+                                _plain_lines.append(line)
                             continue
+                        _saw_sse = True
+                        _plain_lines.clear()
                         data = line[len("data:"):].strip()
                         if not data:
                             continue
                         if data == "[DONE]":
+                            # 部分端点不发 finish_reason 只发 [DONE]:已累积的工具必须在此落地,
+                            # 否则模型明明出了工具却"什么都没发生"。
+                            if not _done:
+                                had_tools = bool(tools_acc)
+                                for ev in self._tool_stops(tools_acc):
+                                    yield ev
+                                yield Done(stop_reason="tool_calls" if had_tools else "stop")
+                                _done = True
                             break
                         for ev in self._normalize(json.loads(data), tools_acc):
+                            if isinstance(ev, Done):
+                                _done = True
                             yield ev
+            if not _saw_sse and _plain_lines:
+                try:
+                    payload = json.loads("\n".join(_plain_lines))
+                except json.JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict):
+                    if payload.get("error") is not None:
+                        # 200 包裹的错误体(自建网关常见):如实报真因,别再当"空流"。
+                        yield ErrorEvent(
+                            kind="ProviderErrorBody",
+                            message=json.dumps(payload["error"], ensure_ascii=False)[:500])
+                    else:
+                        for ev in self._normalize(payload, tools_acc):
+                            yield ev
+                        u = payload.get("usage")
+                        if u:
+                            yield Usage(input_tokens=u.get("prompt_tokens", 0),
+                                        output_tokens=u.get("completion_tokens", 0),
+                                        cache_read=_cached_read_tokens(u))
+            if not _done and tools_acc:
+                # 流自然结束(既无 [DONE] 也无 finish_reason)也把累积工具落地。
+                for ev in self._tool_stops(tools_acc):
+                    yield ev
+                yield Done(stop_reason="tool_calls")
         except Exception as e:  # noqa: BLE001 — 归一化成 ErrorEvent,不穿透打断上层
             yield ErrorEvent(kind=type(e).__name__, message=str(e))
 
@@ -228,10 +274,31 @@ class OpenAICompletionsAdapter:
                             cache_read=_cached_read_tokens(u))
             return
         ch = choices[0]
-        delta = ch.get("delta") or {}
+        delta = ch.get("delta")
+        if delta is None:
+            # 非流式形态(choices[0].message):整段 JSON 回包(网关忽略 stream=true)。
+            msg = ch.get("message") or {}
+            delta = {
+                "content": msg.get("content"),
+                "reasoning_content": msg.get("reasoning_content") or msg.get("reasoning"),
+                "tool_calls": [
+                    {"index": i, "id": tc.get("id"), "function": tc.get("function") or {}}
+                    for i, tc in enumerate(msg.get("tool_calls") or [])
+                ],
+            }
+        delta = delta or {}
         content = delta.get("content")
+        if isinstance(content, list):
+            # 少数端点 content 是 parts 列表([{"type":"text","text":...}])而非字符串。
+            content = "".join(
+                p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
         if content:
             yield TextDelta(text=content)
+        # 推理模型(SGLang/vLLM/DeepSeek 方言)会把输出分到 reasoning_content(或 reasoning)。
+        # 只认 content 时,答案整段落在这两个字段 → 上层拿到"零文本"并误判 infra_dead。
+        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+        if isinstance(reasoning, str) and reasoning:
+            yield ThinkingDelta(text=reasoning)
         for tc in (delta.get("tool_calls") or []):
             idx = tc.get("index", 0)
             slot = tools_acc.setdefault(idx, {"id": "", "name": "", "args": ""})
@@ -245,15 +312,20 @@ class OpenAICompletionsAdapter:
                 slot["args"] += fn["arguments"]
         fr = ch.get("finish_reason")
         if fr:
-            for idx in sorted(tools_acc):
-                slot = tools_acc[idx]
-                try:
-                    inp = json.loads(slot["args"]) if slot["args"] else {}
-                except json.JSONDecodeError:
-                    inp = {"_raw": slot["args"]}
-                yield ToolUseStop(id=slot["id"], input=inp)
-            tools_acc.clear()
+            for ev in self._tool_stops(tools_acc):
+                yield ev
             yield Done(stop_reason=fr)
+
+    def _tool_stops(self, tools_acc: dict):
+        """把累积工具一次落地(finish_reason / [DONE] / 流自然结束 共用)。"""
+        for idx in sorted(tools_acc):
+            slot = tools_acc[idx]
+            try:
+                inp = json.loads(slot["args"]) if slot["args"] else {}
+            except json.JSONDecodeError:
+                inp = {"_raw": slot["args"]}
+            yield ToolUseStop(id=slot["id"], input=inp)
+        tools_acc.clear()
 
     async def embed(self, text: str, model: ModelDefinition, provider: ProviderConfig):
         raise NotImplementedError("openai-completions embedding P-next(用专门 embedding provider)")

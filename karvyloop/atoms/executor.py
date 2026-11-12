@@ -19,6 +19,7 @@ KARVYLOOP_EXECUTOR_DEBUG=1
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
@@ -34,6 +35,8 @@ from .terminal import Terminal
 
 
 CIRCUIT_OPEN_THRESHOLD = 3  # 连续失败次数(HR-3)
+
+logger = logging.getLogger(__name__)
 
 
 class AdapterStreamError(RuntimeError):
@@ -390,6 +393,8 @@ async def run(
             cache_read = 0
             cache_write = 0
             cost = 0.0
+            thinking_chars = 0
+            stop_reason = ""
             try:
                 events: list = []
                 async for ev in gateway.complete(
@@ -409,6 +414,7 @@ async def run(
                         # (保旧行为=不静默死,0 回归)。
                         thinking_text = getattr(ev, "text", "")
                         if thinking_text:
+                            thinking_chars += len(thinking_text)
                             yield ThinkingEvent(text=thinking_text)
                     elif tname == "ToolUseStart":
                         bid = ToolUseBlock(
@@ -441,10 +447,13 @@ async def run(
                         # 可观测性②:adapter 流内异常(网络断/超时/HTTP 状态/解析 bug)被归一化成
                         # ErrorEvent 且流随即结束 —— 此前这里没有分支,失败被当"正常结束、无 tool_use"
                         # → COMPLETED + 空输出的静默假成功。重建异常交下方分类(kind 是原异常类名)。
+                        logger.warning("[executor] adapter 流异常 kind=%s message=%s",
+                                       getattr(ev, "kind", "") or "",
+                                       getattr(ev, "message", "") or "")
                         raise AdapterStreamError(getattr(ev, "kind", "") or "",
                                                  getattr(ev, "message", "") or "")
                     elif tname == "Done":
-                        pass
+                        stop_reason = getattr(ev, "stop_reason", "") or ""
                 state.cumulative_input_tokens += input_tokens
                 state.cumulative_output_tokens += output_tokens
                 state.cumulative_cost_usd += cost
@@ -500,6 +509,10 @@ async def run(
                     raise
                 state.transition = Transition(reason="model_call_failed",
                                               extra={"error": f"{type(e).__name__}: {e}"})
+                # 可观测性③:超时/断连/5xx 此前只写进 transition.extra,日志里一行都没有
+                # (线上日志因此"看不见"模型真报错)。这里如实落 WARNING,含归类结论。
+                logger.warning("[executor] 模型调用失败 → %s 归类: %s: %s",
+                               reason, type(e).__name__, e)
                 # 调模型失败本身不进断路器(避免误判 tool 质量)。
                 final_reason = reason
                 break
@@ -516,6 +529,12 @@ async def run(
                 else:
                     # 模型流只有 Done、没有任何可展示内容时不能算成功。
                     # 否则上层会收到 completed + success=True + 空正文并静默重试。
+                    # 可观测性④:落真因(stop_reason/事件种类/推理字数)——线上 42 次
+                    # "模型正文为空"此前查不出是协议字段丢了还是 provider 真空流。
+                    logger.warning(
+                        "[executor] 模型本轮零正文零工具 stop_reason=%r thinking_chars=%d events=%s",
+                        stop_reason, thinking_chars,
+                        [type(e).__name__ for e in events])
                     state.transition = Transition(reason="empty_model_output")
                     final_reason = Terminal.INFRA_DEAD
                 if _os_ex.environ.get("KARVYLOOP_EXECUTOR_DEBUG"):
