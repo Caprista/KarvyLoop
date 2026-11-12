@@ -49,6 +49,23 @@ def _cached_read_tokens(usage: dict) -> int:
     return 0
 
 
+_TIMEOUT_ERRORS = {"ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout", "TimeoutException"}
+
+
+def _error_message(e: Exception, *, url: str, timeout_s: float) -> str:
+    """异常 → 可诊断的 message。
+
+    httpx 的 Read/ConnectTimeout `str(e)` 是**空串**(线上日志里就是 `message=` 空着),
+    等于只知道"超时"、不知道阈值多少、打的是哪个端点,无法区分「阈值太小」和「服务端卡死」。
+    超时类异常统一补上 timeout 阈值与 URL;其余异常保留原文(空则退回类名)。
+    """
+    detail = str(e).strip()
+    if type(e).__name__ in _TIMEOUT_ERRORS:
+        msg = f"等待超过 timeout={timeout_s:.0f}s 无数据 (POST {url})"
+        return f"{msg} | {detail}" if detail else msg
+    return detail or type(e).__name__
+
+
 def _content_to_text(content) -> str:
     """tool_result.content(字符串 / text 块数组)→ 纯文本。"""
     if isinstance(content, str):
@@ -199,11 +216,12 @@ class OpenAICompletionsAdapter:
         # keepalive 就能把 drive worker 无限吊住;从流开始计时,循环体顶部逐行核对,超了 fail-loud。
         _start = time.monotonic()
         _deadline = stream_deadline(provider)
+        _timeout_s = provider_timeout(provider)
         _saw_sse = False
         _plain_lines: list[str] = []   # 非 SSE 回包(整段 JSON)缓冲
         _done = False
         try:
-            async with httpx.AsyncClient(timeout=provider_timeout(provider)) as client:
+            async with httpx.AsyncClient(timeout=_timeout_s) as client:
                 async with client.stream("POST", url, json=body, headers=headers) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
@@ -262,7 +280,8 @@ class OpenAICompletionsAdapter:
                     yield ev
                 yield Done(stop_reason="tool_calls")
         except Exception as e:  # noqa: BLE001 — 归一化成 ErrorEvent,不穿透打断上层
-            yield ErrorEvent(kind=type(e).__name__, message=str(e))
+            yield ErrorEvent(kind=type(e).__name__,
+                             message=_error_message(e, url=url, timeout_s=_timeout_s))
 
     def _normalize(self, chunk: dict, tools_acc: dict):
         choices = chunk.get("choices") or []

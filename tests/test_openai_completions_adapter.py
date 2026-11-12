@@ -340,3 +340,18 @@ async def test_error_body_with_200_is_reported_not_swallowed():
     errs = [e for e in evs if isinstance(e, ErrorEvent)]
     assert len(errs) == 1 and "overloaded" in errs[0].message
 
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_read_timeout_message_carries_threshold_and_url():
+    """httpx 的 ReadTimeout `str(e)` 是空串 —— 线上日志只有 `message=` 空白,无法判断阈值。
+    必须补上 timeout 阈值与端点 URL。"""
+    respx.post("https://api.test/v1/chat/completions").mock(
+        side_effect=httpx.ReadTimeout(""))
+    evs = [ev async for ev in OpenAICompletionsAdapter().complete(
+        [{"role": "user", "content": "hi"}], [], _model(), _provider())]
+    errs = [e for e in evs if isinstance(e, ErrorEvent)]
+    assert len(errs) == 1 and errs[0].kind == "ReadTimeout"
+    assert "timeout=120s" in errs[0].message
+    assert "https://api.test/v1/chat/completions" in errs[0].message
+

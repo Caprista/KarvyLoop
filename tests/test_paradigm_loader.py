@@ -125,6 +125,18 @@ def test_ac2_must_layers_always_present_conditional_only_when_rule_hits():
     assert 4 in r5.layers
 
 
+def test_verify_keyword_without_pursuit_does_not_load_l4():
+    """无 pursuit 时,'判定/verify' 不能触发 Layer 4。
+
+    回归:线上 3 次 `paradigm/layers.py assert p is not None` —— R3 只看消息关键词、不查
+    pursuit,导致 L4 在无 pursuit 时被加载、assert 崩、整个 paradigm 回退 persona。
+    """
+    for msg in ("let's verify the result", "该做最终判定了"):
+        result = load_paradigm(_make_ctx(pursuit=None, user_message=msg))
+        assert 4 not in result.layers, f"无 pursuit 却加载了 L4(msg={msg!r})"
+        assert 3 not in result.layers
+
+
 # ============ AC3:budget overflow → 按降级顺序砍 ============
 def test_ac3_overflow_drops_layer_6_first_then_5():
     """AC3: budget 满 → 优先砍 Layer 6 → 再砍 Layer 5 → 永不砍 Layer 0/1/2。"""

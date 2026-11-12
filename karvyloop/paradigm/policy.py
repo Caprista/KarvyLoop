@@ -90,9 +90,15 @@ def _has_pursuit(ctx: "ParadigmContext") -> bool:
 
 
 def _entering_verification(ctx: "ParadigmContext") -> bool:
-    """进入'判定'步骤:当前 pursuit 标记 entering_verification 或 user message 含触发词。"""
+    """进入'判定'步骤:当前 pursuit 标记 entering_verification 或 user message 含触发词。
+    必须已有 pursuit —— Layer 4 内容源自 pursuit,无 pursuit 时加载会 assert 崩。"""
     p = ctx.current_pursuit
-    if p is not None and getattr(p, "entering_verification", False):
+    if p is None:
+        # Layer 4 的正文全部取自 pursuit(layers.load_L4_verify_gate 断言 p 非空)。没有 pursuit
+        # 时,消息里出现"判定/verify"也不能加载它 —— 否则 assert 崩、整个 paradigm 回退 persona
+        # (线上 3 次 assert p is not None 就是这么来的)。
+        return False
+    if getattr(p, "entering_verification", False):
         return True
     msg = (ctx.user_message or "").lower()
     return "?verify?" in msg or "判定" in msg or "verify" in msg.lower()
