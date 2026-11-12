@@ -11,6 +11,15 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.11.12.1] — 2026-11-12
+
+A diagnostics patch: read timeouts on slow OpenAI-compatible endpoints now say what
+they were waiting for, and a `verify` keyword can no longer crash the paradigm layers.
+
+### Fixed
+- **Read-timeout failures are now self-explanatory.** `httpx`'s `ReadTimeout` and `ConnectTimeout` carry an empty `str()`, so the log line read `message=` with nothing after it — impossible to tell a threshold that is too low from a provider that had stalled. Timeout errors now report the configured `timeout` and the endpoint URL they were talking to.
+- **A missing pursuit no longer crashes the paradigm.** The verification-step rule keyed only on the message text, so a message containing `verify`/`判定` with no active pursuit loaded Layer 4, whose loader asserts `p is not None`; the whole paradigm then fell back to the persona prompt with a traceback. The rule now requires an active pursuit.
+
 ## [2026.11.12] — 2026-11-12
 
 The configuration-recovery release: a broken or offline model no longer traps you
