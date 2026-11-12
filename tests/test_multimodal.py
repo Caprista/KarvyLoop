@@ -296,11 +296,11 @@ def test_upsert_model_accepts_and_preserves_input_modalities(tmp_path):
 
     assert _md()["input_modalities"] == ["image", "text"]
     # ② 编辑别的字段(请求未承载 input_modalities)→ 保留,不静默重置
-    ok, msg = upsert_model({**base, "context_window": 2000}, cfg_path=cfg)
+    ok, msg = upsert_model({**base, "original_id": "p1/vis", "context_window": 2000}, cfg_path=cfg)
     assert ok, msg
     assert _md()["input_modalities"] == ["image", "text"]
     assert _md()["context_window"] == 2000
     # ③ 显式覆写回 text-only
-    ok, msg = upsert_model({**base, "input_modalities": ["text"]}, cfg_path=cfg)
+    ok, msg = upsert_model({**base, "original_id": "p1/vis", "input_modalities": ["text"]}, cfg_path=cfg)
     assert ok, msg
     assert _md()["input_modalities"] == ["text"]

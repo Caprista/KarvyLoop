@@ -216,6 +216,8 @@ function _modelForm(m: any, title: string, onSaved?: () => Promise<void> | void,
   const submit = el("button", { class: "mgmt-submit", text: t("mgmt.save"),
     onclick: async () => {
       const r = await _postJSON("/api/model/save", {
+        // 编辑时的原 id:改 id = 真·改名(迁移旧条目),不是"再加一个同 supplier 的模型"
+        original_id: m.id || "",
         provider: provIn.value.trim(), model_id: idIn.value.trim(), model_name: nameIn.value.trim(),
         api: apiSel.value, role: roleSel.value, base_url: baseIn.value.trim(),
         api_key: keyIn.value, auth_header: authSel.value,
@@ -357,7 +359,11 @@ async function _onbSave(p: any, key: string, msg: HTMLElement, onDone: () => Pro
     return;
   }
   _setMsg(msg, true, t("onb.saving"));
+  // 面板「新增」(setDefault:false)= 纯新增:original_id 留空 → 同 id 已存在时后端明确拒绝,
+  // 不再静默覆盖掉已有模型(实拍:同 supplier 加第二个模型,前一个被悄悄吃掉)。
+  // 首配/重新配置路径 = 对**这个预设模型**的配置动作:original_id = preset 的 id(已存在则更新 key)。
   const r = await _postJSON("/api/model/save", {
+    original_id: (opts && opts.setDefault === false) ? "" : p.model_id,
     provider: p.id, model_id: p.model_id, model_name: p.model_name || "",
     api: p.api, role: "chat", base_url: p.base_url, api_key: key,
     auth_header: p.auth_header, messages_path: p.messages_path || "",
@@ -439,11 +445,17 @@ async function checkSetupGate(deps?: Deps): Promise<void> {
   if (deps) _deps = deps;
   const s = await _getJSON("/api/setup_status?live=1");
   if (!s || s.no_llm_mode) return;                    // ①:显式只读模式不设门
-  if (s.must_setup) { openForcedSetup(); return; }    // ②:同旧行为
+  if (s.must_setup) { openForcedSetup(); return; }    // ②:真没配模型 → 必须配
   if (!s.live_checked || s.live_ok) return;           // ③:真验通过 → 进主界面
-  const fail = _liveFailOf(s);
-  if (_isConfigError(fail.cls)) openForcedSetup(fail);  // ④:确定性配置病 → 回 gate
-  else openDegradedGate(fail);                          // ⑤:网络类 → 别把离线用户锁死
+  // ④⑤:配置在、但真调用失败(key 坏/地址错/离线)→ 一律进**可退出**的降级门。
+  // 实拍病根:模型管理页与 setup gate 共用同一个 #mgmt-modal;此前 bad_key/bad_url 走
+  // openForcedSetup 锁死模态且无管理出口 → 用户点侧栏「模型」也进不去,只能重配一遍。
+  openDegradedGate(_liveFailOf(s));
+}
+// setup gate → 模型管理页的唯一出口:先解锁/关掉当前模态,再按模型管理正常打开。
+function _openModelsManager(): void {
+  _gateClose();
+  void open();
 }
 function openForcedSetup(fail?: LiveFail): void {
   _KM.setSetupLocked(true);               // 锁住模态:配好前关不掉
@@ -474,8 +486,11 @@ function openForcedSetup(fail?: LiveFail): void {
     b.appendChild(el("button", { class: "mgmt-inline-link setup-offline-link",
       text: t("setup.offline_continue"), onClick: () => _offlineContinue(fail) }));
   }
+  // 永远留一条"打开模型管理"的路:改已有模型的 key/地址/默认,不必重走一遍引导。
+  b.appendChild(el("button", { class: "mgmt-inline-link setup-manage-link",
+    text: t("setup.open_models"), onClick: _openModelsManager }));
 }
-// ⑤ 网络类校验失败:拦住但不锁死 —— 两个出口(重新配置 / 离线继续)
+// ④⑤ 配置在但真调用失败:拦住但给出路 —— 重新配置 / 打开模型管理 / (非配置病)离线继续
 function openDegradedGate(fail: LiveFail): void {
   _KM.setSetupLocked(true);
   openMgmtModal(t("setup.title"), { backdropClose: false });
@@ -487,12 +502,21 @@ function openDegradedGate(fail: LiveFail): void {
   const row = el("div", { class: "setup-degraded-actions" });
   row.appendChild(el("button", { class: "mgmt-submit", text: t("setup.reconfigure"),
     onClick: () => openForcedSetup(fail) }));
-  row.appendChild(el("button", { class: "mgmt-submit setup-offline-btn",
-    text: t("setup.offline_continue"), onClick: () => _offlineContinue(fail) }));
+  row.appendChild(el("button", { class: "mgmt-submit setup-manage-btn",
+    text: t("setup.open_models"), onClick: _openModelsManager }));
+  // key/地址确定性坏了时,"离线继续"等于装看不见 → 只给网络类失败
+  if (!_isConfigError(fail.cls)) {
+    row.appendChild(el("button", { class: "mgmt-submit setup-offline-btn",
+      text: t("setup.offline_continue"), onClick: () => _offlineContinue(fail) }));
+  }
   b.appendChild(row);
 }
 
 async function open(): Promise<void> {
+  // 任何入口进模型管理都不该被 setup gate 的锁挡住(实拍:离线后锁死进不来)
+  _KM.setSetupLocked(false);
+  const closeBtn = document.getElementById("mgmt-close");
+  if (closeBtn) closeBtn.style.display = "";
   // CFG-01①:全局模型设置窗禁点空白关闭(防切页误关);✕/Esc 仍可关
   openMgmtModal(t("models.title"), { backdropClose: false, escClose: true });
   await renderModelsPanel();

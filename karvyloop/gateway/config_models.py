@@ -151,6 +151,20 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
         return False, "provider 和 model id 必填"
     if "/" not in mid:
         return False, "model id 须为 <provider>/<model-id> 形态(全局唯一引用键)"
+    # provider 前缀必须与 provider 块名一致:registry.provider_of 直接用 id 前缀查 provider 块。
+    # 前缀对不上 → 裸 KeyError → 模型在列表里可见却"无法使用"(实拍:同 supplier 加第二个模型)。
+    if mid.split("/", 1)[0] != pname:
+        return False, f"model id 须以 provider 名作前缀:{pname}/<model-id>(当前 id={mid})"
+    # 同 id 冲突(实拍:同 supplier 加第二个模型把第一个静默吃掉):
+    #   · 不带 original_id = 纯新增 → 撞已有 id 直接拒,绝不静默覆盖;
+    #   · original_id == model_id = 原地更新(编辑已有模型);
+    #   · original_id != model_id = 改名(旧条目迁移/删除);新 id 被别的模型占着 → 拒。
+    orig = str(spec.get("original_id", "") or "").strip()
+    existing_ids = {x.get("id") for pp in provs.values() for x in (pp.get("models") or [])}
+    if mid in existing_ids and orig != mid:
+        if orig:
+            return False, f"不能改名为 {mid}:该 id 已被其它模型占用"
+        return False, f"模型 {mid} 已存在;同 supplier 再加一个模型请换个 model id(要改它就编辑已有那条)"
     api = str(spec.get("api", "")).strip()
     if api not in VALID_APIS:
         return False, f"api 须是 {VALID_APIS} 之一"
@@ -193,11 +207,12 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
         if not has_existing and not is_local:
             return False, "云端模型必须先填 API Key(留空只在编辑已有配置时表示保留原值)"
     p.setdefault("models", [])
-    # 编辑既有模型:先抓旧条目,承载 reasoning / reasoning_styles 的"未提供 = 保留"语义
-    # (审计 #87 §3-①③,与 extra_headers 同模具:请求不带该字段 → 不静默重置/整段丢)。
+    # 编辑既有模型:先抓旧条目(改名时按 original_id 取),承载 reasoning / reasoning_styles 的
+    # "未提供 = 保留"语义(审计 #87 §3-①③,与 extra_headers 同模具:请求不带该字段 → 不静默重置/整段丢)。
+    lookup_id = orig or mid
     existing_md = next(
         (x for pp in provs.values() for x in (pp.get("models") or [])
-         if x.get("id") == mid), None)
+         if x.get("id") == lookup_id), None)
     # 深想标志:None(请求未承载)= 保留旧值(新模型则 False);显式 bool = 覆写。
     # 此前无条件 `bool(spec.get("reasoning", False))` 把任意字段的编辑保存都重置成 False。
     r = spec.get("reasoning")
@@ -239,9 +254,17 @@ def upsert_model(spec: dict, cfg_path=None) -> tuple[bool, str]:
                 clean_im.append(x)
         if clean_im:
             md["input_modalities"] = clean_im
-    # id 全局唯一:先从所有 provider 删同 id(支持改 provider),再加到目标 provider
+    # id 全局唯一:先从所有 provider 删同 id(支持改 provider);改名时旧 id 一并迁移掉
+    # (否则同一 supplier 下会留下"两个模型"——旧条目还在,默认指针还指着它)。
+    ids_to_drop = {mid} | ({orig} if orig and orig != mid else set())
     for pp in provs.values():
-        pp["models"] = [x for x in (pp.get("models") or []) if x.get("id") != mid]
+        pp["models"] = [x for x in (pp.get("models") or []) if x.get("id") not in ids_to_drop]
+    # 改名的默认指针跟随,别让默认 chat/embedding 指向已不存在的旧 id(注册表会因此整体加载失败)
+    if orig and orig != mid:
+        if _default_chat(cfg) == orig:
+            cfg.setdefault("agents", {}).setdefault("defaults", {})["model"] = mid
+        if _default_embedding(cfg) == orig:
+            cfg.setdefault("embedding", {})["model"] = mid
     p["models"].append(md)
     _save(cfg, cfg_path)
     return True, ""

@@ -101,6 +101,9 @@ def api_model_config(request: Request) -> dict[str, Any]:
 class ModelSaveRequest(BaseModel):
     provider: str = Field(..., min_length=1, max_length=64)
     model_id: str = Field(..., min_length=1, max_length=128)
+    # 编辑时回传的原 id:"" = 新建(撞已有 id 后端直接拒,绝不静默覆盖别人);
+    # 与 model_id 相同 = 原地更新;不同 = 改名(旧条目迁移,默认指针跟随)。
+    original_id: str = Field(default="", max_length=128)
     model_name: str = Field(default="", max_length=128)
     api: str = Field(..., max_length=32)
     role: str = Field(default="chat", max_length=16)

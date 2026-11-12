@@ -136,6 +136,7 @@ def test_model_save_route_returns_kimi_hint(tmp_path):
     # 普通 key → 无 hint 字段
     r2 = c.post("/api/model/save", json={
         "provider": "kimi", "model_id": "kimi/kimi-k2-0711-preview",
+        "original_id": "kimi/kimi-k2-0711-preview",
         "api": "openai-completions", "base_url": "https://api.moonshot.ai/v1",
         "api_key": "sk-FAKE-DO-NOT-LEAK-normal-1", "auth_header": "Authorization"}).json()
     assert r2["ok"] is True and "hint" not in r2
@@ -163,6 +164,7 @@ def test_model_save_without_extra_headers_keeps_existing(tmp_path):
     """编辑请求不带 extra_headers(None)→ 保留已有配置,不静默清空 UA 门。"""
     p = _w(tmp_path)
     ok, _ = cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                             "original_id": "kimi-coding/kimi-for-coding",
                              "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
                              "api_key": "sk-kimi-FAKE-DO-NOT-LEAK-123",
                              "extra_headers": {"User-Agent": "UA-1"}}, p)
@@ -170,6 +172,7 @@ def test_model_save_without_extra_headers_keeps_existing(tmp_path):
     c = TestClient(_app(p))
     r = c.post("/api/model/save", json={
         "provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+        "original_id": "kimi-coding/kimi-for-coding",
         "model_name": "renamed", "api": "openai-completions",
         "base_url": "https://api.kimi.com/coding/v1", "api_key": ""}).json()
     assert r["ok"] is True
@@ -185,6 +188,7 @@ def test_model_save_route_reasoning_preserved_on_edit(tmp_path):
     p = _w(tmp_path)
     # 先建一个 reasoning:true 的模型(带 reasoning_styles)
     ok, _ = cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                             "original_id": "kimi-coding/kimi-for-coding",
                              "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
                              "api_key": "sk-kimi-FAKE-DO-NOT-LEAK-1", "reasoning": True,
                              "reasoning_styles": {"deep": {"reasoning_effort": "high"}}}, p)
@@ -193,6 +197,7 @@ def test_model_save_route_reasoning_preserved_on_edit(tmp_path):
     # 编辑 max_tokens(前端表单现在会带 reasoning=checked;这里模拟"就是不带"最坏情况)
     r = c.post("/api/model/save", json={
         "provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+        "original_id": "kimi-coding/kimi-for-coding",
         "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
         "api_key": "", "max_tokens": 4096}).json()
     assert r["ok"] is True
@@ -206,11 +211,13 @@ def test_model_save_route_reasoning_toggle_off(tmp_path):
     """前端深想开关显式关(reasoning=false)→ 覆写生效。"""
     p = _w(tmp_path)
     cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                     "original_id": "kimi-coding/kimi-for-coding",
                      "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
                      "api_key": "sk-kimi-FAKE-DO-NOT-LEAK-1", "reasoning": True}, p)
     c = TestClient(_app(p))
     r = c.post("/api/model/save", json={
         "provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+        "original_id": "kimi-coding/kimi-for-coding",
         "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
         "api_key": "", "reasoning": False}).json()
     assert r["ok"] is True

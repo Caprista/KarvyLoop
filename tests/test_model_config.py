@@ -56,6 +56,7 @@ def test_config_yaml_chmod_600_is_reached_all_platforms(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "chmod", lambda path, mode, *a, **k: calls.append((str(path), mode)) or real_chmod(path, mode, *a, **k))
     p = _w(tmp_path)
     ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                             "original_id": "anthropic/claude",
                              "api": "anthropic-messages", "api_key": "FAKE-DO-NOT-LEAK-newkey"}, p)
     assert ok
     assert any(cp == str(p) and mode == 0o600 for cp, mode in calls), \
@@ -71,6 +72,7 @@ def test_config_yaml_written_0600(tmp_path):
         pytest.skip("0600 权限位只在 POSIX 有意义")
     p = _w(tmp_path)
     ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                             "original_id": "anthropic/claude",
                              "api": "anthropic-messages",
                              "api_key": "FAKE-DO-NOT-LEAK-newkey"}, p)
     assert ok
@@ -81,6 +83,7 @@ def test_config_yaml_written_0600(tmp_path):
 def test_upsert_add_and_blank_key_keeps(tmp_path):
     p = _w(tmp_path)
     ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                             "original_id": "anthropic/claude",
                              "model_name": "Claude v2", "api": "anthropic-messages",
                              "api_key": ""}, p)   # 留空 = 保留原 key
     assert ok
@@ -94,6 +97,7 @@ def test_upsert_add_and_blank_key_keeps(tmp_path):
 def test_upsert_masked_key_keeps(tmp_path):
     p = _w(tmp_path)
     cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                     "original_id": "anthropic/claude",
                      "api": "anthropic-messages", "api_key": "****2345"}, p)  # 回传遮罩串
     import yaml
     assert yaml.safe_load(p.read_text(encoding="utf-8"))["models"]["providers"]["anthropic"]["api_key"] == "sk-ant-SECRET12345"
@@ -138,6 +142,7 @@ def test_reasoning_flag_preserved_when_not_carried(tmp_path):
     """§3-①:编辑别的字段(reasoning 键缺席=None)→ reasoning:true 不被重置成 False。"""
     p = _w_reasoning(tmp_path)
     ok, _ = cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                             "original_id": "kimi-coding/kimi-for-coding",
                              "model_name": "renamed", "api": "openai-completions",
                              "base_url": "https://api.kimi.com/coding/v1", "api_key": ""}, p)
     assert ok
@@ -150,6 +155,7 @@ def test_reasoning_flag_explicit_false_overwrites(tmp_path):
     """显式传 reasoning=False → 覆写(用户真想关时能关)。"""
     p = _w_reasoning(tmp_path)
     cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                     "original_id": "kimi-coding/kimi-for-coding",
                      "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
                      "api_key": "", "reasoning": False}, p)
     assert _md(p)["reasoning"] is False
@@ -169,6 +175,7 @@ def test_reasoning_styles_preserved_when_not_carried(tmp_path):
     """§3-③:编辑别的字段(reasoning_styles 键缺席=None)→ 整段落参表不丢。"""
     p = _w_reasoning(tmp_path)
     cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                     "original_id": "kimi-coding/kimi-for-coding",
                      "model_name": "renamed2", "api": "openai-completions",
                      "base_url": "https://api.kimi.com/coding/v1", "api_key": ""}, p)
     assert _md(p)["reasoning_styles"] == {"deep": {"reasoning_effort": "high"}}
@@ -178,6 +185,7 @@ def test_reasoning_styles_explicit_overwrites(tmp_path):
     """显式传新表 → 覆写(只留合法档位)。"""
     p = _w_reasoning(tmp_path)
     cm.upsert_model({"provider": "kimi-coding", "model_id": "kimi-coding/kimi-for-coding",
+                     "original_id": "kimi-coding/kimi-for-coding",
                      "api": "openai-completions", "base_url": "https://api.kimi.com/coding/v1",
                      "api_key": "", "reasoning_styles": {"fast": {"reasoning_effort": "low"},
                                                          "bogus": {"x": 1}}}, p)
@@ -259,6 +267,7 @@ def test_save_writes_backup_of_previous_config(tmp_path):
     p = _w(tmp_path)
     original = p.read_text(encoding="utf-8")
     ok, _ = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                             "original_id": "anthropic/claude",
                              "model_name": "Claude v2", "api": "anthropic-messages",
                              "api_key": ""}, p)
     assert ok
@@ -272,6 +281,45 @@ def test_reject_bad_api(tmp_path):
     p = _w(tmp_path)
     ok, reason = cm.upsert_model({"provider": "x", "model_id": "x/y", "api": "bogus"}, p)
     assert not ok and "api" in reason
+
+
+# ---- 同 supplier 加第二个模型:不再静默覆盖 / 不再造出"无法使用"的 id ----
+
+def test_reject_model_id_prefix_mismatch(tmp_path):
+    """id 前缀必须 == provider 块名:registry.provider_of 用前缀查 provider 块,
+    对不上就是裸 KeyError → 模型在列表里可见却"无法使用"。
+    (实拍:同 supplier 加第二个模型时 id 前缀写成了别的供应商名)"""
+    p = _w(tmp_path)
+    ok, reason = cm.upsert_model({"provider": "deepseek", "model_id": "openai/deepseek-chat",
+                                  "api": "openai-completions", "api_key": "FAKE-k"}, p)
+    assert not ok and "前缀" in reason
+    assert "deepseek" not in p.read_text(encoding="utf-8")     # 脏配置没落盘
+
+
+def test_reject_new_model_with_duplicate_id(tmp_path):
+    """不带 original_id = 纯新增:撞已有 id 直接拒,绝不静默删掉已有模型再覆盖。"""
+    p = _w(tmp_path)
+    ok, reason = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude",
+                                  "api": "anthropic-messages", "api_key": "FAKE-k"}, p)
+    assert not ok and "已存在" in reason
+    assert "sk-ant-SECRET12345" in p.read_text(encoding="utf-8")   # 原模型/原 key 原样还在
+
+
+def test_rename_model_migrates_old_entry_and_default(tmp_path):
+    """original_id != model_id = 改名:旧条目删除(不留"同 supplier 两个模型"),
+    默认 chat/embedding 指针跟随新 id(否则注册表整体加载失败)。"""
+    import yaml
+    p = _w(tmp_path)
+    ok, reason = cm.upsert_model({"provider": "anthropic", "model_id": "anthropic/claude-2",
+                                  "original_id": "anthropic/claude",
+                                  "api": "anthropic-messages", "api_key": ""}, p)
+    assert ok, reason
+    cfg = yaml.safe_load(p.read_text(encoding="utf-8"))
+    ids = [m["id"] for m in cfg["models"]["providers"]["anthropic"]["models"]]
+    assert ids == ["anthropic/claude-2"]                          # 旧条目没了
+    assert cfg["agents"]["defaults"]["model"] == "anthropic/claude-2"
+    assert cfg["embedding"]["model"] == "anthropic/claude-2"
+    assert cfg["models"]["providers"]["anthropic"]["api_key"] == "sk-ant-SECRET12345"  # key 保留
 
 
 # ---- CFG-06(内测建议):UI 删模型 → config.yaml 里"相关配置数据"同步清干净 ----
