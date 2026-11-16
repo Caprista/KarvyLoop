@@ -11,6 +11,27 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.11.16] — 2026-11-16
+
+The sandbox-coherence release: commands run by roles now actually start inside
+bubblewrap — a leftover grant path, an interpreter the sandbox could not see, or an
+inverted Landlock layer no longer takes the whole command down — and networking
+inside the sandbox became an explicit switch instead of a hard-coded off.
+
+### Added
+- **`sandbox.network` switch.** Default `false` keeps the isolated network namespace (only `lo`). Set `true` in `config.yaml` when roles must reach an intranet API: the run token then carries `net:*` and the sandbox shares the host network. Roles whose skill declares `net_allowlist` still fail closed.
+- **`KARVY_WORKSPACE` is injected into the sandbox** with the command's working directory, so skill scripts can default their output directories to a writable workspace instead of requiring the model to export path variables.
+- **The grant overview marks stale entries.** A grant whose path no longer exists (role renamed or deleted, skill moved) now shows a `path missing` / `路径已失效` badge, so dirty entries are visible instead of silently accumulating.
+
+### Fixed
+- **One dead grant path no longer breaks every command.** bubblewrap hard-fails on a `--ro-bind` source that does not exist, so a single leftover path in the grant ledger (or a workspace that had been moved) made every sandboxed command exit non-zero. Missing and duplicate mount paths are now dropped silently — fewer mounts only means stricter — and a path granted both read and write is mounted writable.
+- **Payload interpreters are visible inside the sandbox.** Binary-parent binding now resolves both the inner Landlock interpreter and the real payload, so a payload interpreter such as `.venv/bin/python` no longer fails with `ENOENT`.
+- **Landlock moved inside bubblewrap.** Applied outside, its read-only `/proc` rule made bubblewrap unable to write `/proc/self/uid_map` (`setting up uid map: Permission denied`) and the sandbox never started. It now wraps the payload from the inside and only the single `landlock.py` file is bind-mounted, so the venv and source tree stay hidden.
+- **Sandbox-private `/dev` and `/tmp` are writable.** Redirecting `2>/dev/null` or writing a temporary file is routine; treating them as read-only denied both. Writes land on the sandbox's own mounts, never the host.
+- **A grant to a single file no longer disables the whole Landlock layer.** Rules for non-directories are narrowed to the file permission bits — the kernel rejects directory-only access on a file with `EINVAL`, which used to fail the layer closed and deny every command.
+- **`PR_SET_NO_NEW_PRIVS` uses the real syscall.** The hard-coded syscall number 158 is `arch_prctl` on x86_64 (`__NR_prctl` is 157), so the call failed after all rules had been added and the whole layer fell closed. It now goes through `libc.prctl`.
+- **Known bubblewrap failures carry a one-line explanation.** Errors such as `Can't find source path` or a disabled user namespace now append a Chinese hint after the original message; the exit code and the original stderr are untouched.
+
 ## [2026.11.12.1] — 2026-11-12
 
 A diagnostics patch: read timeouts on slow OpenAI-compatible endpoints now say what
