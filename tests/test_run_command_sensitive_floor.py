@@ -220,9 +220,9 @@ def test_bwrap_mount_closure_excludes_home_and_sensitive(tmp_path, monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(bw.BubblewrapSandbox, "available", staticmethod(lambda: True))
-    # 不让 Landlock wrapper 扰动 argv(纯 bwrap 命令便于断言)
-    monkeypatch.setattr(bw.BubblewrapSandbox, "_wrap_landlock",
-                        classmethod(lambda cls, bwrap, ro, rw: bwrap))
+    # 不让 Landlock 里层前缀扰动 argv(纯 bwrap 命令便于断言)
+    monkeypatch.setattr(bw.BubblewrapSandbox, "_landlock_inner",
+                        classmethod(lambda cls, rw, ro: []))
     monkeypatch.setattr(bw.asyncio, "create_subprocess_exec", _fake_exec)
 
     sb = bw.BubblewrapSandbox()

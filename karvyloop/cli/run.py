@@ -26,16 +26,30 @@ from karvyloop.sandbox import default_sandbox
 from .render import Renderer
 
 
-def _make_token(workspace_root: str) -> object:
-    """M0 简版:工作区写 token(读 + 写 + exec)。"""
-    return mint(
-        task_id="cli",
-        grants=[
-            Capability(resource=f"fs:{workspace_root}", ops=["read", "write"]),
-            Capability(resource=f"fs:{workspace_root}", ops=["exec"]),
-        ],
-        ttl_seconds=3600.0,
-    )
+def _make_token(workspace_root: str, *, net: bool = False) -> object:
+    """M0 简版:工作区写 token(读 + 写 + exec)。
+
+    `net`:config.yaml `sandbox.network: true` 时给 `net:*`,沙箱共享宿主 netns
+    (不再 `--unshare-net`)。默认 false = 断网,与既有行为一致。
+    """
+    grants = [
+        Capability(resource=f"fs:{workspace_root}", ops=["read", "write"]),
+        Capability(resource=f"fs:{workspace_root}", ops=["exec"]),
+    ]
+    if net:
+        grants.append(Capability(resource="net:*", ops=["connect"]))
+    return mint(task_id="cli", grants=grants, ttl_seconds=3600.0)
+
+
+def _config_net_enabled(cfg_path: Path) -> bool:
+    """读 config.yaml `sandbox.network`(缺省/读失败 = False,保持 fail-closed)。"""
+    try:
+        import yaml
+        cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        blk = cfg.get("sandbox") or {}
+        return bool(blk.get("network")) if isinstance(blk, dict) else False
+    except Exception:
+        return False
 
 
 def _bootstrap_runtime(
@@ -69,7 +83,7 @@ def _bootstrap_runtime(
     wire_spend_budget(registry=reg, config_path=cfg_path)
     sb = default_sandbox()
     ws = workspace_root or str(Path.cwd())
-    token = _make_token(ws)
+    token = _make_token(ws, net=_config_net_enabled(cfg_path))
     return cfg_path, token, gateway, sb, ws, (model_ref or reg.default_chat)
 
 

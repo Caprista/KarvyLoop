@@ -361,3 +361,29 @@ def test_extra_main_run_missing_config(tmp_path: Path, monkeypatch, capsys):
     rc = main(["run", "x", "--config", str(tmp_path / "missing.yaml"),
                "--workspace", str(tmp_path)])
     assert rc == 1
+
+
+# ============ 沙箱网络开关(config.yaml sandbox.network) ============
+def test_make_token_default_no_net(tmp_path: Path):
+    from karvyloop.cli.run import _make_token
+    tok = _make_token(str(tmp_path))
+    assert not any(g.resource.startswith("net:") for g in tok.grants)
+
+
+def test_make_token_net_switch_grants_connect(tmp_path: Path):
+    from karvyloop.cli.run import _make_token
+    tok = _make_token(str(tmp_path), net=True)
+    net = [g for g in tok.grants if g.resource == "net:*"]
+    assert net and "connect" in net[0].ops
+
+
+def test_config_net_enabled_reads_yaml_and_defaults_false(tmp_path: Path):
+    from karvyloop.cli.run import _config_net_enabled
+    cfg = tmp_path / "config.yaml"
+    assert _config_net_enabled(cfg) is False          # 文件不存在 → 断网
+    cfg.write_text("sandbox:\n  network: true\n", encoding="utf-8")
+    assert _config_net_enabled(cfg) is True
+    cfg.write_text("sandbox:\n  network: false\n", encoding="utf-8")
+    assert _config_net_enabled(cfg) is False
+    cfg.write_text("models: {}\n", encoding="utf-8")
+    assert _config_net_enabled(cfg) is False

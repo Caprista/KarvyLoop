@@ -12,9 +12,11 @@
      (--unshare-net),**绝不**退回可被无视的 *_PROXY env 假放行。待(2)落地即翻真强制(P1)。
   3) 超时强杀 + 输出字节截断（UTF-8 边界，HR-9 同源）
   4) 不接 L7 内容过滤（范围外，留 P1）
-  5) **Landlock 深度防御**（landlock.py）：内核支持则在 bwrap 之上再叠一层 Landlock LSM
+  5) **Landlock 深度防御**（landlock.py）：内核支持则在 bwrap **之内**再叠一层 Landlock LSM
      文件系统门（workspace 可写、系统 bin 只读、其余默认拒）——mount 隔离 + 内核路径规则
      双层。旧核不支持 → 优雅降级为纯 bwrap（fail-closed 语义不变）。免特权（no_new_privs）。
+     顺序必须是「bwrap … -- python3 landlock.py … -- payload」：套在 bwrap 外面会因 /proc
+     被设为只读而让 bwrap 写不了 /proc/self/uid_map（`setting up uid map: Permission denied`）。
 """
 
 from __future__ import annotations
@@ -42,6 +44,53 @@ def _truncate_utf8(data: bytes, limit: int) -> tuple[bytes, bool]:
     return data[:cut], True
 
 
+def _existing_mount_paths(paths: list[str]) -> list[str]:
+    """过滤掉不存在与重复的挂载路径。
+
+    bwrap 对**源路径不存在**是硬失败(`bwrap: Can't find source path …`),整条命令直接跑不起来。
+    而挂载面是"只减不加"的:授权台账里残留的死路径(角色被改名/删掉、技能搬家)、token 里
+    已消失的工作区,都应当静默跳过 —— 少一个挂载 = 更严,绝不能让整条命令连带失败。
+    纯函数,平台无关可单测。
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in paths:
+        ap = os.path.abspath(p)
+        if ap in seen or not os.path.exists(ap):
+            continue
+        seen.add(ap)
+        out.append(ap)
+    return out
+
+
+def humanize_bwrap_error(stderr: str) -> str:
+    """把 bwrap 的英文硬失败翻成一句中文提示(空串 = 没有可翻的)。
+
+    bwrap 的报错很短且不解释原因,用户只看得到 `bwrap: Can't find source path …`,
+    往往以为是命令写错。这里按已知根因给一句可执行的提示,附在 stderr 之后;
+    **不改 exit code、不吞原始报错**,诊断信息仍然完整。
+    """
+    s = stderr or ""
+    hints = (
+        ("Can't find source path",
+         "挂载源路径不存在(角色被改名/删除、技能换目录后台账里残留了旧路径)。"
+         "挂载层会自动跳过死路径,出现这句说明是别处显式要求挂它;请到能力总览撤销该死授权。"),
+        ("setting up uid map",
+         "创建用户命名空间失败:宿主禁用了 unprivileged userns"
+         "(sysctl user.max_user_namespaces / 容器 seccomp 策略)。"),
+        ("No such file or directory",
+         "沙箱内找不到要执行的命令(或其解释器目录没有被 ro-bind 进来)。"),
+        ("Permission denied",
+         "沙箱内权限不足:目标路径没有按可写挂载,或 Landlock 规则把它限制了。"),
+        ("bwrap: execvp",
+         "沙箱内 exec 失败:命令或解释器路径在沙箱里不可见。"),
+    )
+    for needle, hint in hints:
+        if needle in s:
+            return hint
+    return ""
+
+
 def mounts_from_token(token: CapabilityToken) -> tuple[list[str], list[str]]:
     """兼容 re-export:见 karvyloop.sandbox.mounts.mounts_from_token。"""
     from karvyloop.sandbox.mounts import mounts_from_token as _impl
@@ -54,28 +103,33 @@ def has_net(token: CapabilityToken) -> bool:
     return _impl(token)
 
 
-def _bind_binary_parents(bwrap: list[str], argv: list[str]) -> None:
-    """解析 argv[0] 并把它的父目录 ro-bind 进沙箱,让 `sleep` / `sh` 等可见。
+def _bind_binary_parents(bwrap: list[str], argvs: list[list[str]]) -> None:
+    """解析每个 argv[0] 并把它的父目录 ro-bind 进沙箱,让 `sleep` / `sh` 等可见。
 
     处理三处:
       1. argv[0] 是绝对路径 → 直接 bind 父目录
       2. argv[0] 是裸名(无 /) → shutil.which 解析,可能命中 /usr/bin/<x>、/bin/<x>
       3. 解析不到 → 不 bind(让 bwrap 报 "No such file" 给上层,可观测)
 
+    `argvs` 是若干条命令(run_command 场景里是**里层 landlock wrapper + 真正 payload** 两条):
+    两条都要看 —— 只绑 wrapper 的 python3 会让 payload 自己的解释器(如 .venv/bin/python)
+    在沙箱里"不存在"(ENOENT)。
+
     同时确保:
       - /bin 和 /usr/bin 至少有一个被 bind(常见工具集)
       - ld 解析需要的 /lib /lib64 也被 bind
     """
-    if not argv:
-        return
     candidate_paths: set[str] = set()
-    first = argv[0]
-    if "/" in first:
-        candidate_paths.add(first)
-    else:
-        resolved = shutil.which(first)
-        if resolved:
-            candidate_paths.add(resolved)
+    for argv in argvs:
+        if not argv:
+            continue
+        first = argv[0]
+        if "/" in first:
+            candidate_paths.add(first)
+        else:
+            resolved = shutil.which(first)
+            if resolved:
+                candidate_paths.add(resolved)
 
     # 把候选路径的父目录 + 一些基础库目录加入
     bind_dirs: set[str] = set()
@@ -107,11 +161,16 @@ class BubblewrapSandbox:
         return shutil.which("bwrap") is not None
 
     @classmethod
-    def _wrap_landlock(cls, bwrap: list[str], ro: list[str], rw: list[str]) -> list[str]:
-        """内核支持 Landlock → 返回 `python -m ...landlock <rw> <ro> -- bwrap …`(前置 wrapper);
-        不支持 → 原样返回 bwrap(优雅降级,零回归)。探测结果缓存。
+    def _landlock_inner(cls, rw: list[str], ro: list[str]) -> list[str]:
+        """内核支持 Landlock → 返回装进沙箱内部的 `python3 landlock.py <rw> <ro> --` 前缀;
+        不支持 → 空列表(优雅降级,零回归)。
 
-        wrapper 里 workspace/授权 rw 可写、系统目录 + ro 只读、其余内核拒 —— 与 bwrap 挂载叠加。
+        **顺序很关键**:Landlock 必须装在 bwrap **里面**,不能套在外面。
+        bwrap 自己要 `unshare(CLONE_NEWUSER)` 再写 `/proc/self/uid_map`;外层 Landlock 把
+        `/proc` 设为只读 → bwrap 报 `setting up uid map: Permission denied`,整个沙箱起不来
+        (实测)。装在里层则只限制 payload,且 domain 被其后所有子进程继承。
+
+        里层只 ro-bind 单个 landlock.py + 用系统 python3 跑,不暴露 venv/源码目录。
         """
         import json
         if cls._landlock_supported is None:
@@ -121,9 +180,20 @@ class BubblewrapSandbox:
             except Exception:
                 cls._landlock_supported = False
         if not cls._landlock_supported:
-            return bwrap
-        return [sys.executable, "-m", "karvyloop.platform.linux.landlock",
-                json.dumps(rw), json.dumps(ro), "--"] + bwrap
+            return []
+        return [cls._landlock_python(), cls._landlock_file(),
+                json.dumps(rw), json.dumps(ro), "--"]
+
+    @staticmethod
+    def _landlock_python() -> str:
+        """沙箱内可用的 python3(/usr/bin 已 ro-bind,与系统解释器同源)。"""
+        return shutil.which("python3") or "/usr/bin/python3"
+
+    @staticmethod
+    def _landlock_file() -> str:
+        from karvyloop.platform.linux import landlock as _ll
+        return os.path.abspath(_ll.__file__)
+
 
     async def exec(self, argv, *, token, cwd, stdin=b"", timeout_s=120.0,
                    max_output_bytes=30_000) -> ExecResult:
@@ -148,6 +218,11 @@ class BubblewrapSandbox:
                     (rw if "write" in (g.get("ops") or []) else ro).append(g["path"])
         except Exception:
             pass
+        # 死路径/重复路径一律丢弃:台账里可能残留已被改名/删掉的角色技能文件,
+        # 而 bwrap 只要有一条 --ro-bind 的源不存在就整体失败(实测 error_code 10)。
+        ro, rw = _existing_mount_paths(ro), _existing_mount_paths(rw)
+        rw_set = set(rw)
+        ro = [p for p in ro if p not in rw_set]   # 同一路径读写都给 → 按可写挂
         net = has_net(token)
         allowlist = net_allowlist_of(token)
 
@@ -194,16 +269,28 @@ class BubblewrapSandbox:
         # 都在 /usr/bin、/bin,沙箱里直接调会 "No such file or directory"。
         # 用 shutil.which 解析 argv[0] 并 ro-bind 它的父目录 —— 标准 bubblewrap
         # 实战做法。token 决定哪些 fs 路径可写,这一步只让 binary 可见,不放开写。
-        _bind_binary_parents(bwrap, argv)
+        # 工作区路径显式交给 payload:技能目录/实例目录在沙箱里恒只读,技能脚本据此把
+        # 产物目录默认落到可写的工作区(KARVY_WORKSPACE/{cases,snapshots,out,…}),
+        # 而不是要求模型自己 export 一串变量。
+        if cwd and os.path.isdir(cwd):
+            bwrap += ["--setenv", "KARVY_WORKSPACE", os.path.abspath(cwd)]
 
-        bwrap += ["--"] + list(argv)
+        # Landlock 深度防御:装在 bwrap **里层**(理由见 _landlock_inner 的 docstring)。
+        # 只 ro-bind 一个 landlock.py 脚本文件,用系统 python3 跑 —— 不暴露 venv/源码目录。
+        ll_prefix = self._landlock_inner(rw, ro)
+        if ll_prefix:
+            ll_file = self._landlock_file()
+            bwrap += ["--ro-bind", ll_file, ll_file]
 
-        # Landlock 深度防御:内核支持则以前置 wrapper 装内核路径门再 execve 成 bwrap
-        # (Landlock domain 被 bwrap 及其内子进程继承)。旧核 → 优雅降级,cmd 保持纯 bwrap。
-        cmd = self._wrap_landlock(bwrap, ro, rw)
+        # 沙箱内可见的 binary 目录按「里层解释器 + 真正 payload」一起解析:bwrap 起的是
+        # python3(可能解析到 venv 下的路径),它的父目录同样得 ro-bind 进去;payload 自己的
+        # 解释器(如 .venv/bin/python)也一样,否则里层 wrapper execvp 时 ENOENT。
+        _bind_binary_parents(bwrap, [ll_prefix, list(argv)])
+
+        bwrap += ["--"] + ll_prefix + list(argv)
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdin=asyncio.subprocess.PIPE,
+            *bwrap, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -218,6 +305,13 @@ class BubblewrapSandbox:
                 pass
             out, err = await proc.communicate()
         out, truncated = _truncate_utf8(out, max_output_bytes)
+        # bwrap 自己的硬失败(挂载源不存在 / userns 被禁 …)只有英文一行,补一句中文提示。
+        # 只在 stderr 里出现 bwrap 自己的前缀、且整条命令非 0 退出时追加;payload 自己的
+        # stderr(cat: No such file …)一个字都不动。
+        if err and (proc.returncode or 0) != 0 and b"bwrap:" in err:
+            hint = humanize_bwrap_error(err.decode("utf-8", errors="replace"))
+            if hint:
+                err += ("\n[沙箱] %s\n" % hint).encode("utf-8")
         return ExecResult(
             stdout=out, stderr=err, exit_code=proc.returncode or 0,
             timed_out=timed_out, truncated=truncated,

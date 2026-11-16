@@ -61,6 +61,19 @@ def test_grant_prefix_expiry_idempotent_revoke(tmp_path):
     assert not st2.allows(str(tmp_path / "docs" / "a.txt"), "read")
 
 
+def test_list_marks_expired_and_stale(tmp_path):
+    """能力总览要能看出"这条授权已经没用了":过期 + 路径已不存在(stale)。"""
+    st = FsGrantsStore(tmp_path / "g.json")
+    live = tmp_path / "live"; live.mkdir()
+    st.record(str(live), ["read"])
+    st.record(str(tmp_path / "ghost"), ["read"])
+    st.record(str(live / "sub"), ["read"], ttl_seconds=1, now=1000.0)
+    rows = {r["path"].rsplit("/", 1)[-1]: r for r in st.list(now=1005.0)}
+    assert rows["live"]["stale"] is False and rows["live"]["expired"] is False
+    assert rows["ghost"]["stale"] is True
+    assert rows["sub"]["expired"] is True
+
+
 def test_path_allowed_and_note(tmp_path):
     ws = str(tmp_path / "ws")
     (tmp_path / "ws").mkdir()

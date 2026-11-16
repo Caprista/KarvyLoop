@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
@@ -168,9 +169,23 @@ class FsGrantsStore:
         return False
 
     def list(self, *, now: Optional[float] = None) -> list:
+        """全部授权(附带两个派生标记,供能力总览展示/清理)。
+
+        - expired: 已过期(仍占一条,可撤)
+        - stale: 路径已不存在(角色被改名/删、技能搬家)。沙箱挂载层会**静默跳过**它
+          (见 bubblewrap._existing_mount_paths),但总览里要能看出来该撤,否则台账越攒越脏。
+        """
         n = now if now is not None else time.time()
-        return [dict(g, expired=(g.get("expires_at") is not None and n > float(g["expires_at"])))
-                for g in self._grants]
+        out = []
+        for g in self._grants:
+            d = dict(g)
+            d["expired"] = g.get("expires_at") is not None and n > float(g["expires_at"])
+            try:
+                d["stale"] = not os.path.exists(str(Path(g.get("path", "")).expanduser()))
+            except Exception:
+                d["stale"] = True
+            out.append(d)
+        return out
 
     # ---- "想要"队列(拒绝→升卡的信使)----
 

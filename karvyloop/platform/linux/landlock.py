@@ -77,12 +77,27 @@ _WRITE_ACCESS = (
 #: 全集(ruleset 的 handled_access_fs 起点,再按 ABI 掩码)
 _ALL_FS_ACCESS = _WRITE_ACCESS | LANDLOCK_ACCESS_FS_IOCTL_DEV
 
+#: 规则路径是**普通文件**时允许的权限位(内核硬约束:path_beneath 指向非目录时,
+#: 带 READ_DIR / REMOVE_* / MAKE_* 会直接 EINVAL —— 实测 errno 22。只留文件三件套 + TRUNCATE)
+_FILE_ACCESS = (
+    LANDLOCK_ACCESS_FS_EXECUTE
+    | LANDLOCK_ACCESS_FS_WRITE_FILE
+    | LANDLOCK_ACCESS_FS_READ_FILE
+    | LANDLOCK_ACCESS_FS_TRUNCATE
+)
+
 #: bwrap 及常见解释器/工具要读执行的系统目录(与 bubblewrap._bind_binary_parents 对齐)
 _SYSTEM_RO_DIRS = (
     "/bin", "/usr/bin", "/usr/local/bin", "/sbin", "/usr/sbin",
     "/lib", "/lib64", "/usr/lib", "/usr/lib64", "/usr/libexec",
-    "/etc", "/proc", "/sys", "/dev", "/usr/share", "/opt", "/run",
+    "/etc", "/proc", "/sys", "/usr/share", "/opt", "/run",
 )
+
+#: 必须可写的系统目录。两者在 bwrap 里都是**沙箱私有**的:`--dev /dev` 是私有 devtmpfs,
+#: `--tmpfs /tmp` 是私有 tmpfs —— `2>/dev/null`、写 /dev/stdout、各种临时文件落 /tmp
+#: 都极其常见,按只读放行会直接 Permission denied(实测)。写只落在沙箱自己的挂载上,
+#: 不触及宿主。
+_SYSTEM_RW_DIRS = ("/dev", "/tmp")
 
 # ---- syscall 号(x86_64 / arm64 一致:create=444, add_rule=445, restrict_self=446)----
 # 这几个号在所有主流架构上相同(Landlock 是较新 syscall,统一编号)。
@@ -117,6 +132,17 @@ def rule_access_for_abi(base: int, abi: int) -> int:
     return base & access_fs_for_abi(abi)
 
 
+def narrow_access_for_file(allowed: int, *, is_dir: bool) -> int:
+    """非目录(普通文件/符号链接目标)的 PATH_BENEATH 规则不能带目录专属权限位。
+
+    内核在 add_rule 时校验:parent_fd 指向非目录却给了 READ_DIR/REMOVE_*/MAKE_* → EINVAL。
+    实测(ABI 3,6.x 内核)文件 + READ_DIR 必报 errno 22,而这里原本对所有路径都用
+    `_READ_ACCESS`(含 READ_DIR),一旦授权台账里出现文件路径(如角色 IDENTITY.md 被授读),
+    整条 Landlock 装载就 fail-closed → 所有 run_command 被拒。纯函数,平台无关可单测。
+    """
+    return allowed if is_dir else (allowed & _FILE_ACCESS)
+
+
 def pack_ruleset_attr(handled_access_fs: int) -> bytes:
     """struct landlock_ruleset_attr 的字节打包(__u64 handled_access_fs; __u64 handled_access_net;
     __u64 scoped)。只管 fs,net/scoped 置 0。纯函数可单测(不依赖内核)。"""
@@ -139,11 +165,11 @@ def plan_fs_rules(rw_paths: list[str], ro_paths: list[str]) -> list[tuple[str, b
     """规划要放行的 (path, is_write) 列表:workspace/授权 rw 可写,系统目录 + ro 授权只读。
 
     去重、只保留真实存在的路径。纯函数(不 syscall)可单测。系统目录固定只读(深度防御:
-    即便脚本拿到系统 bin 也只能读/执行、不能改)。
+    即便脚本拿到系统 bin 也只能读/执行、不能改);`_SYSTEM_RW_DIRS`(沙箱私有 /dev)例外。
     """
     plan: list[tuple[str, bool]] = []
     seen: set[str] = set()
-    for p in rw_paths:
+    for p in list(rw_paths) + list(_SYSTEM_RW_DIRS):
         rp = os.path.realpath(p)
         if rp in seen or not os.path.exists(rp):
             continue
@@ -216,6 +242,11 @@ def apply_landlock(rw_paths: list[str], ro_paths: list[str]) -> bool:
             except OSError:
                 continue    # 路径打不开(权限/竞态)→ 跳过这条(不放行 = 更严,安全侧)
             try:
+                # 台账里可能授权到具体文件(角色 IDENTITY.md 等);文件规则不能带目录权限位
+                # (内核 add_rule 会 EINVAL),必须按目录/文件收窄,否则整层 fail-closed。
+                import stat as _stat
+                is_dir = _stat.S_ISDIR(os.fstat(dir_fd).st_mode)
+                allowed = narrow_access_for_file(allowed, is_dir=is_dir)
                 pb = pack_path_beneath_attr(allowed, dir_fd)
                 pbuf = ctypes.create_string_buffer(pb, len(pb))
                 rc = libc.syscall(_NR_landlock_add_rule, ctypes.c_int(ruleset_fd),
@@ -226,10 +257,11 @@ def apply_landlock(rw_paths: list[str], ro_paths: list[str]) -> bool:
                     raise OSError(err, f"landlock_add_rule({path}) 失败(errno {err})")
             finally:
                 os.close(dir_fd)
-        # no_new_privs 是 restrict_self 的前提(非 CAP_SYS_ADMIN 路径)
-        if libc.syscall(158, ctypes.c_int(_PR_SET_NO_NEW_PRIVS),  # __NR_prctl=158
-                        ctypes.c_ulong(1), ctypes.c_ulong(0),
-                        ctypes.c_ulong(0), ctypes.c_ulong(0)):
+        # no_new_privs 是 restrict_self 的前提(非 CAP_SYS_ADMIN 路径)。
+        # 直接调 libc.prctl:不走 syscall(nr) 硬编码号 —— x86_64 的 __NR_prctl=157、
+        # arm64 是 167,写死必错(原写 158 在 x86_64 上是 arch_prctl → EINVAL,
+        # 表现为 Landlock 规则都加成功了却卡在 prctl,整层 fail-closed)。
+        if libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0):
             err = ctypes.get_errno()
             raise OSError(err, f"prctl(PR_SET_NO_NEW_PRIVS) 失败(errno {err})")
         rc = libc.syscall(_NR_landlock_restrict_self, ctypes.c_int(ruleset_fd),

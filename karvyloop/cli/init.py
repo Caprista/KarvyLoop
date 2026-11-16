@@ -65,6 +65,11 @@ agents:
 embedding:
   model: ollama/nomic-embed-text
 
+sandbox:
+  # 沙箱网络(默认 false = 断网,独立 netns 只有 lo)。true 时运行命令的 token 带 net:*,
+  # 沙箱共享宿主网络(适合访问内网 API)。给了 net_allowlist 的技能仍会 fail-closed 拒网。
+  # network: true
+
 crystallize:
   # 技能结晶落盘目录(可被 --skills-dir CLI flag 覆盖)
   # M3+ 拍 6 落地;拍 8 写进默认 config 让 wizard 用户能直接看到

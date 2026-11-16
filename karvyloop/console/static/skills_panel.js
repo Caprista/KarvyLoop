@@ -1051,7 +1051,8 @@ var KarvySkillsPanelBundle = (function(exports) {
         el(
           "div",
           { class: "mc-main" },
-          el("div", { class: "mc-name" }, el("span", { text: "📂 " + g.path }), " ", opsBadge),
+          el("div", { class: "mc-name" }, el("span", { text: "📂 " + g.path }), " ", opsBadge,
+             g.stale ? el("span", { class: "dpref-badge provisional", text: t("capov.grant_stale") }) : null),
           el("div", { class: "mc-meta", text: (g.role ? t("capov.grant_role", { role: g.role }) + " · " : "") + (g.origin || "") })
         ),
         actions

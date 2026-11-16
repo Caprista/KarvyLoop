@@ -175,6 +175,83 @@ def test_has_net():
     assert has_net(_tok([], net=False)) is False
 
 
+def test_existing_mount_paths_drops_missing_and_dupes(tmp_path):
+    """死路径 / 重复路径必须被丢弃 —— bwrap 对缺失源路径是硬失败(整条命令跑不起来)。"""
+    from karvyloop.platform.linux.bubblewrap import _existing_mount_paths
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ghost = str(tmp_path / "gone")
+    assert _existing_mount_paths([str(ws), ghost, str(ws)]) == [str(ws)]
+    assert _existing_mount_paths([ghost]) == []
+
+
+# ============ AC7：台账里的死路径不能让整条命令失败 ============
+@requires_linux_bwrap
+@pytest.mark.asyncio
+async def test_ac7_dead_grant_path_does_not_break_exec(tmp_path):
+    """token 里含不存在的 fs 路径(如角色技能已改名/删掉)→ 跳过该挂载,命令照常跑。"""
+    ghost = str(tmp_path / "no-such-file.md")
+    tok = _tok([(str(tmp_path), "read"), (str(tmp_path), "write"),
+                (ghost, "read")])
+    sb = BubblewrapSandbox()
+    r = await sb.exec(["sh", "-c", "echo ALIVE"], token=tok, cwd=str(tmp_path))
+    assert r.exit_code == 0, r.stderr.decode(errors="replace")
+    assert b"ALIVE" in r.stdout
+    assert b"Can't find source path" not in r.stderr
+
+
+# ============ AC8：工作区路径自动注入 payload + 沙箱私有 /tmp 可写 ============
+@requires_linux_bwrap
+@pytest.mark.asyncio
+async def test_ac8_workspace_env_injected_and_tmp_writable(tmp_path):
+    """框架自动把 cwd 以 KARVY_WORKSPACE 注入沙箱(技能脚本据此把产物落工作区),
+    且沙箱私有的 /tmp 必须可写(`--tmpfs /tmp`;Landlock 按只读放行会 Permission denied)。"""
+    tok = _tok([(str(tmp_path), "read"), (str(tmp_path), "write")])
+    sb = BubblewrapSandbox()
+    r = await sb.exec(
+        ["sh", "-c", 'echo "WS=$KARVY_WORKSPACE"; echo hi > /tmp/kv_probe; cat /tmp/kv_probe'],
+        token=tok, cwd=str(tmp_path))
+    assert r.exit_code == 0, r.stderr.decode(errors="replace")
+    out = r.stdout.decode()
+    assert "WS=%s" % os.path.abspath(str(tmp_path)) in out
+    assert "hi" in out
+
+
+# ============ bwrap 报错中文化(纯函数,平台无关) ============
+def test_humanize_bwrap_error_maps_known_failures():
+    from karvyloop.platform.linux.bubblewrap import humanize_bwrap_error
+    assert "授权" in humanize_bwrap_error("bwrap: Can't find source path /nope/x.md")
+    assert "命名空间" in humanize_bwrap_error("bwrap: setting up uid map: Permission denied")
+    # 未知报错不硬翻;空输入不翻
+    assert humanize_bwrap_error("bwrap: 某种新报错") == ""
+    assert humanize_bwrap_error("") == ""
+
+
+# ============ AC9：沙箱冒烟(部署后一条命令验证沙箱没坏) ============
+@requires_linux_bwrap
+@pytest.mark.asyncio
+async def test_ac9_smoke_workspace_roundtrip_and_readonly_outside(tmp_path):
+    """工作区内可写可读、沙箱私有 /tmp 可写、只读挂载点写不进去。
+
+    这是"沙箱还能不能用"的冒烟:挂载面/默认目录/只读边界任何一项坏掉,这里最先红。
+    """
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tok = _tok([(str(ws), "read"), (str(ws), "write")])
+    sb = BubblewrapSandbox()
+    cmd = (
+        'echo ok > ./inside.txt && cat ./inside.txt && '
+        'echo tmp > /tmp/kv_smoke.txt && cat /tmp/kv_smoke.txt && '
+        'if echo x > /usr/bin/kv_smoke_probe 2>/dev/null; then echo OUTSIDE_WRITABLE; '
+        'else echo OUTSIDE_DENIED; fi'
+    )
+    r = await sb.exec(["sh", "-c", cmd], token=tok, cwd=str(ws))
+    out = r.stdout.decode()
+    assert r.exit_code == 0, r.stderr.decode(errors="replace")
+    assert "ok" in out and "tmp" in out and "OUTSIDE_DENIED" in out
+    assert (ws / "inside.txt").read_text().strip() == "ok"
+
+
 # ============ 跨平台：PAL selector ============
 def test_selector_on_win32_is_restricted_or_degraded(monkeypatch):
     """模拟 win32 → selector 走探测降级链:Tier 3 RestrictedToken(可用则)否则 Tier 4
