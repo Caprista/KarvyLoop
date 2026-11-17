@@ -40,6 +40,88 @@ def _files_safe(root, rel: str):
     return target if (target == root or root in target.parents) else None
 
 
+#: 产物内联预览允许的角色子目录。角色产物落在 ~/.karvyloop/roles/<role>/{out,cases,snapshots},
+#: 在 workspace 之外 —— 旧 /api/files/* 够不到,对话里给了路径也点不开。
+_ARTIFACT_SUBDIRS = ("out", "cases", "snapshots")
+
+
+def _roles_root():
+    from pathlib import Path
+    return Path.home() / ".karvyloop" / "roles"
+
+
+def _artifact_roots(request: Request) -> list:
+    """内联预览允许访问的根:workspace + 每个角色的运行期产物目录。"""
+    roots = []
+    ws = _files_root(request)
+    if ws is not None:
+        roots.append(ws)
+    roles = _roles_root()
+    try:
+        if roles.is_dir():
+            for rd in sorted(roles.iterdir()):
+                if not rd.is_dir():
+                    continue
+                for sub in _ARTIFACT_SUBDIRS:
+                    p = rd / sub
+                    if p.is_dir():
+                        roots.append(p.resolve())
+    except OSError:
+        pass
+    return roots
+
+
+def _artifact_target(request: Request, path: str, role: str = ""):
+    """解析产物路径(绝对路径,或 role 内的相对路径)→ 允许访问的文件;越界/不存在 → None。"""
+    from pathlib import Path
+    raw = (path or "").strip()
+    if not raw:
+        return None
+    p = Path(raw)
+    if not p.is_absolute():
+        base = None
+        if role:
+            cand = (_roles_root() / role).resolve()
+            roles = _roles_root().resolve()
+            if cand == roles or roles not in cand.parents:
+                return None
+            base = cand
+        else:
+            base = _files_root(request)
+        if base is None:
+            return None
+        p = base / raw
+    try:
+        target = p.resolve()
+    except Exception:
+        return None
+    for root in _artifact_roots(request):
+        if target == root or root in target.parents:
+            return target if target.is_file() else None
+    return None
+
+
+@router.get("/files/raw")
+def api_files_raw(request: Request, path: str, role: str = ""):
+    """内联打开产物(排产 HTML 报告等):新标签直接看,不强制下载。
+
+    HTML/SVG 加 CSP `sandbox`(给 allow-scripts 但不给 allow-same-origin)—— 报告自己的
+    内联脚本能跑,但页面拿不到控制台同源权限(agent 生成的 HTML 半可信,不能让它调 /api)。
+    """
+    import mimetypes
+    from fastapi.responses import FileResponse
+    target = _artifact_target(request, path, role)
+    if target is None:
+        raise HTTPException(status_code=404, detail="not found")
+    mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if mime in ("text/html", "image/svg+xml"):
+        headers["Content-Security-Policy"] = (
+            "sandbox allow-scripts allow-popups allow-forms allow-modals allow-downloads")
+    return FileResponse(str(target), media_type=mime, headers=headers,
+                        content_disposition_type="inline")
+
+
 @router.get("/files/list")
 def api_files_list(request: Request, path: str = "") -> dict[str, Any]:
     """列 workspace 下某目录(钉死在 workspace 根)。无 workspace / 越狱 → ok:false。"""

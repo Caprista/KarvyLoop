@@ -11,6 +11,35 @@ Releasing is described in [RELEASING.md](RELEASING.md).
 
 _Work in progress toward the GA bar — see [ROADMAP.md](ROADMAP.md)._
 
+## [2026.11.17] — 2026-11-17
+
+The console-interaction release: a role's question can now be a set of buttons
+instead of prose, a produced file arrives as a card that opens in place, and the
+chat stream only keeps the decision cards that belong to the turn you are in.
+
+### Added
+- **Interactive `kv-ui` blocks.** A reply can carry a fenced `kv-ui` block with one
+  line of JSON: `{"type":"ask", ...}` renders a question with 2–5 option buttons
+  (single-choice sends on click, `multi:true` adds a confirm button), and
+  `{"type":"file", ...}` renders an artifact card with an **Open** button. The
+  contract is part of the platform prompt, so every role gets it without repeating
+  it in its own skill.
+- **`GET /api/files/raw`** serves an artifact inline in a new tab instead of
+  forcing a download, and resolves paths under a role's `out/`, `cases/`, and
+  `snapshots/` directories as well as the workspace. HTML and SVG are served with
+  `Content-Security-Policy: sandbox allow-scripts` (no `allow-same-origin`) so a
+  report's own scripts run without it reaching the console origin.
+- **Historical replies are upgraded too.** Bare `{"type":"options", ...}` JSON that
+  older turns emitted as text is recognised and rebuilt as buttons when the chat
+  history is replayed.
+
+### Changed
+- **Only this turn's decision cards enter the chat stream.** A proposal is rendered
+  inline only while a run is active (plus a 15-second grace window) *and* its kind
+  is one the user must answer mid-task; everything else — cross-session memory
+  conflicts, background cards — goes to the sidebar only. Rebuilding history no
+  longer re-attaches old cards at the bottom of the conversation.
+
 ## [2026.11.16] — 2026-11-16
 
 The sandbox-coherence release: commands run by roles now actually start inside

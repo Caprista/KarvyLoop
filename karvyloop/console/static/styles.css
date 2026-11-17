@@ -2882,6 +2882,52 @@ button.topbar-karvy:focus-visible { outline: 2px solid var(--border-focus); outl
 }
 
 /* ============================================================================
+   kv-ui 约定块 — Agent 的结构化交互(选择列表 / 产物文件卡),2026-11-17。
+   Agent 用 ```kv-ui + JSON 输出,前端在聊天流里升级成按钮组 / 文件卡;
+   文本提问不再只是"问一句",点一下就作为用户消息发回。
+   ========================================================================= */
+.kv-ui-card {
+  margin: 8px 0; padding: 10px 12px; max-width: 560px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 10px; box-shadow: var(--shadow-sm);
+}
+.kv-ui-q { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.55; margin-bottom: 8px; }
+.kv-ui-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.kv-ui-opt, .kv-ui-confirm {
+  padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  font-size: 12.5px; line-height: 1.4;
+  background: var(--surface-2); color: var(--text-2);
+  border: 1px solid var(--border-strong);
+}
+.kv-ui-opt:hover:not(:disabled), .kv-ui-confirm:hover:not(:disabled) {
+  border-color: var(--accent-line); color: var(--accent-strong); background: var(--accent-soft);
+}
+.kv-ui-opt.is-on {
+  background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); font-weight: 700;
+}
+.kv-ui-opt:disabled { cursor: default; opacity: .55; }
+.kv-ui-opt.is-on:disabled { opacity: 1; }
+.kv-ui-confirm { margin-top: 8px; font-weight: 700; }
+.kv-ui-confirm:disabled { cursor: default; opacity: .55; }
+.kv-ui-hint { margin-top: 7px; font-size: 11px; color: var(--text-dim); }
+
+.kv-ui-file { display: flex; align-items: center; gap: 10px; }
+.kv-ui-file-icon { font-size: 22px; line-height: 1; flex: none; }
+.kv-ui-file-meta { flex: 1; min-width: 0; }
+.kv-ui-file-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.kv-ui-file-sub {
+  margin-top: 2px; font-size: 11px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kv-ui-file-open {
+  flex: none; padding: 5px 14px; border-radius: 8px; text-decoration: none;
+  font-size: 12px; font-weight: 700;
+  background: var(--accent-soft); color: var(--accent-strong);
+  border: 1px solid var(--accent-line);
+}
+.kv-ui-file-open:hover { background: var(--accent-light); color: var(--accent-strong); }
+
+/* ============================================================================
    docs/46 S4 — 新手引导:重看入口 + 空态行动链接(tour 本体样式来自
    vendored driver.min.css,按需注入,不常驻)。
    ========================================================================= */

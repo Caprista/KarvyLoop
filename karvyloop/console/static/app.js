@@ -724,7 +724,7 @@
       // 在回放存量卡**之前**校准(否则第一批按默认值分区)。坏值/缺键 → 守同值默认 7。
       const dn = Number(data.drawer_n);
       if (Number.isFinite(dn) && dn >= 1) _drawerN = dn;
-      (data.proposals || []).forEach((p) => _routeProposal(p, { replay: true }));   // 按 kind 分流(拍板/预判)
+      (data.proposals || []).forEach((p) => _routeProposal(p, { replay: true, inline: false }));   // 按 kind 分流(拍板/预判);存量卡只进右栏
       _refreshDecideFilter();   // #6:开机回放存量卡后一次性算筛选条(多 kind 积压才现身)
     } catch (e) {
       console.warn("[boot] pending proposals failed", e);
@@ -1776,7 +1776,11 @@
       _regroupChains(list);                           // docs/92 刀1:同链 ≥2 张 → 收进组壳(纯视觉)
       _refreshDrawerRow(list);                        // 刀2:直出卡 append 在抽屉后 → 抽屉回列底
     }
-    _renderProposalInChat(payload, built.proposalId); // S3:决策卡双面出 —— 同时冒进聊天流
+    // S3:决策卡双面出 —— 只有"影响本轮任务执行"的卡才冒进聊天流;回放/后台整理卡留在右栏
+    const _inline = (opts && typeof opts.inline === "boolean")
+      ? opts.inline
+      : (!(opts && opts.replay) && _shouldInlineProposal(payload));
+    if (_inline) _renderProposalInChat(payload, built.proposalId);
     // 桌面视图(docs/51 §4.2):⚖便签置顶 + 闪烁 + 卡皮巴拉冒泡(fail-loud,推回决策舱);
     // replay(开机回放存量卡)只保"在位可瞟",不演叼卡剧场 —— 事件 vs 快照在 desktop.ts 一处区分
     if (window.KarvyDesktop) window.KarvyDesktop.notifyH2A({ replay: !!(opts && opts.replay) });
@@ -2072,6 +2076,43 @@
   // ============ S3 决策卡双面出(docs/46 §4.1,业界 HITL 范式)============
   // 新 H2A 提案除右栏列表外,同时以"小卡递来一张待签单"的卡片消息冒进当前 chat-log;
   // 两处操作同一条数据:任一侧拍板 → 聊天流里的卡转终态、右栏卡经 h2a_envelope 撤下。
+  //
+  // 入流门(2026-11-17):对话记录里只留**任务进行中、AI 需要用户做选择才能继续**的卡;
+  // 其余一律只进右侧边栏。两层判定:
+  //   ① 时态:必须在本轮 drive 运行期间到达(结束后只留 15s 宽限,收 drive 自己刚产出的那张);
+  //   ② 类型:只有挡住/推进当前任务的 kind(白名单);记忆冲突/结晶/定时建议/归档等后台卡不算。
+  const _TURN_GRACE_MS = 15 * 1000;          // drive_done 后给迟到卡的小宽限
+  const _TURN_HARD_CAP_MS = 15 * 60 * 1000;  // 兜底:drive_done 丢了也别把窗口永远开着
+  let _turnInlineOn = false;                 // 本轮 drive 是否进行中
+  let _turnInlineUntil = 0;                  // 兜底截止时刻(ms)
+  let _turnCloseTimer = 0;
+  function _openTurnWindow() {
+    clearTimeout(_turnCloseTimer);
+    _turnInlineOn = true;
+    _turnInlineUntil = Date.now() + _TURN_HARD_CAP_MS;
+  }
+  function _closeTurnWindow() {
+    if (!_turnInlineOn) return;
+    clearTimeout(_turnCloseTimer);
+    _turnCloseTimer = setTimeout(() => { _turnInlineOn = false; }, _TURN_GRACE_MS);
+  }
+  function _turnInlineActive() { return _turnInlineOn && Date.now() < _turnInlineUntil; }
+
+  // 只有这些 kind = "AI 卡住了,要你选一个才能继续这轮任务"。
+  const _INLINE_KINDS = new Set([
+    "route_to_role",     // 这句话要委派给谁 / 拉群
+    "roundtable",        // 为当前请求开圆桌
+    "resolve_conflict",  // 技能冲突挡着当前任务
+    "fs_access",         // 角色跑当前任务撞权限墙
+    "infeasible_report", // 角色跑当前任务不可行,带证据回头要你定
+    "outbound_draft",    // 当前任务要对外发送,拍板才能发
+  ]);
+  function _shouldInlineProposal(payload) {
+    if (!_turnInlineActive()) return false;
+    if (payload && payload.payload && payload.payload.user_initiated) return true;  // 用户主动求的卡
+    return _INLINE_KINDS.has(String((payload && payload.kind) || ""));
+  }
+
   function _renderProposalInChat(payload, proposalId) {
     const log = document.getElementById("chat-log");
     if (!log) return;
@@ -2875,6 +2916,7 @@
   async function requestProposal() {
     if (_proposeWaiting) return;                 // 已在看,别叠加
     _proposeBusy(true);
+    _openTurnWindow();                           // 手动求建议 = 本轮事件,回执卡进聊天流
     // 兜底:回执丢了(断线等)也 30s 自愈,不留残废按钮
     _proposeTimer = setTimeout(() => { _proposeTimer = 0; _proposeBusy(false); }, 30000);
     const sent = sendWS("propose", {});
@@ -3941,6 +3983,7 @@
   }
 
   function renderDriveDone(payload) {
+    _closeTurnWindow();   // 本轮 drive 结束:之后的卡一律只进右侧边栏(15s 宽限给 drive 自己刚出的那张)
     clearBusy();  // 9.5 P2:结果到了,撤掉"执行中"
     // 群里不 @ 任何人:没人回,小卡只轻提醒一句(本地化;不当成一轮真回复)
     if (payload.no_mention_nudge) {
@@ -4143,18 +4186,208 @@
     return line;
   }
 
+  // ============ kv-ui 约定块:Agent 的"选择列表"与"产物文件卡"(2026-11-17)============
+  // Agent 在回复里输出围栏代码块 ```kv-ui + 一行 JSON,这里渲染成交互控件(不再是一坨 JSON/纯文本):
+  //   {"type":"ask","question":"...","options":["A","B"],"multi":false}   → 选项按钮组
+  //   {"type":"file","title":"排产报告","path":".../out/x.html","role":"排产小助手-新"} → 文件卡
+  // 选择后作为**用户消息**走既有 _submitChat 全链路(与手打完全同构,不另开提交口)。
+  // 识别两种写法:```kv-ui 围栏块 / 忘了围栏的一行 JSON(都会在 _enhanceKvUi 里升级成组件)
+  const _KV_UI_CHOICE_EVENT = "karvy:kv-ui-choice";
+
+  function _kvUiFileUrl(spec) {
+    const q = "path=" + encodeURIComponent(String(spec.path || ""));
+    const role = String(spec.role || "");
+    return "/api/files/raw?" + q + (role ? "&role=" + encodeURIComponent(role) : "");
+  }
+
+  function _kvUiSize(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v) || v <= 0) return "";
+    if (v < 1024) return v + " B";
+    if (v < 1024 * 1024) return (v / 1024).toFixed(1) + " KB";
+    return (v / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  function _buildKvAsk(spec) {
+    const card = el("div", { class: "kv-ui-card kv-ui-ask" });
+    const question = String(spec.question || spec.title || "");
+    if (question) card.appendChild(el("div", { class: "kv-ui-q", text: question }));
+    const multi = !!spec.multi;
+    const opts = Array.isArray(spec.options) ? spec.options : [];
+    const box = el("div", { class: "kv-ui-opts" });
+    const picked = new Map();   // label → label(发给 agent 的就是用户看到的选项文字)
+    let done = false;
+    const hint = el("div", { class: "kv-ui-hint",
+      text: multi ? "可多选，选好后点「确定」发送" : "点击选项即作为你的回复发送" });
+    function lock(label) {
+      done = true;
+      Array.from(box.querySelectorAll("button")).forEach((b) => {
+        b.disabled = true;
+        if (b.getAttribute("data-label") === label) b.classList.add("is-on");
+      });
+      const confirmBtn = card.querySelector(".kv-ui-confirm");
+      if (confirmBtn) confirmBtn.remove();
+      hint.textContent = "已选择：" + label;
+    }
+    function send(values) {
+      if (!values.length) return;
+      const label = values.join("、");
+      lock(label);
+      window.dispatchEvent(new CustomEvent(_KV_UI_CHOICE_EVENT, {
+        detail: { question: question, text: label, values: values, multi: multi },
+      }));
+    }
+    opts.forEach((opt) => {
+      const obj = (opt && typeof opt === "object") ? opt : { label: opt };
+      const label = String(obj.label == null ? obj.value : obj.label);
+      if (!label) return;
+      const btn = el("button", { class: "kv-ui-opt", type: "button", text: label, "data-label": label });
+      btn.addEventListener("click", () => {
+        if (done) return;
+        if (multi) {
+          if (picked.has(label)) { picked.delete(label); btn.classList.remove("is-on"); }
+          else { picked.set(label, label); btn.classList.add("is-on"); }
+          return;
+        }
+        send([label]);
+      });
+      box.appendChild(btn);
+    });
+    card.appendChild(box);
+    if (multi) {
+      card.appendChild(el("button", { class: "kv-ui-confirm", type: "button", text: "确定",
+        onClick: () => send(Array.from(picked.values())) }));
+    }
+    card.appendChild(hint);
+    return card;
+  }
+
+  function _buildKvFile(spec) {
+    const path = String(spec.path || "");
+    const title = String(spec.title || path.split("/").pop() || "文件");
+    const card = el("div", { class: "kv-ui-card kv-ui-file" });
+    const ext = (title.split(".").pop() || "").toLowerCase();
+    const icon = ext === "html" || ext === "htm" ? "🌐" : (ext === "pdf" ? "📕" : "📄");
+    const sub = [_kvUiSize(spec.size), path].filter(Boolean).join(" · ");
+    const meta = el("div", { class: "kv-ui-file-meta" },
+      el("div", { class: "kv-ui-file-name", text: title }),
+      el("div", { class: "kv-ui-file-sub", text: sub, title: path }));
+    card.appendChild(el("div", { class: "kv-ui-file-icon", text: icon }));
+    card.appendChild(meta);
+    card.appendChild(el("a", { class: "kv-ui-file-open", text: "打开", target: "_blank",
+      rel: "noopener", href: _kvUiFileUrl(spec) }));
+    return card;
+  }
+
+  // 一段文本是否就是"一整块 kv-ui JSON" —— 是就返回规范化的 spec,否则 null。
+  // 兼容模型常见的两种跑偏:type 写成 "options"(同 ask),以及**忘了围栏**、直接甩一行 JSON。
+  function _kvUiSpecFromText(text) {
+    const raw = String(text || "").trim();
+    if (!raw || raw.charAt(0) !== "{" || raw.charAt(raw.length - 1) !== "}") return null;
+    let spec = null;
+    try { spec = JSON.parse(raw); } catch (e) { return null; }
+    if (!spec || typeof spec !== "object") return null;
+    const type = String(spec.type || "");
+    if ((type === "ask" || type === "options") && Array.isArray(spec.options) && spec.options.length) {
+      return Object.assign({}, spec, { type: "ask" });
+    }
+    if (type === "file" && spec.path) return Object.assign({}, spec, { type: "file" });
+    return null;
+  }
+
+  // 要被替换的那个"壳":代码块可能被 render 层套了 .code-wrap(带复制按钮),整壳换掉
+  function _kvUiHolder(node) {
+    const pre = (node.tagName === "PRE") ? node : (node.closest ? node.closest("pre") : null);
+    if (pre) {
+      const p = pre.parentElement;
+      return (p && p.classList && p.classList.contains("code-wrap")) ? p : pre;
+    }
+    return node;   // 裸 JSON 段落
+  }
+
+  // 把容器里的约定块换成真组件(解析失败就保持原样 = 至少人还能看到原文)
+  function _enhanceKvUi(root) {
+    if (!root || !root.querySelectorAll) return;
+    // ① 代码块(带 kv-ui 围栏或没写语言的围栏):整块就是一个 JSON
+    Array.from(root.querySelectorAll("pre > code")).forEach((node) => {
+      const spec = _kvUiSpecFromText(node.textContent);
+      if (!spec) return;
+      const card = spec.type === "ask" ? _buildKvAsk(spec) : _buildKvFile(spec);
+      const holder = _kvUiHolder(node);
+      if (!holder || !holder.parentElement) return;
+      holder.parentElement.replaceChild(card, holder);
+    });
+    // ② 裸 JSON 段落:模型忘了加围栏,直接把一行 JSON 甩进正文(2026-11-17 实拍)。
+    //    整段是 JSON → 整段换卡;JSON 只是段尾一段 → 保留前面正常文字,卡插在后面。
+    Array.from(root.querySelectorAll("p")).forEach((p) => {
+      if (!p.parentElement) return;
+      const text = p.textContent || "";
+      let spec = _kvUiSpecFromText(text);
+      let start = -1;
+      if (!spec) {
+        start = text.lastIndexOf('{"type"');
+        if (start <= 0) return;
+        spec = _kvUiSpecFromText(text.slice(start));
+        if (!spec) return;
+      }
+      const card = spec.type === "ask" ? _buildKvAsk(spec) : _buildKvFile(spec);
+      if (start > 0) {
+        p.textContent = text.slice(0, start).replace(/\s+$/, "");
+        p.parentElement.insertBefore(card, p.nextSibling);
+      } else {
+        p.parentElement.replaceChild(card, p);
+      }
+    });
+    // 兜底:agent 只给了 file:// 绝对路径链接时也升级成文件卡(浏览器的 file:// 链接默认点不开)
+    Array.from(root.querySelectorAll('a[href^="file://"]')).forEach((a) => {
+      const href = a.getAttribute("href") || "";
+      let path = href.replace(/^file:\/\//, "");
+      try { path = decodeURIComponent(path); } catch (e) { /* 保持原样 */ }
+      if (!path) return;
+      const name = path.split("/").pop() || path;
+      const card = _buildKvFile({ path: path, title: (a.textContent || "").trim() || name });
+      if (a.parentElement) a.parentElement.replaceChild(card, a);
+    });
+  }
+
+  // 聊天流是唯一渲染面(实时/历史重建/群聊/角色直聊都汇到 #chat-log):一处观察,全路径生效
+  function _watchKvUi() {
+    const log = document.getElementById("chat-log");
+    if (!log || log.dataset.kvUiWatched) return;
+    log.dataset.kvUiWatched = "1";
+    const obs = new MutationObserver((muts) => {
+      muts.forEach((m) => {
+        Array.from(m.addedNodes).forEach((n) => {
+          if (!n || n.nodeType !== 1) return;
+          const scope = (n.querySelector && n.querySelector("pre > code, p")) ? n
+            : (n.closest ? n.closest(".md") : null);
+          if (scope) _enhanceKvUi(scope);
+        });
+      });
+    });
+    obs.observe(log, { childList: true, subtree: true });
+  }
+
+  // 选择结果作为用户消息发回:写进输入框再走 _submitChat(乐观渲染/忙碌态/回合窗口全部复用)
+  function _sendAsUser(text) {
+    const ce = _ceInput();
+    if (ce) { ce.textContent = text; _ceUpdateEmpty(); }
+    _submitChat();
+  }
+  window.addEventListener(_KV_UI_CHOICE_EVENT, (ev) => {
+    const d = (ev && ev.detail) || {};
+    if (d.text) _sendAsUser(String(d.text));
+  });
+
   function renderChatHistory(lines) {
     if (!lines || lines.length === 0) {
       // 不要清空 — 用户可能正在输入
       return;
     }
     const log = document.getElementById("chat-log");
-    // S3 保卡:整块重建会把"还没拍的 inline 决策卡"冲掉(boot 时 state 快照与历史两个
-    // 请求赛跑,历史后到即吃卡 —— 决策卡静默消失=决策 loop 反模式)。重建前摘下未终态
-    // 的卡,重建后接回尾部;已拍的终态卡不保(历史里有回执,不重复)。
-    const _keepCards = Array.from(
-      log.querySelectorAll(".chat-line[data-proposal-id]:not([data-decided])"));
-    // 简单 diff:行数变了就重渲整个 log(500 条 cap,可接受)
+    // 整块重建**不搬运**聊天流里的未拍决策卡(2026-11-17):旧实现把未终态卡摘下再接回
+    // 尾部,于是上一轮/开机回放的卡永远挂在"本轮对话"下面。现在 inline 卡只属于本轮窗口,
+    // 重建即清;待你拍的卡仍在右栏待决列,信息不丢。
     log.innerHTML = "";
     for (const e of lines) {
       if (e.role === "agent") {
@@ -4169,7 +4402,6 @@
         log.appendChild(line);
       }
     }
-    _keepCards.forEach((n) => log.appendChild(n));   // 未拍的卡接回(等你拍板的东西绝不静默消失)
     log.scrollTop = log.scrollHeight;
   }
 
@@ -5053,7 +5285,7 @@
     const send = document.getElementById("chat-send");
     if (send) send.disabled = true;
     openChatModal();
-    // 乐观渲染:**真**显示发了什么(缩略图/文档块),不再只写"(带了 N 个附件)"
+    _openTurnWindow();   // 本轮开窗:本轮产生/触发的决策卡才进聊天流(见 _TURN_INLINE_WINDOW_MS)
     if (_manifest.length) _pushUserWithAttachments(_qText, _manifest, Date.now());
     else pushChatLine("user", text, "", Date.now());
     showBusy();
@@ -6016,6 +6248,7 @@
       openChatModal();
     });
     _decorateStaticEmpties();
+    _watchKvUi();   // kv-ui 约定块(选择列表 / 产物文件卡)统一在聊天流里升级成组件
     _startPlaceholderRotation();
     // 首启:先看「第一个 10 分钟」旅程是否活跃 —— 活跃就让旅程当主角(tour 随时可从 💡 重看);
     // 不活跃(老用户/已完成/已跳过)才自动起 6 步 tour(localStorage 无 tour_done 时)。
